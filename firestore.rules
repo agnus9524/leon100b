@@ -1,0 +1,51 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && 
+             request.auth.token.email == "agnus9524@gmail.com" && 
+             request.auth.token.email_verified == true;
+    }
+
+    // License rules
+    match /licenses/{userId} {
+      // Users can read/write their own
+      allow get: if isOwner(userId) || isAdmin();
+      allow create, update: if isAdmin() || isOwner(userId);
+      // Admin can list all licenses for the management panel
+      allow list: if isAdmin();
+    }
+
+    // Auth Key rules
+    match /authKeys/{keyId} {
+      allow get: if isSignedIn();
+      allow list: if isAdmin();
+      allow create: if isAdmin();
+      // Allow users to update a key to 'used' status, or Admin to manage
+      allow update: if isSignedIn() && (
+        isAdmin() || 
+        (resource.data.status == 'unused' && request.resource.data.status == 'used') ||
+        (resource.data.usedBy == request.auth.uid)
+      );
+      allow delete: if isAdmin();
+    }
+
+    // User Settings rules
+    match /userSettings/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+  }
+}

@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "License": {
+      "title": "License",
+      "description": "User subscription and license information",
+      "type": "object",
+      "properties": {
+        "key": { "type": "string", "description": "Activated auth key used" },
+        "userId": { "type": "string", "description": "Owner's UID from Firebase Auth" },
+        "status": { "type": "string", "description": "active, expired, or pending", "enum": ["active", "expired", "pending"] },
+        "expiresAt": { "type": "string", "format": "date-time", "description": "Subscription expiration date" },
+        "createdAt": { "type": "string", "format": "date-time", "description": "Account/License creation date" },
+        "updatedAt": { "type": "string", "format": "date-time", "description": "Last modified timestamp" }
+      },
+      "required": ["userId", "status", "expiresAt"]
+    },
+    "AuthKey": {
+      "title": "AuthKey",
+      "description": "Pre-generated authentication keys for sale",
+      "type": "object",
+      "properties": {
+        "keyText": { "type": "string", "description": "The random key string" },
+        "status": { "type": "string", "enum": ["unused", "used"] },
+        "durationDays": { "type": "number" },
+        "usedBy": { "type": "string" },
+        "usedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["status", "durationDays"]
+    }
+  },
+  "firestore": {
+    "licenses/{userId}": {
+      "schema": "License",
+      "description": "Collection mapping individual user UIDs to their license status"
+    },
+    "authKeys/{keyId}": {
+      "schema": "AuthKey",
+      "description": "Collection of pre-generated random 16-character keys for customers"
+    },
+    "userSettings/{userId}": {
+      "schema": "object",
+      "description": "Persistent KIS configuration and user-specific dashboard settings"
+    }
+  }
+}

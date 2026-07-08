@@ -1,0 +1,36 @@
+@import "tailwindcss";
+
+@theme {
+  --color-sleek-bg: #0f172a;
+  --color-sleek-card: #1e293b;
+  --color-sleek-text-primary: #f8fafc;
+  --color-sleek-text-secondary: #94a3b8;
+  --color-sleek-green: #22c55e;
+  --color-sleek-red: #ef4444;
+  --color-sleek-blue: #3b82f6;
+  --color-sleek-border: rgba(148, 163, 184, 0.1);
+  --color-up: #ef4444;
+  --color-down: #3b82f6;
+  --font-mono: "Courier New", Courier, monospace;
+}
+
+@layer base {
+  body {
+    @apply bg-sleek-bg text-sleek-text-primary font-sans antialiased;
+  }
+}
+
+/* Custom chart styles mapped to Sleek palette */
+.recharts-cartesian-grid-horizontal line,
+.recharts-cartesian-grid-vertical line {
+  stroke: rgba(148, 163, 184, 0.1);
+}
+
+.recharts-tooltip-cursor {
+  stroke: rgba(148, 163, 184, 0.2);
+}
+
+.glass-header {
+  background: rgba(30, 41, 59, 0.5);
+  backdrop-filter: blur(10px);
+}

@@ -1,0 +1,6 @@
+{
+  "name": "레오의 100억주식매매 프로그램",
+  "description": "불GPT(BullGPT) - 딥러닝 기반 패턴 인식을 통한 초정밀 AI 주식 매매 엔진. 실시간 시장 데이터 재구성 및 자동매매 시그널을 제공합니다.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
