@@ -101,7 +101,7 @@ export const generateAuthKey = async (durationDays: number = 30) => {
     return keyText;
   } catch (error) {
     console.error("Error generating auth key:", error);
-    return null;
+    throw error;
   }
 };
 

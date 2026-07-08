@@ -16,8 +16,7 @@ service cloud.firestore {
 
     function isAdmin() {
       return isSignedIn() && 
-             request.auth.token.email == "agnus9524@gmail.com" && 
-             request.auth.token.email_verified == true;
+             request.auth.token.email == "agnus9524@gmail.com";
     }
 
     // License rules

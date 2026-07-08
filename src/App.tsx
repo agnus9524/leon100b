@@ -754,10 +754,15 @@ export default function App() {
 
   const handleGenerateKey = async () => {
     setIsAdminLoading(true);
-    const key = await generateAuthKey(30);
-    if (key) {
-      alert(`새 인증키가 생성되었습니다: ${key}\n\n사용자에게 전달하여 입금 확인 후 사용 가능하게 하세요.`);
-      handleFetchAllLicenses();
+    try {
+      const key = await generateAuthKey(30);
+      if (key) {
+        alert(`새 인증키가 생성되었습니다: ${key}\n\n사용자에게 전달하여 입금 확인 후 사용 가능하게 하세요.`);
+        handleFetchAllLicenses();
+      }
+    } catch (error: any) {
+      console.error("Failed to generate auth key:", error);
+      alert(`인증키 생성에 실패했습니다: ${error.message || error}`);
     }
     setIsAdminLoading(false);
   };
