@@ -136,8 +136,11 @@ async function startServer() {
   app.all('/api/kis/*', async (req, res) => {
     const targetUrl = req.path.replace('/api/kis', '');
     
-    // Hardcoded to Real server as requested to remove all virtual/test references
-    const baseUrl = 'https://openapi.koreainvestment.com:9443';
+    // Check if client specifies real or virtual server
+    const isRealServer = req.headers['x-is-real-server'] !== 'false';
+    const baseUrl = isRealServer 
+      ? 'https://openapi.koreainvestment.com:9443' 
+      : 'https://openapivts.koreainvestment.com:29443';
     
     const agent = new https.Agent({
       keepAlive: true,
@@ -147,7 +150,7 @@ async function startServer() {
     const fullUrl = `${baseUrl}${targetUrl}`;
     
     if (process.env.NODE_ENV !== 'production') {
-      console.log(`[KIS Proxy] ${req.method} ${fullUrl}`);
+      console.log(`[KIS Proxy] ${req.method} ${fullUrl} (RealServer: ${isRealServer})`);
       console.log(`[KIS Proxy] Incoming Headers: ${JSON.stringify(req.headers)}`);
     }
     
@@ -173,6 +176,11 @@ async function startServer() {
         }
       }
     });
+
+    // If virtual server, convert trade TR-IDs starting with T to V
+    if (!isRealServer && headers['tr_id'] && typeof headers['tr_id'] === 'string' && headers['tr_id'].startsWith('T')) {
+      headers['tr_id'] = 'V' + headers['tr_id'].substring(1);
+    }
 
     try {
       const axiosConfig: any = {

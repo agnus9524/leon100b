@@ -372,6 +372,7 @@ export default function App() {
     accountNo: '',
     accountCode: '01',
     accountPw: '',
+    isRealServer: true,
     isConnected: false
   });
 
@@ -588,8 +589,13 @@ export default function App() {
                     accountNo: activeData.accountNo || '',
                     accountCode: activeData.accountCode || '01',
                     accountPw: activeData.accountPw || '',
+                    isRealServer: activeData.isRealServer !== undefined ? activeData.isRealServer : true,
                     isConnected: loadedConfig.isConnected || false
                  };
+              } else {
+                 if (finalConfig.isRealServer === undefined) {
+                    finalConfig.isRealServer = true;
+                 }
               }
               
               setKisConfig(finalConfig);
@@ -1831,7 +1837,7 @@ export default function App() {
       setBotStatus("계좌 잔고 조회 중...");
       try {
         await kisService.getBalance();
-        showNotification("성공! 실전 서버 연결에 성공했습니다.", "success");
+        showNotification(`성공! ${kisConfig.isRealServer === false ? '모의' : '실전'} 서버 연결에 성공했습니다.`, "success");
       } catch (e: any) {
         // Balance might fail even if token works (e.g. password)
         showNotification(`잔고 조회 실패: ${e.message}`, "error");
@@ -1861,7 +1867,7 @@ export default function App() {
     }
     
     setShowKisModal(false);
-    showNotification("한국투자증권 실전계좌가 연결되었습니다.", "success");
+    showNotification(`한국투자증권 ${kisConfig.isRealServer === false ? '모의' : '실전'}계좌가 연결되었습니다.`, "success");
     
     // Trigger immediate sync after connection
     setTimeout(() => {
@@ -1870,7 +1876,7 @@ export default function App() {
 
     setTradeLogs(prev => [{
       time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
-      symbol: 'SYSTEM', type: '매수', price: 0, amount: 0, reason: `한국투자증권 실전계좌가 연결되었습니다. 데이터 동기화를 시작합니다.`
+      symbol: 'SYSTEM', type: '매수', price: 0, amount: 0, reason: `한국투자증권 ${kisConfig.isRealServer === false ? '모의' : '실전'}계좌가 연결되었습니다. 데이터 동기화를 시작합니다.`
     } as any, ...prev].slice(0, 50));
   };
 
@@ -2066,29 +2072,56 @@ export default function App() {
               
               <div className="space-y-4">
                 <div>
-                  <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">App Key (실전)</label>
+                  <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-2 block">투자 유형 (Investment Type)</label>
+                  <div className="grid grid-cols-2 gap-2 bg-black/40 p-1 border border-sleek-border rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setKisConfig((prev: any) => ({ ...prev, isRealServer: true }))}
+                      className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                        kisConfig.isRealServer !== false 
+                          ? 'bg-sleek-blue text-white shadow-lg' 
+                          : 'text-sleek-text-secondary hover:text-white'
+                      }`}
+                    >
+                      실전투자 (Real)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setKisConfig((prev: any) => ({ ...prev, isRealServer: false }))}
+                      className={`py-2 rounded-lg text-xs font-bold transition-all ${
+                        kisConfig.isRealServer === false 
+                          ? 'bg-sleek-blue text-white shadow-lg' 
+                          : 'text-sleek-text-secondary hover:text-white'
+                      }`}
+                    >
+                      모의투자 (Mock)
+                    </button>
+                  </div>
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">App Key ({kisConfig.isRealServer === false ? '모의' : '실전'})</label>
                   <input 
                     type="password" 
                     value={kisConfig.appKey}
-                    onChange={(e) => setKisConfig(prev => ({ 
+                    onChange={(e) => setKisConfig((prev: any) => ({ 
                       ...prev, 
                       appKey: e.target.value
                     }))}
                     className="w-full bg-black/40 border border-sleek-border rounded-lg p-3 text-xs focus:border-sleek-blue outline-none" 
-                    placeholder="한국투자증권 실전 App Key 입력"
+                    placeholder={`한국투자증권 ${kisConfig.isRealServer === false ? '모의' : '실전'} App Key 입력`}
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">App Secret (실전)</label>
+                  <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">App Secret ({kisConfig.isRealServer === false ? '모의' : '실전'})</label>
                   <input 
                     type="password" 
                     value={kisConfig.appSecret}
-                    onChange={(e) => setKisConfig(prev => ({ 
+                    onChange={(e) => setKisConfig((prev: any) => ({ 
                       ...prev, 
                       appSecret: e.target.value
                     }))}
                     className="w-full bg-black/40 border border-sleek-border rounded-lg p-3 text-xs focus:border-sleek-blue outline-none" 
-                    placeholder="한국투자증권 실전 Secret Key 입력"
+                    placeholder={`한국투자증권 ${kisConfig.isRealServer === false ? '모의' : '실전'} Secret Key 입력`}
                   />
                 </div>
                 <div className="flex gap-2">
