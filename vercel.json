@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/api/:path*",
+      "destination": "https://service-100-221699414173.us-west1.run.app/api/:path*"
+    }
+  ]
+}

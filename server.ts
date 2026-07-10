@@ -20,6 +20,17 @@ async function startServer() {
 
   app.use(express.json());
 
+  // CORS Middleware for external frontend connections (e.g., Vercel)
+  app.use((req, res, next) => {
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization, x-is-real-server');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+    if (req.method === 'OPTIONS') {
+      return res.sendStatus(200);
+    }
+    next();
+  });
+
   // Gemini AI Routes
   app.post('/api/ai/analyze-stock', async (req, res) => {
     const { symbol, chartData, name } = req.body;
