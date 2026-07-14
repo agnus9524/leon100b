@@ -3048,8 +3048,8 @@ export default function App() {
           </div>
 
           {/* Terminal Core */}
-          <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            <div className="bg-sleek-card border border-sleek-border p-8 rounded-[40px] shadow-2xl space-y-6">
+          <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
+            <div className="bg-sleek-card border border-sleek-border p-8 rounded-[40px] shadow-2xl space-y-6 xl:col-span-1">
               <div className="flex items-center justify-between">
                 <div className="flex flex-col">
                   <h2 className="text-lg font-black text-white italic uppercase tracking-tighter">AI SCALPING CONFIG</h2>
@@ -3314,7 +3314,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="bg-sleek-card border border-sleek-border p-8 rounded-[40px] shadow-2xl flex flex-col h-full min-h-[500px] lg:col-span-2">
+            <div className="bg-sleek-card border border-sleek-border p-8 rounded-[40px] shadow-2xl flex flex-col h-full min-h-[500px] xl:col-span-2">
               <div className="flex items-center justify-between mb-8">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-sleek-card border border-sleek-border rounded-2xl flex items-center justify-center shadow-lg">
