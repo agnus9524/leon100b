@@ -200,6 +200,16 @@ interface NewsItem {
 
 const INITIAL_STOCKS_KR: Stock[] = [
   {
+    symbol: '073240',
+    name: '금호타이어',
+    price: 6140,
+    change: 0,
+    changePercent: 0,
+    volume: '1.2M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 6000 + Math.random() * 200 })),
+    isAI: true
+  },
+  {
     symbol: '005930',
     name: '삼성전자',
     price: 77600, // Updated to a more realistic current price
@@ -302,7 +312,7 @@ export default function App() {
   const [exchangeRateTrend, setExchangeRateTrend] = useState<'UP' | 'DOWN'>('UP');
   const [selectionMode, setSelectionMode] = useState<'RECOMMENDED' | 'MANUAL'>('RECOMMENDED');
   const [stocks, setStocks] = useState<Stock[]>(INITIAL_STOCKS_KR);
-  const [selectedSymbol, setSelectedSymbol] = useState('005930');
+  const [selectedSymbol, setSelectedSymbol] = useState('073240');
   const [balance, setBalance] = useState(0); // User's money (will be synced via KIS)
   const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
   const [holdings, setHoldings] = useState<Record<string, number>>({});
@@ -683,7 +693,7 @@ export default function App() {
     if (marketType === 'US') {
       if (!cachedStocks.some(s => s.symbol === selectedSymbol)) setSelectedSymbol('NVDA');
     } else {
-      if (!cachedStocks.some(s => s.symbol === selectedSymbol)) setSelectedSymbol('005930');
+      if (!cachedStocks.some(s => s.symbol === selectedSymbol)) setSelectedSymbol('073240');
     }
   }, [marketType]);
 
@@ -965,7 +975,7 @@ export default function App() {
       } catch (err) {
         console.error("Failed to fetch remote stock suggestions:", err);
       }
-    }, 300); // 300ms debounce
+    }, 50); // 50ms debounce for ultra-responsive instant search results
 
     // Dynamic offset calculation
     if (textMeasurerRef.current) {

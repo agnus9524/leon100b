@@ -6,6 +6,7 @@ export interface StockSuggestion {
 
 export const POPULAR_STOCKS: StockSuggestion[] = [
   // KR Stocks
+  { symbol: '073240', name: '금호타이어', market: 'KR' },
   { symbol: '005930', name: '삼성전자', market: 'KR' },
   { symbol: '000660', name: 'SK하이닉스', market: 'KR' },
   { symbol: '035420', name: '네이버', market: 'KR' },
