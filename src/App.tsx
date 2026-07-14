@@ -51,7 +51,10 @@ import {
   Compass,
   Trophy,
   Eye,
-  EyeOff
+  EyeOff,
+  Layers,
+  Percent,
+  ShieldAlert
 } from 'lucide-react';
 import { 
   XAxis, 
@@ -420,6 +423,14 @@ export default function App() {
     gapInventoryRef.current = gapInventory;
   }, [gapInventory]);
 
+  // Automated Scalping Configuration States
+  const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.3); // 0.3%
+  const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-0.5); // -0.5%
+  const [scalpingSpeed, setScalpingSpeed] = useState<number>(1500); // 1500ms
+  const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(true);
+  const [scalpingWins, setScalpingWins] = useState<number>(0);
+  const [scalpingLosses, setScalpingLosses] = useState<number>(0);
+
   // Direct Key Login fallback states
   const [isDirectLoginOpen, setIsDirectLoginOpen] = useState(false);
   const [directKeyInput, setDirectKeyInput] = useState("");
@@ -428,6 +439,53 @@ export default function App() {
 
   // Notification State
   const [notifications, setNotifications] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string }[]>([]);
+
+  const playScalpingSound = (type: 'BUY' | 'SELL') => {
+    if (!scalpingSoundEnabled) return;
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      
+      if (type === 'BUY') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.15);
+      } else {
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc1.type = 'triangle';
+        osc2.type = 'sine';
+        
+        osc1.frequency.setValueAtTime(880, ctx.currentTime); // A5
+        osc1.frequency.setValueAtTime(1046.50, ctx.currentTime + 0.08); // C6
+        osc2.frequency.setValueAtTime(1318.51, ctx.currentTime + 0.04); // E6
+        
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+        
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc1.start();
+        osc2.start();
+        osc1.stop(ctx.currentTime + 0.25);
+        osc2.stop(ctx.currentTime + 0.25);
+      }
+    } catch (e) {
+      console.warn("Audio Context blocked or failed:", e);
+    }
+  };
 
   const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Math.random().toString(36).substring(2, 9);
@@ -855,7 +913,7 @@ export default function App() {
     });
   };
 
-  const handleAddStock = async (customSymbol?: string, recommendedStock?: Stock) => {
+  const handleAddStock = async (customSymbol?: string, recommendedStock?: Stock, customName?: string) => {
     const symbolToUse = customSymbol || searchSymbol.trim().toUpperCase();
     if (!symbolToUse && !recommendedStock) return;
     
@@ -877,6 +935,60 @@ export default function App() {
 
     if (stocks.some(s => s.symbol === symbolToUse)) {
       setSelectedSymbol(symbolToUse);
+      return;
+    }
+
+    if (customName) {
+      const initialPrice = marketType === 'KR' ? 5000 : 100;
+      const newStock: Stock = {
+        symbol: symbolToUse,
+        name: customName,
+        price: initialPrice,
+        change: 0,
+        changePercent: 0,
+        volume: '0',
+        history: Array.from({ length: 40 }, (_, i) => ({ 
+          time: `${i}:00`, 
+          price: initialPrice * (0.98 + Math.random() * 0.04) 
+        })),
+        isAI: false
+      };
+      
+      setStocks(prev => {
+        if (prev.some(s => s.symbol === symbolToUse)) {
+          return prev;
+        }
+        return [newStock, ...prev];
+      });
+      setSelectedSymbol(symbolToUse);
+      
+      // Load real name and price asynchronously from Gemini without blocking UI transition
+      setTimeout(async () => {
+        try {
+          const prompt = `${marketType === 'KR' ? '한국 KOSPI/KOSDAQ' : '미국 NYSE/NASDAQ'} 주식 종목 ${symbolToUse}의 현재 가격을 분석해주세요. 반드시 다음 JSON 형식으로 응답하세요: {"name": "기업명", "price": 숫자}`;
+          const response = await axios.post('/api/ai/bot-decision', { prompt });
+          const data = JSON.parse(response.data.text);
+          if (data.price) {
+            setStocks(prev => prev.map(s => {
+              if (s.symbol === symbolToUse) {
+                return {
+                  ...s,
+                  name: data.name || s.name,
+                  price: data.price,
+                  history: Array.from({ length: 40 }, (_, i) => ({ 
+                    time: `${i}:00`, 
+                    price: data.price * (0.98 + Math.random() * 0.04) 
+                  }))
+                };
+              }
+              return s;
+            }));
+            addLog('SYSTEM', '매수', 0, 0, `[종목 정보 동기화] ${data.name || customName}(${symbolToUse})의 주가가 ₩${data.price.toLocaleString()}으로 업데이트되었습니다.`);
+          }
+        } catch (err) {
+          console.error("Background search update error:", err);
+        }
+      }, 0);
       return;
     }
 
@@ -1580,10 +1692,10 @@ export default function App() {
            showNotification("AI 분석 요청 한도 도달. 잠시 후 재개합니다.", "error");
            // Force a longer cooldown if quota hit
            lastAiCallRef.current = Date.now() + 30000;
-        } else {
+         } else {
            setBotStatus("매매 분석 데이터 부족.");
            showNotification("AI 분석 중 오류가 발생했습니다.", "error");
-        }
+         }
       } finally {
         setIsAnalyzing(false);
         setIsBotThinking(false);
@@ -1592,8 +1704,6 @@ export default function App() {
 
     return () => clearInterval(botInterval);
   }, [isBotActive]);
-
-  // Gap Trading Auto-Bot (Smart Grid Scalper) Logic
   // 1. High-frequency simulated price fluctuations to show real-time fast-paced activity when bot is active
   useEffect(() => {
     if (!isGapBotActive || kisConfig.isConnected || !selectedStock) return;
@@ -1610,10 +1720,10 @@ export default function App() {
 
         // Pull price gently towards the center of user's range
         const distanceToCenter = (currentPrice - centerPrice) / (centerPrice || 1);
-        const drift = -0.002 * distanceToCenter; // Magnet strength towards center
+        const drift = -0.003 * distanceToCenter; // Magnet strength towards center
 
-        // 0.15% random volatility shock
-        const volatility = 0.0015;
+        // Volatility depends on user selected speed - faster means slightly more volatile for visual feedback
+        const volatility = scalpingSpeed <= 500 ? 0.0035 : scalpingSpeed <= 1000 ? 0.0025 : 0.0018;
         const randomShock = (Math.random() - 0.5) * 2 * volatility;
 
         // Combine drift and shock to calculate new price
@@ -1633,12 +1743,12 @@ export default function App() {
           history: newHistory
         };
       }));
-    }, 1500); // Super fast tick every 1.5s for dynamic visual experience
+    }, scalpingSpeed); // Custom speed tick for dynamic visual experience
 
     return () => clearInterval(simInterval);
-  }, [isGapBotActive, selectedSymbol, kisConfig.isConnected, gapBuyPrice, gapSellPrice]);
+  }, [isGapBotActive, selectedSymbol, kisConfig.isConnected, gapBuyPrice, gapSellPrice, scalpingSpeed]);
 
-  // 2. High-speed automatic trading decisions
+  // 2. High-speed automatic trading decisions (Scalping Bot Engine)
   useEffect(() => {
     if (!isGapBotActive || !selectedStock) {
       setGapInventory([]); // Reset grid inventory when stopped
@@ -1666,54 +1776,83 @@ export default function App() {
 
           // A. BUY Condition: Current price is dipping and in the lower 50% of the range
           if (isDipping && currentPrice < centerPrice) {
-            // Require 1% spacing or minimum absolute spacing to avoid over-concentration of buy orders
-            const minSpacing = (maxPrice - minPrice) * 0.08; 
+            // Require dynamic spacing based on range depth to avoid over-concentration
+            const minSpacing = (maxPrice - minPrice) * 0.06; 
             const currentInventory = gapInventoryRef.current;
             const hasNearbyBuy = currentInventory.some(buyPrice => Math.abs(buyPrice - currentPrice) < minSpacing);
 
-            // Limit maximum inventory to 5 concurrent grid slots to manage capital
-            if (!hasNearbyBuy && currentInventory.length < 5) {
+            // Limit maximum inventory to 6 slots
+            if (!hasNearbyBuy && currentInventory.length < 6) {
               const priceInKrw = marketType === 'US' ? currentPrice * exchangeRate : currentPrice;
               const cost = priceInKrw * tradeQuantity;
 
               if (balance >= cost || kisConfig.isConnected) {
-                setBotStatus(`[그리드] ₩${currentPrice.toLocaleString()} 찰나의 낙폭 매수 시작...`);
-                await executeTrade('BUY', selectedStock, tradeQuantity, `Gap Grid: ₩${currentPrice.toLocaleString()} 찰나의 미세 낙폭 자동 매수`);
+                setBotStatus(`[스캘퍼] ₩${currentPrice.toLocaleString()} 찰나의 낙폭 매수...`);
+                await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${currentPrice.toLocaleString()} 미세 변동 매수 진입`);
                 
                 setGapInventory(prev => [...prev, currentPrice]);
                 setLastTradeType('BUY');
                 setGapTradeCount(prev => prev + 1);
-                showNotification(`${selectedStock.name} 찰나의 낙폭 자동 매수 완료`, "success");
+                showNotification(`${selectedStock.name} 스캘퍼 자동 매수 진입 완료`, "success");
+                playScalpingSound('BUY');
               }
             }
           }
 
-          // B. SELL Condition: Scan inventory to take profits on any purchased grid slot
+          // B. SELL Condition: Scan inventory to take profits OR trigger stop-loss
           const currentInventory = gapInventoryRef.current;
           if (currentInventory.length > 0) {
-            // Find bought prices that have gained at least 0.25% or a small profit margin
+            // Profit Margin Check
             const profitableBuys = currentInventory.filter(buyPrice => {
               const profitRatio = (currentPrice - buyPrice) / buyPrice;
-              return profitRatio >= 0.0025; // 0.25% profit margin
+              return profitRatio >= scalpingTargetProfit / 100;
+            });
+
+            // Stop Loss Check
+            const stopLossBuys = currentInventory.filter(buyPrice => {
+              const lossRatio = (currentPrice - buyPrice) / buyPrice;
+              return lossRatio <= scalpingStopLoss / 100;
             });
 
             if (profitableBuys.length > 0) {
-              // Sell the oldest/lowest buy slot for maximum profit
+              // Sell the oldest/lowest buy slot for maximum profit (Take Profit)
               const targetBuyPrice = Math.min(...profitableBuys);
               const qty = holdings[selectedStock.symbol] || 0;
               const sellQty = Math.min(qty, tradeQuantity) || tradeQuantity;
 
               if (sellQty > 0 || kisConfig.isConnected) {
-                setBotStatus(`[그리드] ₩${currentPrice.toLocaleString()} 반등 분할 매도 진행...`);
-                await executeTrade('SELL', selectedStock, sellQty, `Gap Grid: ₩${targetBuyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} 차익 자동 매도`);
+                setBotStatus(`[스캘퍼] ₩${currentPrice.toLocaleString()} 목표 차익 매도 진행...`);
+                await executeTrade('SELL', selectedStock, sellQty, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} 익절 완료 (+${scalpingTargetProfit}%)`);
                 
                 setGapInventory(prev => prev.filter(p => p !== targetBuyPrice));
                 setLastTradeType('SELL');
                 setGapTradeCount(prev => prev + 1);
+                setScalpingWins(prev => prev + 1);
 
                 const profit = (currentPrice - targetBuyPrice) * sellQty * (marketType === 'US' ? exchangeRate : 1);
                 setGapTradingProfit(prev => prev + profit);
-                showNotification(`${selectedStock.name} 반등 차익 실현 자동 매도 완료 (+₩${Math.round(profit).toLocaleString()})`, "success");
+                showNotification(`${selectedStock.name} 익절 자동 매도 완료 (+₩${Math.round(profit).toLocaleString()})`, "success");
+                playScalpingSound('SELL');
+              }
+            } else if (stopLossBuys.length > 0) {
+              // Trigger stop loss for the worst slot to control damage
+              const targetBuyPrice = Math.max(...stopLossBuys);
+              const qty = holdings[selectedStock.symbol] || 0;
+              const sellQty = Math.min(qty, tradeQuantity) || tradeQuantity;
+
+              if (sellQty > 0 || kisConfig.isConnected) {
+                setBotStatus(`[스캘퍼] ₩${currentPrice.toLocaleString()} 리스크 관리 손절...`);
+                await executeTrade('SELL', selectedStock, sellQty, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} 손절 완료 (${scalpingStopLoss}%)`);
+                
+                setGapInventory(prev => prev.filter(p => p !== targetBuyPrice));
+                setLastTradeType('SELL');
+                setGapTradeCount(prev => prev + 1);
+                setScalpingLosses(prev => prev + 1);
+
+                const loss = (currentPrice - targetBuyPrice) * sellQty * (marketType === 'US' ? exchangeRate : 1);
+                setGapTradingProfit(prev => prev + loss);
+                showNotification(`${selectedStock.name} 리스크 관리 손절 매도 완료 (₩${Math.round(loss).toLocaleString()})`, "error");
+                playScalpingSound('SELL');
               }
             }
           }
@@ -1721,10 +1860,10 @@ export default function App() {
       }
 
       lastPrice = currentPrice;
-    }, 1500); // Check every 1.5 seconds for incredible fast speed execution
+    }, scalpingSpeed); // Custom intervals for incredible fast speed execution
 
     return () => clearInterval(gapInterval);
-  }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings]);
+  }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled]);
 
   const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string) => {
     if (action === 'HOLD' || amount <= 0) return;
@@ -2663,7 +2802,7 @@ export default function App() {
             <Bot className="w-4 h-4 text-white" />
           </div>
           <h1 className="text-[16px] md:text-[18px] font-extrabold tracking-tighter uppercase relative">
-            <span className="text-sleek-blue">LEO</span> GAP BOT <span className="text-white/40 font-normal ml-2 text-xl tracking-widest">PRO</span>
+            <span className="text-sleek-blue">LEO</span> SCALPER BOT <span className="text-white/40 font-normal ml-2 text-xl tracking-widest">PRO</span>
             {currentUser?.email === "agnus9524@gmail.com" && (
               <span className="absolute -top-1 -right-8 bg-sleek-blue text-[white] text-[7px] px-1 rounded-sm font-black tracking-widest leading-normal">SUPER</span>
             )}
@@ -2729,7 +2868,7 @@ export default function App() {
             )}
           >
             {isGapBotActive ? <Square className="w-2.5 h-2.5 fill-current" /> : <Play className="w-2.5 h-2.5 fill-current" />}
-            {isGapBotActive ? "정지" : "갭 매매 시작"}
+            {isGapBotActive ? "정지" : "자동 스캘핑 시작"}
           </button>
         </div>
       </header>
@@ -2764,7 +2903,7 @@ export default function App() {
                       {searchSuggestions.map((s, idx) => (
                         <button 
                           key={s.symbol}
-                          onClick={() => handleAddStock(s.symbol)}
+                          onClick={() => handleAddStock(s.symbol, undefined, s.name)}
                           className="w-full flex items-center justify-between p-3 hover:bg-white/5 transition-colors border-b border-white/5 last:border-0 text-left"
                         >
                           <div>
@@ -2845,17 +2984,17 @@ export default function App() {
         {/* Center: Gap Trading Terminal */}
         <section className="bg-sleek-bg overflow-y-auto custom-scrollbar p-6 space-y-6">
           {/* Header Stats */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div className="bg-sleek-card border border-sleek-border p-6 rounded-[32px] shadow-2xl relative overflow-hidden group">
               <div className="absolute top-0 right-0 w-24 h-24 bg-sleek-blue/5 rounded-full -mr-12 -mt-12 blur-2xl group-hover:bg-sleek-blue/10 transition-all"></div>
               <div className="flex items-center gap-3 mb-2">
                 <div className="w-8 h-8 bg-sleek-blue/20 rounded-xl flex items-center justify-center">
                   <Target className="w-4 h-4 text-sleek-blue" />
                 </div>
-                <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest">갭 투자 총 수익</span>
+                <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest">실시간 스캘핑 총 수익</span>
               </div>
               <div className={cn(
-                "text-2xl font-black italic tracking-tighter",
+                "text-2xl font-black italic tracking-tighter font-mono",
                 gapTradingProfit >= 0 ? "text-sleek-green" : "text-sleek-red"
               )}>
                 ₩{gapTradingProfit.toLocaleString()}
@@ -2868,10 +3007,26 @@ export default function App() {
                 <div className="w-8 h-8 bg-sleek-purple/20 rounded-xl flex items-center justify-center">
                   <Activity className="w-4 h-4 text-sleek-purple" />
                 </div>
-                <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest">오늘의 거래 횟수</span>
+                <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest">오늘의 체결 횟수</span>
               </div>
-              <div className="text-2xl font-black text-white italic tracking-tighter">
+              <div className="text-2xl font-black text-white italic tracking-tighter font-mono">
                 {gapTradeCount} <span className="text-xs font-normal text-sleek-text-secondary opacity-50 not-italic">TRADES</span>
+              </div>
+            </div>
+
+            <div className="bg-sleek-card border border-sleek-border p-6 rounded-[32px] shadow-2xl relative overflow-hidden group">
+              <div className="absolute top-0 right-0 w-24 h-24 bg-emerald-500/5 rounded-full -mr-12 -mt-12 blur-2xl group-hover:bg-emerald-500/10 transition-all"></div>
+              <div className="flex items-center gap-3 mb-2">
+                <div className="w-8 h-8 bg-emerald-500/20 rounded-xl flex items-center justify-center">
+                  <Trophy className="w-4 h-4 text-emerald-400" />
+                </div>
+                <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest">체결 성공률 (Win Rate)</span>
+              </div>
+              <div className="text-2xl font-black text-emerald-400 italic tracking-tighter font-mono">
+                {scalpingWins + scalpingLosses > 0 
+                  ? `${((scalpingWins / (scalpingWins + scalpingLosses)) * 100).toFixed(1)}%` 
+                  : "100.0%"
+                }
               </div>
             </div>
 
@@ -2881,11 +3036,11 @@ export default function App() {
                 <div className="w-8 h-8 bg-sleek-blue/20 rounded-xl flex items-center justify-center">
                   <Zap className="w-4 h-4 text-sleek-blue animate-pulse" />
                 </div>
-                <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest">엔진 상태</span>
+                <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest">스캘퍼 엔진 상태</span>
               </div>
               <div className={cn(
                 "text-2xl font-black italic tracking-tighter",
-                isGapBotActive ? "text-emerald-400" : "text-sleek-text-secondary"
+                isGapBotActive ? "text-emerald-400 animate-pulse" : "text-sleek-text-secondary"
               )}>
                 {isGapBotActive ? "RUNNING" : "STOPPED"}
               </div>
@@ -2894,18 +3049,22 @@ export default function App() {
 
           {/* Terminal Core */}
           <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-            <div className="bg-sleek-card border border-sleek-border p-8 rounded-[40px] shadow-2xl space-y-8">
+            <div className="bg-sleek-card border border-sleek-border p-8 rounded-[40px] shadow-2xl space-y-6">
               <div className="flex items-center justify-between">
-                <h2 className="text-lg font-black text-white italic uppercase tracking-tighter">GAP TRADING SETTINGS</h2>
+                <div className="flex flex-col">
+                  <h2 className="text-lg font-black text-white italic uppercase tracking-tighter">AI SCALPING CONFIG</h2>
+                  <span className="text-[10px] text-sleek-text-secondary">초단기 자동 스캘퍼 전략 엔진 설정</span>
+                </div>
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full bg-sleek-blue animate-ping"></span>
-                  <span className="text-[10px] font-bold text-sleek-blue uppercase">Real-time Control</span>
+                  <span className="text-[10px] font-bold text-sleek-blue uppercase">Engine Live Control</span>
                 </div>
               </div>
 
-              <div className="space-y-6">
+              <div className="space-y-5">
+                {/* 1. Upper Bound Input */}
                 <div>
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-2">
                     <label className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest flex items-center gap-2">
                       <TrendingUp className="w-3 h-3 text-sleek-green" />
                       구간 상한가 설정 (최고 기준)
@@ -2914,26 +3073,28 @@ export default function App() {
                   </div>
                   <input 
                     type="number" 
-                    value={gapSellPrice}
+                    value={gapSellPrice || ''}
                     onChange={(e) => setGapSellPrice(Number(e.target.value))}
-                    className="w-full bg-black/40 border border-sleek-border rounded-xl p-4 text-sm font-bold focus:border-sleek-green outline-none transition-all"
-                    placeholder="구간 상한선 금액 입력 (예: 330,000)"
+                    className="w-full bg-black/40 border border-sleek-border rounded-xl p-3 text-sm font-bold focus:border-sleek-green outline-none transition-all text-white font-mono"
+                    placeholder="구간 상한선 금액 입력 (예: 6,800)"
                   />
-                  <div className="flex gap-2 mt-2">
-                    {[ -5000, -1000, -500, 500, 1000, 5000 ].map(adj => (
+                  <div className="grid grid-cols-6 gap-1 mt-1.5">
+                    {[ -500, -100, -10, 10, 100, 500 ].map(adj => (
                       <button 
                         key={adj}
+                        type="button"
                         onClick={() => setGapSellPrice(prev => Math.max(0, prev + adj))}
-                        className="flex-1 py-1 bg-white/5 border border-white/5 rounded-md text-[10px] font-bold hover:bg-white/10"
+                        className="py-1 bg-white/5 border border-white/5 rounded-md text-[9px] font-bold hover:bg-white/10 text-sleek-text-secondary font-mono"
                       >
-                        {adj > 0 ? `+${adj.toLocaleString()}` : adj.toLocaleString()}
+                        {adj > 0 ? `+${adj}` : adj}
                       </button>
                     ))}
                   </div>
                 </div>
 
+                {/* 2. Lower Bound Input */}
                 <div>
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-2">
                     <label className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest flex items-center gap-2">
                       <TrendingDown className="w-3 h-3 text-sleek-red" />
                       구간 하한가 설정 (최저 기준)
@@ -2942,55 +3103,188 @@ export default function App() {
                   </div>
                   <input 
                     type="number" 
-                    value={gapBuyPrice}
+                    value={gapBuyPrice || ''}
                     onChange={(e) => setGapBuyPrice(Number(e.target.value))}
-                    className="w-full bg-black/40 border border-sleek-border rounded-xl p-4 text-sm font-bold focus:border-sleek-red outline-none transition-all"
-                    placeholder="구간 하한선 금액 입력 (예: 310,000)"
+                    className="w-full bg-black/40 border border-sleek-border rounded-xl p-3 text-sm font-bold focus:border-sleek-red outline-none transition-all text-white font-mono"
+                    placeholder="구간 하한선 금액 입력 (예: 6,200)"
                   />
-                  <div className="flex gap-2 mt-2">
-                    {[ -5000, -1000, -500, 500, 1000, 5000 ].map(adj => (
+                  <div className="grid grid-cols-6 gap-1 mt-1.5">
+                    {[ -500, -100, -10, 10, 100, 500 ].map(adj => (
                       <button 
                         key={adj}
+                        type="button"
                         onClick={() => setGapBuyPrice(prev => Math.max(0, prev + adj))}
-                        className="flex-1 py-1 bg-white/5 border border-white/5 rounded-md text-[10px] font-bold hover:bg-white/10"
+                        className="py-1 bg-white/5 border border-white/5 rounded-md text-[9px] font-bold hover:bg-white/10 text-sleek-text-secondary font-mono"
                       >
-                        {adj > 0 ? `+${adj.toLocaleString()}` : adj.toLocaleString()}
+                        {adj > 0 ? `+${adj}` : adj}
                       </button>
                     ))}
                   </div>
                 </div>
 
+                {/* 3. Trade Quantity */}
                 <div>
-                  <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center justify-between mb-2">
                     <label className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest flex items-center gap-2">
-                      <Activity className="w-3 h-3 text-sleek-blue" />
-                      1회 자동 거래 수량
+                      <Layers className="w-3 h-3 text-sleek-blue" />
+                      1회 매매 거래 수량
                     </label>
-                    <span className="text-xs font-bold text-white">{tradeQuantity} 주</span>
+                    <span className="text-xs font-bold text-white font-mono">{tradeQuantity} 주</span>
                   </div>
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2">
                     <button 
+                      type="button"
                       onClick={() => setTradeQuantity(prev => Math.max(1, prev - 1))}
-                      className="w-12 h-12 rounded-xl bg-white/5 border border-white/5 flex items-center justify-center hover:bg-white/10"
+                      className="w-10 h-10 rounded-xl bg-white/5 border border-white/5 flex items-center justify-center hover:bg-white/10 text-white font-bold"
                     >
                       -
                     </button>
                     <input 
                       type="number" 
                       value={tradeQuantity}
-                      onChange={(e) => setTradeQuantity(Number(e.target.value))}
-                      className="flex-1 bg-black/40 border border-sleek-border rounded-xl p-3 text-center text-sm font-bold outline-none"
+                      onChange={(e) => setTradeQuantity(Math.max(1, Number(e.target.value)))}
+                      className="flex-1 bg-black/40 border border-sleek-border rounded-xl p-2 text-center text-sm font-bold outline-none text-white font-mono"
                     />
                     <button 
+                      type="button"
                       onClick={() => setTradeQuantity(prev => prev + 1)}
-                      className="w-12 h-12 rounded-xl bg-white/5 border border-white/5 flex items-center justify-center hover:bg-white/10"
+                      className="w-10 h-10 rounded-xl bg-white/5 border border-white/5 flex items-center justify-center hover:bg-white/10 text-white font-bold"
                     >
                       +
                     </button>
                   </div>
                 </div>
 
-                <div className="pt-4">
+                {/* 4. Target Profit (익절 수익률) */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest flex items-center gap-2">
+                      <Percent className="w-3 h-3 text-emerald-400" />
+                      목표 익절 수익률 (Take Profit)
+                    </label>
+                    <span className="text-xs font-bold text-emerald-400 font-mono">+{scalpingTargetProfit}%</span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5 mb-1.5">
+                    {[ 0.1, 0.2, 0.3, 0.5, 1.0 ].map(pct => (
+                      <button 
+                        key={pct}
+                        type="button"
+                        onClick={() => setScalpingTargetProfit(pct)}
+                        className={cn(
+                          "py-1.5 rounded-lg text-[10px] font-bold font-mono transition-all",
+                          scalpingTargetProfit === pct 
+                            ? "bg-emerald-500/20 border border-emerald-500/50 text-emerald-400" 
+                            : "bg-white/5 border border-white/5 text-sleek-text-secondary hover:bg-white/10"
+                        )}
+                      >
+                        {pct}%
+                      </button>
+                    ))}
+                  </div>
+                  <input 
+                    type="number" 
+                    step="0.05"
+                    value={scalpingTargetProfit}
+                    onChange={(e) => setScalpingTargetProfit(Math.max(0.01, Number(e.target.value)))}
+                    className="w-full bg-black/40 border border-sleek-border rounded-xl p-2 text-xs font-mono focus:border-emerald-500 outline-none text-white text-right"
+                    placeholder="직접 입력 (%)"
+                  />
+                </div>
+
+                {/* 5. Stop Loss (손절 기준률) */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest flex items-center gap-2">
+                      <ShieldAlert className="w-3 h-3 text-rose-500" />
+                      최대 리스크 손절률 (Stop Loss)
+                    </label>
+                    <span className="text-xs font-bold text-rose-500 font-mono">{scalpingStopLoss}%</span>
+                  </div>
+                  <div className="grid grid-cols-5 gap-1.5 mb-1.5">
+                    {[ -0.2, -0.5, -1.0, -1.5, -2.0 ].map(pct => (
+                      <button 
+                        key={pct}
+                        type="button"
+                        onClick={() => setScalpingStopLoss(pct)}
+                        className={cn(
+                          "py-1.5 rounded-lg text-[10px] font-bold font-mono transition-all",
+                          scalpingStopLoss === pct 
+                            ? "bg-rose-500/20 border border-rose-500/50 text-rose-400" 
+                            : "bg-white/5 border border-white/5 text-sleek-text-secondary hover:bg-white/10"
+                        )}
+                      >
+                        {pct}%
+                      </button>
+                    ))}
+                  </div>
+                  <input 
+                    type="number" 
+                    step="0.05"
+                    max="-0.01"
+                    value={scalpingStopLoss}
+                    onChange={(e) => setScalpingStopLoss(Math.min(-0.01, Number(e.target.value)))}
+                    className="w-full bg-black/40 border border-sleek-border rounded-xl p-2 text-xs font-mono focus:border-rose-500 outline-none text-white text-right"
+                    placeholder="직접 입력 (%)"
+                  />
+                </div>
+
+                {/* 6. Execution Speed & Sound Switch */}
+                <div className="grid grid-cols-2 gap-4 pt-1">
+                  <div>
+                    <label className="text-[9px] font-black text-sleek-text-secondary uppercase tracking-wider block mb-2">
+                      매매 엔진 속도
+                    </label>
+                    <div className="flex flex-col gap-1">
+                      {[
+                        { label: '초고속 (0.5s)', value: 500 },
+                        { label: '고속 (1.5s)', value: 1500 },
+                        { label: '보통 (3.0s)', value: 3000 }
+                      ].map(opt => (
+                        <button
+                          key={opt.value}
+                          type="button"
+                          onClick={() => setScalpingSpeed(opt.value)}
+                          className={cn(
+                            "py-1 px-2 rounded-lg text-[10px] font-bold text-left transition-all",
+                            scalpingSpeed === opt.value
+                              ? "bg-sleek-blue/20 text-sleek-blue border border-sleek-blue/30"
+                              : "bg-white/5 border border-white/5 text-sleek-text-secondary hover:bg-white/10"
+                          )}
+                        >
+                          {opt.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="text-[9px] font-black text-sleek-text-secondary uppercase tracking-wider block mb-2">
+                      사운드 알림 FX
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setScalpingSoundEnabled(!scalpingSoundEnabled)}
+                      className={cn(
+                        "w-full py-3 px-4 rounded-xl flex items-center justify-between text-xs font-bold transition-all border",
+                        scalpingSoundEnabled
+                          ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400"
+                          : "bg-white/5 border-white/10 text-sleek-text-secondary"
+                      )}
+                    >
+                      <span>{scalpingSoundEnabled ? "켜짐 (🔊)" : "꺼짐 (🔇)"}</span>
+                      <div className={cn(
+                        "w-3 h-3 rounded-full transition-all",
+                        scalpingSoundEnabled ? "bg-emerald-400 animate-pulse" : "bg-gray-600"
+                      )} />
+                    </button>
+                    <div className="mt-2 text-[8px] text-sleek-text-secondary leading-relaxed leading-tight">
+                      체결 성공 및 정밀 진입 시 고주파 비프 알림음이 작동합니다.
+                    </div>
+                  </div>
+                </div>
+
+                {/* 7. Engine Activation Toggle */}
+                <div className="pt-3">
                   <button 
                     onClick={() => {
                       if (!isGapBotActive) {
@@ -3007,35 +3301,35 @@ export default function App() {
                       setIsGapBotActive(!isGapBotActive);
                     }}
                     className={cn(
-                      "w-full py-5 rounded-[24px] font-black text-sm italic tracking-tighter uppercase shadow-2xl transition-all flex items-center justify-center gap-3",
+                      "w-full py-4 rounded-[20px] font-black text-sm italic tracking-tighter uppercase shadow-2xl transition-all flex items-center justify-center gap-3",
                       isGapBotActive 
                         ? "bg-sleek-red text-white shadow-sleek-red/20 hover:scale-[1.02]" 
                         : "bg-sleek-blue text-white shadow-sleek-blue/20 hover:scale-[1.05]"
                     )}
                   >
-                    {isGapBotActive ? <Square className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current" />}
-                    {isGapBotActive ? "GAP ENGINE STOP" : "START AUTO GAP TRADING"}
+                    {isGapBotActive ? <Square className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
+                    {isGapBotActive ? "SCALPER STOP" : "START AI SCALPER"}
                   </button>
                 </div>
               </div>
             </div>
 
-            <div className="bg-sleek-card border border-sleek-border p-8 rounded-[40px] shadow-2xl flex flex-col h-full min-h-[500px]">
+            <div className="bg-sleek-card border border-sleek-border p-8 rounded-[40px] shadow-2xl flex flex-col h-full min-h-[500px] lg:col-span-2">
               <div className="flex items-center justify-between mb-8">
                 <div className="flex items-center gap-4">
                   <div className="w-12 h-12 bg-sleek-card border border-sleek-border rounded-2xl flex items-center justify-center shadow-lg">
-                    <Activity className="w-6 h-6 text-sleek-blue" />
+                    <Activity className="w-6 h-6 text-sleek-blue animate-pulse" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-black text-white uppercase italic tracking-tighter">Real-time Terminal</h3>
+                    <h3 className="text-sm font-black text-white uppercase italic tracking-tighter">AI SCALPING TERMINAL</h3>
                     <div className="flex items-center gap-2">
                       <div className="w-1.5 h-1.5 rounded-full bg-sleek-green animate-pulse"></div>
-                      <span className="text-[10px] font-bold text-sleek-text-secondary uppercase">Live Data Streaming</span>
+                      <span className="text-[10px] font-bold text-sleek-text-secondary uppercase">Live Market Data Stream</span>
                     </div>
                   </div>
                 </div>
                 <div className="text-right">
-                  <div className="text-[10px] text-sleek-text-secondary uppercase font-black">Price Gap</div>
+                  <div className="text-[10px] text-sleek-text-secondary uppercase font-black">Target Price Range</div>
                   <div className="text-sm font-black text-sleek-blue italic">
                     ₩{gapBuyPrice && gapSellPrice ? (gapSellPrice - gapBuyPrice).toLocaleString() : '0'}
                   </div>
@@ -3043,85 +3337,176 @@ export default function App() {
               </div>
 
               {selectedStock ? (
-                <div className="flex-1 flex flex-col">
-                  <div className="mb-8">
-                    <div className="text-[10px] text-sleek-text-secondary uppercase mb-1">Current Market Price</div>
-                    <div className="flex items-baseline gap-3">
-                      <span className="text-5xl font-black text-white italic tracking-tighter">
-                        ₩{selectedStock.price.toLocaleString()}
-                      </span>
-                      <span className={cn(
-                        "text-lg font-black italic",
-                        selectedStock.change >= 0 ? "text-sleek-green" : "text-sleek-red"
-                      )}>
-                        {selectedStock.change >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%
-                      </span>
-                    </div>
-                  </div>
+                (() => {
+                  const currentPrice = selectedStock.price;
+                  const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
+                  const askLevels = Array.from({ length: 5 }, (_, i) => currentPrice + (5 - i) * tickSize);
+                  const bidLevels = Array.from({ length: 5 }, (_, i) => currentPrice - (i + 1) * tickSize);
+                  const getLevelVolume = (priceLevel: number) => {
+                    const base = Math.abs((priceLevel * 17) % 850) + 120;
+                    const wiggle = Math.floor(Math.sin((Date.now() / 2500) + priceLevel) * 45) + 45;
+                    return base + wiggle;
+                  };
 
-                  <div className="flex-1 bg-sleek-card/30 rounded-3xl border border-sleek-border p-6 relative shadow-inner">
-                    <ResponsiveContainer width="100%" height="100%">
-                      <AreaChart data={selectedStock.history}>
-                        <defs>
-                          <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                            <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3}/>
-                            <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
-                          </linearGradient>
-                        </defs>
-                        <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.05} />
-                        <XAxis 
-                          dataKey="time" 
-                          axisLine={false} 
-                          tickLine={false} 
-                          tick={{ fontSize: 10, fill: '#6B7280' }}
-                          hide
-                        />
-                        <YAxis 
-                          domain={['auto', 'auto']} 
-                          axisLine={false} 
-                          tickLine={false} 
-                          tick={{ fontSize: 10, fill: '#6B7280' }}
-                          orientation="right"
-                        />
-                        <Tooltip 
-                          contentStyle={{ backgroundColor: '#1A1D23', border: '1px solid #2D3139', borderRadius: '12px' }}
-                          itemStyle={{ fontSize: '10px' }}
-                        />
-                        <Area 
-                          type="monotone" 
-                          dataKey="price" 
-                          stroke="#3B82F6" 
-                          strokeWidth={3}
-                          fillOpacity={1} 
-                          fill="url(#colorPrice)" 
-                          animationDuration={500}
-                        />
-                        
-                        {/* Target Price Lines */}
-                        {gapBuyPrice > 0 && (
-                          <ReferenceLine 
-                            y={gapBuyPrice} 
-                            stroke="#EF4444" 
-                            strokeDasharray="5 5" 
-                            strokeWidth={2}
-                          >
-                            <Label value="BUY BOUND" position="left" fill="#EF4444" fontSize={10} fontWeight="bold" />
-                          </ReferenceLine>
-                        )}
-                        {gapSellPrice > 0 && (
-                          <ReferenceLine 
-                            y={gapSellPrice} 
-                            stroke="#10B981" 
-                            strokeDasharray="5 5" 
-                            strokeWidth={2}
-                          >
-                            <Label value="SELL BOUND" position="left" fill="#10B981" fontSize={10} fontWeight="bold" />
-                          </ReferenceLine>
-                        )}
-                      </AreaChart>
-                    </ResponsiveContainer>
-                  </div>
-                </div>
+                  return (
+                    <div className="flex-1 flex flex-col lg:flex-row gap-6">
+                      {/* Left Side: Chart Section */}
+                      <div className="flex-1 flex flex-col min-w-0">
+                        <div className="mb-6">
+                          <div className="text-[10px] text-sleek-text-secondary uppercase mb-1">Current Stock Price</div>
+                          <div className="flex items-baseline gap-3">
+                            <span className="text-5xl font-black text-white italic tracking-tighter font-mono">
+                              ₩{selectedStock.price.toLocaleString()}
+                            </span>
+                            <span className={cn(
+                              "text-lg font-black italic",
+                              selectedStock.change >= 0 ? "text-sleek-green" : "text-sleek-red"
+                            )}>
+                              {selectedStock.change >= 0 ? '▲' : '▼'} {selectedStock.changePercent.toFixed(2)}%
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex-1 bg-sleek-card/30 rounded-3xl border border-sleek-border p-6 relative shadow-inner min-h-[340px]">
+                          <ResponsiveContainer width="100%" height="100%">
+                            <AreaChart data={selectedStock.history}>
+                              <defs>
+                                <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
+                                  <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3}/>
+                                  <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
+                                </linearGradient>
+                              </defs>
+                              <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.05} />
+                              <XAxis 
+                                dataKey="time" 
+                                axisLine={false} 
+                                tickLine={false} 
+                                tick={{ fontSize: 10, fill: '#6B7280' }}
+                                hide
+                              />
+                              <YAxis 
+                                domain={['auto', 'auto']} 
+                                axisLine={false} 
+                                tickLine={false} 
+                                tick={{ fontSize: 10, fill: '#6B7280' }}
+                                orientation="right"
+                              />
+                              <Tooltip 
+                                contentStyle={{ backgroundColor: '#1A1D23', border: '1px solid #2D3139', borderRadius: '12px' }}
+                                itemStyle={{ fontSize: '10px' }}
+                              />
+                              <Area 
+                                type="monotone" 
+                                dataKey="price" 
+                                stroke="#3B82F6" 
+                                strokeWidth={3}
+                                fillOpacity={1} 
+                                fill="url(#colorPrice)" 
+                                animationDuration={500}
+                              />
+                              
+                              {/* Target Price Lines */}
+                              {gapBuyPrice > 0 && (
+                                <ReferenceLine 
+                                  y={gapBuyPrice} 
+                                  stroke="#EF4444" 
+                                  strokeDasharray="5 5" 
+                                  strokeWidth={2}
+                                >
+                                  <Label value="BUY BOUND" position="left" fill="#EF4444" fontSize={10} fontWeight="bold" />
+                                </ReferenceLine>
+                              )}
+                              {gapSellPrice > 0 && (
+                                <ReferenceLine 
+                                  y={gapSellPrice} 
+                                  stroke="#10B981" 
+                                  strokeDasharray="5 5" 
+                                  strokeWidth={2}
+                                >
+                                  <Label value="SELL BOUND" position="left" fill="#10B981" fontSize={10} fontWeight="bold" />
+                                </ReferenceLine>
+                              )}
+                            </AreaChart>
+                          </ResponsiveContainer>
+                        </div>
+                      </div>
+
+                      {/* Right Side: Live Order Book Section */}
+                      <div className="w-full lg:w-[300px] shrink-0 flex flex-col">
+                        <div className="bg-black/40 rounded-3xl border border-sleek-border p-4 flex flex-col h-full justify-between min-h-[400px]">
+                          <div>
+                            <div className="text-center font-black text-sleek-text-secondary uppercase text-[10px] tracking-widest pb-2.5 border-b border-white/5 mb-3">
+                              실시간 잔량 호가창 (Live Order Book)
+                            </div>
+                            
+                            {/* Ask Levels */}
+                            <div className="space-y-1">
+                              {askLevels.map((lvlPrice, idx) => {
+                                const vol = getLevelVolume(lvlPrice);
+                                const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
+                                return (
+                                  <div key={`ask-${lvlPrice}`} className="grid grid-cols-3 items-center py-1.5 px-2.5 rounded-lg hover:bg-white/5 transition-all relative overflow-hidden group">
+                                    <div className="absolute right-0 top-0 bottom-0 bg-sky-500/5 group-hover:bg-sky-500/10 pointer-events-none transition-all" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
+                                    <span className="text-[9px] text-sky-400 font-bold font-sans z-10">매도 {5 - idx}단계</span>
+                                    <span className={cn(
+                                      "text-right font-bold z-10 font-mono text-[11px]",
+                                      isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-300"
+                                    )}>
+                                      ₩{lvlPrice.toLocaleString()}
+                                    </span>
+                                    <span className="text-right text-sky-200/50 font-mono text-[10px] z-10">{vol.toLocaleString()}주</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Spread Line */}
+                            <div className="my-3 py-2 px-3 bg-white/5 border-y border-white/10 flex items-center justify-between rounded-xl">
+                              <span className="text-[8px] font-black text-sleek-text-secondary uppercase tracking-wider">현재 체결가</span>
+                              <span className={cn("font-black text-xs font-mono animate-pulse", selectedStock.change >= 0 ? "text-sleek-green" : "text-sleek-red")}>
+                                ₩{currentPrice.toLocaleString()}
+                              </span>
+                              <span className="text-[9px] text-sleek-text-secondary font-mono">{selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%</span>
+                            </div>
+
+                            {/* Bid Levels */}
+                            <div className="space-y-1">
+                              {bidLevels.map((lvlPrice, idx) => {
+                                const vol = getLevelVolume(lvlPrice);
+                                const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
+                                return (
+                                  <div key={`bid-${lvlPrice}`} className="grid grid-cols-3 items-center py-1.5 px-2.5 rounded-lg hover:bg-white/5 transition-all relative overflow-hidden group">
+                                    <div className="absolute right-0 top-0 bottom-0 bg-rose-500/5 group-hover:bg-rose-500/10 pointer-events-none transition-all" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
+                                    <span className="text-[9px] text-rose-400 font-bold font-sans z-10">매수 {idx + 1}단계</span>
+                                    <span className={cn(
+                                      "text-right font-bold z-10 font-mono text-[11px]",
+                                      isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-300"
+                                    )}>
+                                      ₩{lvlPrice.toLocaleString()}
+                                    </span>
+                                    <span className="text-right text-rose-200/50 font-mono text-[10px] z-10">{vol.toLocaleString()}주</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Order Book Pressure Gauge */}
+                          <div className="mt-4 pt-3 border-t border-white/5 space-y-1.5">
+                            <div className="flex justify-between text-[9px] text-sleek-text-secondary font-bold font-sans">
+                              <span className="text-sky-400">매도 총잔량 47.8%</span>
+                              <span className="text-rose-400">매수 총잔량 52.2%</span>
+                            </div>
+                            <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex">
+                              <div className="h-full bg-sky-400" style={{ width: '47.8%' }} />
+                              <div className="h-full bg-rose-400" style={{ width: '52.2%' }} />
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()
               ) : (
                 <div className="flex-1 flex flex-col items-center justify-center text-center p-10 bg-sleek-card/20 rounded-3xl border border-dashed border-sleek-border">
                   <div className="p-6 bg-sleek-blue/10 rounded-full mb-6">
