@@ -6,15 +6,66 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import iconv from 'iconv-lite';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+interface KrxStock {
+  symbol: string;
+  name: string;
+  market: 'KR';
+}
+
+let krxStocksCache: KrxStock[] = [];
+
+async function fetchKrxStocks() {
+  try {
+    console.log('[KRX Cache] Fetching master list from KIND...');
+    const response = await axios.get('https://kind.krx.co.kr/corpgeneral/corpList.do?method=download', {
+      timeout: 10000,
+      responseType: 'arraybuffer',
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      }
+    });
+
+    const html = iconv.decode(Buffer.from(response.data), 'euc-kr');
+    const trs = html.match(/<tr>[\s\S]*?<\/tr>/gi) || [];
+    const stocks: KrxStock[] = [];
+
+    for (let i = 1; i < trs.length; i++) {
+      const tr = trs[i];
+      const tds = tr.match(/<td[\s\S]*?>([\s\S]*?)<\/td>/gi) || [];
+      if (tds.length >= 3) {
+        const name = tds[0].replace(/<[^>]*>/g, '').trim();
+        let code = tds[2].replace(/<[^>]*>/g, '').trim();
+        code = code.replace(/[^0-9]/g, '');
+        if (code.length === 6) {
+          stocks.push({ symbol: code, name, market: 'KR' });
+        }
+      }
+    }
+
+    if (stocks.length > 0) {
+      krxStocksCache = stocks;
+      console.log(`[KRX Cache] Successfully loaded ${krxStocksCache.length} stocks from KIND.`);
+    } else {
+      console.error('[KRX Cache] Failed to parse stocks. Parsed count is 0.');
+    }
+  } catch (error: any) {
+    console.error('[KRX Cache] Error fetching KRX stock list:', error.message);
+  }
+}
 
 // Initialize Gemini with provided key as fallback or environment variable
 const GEMINI_KEY = process.env.GEMINI_API_KEY || "AIzaSyCemXrlOW04-GFPaK2nWRWr7YHUe99__jc";
 const genAI = new GoogleGenerativeAI(GEMINI_KEY);
 
 async function startServer() {
+  // Populate the high-speed local KRX stock list cache immediately on boot
+  fetchKrxStocks();
+
   const app = express();
   const PORT = 3000;
 
@@ -227,7 +278,7 @@ async function startServer() {
     }
   });
 
-  // Dynamic Stock Search API (Sequential multi-strategy using Naver Finance)
+  // Hybrid Stock Search API (Local KRX Cache for KR + Yahoo Finance for US)
   app.get('/api/stocks/search', async (req, res) => {
     const { keyword, marketType } = req.query;
     
@@ -240,168 +291,96 @@ async function startServer() {
       return res.json([]);
     }
 
+    const isUSRequested = marketType === 'US' || /^[a-zA-Z]/.test(cleanKeyword);
+
     try {
-      let results: any[] = [];
-
-      // Strategy 1: Try Naver Stock Search API (Primary, highly reliable)
-      try {
-        const response = await axios.get('https://api.stock.naver.com/search/stock', {
-          params: {
-            keyword: cleanKeyword,
-            pageSize: 30,
-            page: 1
-          },
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Referer': 'https://finance.naver.com/'
-          },
-          timeout: 2500
-        });
-
-        let rawStocks: any[] = [];
-        if (response.data) {
-          if (Array.isArray(response.data.stocks)) {
-            rawStocks = response.data.stocks;
-          } else if (Array.isArray(response.data)) {
-            rawStocks = response.data;
-          } else if (response.data.stocks && Array.isArray(response.data.stocks)) {
-            rawStocks = response.data.stocks;
-          }
-        }
-
-        if (rawStocks.length > 0) {
-          results = rawStocks.map((s: any) => {
-            const sym = s.stockCode || s.itemCode || s.cd || s.symbol || "";
-            const name = s.stockName || s.nm || s.name || "";
-            const nation = s.nationCode || (s.reMark && s.reMark.includes('KOR') ? 'KR' : '');
-            
-            // Determine market type: US or KR
-            let market: 'KR' | 'US' = 'KR';
-            if (nation === 'US' || (s.reMark && ['NASDAQ', 'NYSE', 'AMEX'].some(m => s.reMark.toUpperCase().includes(m)))) {
-              market = 'US';
-            } else if (sym.match(/^[a-zA-Z]/)) {
-              market = 'US';
-            }
-
-            // Clean symbol for US stocks (e.g. AAPL.O -> AAPL)
-            let finalSym = sym;
-            if (market === 'US' && finalSym.includes('.')) {
-              finalSym = finalSym.split('.')[0];
-            }
-
-            return {
-              symbol: finalSym,
-              name: name,
-              market: market
-            };
-          });
-        }
-      } catch (err) {
-        console.error("[Search Strategy 1 Error]:", err);
-      }
-
-      // Strategy 2: If Strategy 1 returned nothing or failed, try Naver Autocomplete API
-      if (results.length === 0) {
+      if (isUSRequested) {
+        // US Stock Search Strategy: Use globally-reliable Yahoo Finance Search API
         try {
-          const response = await axios.get('https://ac.finance.naver.com/ac', {
-            params: {
-              q: cleanKeyword,
-              q_enc: 'utf-8',
-              st: '111',
-              r_lt: '111',
-              r_format: 'json',
-              r_enc: 'utf-8'
-            },
+          const response = await axios.get('https://query1.finance.yahoo.com/v1/finance/search', {
+            params: { q: cleanKeyword },
             headers: {
               'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             },
-            timeout: 2500
+            timeout: 3000
           });
 
-          if (response.data && Array.isArray(response.data.items) && response.data.items[0]) {
-            const rawItems = response.data.items[0];
-            results = rawItems.map((item: any) => {
-              if (Array.isArray(item) && item.length >= 2) {
-                const name = item[0]?.[0] || item[0] || "";
-                const sym = item[1]?.[0] || item[1] || "";
-                
-                let market: 'KR' | 'US' = 'KR';
-                if (sym.match(/^[a-zA-Z]/)) {
-                  market = 'US';
+          if (response.data && Array.isArray(response.data.quotes)) {
+            const mapped = response.data.quotes
+              .filter((q: any) => q.quoteType === 'EQUITY')
+              .map((q: any) => {
+                let sym = q.symbol || '';
+                if (sym.includes('.')) {
+                  sym = sym.split('.')[0];
                 }
-
-                let finalSym = sym;
-                if (market === 'US' && finalSym.includes('.')) {
-                  finalSym = finalSym.split('.')[0];
-                }
-
                 return {
-                  symbol: finalSym,
-                  name: name,
-                  market: market
+                  symbol: sym,
+                  name: q.longname || q.shortname || sym,
+                  market: 'US' as const
                 };
-              }
-              return null;
-            }).filter(Boolean);
-          }
-        } catch (err) {
-          console.error("[Search Strategy 2 Error]:", err);
-        }
-      }
+              });
 
-      // Strategy 3: Try legacy mobile search list if still empty
-      if (results.length === 0) {
-        try {
-          const response = await axios.get('https://m.stock.naver.com/api/json/search/searchListJson.nhn', {
-            params: { keyword: cleanKeyword },
-            headers: {
-              'User-Agent': 'Mozilla/5.0'
-            },
-            timeout: 2500
-          });
-
-          if (response.data && response.data.result && Array.isArray(response.data.result.d)) {
-            results = response.data.result.d.map((s: any) => {
-              const sym = s.cd || "";
-              const name = s.nm || "";
-              let market: 'KR' | 'US' = 'KR';
-              if (sym.match(/^[a-zA-Z]/)) {
-                market = 'US';
-              }
-
-              let finalSym = sym;
-              if (market === 'US' && finalSym.includes('.')) {
-                finalSym = finalSym.split('.')[0];
-              }
-
-              return {
-                symbol: finalSym,
-                name: name,
-                market: market
-              };
+            // De-duplicate US results
+            const seen = new Set();
+            const unique = mapped.filter((item: any) => {
+              if (seen.has(item.symbol)) return false;
+              seen.add(item.symbol);
+              return true;
             });
+
+            return res.json(unique.slice(0, 15));
           }
-        } catch (err) {
-          console.error("[Search Strategy 3 Error]:", err);
+        } catch (err: any) {
+          console.error('[US Stock Search Error]:', err.message);
         }
+        return res.json([]);
+      } else {
+        // KR Stock Search Strategy: Use our 100% reliable local high-speed KRX listings cache
+        if (krxStocksCache.length === 0) {
+          console.log('[KRX Cache] Cache is empty on request. Performing emergency sync...');
+          await fetchKrxStocks();
+        }
+
+        const lowerKeyword = cleanKeyword.toLowerCase();
+        
+        // Match by Name or Code
+        let matched = krxStocksCache.filter(stock => {
+          return stock.name.toLowerCase().includes(lowerKeyword) || stock.symbol.includes(cleanKeyword);
+        });
+
+        // Smart sorting: exact matches and items starting with keyword first
+        matched.sort((a, b) => {
+          const aNameLower = a.name.toLowerCase();
+          const bNameLower = b.name.toLowerCase();
+          
+          // Exact matches first
+          if (aNameLower === lowerKeyword && bNameLower !== lowerKeyword) return -1;
+          if (bNameLower === lowerKeyword && aNameLower !== lowerKeyword) return 1;
+          if (a.symbol === cleanKeyword && b.symbol !== cleanKeyword) return -1;
+          if (b.symbol === cleanKeyword && a.symbol !== cleanKeyword) return 1;
+
+          // Starts with matches next
+          const aStarts = aNameLower.startsWith(lowerKeyword) || a.symbol.startsWith(cleanKeyword);
+          const bStarts = bNameLower.startsWith(lowerKeyword) || b.symbol.startsWith(cleanKeyword);
+          if (aStarts && !bStarts) return -1;
+          if (bStarts && !aStarts) return 1;
+
+          // Alphabetical otherwise
+          return aNameLower.localeCompare(bNameLower);
+        });
+
+        // De-duplicate results based on symbol
+        const seen = new Set();
+        const uniqueMatched = matched.filter(stock => {
+          if (seen.has(stock.symbol)) return false;
+          seen.add(stock.symbol);
+          return true;
+        });
+
+        return res.json(uniqueMatched.slice(0, 15));
       }
-
-      // Filter by requested marketType ('KR' or 'US')
-      let filteredResults = results.filter((item: any) => item && item.market === marketType);
-
-      // De-duplicate results by symbol
-      const uniqueResults: any[] = [];
-      const seenSymbols = new Set();
-      filteredResults.forEach((item: any) => {
-        if (!seenSymbols.has(item.symbol)) {
-          seenSymbols.add(item.symbol);
-          uniqueResults.push(item);
-        }
-      });
-
-      res.json(uniqueResults.slice(0, 15));
     } catch (error: any) {
-      console.error("Stock search global failure:", error);
+      console.error("Stock search failure:", error);
       res.status(500).json({ error: "Failed to search stocks", message: error.message });
     }
   });
