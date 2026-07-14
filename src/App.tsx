@@ -2907,34 +2907,6 @@ export default function App() {
                 <div>
                   <div className="flex items-center justify-between mb-3">
                     <label className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest flex items-center gap-2">
-                      <TrendingDown className="w-3 h-3 text-sleek-red" />
-                      구간 하한가 설정 (최저 기준)
-                    </label>
-                    <span className="text-xs font-bold text-sleek-red">₩{gapBuyPrice.toLocaleString()}</span>
-                  </div>
-                  <input 
-                    type="number" 
-                    value={gapBuyPrice}
-                    onChange={(e) => setGapBuyPrice(Number(e.target.value))}
-                    className="w-full bg-black/40 border border-sleek-border rounded-xl p-4 text-sm font-bold focus:border-sleek-red outline-none transition-all"
-                    placeholder="구간 하한선 금액 입력 (예: 310,000)"
-                  />
-                  <div className="flex gap-2 mt-2">
-                    {[ -5000, -1000, -500, 500, 1000, 5000 ].map(adj => (
-                      <button 
-                        key={adj}
-                        onClick={() => setGapBuyPrice(prev => Math.max(0, prev + adj))}
-                        className="flex-1 py-1 bg-white/5 border border-white/5 rounded-md text-[10px] font-bold hover:bg-white/10"
-                      >
-                        {adj > 0 ? `+${adj.toLocaleString()}` : adj.toLocaleString()}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-3">
-                    <label className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest flex items-center gap-2">
                       <TrendingUp className="w-3 h-3 text-sleek-green" />
                       구간 상한가 설정 (최고 기준)
                     </label>
@@ -2952,6 +2924,34 @@ export default function App() {
                       <button 
                         key={adj}
                         onClick={() => setGapSellPrice(prev => Math.max(0, prev + adj))}
+                        className="flex-1 py-1 bg-white/5 border border-white/5 rounded-md text-[10px] font-bold hover:bg-white/10"
+                      >
+                        {adj > 0 ? `+${adj.toLocaleString()}` : adj.toLocaleString()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div>
+                  <div className="flex items-center justify-between mb-3">
+                    <label className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest flex items-center gap-2">
+                      <TrendingDown className="w-3 h-3 text-sleek-red" />
+                      구간 하한가 설정 (최저 기준)
+                    </label>
+                    <span className="text-xs font-bold text-sleek-red">₩{gapBuyPrice.toLocaleString()}</span>
+                  </div>
+                  <input 
+                    type="number" 
+                    value={gapBuyPrice}
+                    onChange={(e) => setGapBuyPrice(Number(e.target.value))}
+                    className="w-full bg-black/40 border border-sleek-border rounded-xl p-4 text-sm font-bold focus:border-sleek-red outline-none transition-all"
+                    placeholder="구간 하한선 금액 입력 (예: 310,000)"
+                  />
+                  <div className="flex gap-2 mt-2">
+                    {[ -5000, -1000, -500, 500, 1000, 5000 ].map(adj => (
+                      <button 
+                        key={adj}
+                        onClick={() => setGapBuyPrice(prev => Math.max(0, prev + adj))}
                         className="flex-1 py-1 bg-white/5 border border-white/5 rounded-md text-[10px] font-bold hover:bg-white/10"
                       >
                         {adj > 0 ? `+${adj.toLocaleString()}` : adj.toLocaleString()}
