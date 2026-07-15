@@ -545,7 +545,7 @@ class KISService {
         PDNO: symbol,
         ORD_DVSN: ordDvsn, // 00 for Limit, 01 for Market
         ORD_QTY: qty,
-        ORD_UNPR: price,
+        ORD_UNPR: ordDvsn === '01' ? '0' : price,
       };
 
       if (side === 'SELL') {
