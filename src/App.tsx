@@ -1859,18 +1859,16 @@ export default function App() {
           const isDipping = currentPrice < lastPrice;
           const isRising = currentPrice > lastPrice;
 
-          // A. BUY Condition: Current price is dipping below center OR is at strong buy zone near bottom
-          const minSpacing = (maxPrice - minPrice) * 0.06; 
+          // A. BUY Condition: Current price is dipping and within range, allowing active use of all 5 slots
+          const minSpacing = (maxPrice - minPrice) * 0.04; // 4% of range spacing to easily fit 5 slots
           const currentInventory = gapInventoryRef.current;
           const hasNearbyBuy = currentInventory.some(buyPrice => Math.abs(buyPrice - currentPrice) < minSpacing);
 
-          const meetsBuyTarget = (currentPrice <= minPrice + (maxPrice - minPrice) * 0.1) || // Lowest 10% strong buy zone
-                               (isDipping && currentPrice < centerPrice) || 
-                               (currentInventory.length === 0);
+          const meetsBuyTarget = isDipping || (currentInventory.length === 0);
 
           if (meetsBuyTarget) {
-            // Limit maximum inventory to 6 slots
-            if (!hasNearbyBuy && currentInventory.length < 6) {
+            // Limit maximum inventory to 5 slots to match UI
+            if (!hasNearbyBuy && currentInventory.length < 5) {
               const priceInKrw = marketType === 'US' ? currentPrice * exchangeRate : currentPrice;
               const cost = priceInKrw * tradeQuantity;
 
@@ -1889,8 +1887,8 @@ export default function App() {
                 setBotStatus("잔액 부족으로 매수 취소");
               }
             } else {
-              if (currentInventory.length >= 6) {
-                setScalperMessage("최대 보유 슬롯(6개) 초과로 추가 매수 대기");
+              if (currentInventory.length >= 5) {
+                setScalperMessage("최대 보유 슬롯(5개) 초과로 추가 매수 대기");
               } else if (hasNearbyBuy) {
                 setScalperMessage("기존 체결가 부근 추가 매수 방지 (최소 간격 대기)");
               }
@@ -1898,11 +1896,9 @@ export default function App() {
           } else {
             // No buy happened - explain what we are waiting for!
             if (currentInventory.length === 0) {
-              setScalperMessage(`최초 진입 대기 중 (현재가: ₩${currentPrice.toLocaleString()} / 매수 기준가: ₩${Math.round(centerPrice).toLocaleString()} 미만)`);
-            } else if (currentPrice >= centerPrice) {
-              setScalperMessage(`현재가(₩${currentPrice.toLocaleString()})가 매수 범위(₩${Math.round(centerPrice).toLocaleString()} 미만)보다 높아 대기 중`);
+              setScalperMessage(`최초 진입 대기 중 (현재가: ₩${currentPrice.toLocaleString()})`);
             } else {
-              setScalperMessage(`현재가(₩${currentPrice.toLocaleString()}) 관망 및 추가 하락/상승 신호 감시 중`);
+              setScalperMessage(`현재가(₩${currentPrice.toLocaleString()}) 관망 및 추가 하락/진입 신호 감시 중 (슬롯: ${currentInventory.length}/5)`);
             }
           }
 
