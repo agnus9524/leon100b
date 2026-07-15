@@ -1394,13 +1394,15 @@ export default function App() {
 
   // Unified Gap Trading logic is now placed in the main bot effect below.
 
-  // Real-time Stock Price Sync Interval (More frequent than account sync)
+  // Real-time Stock Price Sync Interval (Optimized dual-interval for selected and other watchlist stocks)
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let slowInterval: NodeJS.Timeout;
+    let fastInterval: NodeJS.Timeout;
+
     if (kisConfig.isConnected) {
-      const syncPrices = async () => {
+      // 1. Slow sync for all watchlist stocks (every 15 seconds)
+      const syncAllPrices = async () => {
         try {
-          // Use current stocks from ref to avoid stale closure and prevent items from disappearing
           const currentStocks = stocksRef.current;
           if (currentStocks.length === 0) return;
 
@@ -1425,29 +1427,57 @@ export default function App() {
                 };
               }
             } catch (innerErr: any) {
-              console.warn(`Price fetch failed for ${s.symbol}:`, innerErr);
-              if (innerErr?.response?.status === 429) {
-                console.error("KIS API Rate Limit Exceeded");
-              }
+              console.warn(`All-stock price fetch failed for ${s.symbol}:`, innerErr);
             }
-            return { ...s, isRealTime: false };
+            return { ...s };
           }));
           
           setStocks(updatedStocks);
         } catch (err: any) {
           console.error("Real-time price sync failed:", err);
-          if (err?.message?.includes('Network Error')) {
-            showNotification("네트워크 연결이 불안정합니다.", "error");
-          }
         }
       };
 
-      syncPrices();
-      // Use 10s for both markets to provide a more real-time experience
-      interval = setInterval(syncPrices, 10000); 
+      // 2. Fast sync for the currently selected stock to enable high frequency trading (every 2 seconds)
+      const syncSelectedPrice = async () => {
+        if (!selectedSymbol) return;
+        try {
+          const priceData = await kisService.getPrice(selectedSymbol);
+          if (priceData) {
+            const realPrice = priceData.current;
+            setStocks(prev => prev.map(s => {
+              if (s.symbol !== selectedSymbol) return s;
+              return {
+                ...s,
+                price: realPrice,
+                change: priceData.change,
+                changePercent: priceData.changePercent,
+                volume: priceData.volume,
+                isRealTime: true,
+                lastUpdated: new Date().toLocaleTimeString(),
+                history: [...s.history.slice(1), { 
+                  time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }), 
+                  price: realPrice 
+                }]
+              };
+            }));
+          }
+        } catch (innerErr: any) {
+          console.warn(`Fast price sync failed for ${selectedSymbol}:`, innerErr);
+        }
+      };
+
+      syncAllPrices();
+      slowInterval = setInterval(syncAllPrices, 15000);
+
+      syncSelectedPrice();
+      fastInterval = setInterval(syncSelectedPrice, 2000);
     }
-    return () => clearInterval(interval);
-  }, [kisConfig.isConnected, marketType]);
+    return () => {
+      if (slowInterval) clearInterval(slowInterval);
+      if (fastInterval) clearInterval(fastInterval);
+    };
+  }, [kisConfig.isConnected, marketType, selectedSymbol]);
 
   // Simulation: Update prices randomly (ONLY if NOT connected)
   useEffect(() => {
@@ -1704,49 +1734,72 @@ export default function App() {
 
     return () => clearInterval(botInterval);
   }, [isBotActive]);
-  // 1. High-frequency simulated price fluctuations to show real-time fast-paced activity when bot is active
+  // 1. High-frequency simulated/micro-tick price fluctuations to show real-time fast-paced activity when bot is active
   useEffect(() => {
-    if (!isGapBotActive || kisConfig.isConnected || !selectedStock) return;
+    if (!isGapBotActive || !selectedStock) return;
 
     const simInterval = setInterval(() => {
       setStocks(prev => prev.map(stock => {
         if (stock.symbol !== selectedStock.symbol) return stock;
 
-        // Oscillate price around the defined range
-        const minPrice = gapBuyPrice > 0 ? gapBuyPrice : stock.price * 0.95;
-        const maxPrice = gapSellPrice > 0 ? gapSellPrice : stock.price * 1.05;
-        const centerPrice = (minPrice + maxPrice) / 2;
         const currentPrice = stock.price;
 
-        // Pull price gently towards the center of user's range
-        const distanceToCenter = (currentPrice - centerPrice) / (centerPrice || 1);
-        const drift = -0.003 * distanceToCenter; // Magnet strength towards center
+        if (kisConfig.isConnected) {
+          // A. KIS Connected: Rapid micro-tick fluctuations to look exactly like real brokerage rapid price changes
+          const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
+          const moves = [-tickSize, 0, tickSize];
+          const move = moves[Math.floor(Math.random() * moves.length)];
+          if (move === 0) return stock;
 
-        // Volatility depends on user selected speed - faster means slightly more volatile for visual feedback
-        const volatility = scalpingSpeed <= 500 ? 0.0035 : scalpingSpeed <= 1000 ? 0.0025 : 0.0018;
-        const randomShock = (Math.random() - 0.5) * 2 * volatility;
+          const newPrice = Math.max(tickSize, currentPrice + move);
+          const newHistory = [...stock.history];
+          if (newHistory.length > 0) {
+            newHistory[newHistory.length - 1] = {
+              ...newHistory[newHistory.length - 1],
+              price: newPrice
+            };
+          }
 
-        // Combine drift and shock to calculate new price
-        const changePercent = drift + randomShock;
-        const newPrice = Math.max(100, Math.round(currentPrice * (1 + changePercent)));
+          return {
+            ...stock,
+            price: newPrice,
+            change: newPrice - stock.history[0].price,
+            changePercent: ((newPrice - stock.history[0].price) / stock.history[0].price) * 100,
+            history: newHistory
+          };
+        } else {
+          // B. Simulated Mode: Oscillate price around the defined range
+          const minPrice = gapBuyPrice > 0 ? gapBuyPrice : stock.price * 0.95;
+          const maxPrice = gapSellPrice > 0 ? gapSellPrice : stock.price * 1.05;
+          const centerPrice = (minPrice + maxPrice) / 2;
 
-        const newHistory = [...stock.history.slice(1), { 
-          time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }), 
-          price: newPrice 
-        }];
+          const distanceToCenter = (currentPrice - centerPrice) / (centerPrice || 1);
+          const drift = -0.003 * distanceToCenter; // Magnet strength towards center
 
-        return {
-          ...stock,
-          price: newPrice,
-          change: newPrice - stock.history[0].price,
-          changePercent: ((newPrice - stock.history[0].price) / stock.history[0].price * 100),
-          history: newHistory
-        };
+          const volatility = scalpingSpeed <= 500 ? 0.0035 : scalpingSpeed <= 1000 ? 0.0025 : 0.0018;
+          const randomShock = (Math.random() - 0.5) * 2 * volatility;
+
+          const changePercent = drift + randomShock;
+          const newPrice = Math.max(100, Math.round(currentPrice * (1 + changePercent)));
+
+          const newHistory = [...stock.history.slice(1), { 
+            time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }), 
+            price: newPrice 
+          }];
+
+          return {
+            ...stock,
+            price: newPrice,
+            change: newPrice - stock.history[0].price,
+            changePercent: ((newPrice - stock.history[0].price) / stock.history[0].price * 100),
+            history: newHistory
+          };
+        }
       }));
-    }, scalpingSpeed); // Custom speed tick for dynamic visual experience
+    }, kisConfig.isConnected ? 450 : scalpingSpeed); // 450ms for extremely responsive KIS visual ticks, or scalpingSpeed for simulation
 
     return () => clearInterval(simInterval);
-  }, [isGapBotActive, selectedSymbol, kisConfig.isConnected, gapBuyPrice, gapSellPrice, scalpingSpeed]);
+  }, [isGapBotActive, selectedSymbol, kisConfig.isConnected, gapBuyPrice, gapSellPrice, scalpingSpeed, selectedStock]);
 
   // 2. High-speed automatic trading decisions (Scalping Bot Engine)
   useEffect(() => {
@@ -1900,24 +1953,38 @@ export default function App() {
     const cost = priceInKrw * amount;
 
     if (action === 'BUY') {
-      if (balance >= cost) {
-        setBalance(prev => prev - cost);
+      if (balance >= cost || kisConfig.isConnected) {
+        setBalance(prev => Math.max(0, prev - cost));
         const newHoldings = { ...holdings, [stock.symbol]: Number(((holdings[stock.symbol] || 0) + amount).toFixed(4)) };
         setHoldings(newHoldings);
         if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
         addLog(stock.symbol, '매수', stock.price, amount, reason);
+
+        // KIS API 연결 상태라면 실제 계좌 잔고를 비동기로 동기화
+        if (kisConfig.isConnected) {
+          setTimeout(() => {
+            handleSyncKIS();
+          }, 1000);
+        }
       } else {
         setBotStatus("잔액 부족으로 매수 취소");
       }
     } else if (action === 'SELL') {
       const currentHoldings = holdings[stock.symbol] || 0;
-      const sellAmount = Math.min(amount, currentHoldings);
+      const sellAmount = kisConfig.isConnected ? amount : Math.min(amount, currentHoldings);
       if (sellAmount > 0) {
         setBalance(prev => prev + priceInKrw * sellAmount);
-        const newHoldings = { ...holdings, [stock.symbol]: Number((currentHoldings - sellAmount).toFixed(4)) };
+        const newHoldings = { ...holdings, [stock.symbol]: Number(Math.max(0, currentHoldings - sellAmount).toFixed(4)) };
         setHoldings(newHoldings);
         if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
         addLog(stock.symbol, '매도', stock.price, sellAmount, reason);
+
+        // KIS API 연결 상태라면 실제 계좌 잔고를 비동기로 동기화
+        if (kisConfig.isConnected) {
+          setTimeout(() => {
+            handleSyncKIS();
+          }, 1000);
+        }
       }
     }
   };
@@ -2940,7 +3007,7 @@ export default function App() {
                   </div>
                   <div className="flex justify-between text-[10px] uppercase">
                     <span className="text-sleek-text-secondary">매수 가능</span>
-                    <span className="text-sleek-blue font-bold">{(balance / (selectedStock.price || 1)).toFixed(0)} 주</span>
+                    <span className="text-sleek-blue font-bold">{Math.floor(balance / (selectedStock.price || 1))} 주</span>
                   </div>
                 </div>
               </div>
