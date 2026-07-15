@@ -1906,10 +1906,14 @@ export default function App() {
           // B. SELL Condition: Scan inventory to take profits OR trigger stop-loss
           const currentInventory2 = gapInventoryRef.current;
           if (currentInventory2.length > 0) {
-            // Profit Margin Check
+            // Profit Margin Check (including transaction fees and taxes to ensure positive net yield)
             const profitableBuys = currentInventory2.filter(buyPrice => {
               const profitRatio = (currentPrice - buyPrice) / buyPrice;
-              return profitRatio >= scalpingTargetProfit / 100;
+              // 국내 주식은 제세금(증권거래세+농특세 약 0.18%) 및 왕복 수수료(약 0.03%~0.04%) 포함 약 0.22%의 고정 거래비용이 발생합니다.
+              // 미국 주식은 SEC Fee 및 유관기관 수수료 포함 약 0.03%의 거래비용이 발생합니다.
+              const estimatedFees = marketType === 'US' ? 0.0003 : 0.0022;
+              const netProfitRatio = profitRatio - estimatedFees;
+              return netProfitRatio >= scalpingTargetProfit / 100;
             });
 
             // Stop Loss Check
@@ -3334,6 +3338,9 @@ export default function App() {
                     className="w-full bg-black/40 border border-sleek-border rounded-xl p-2 text-xs font-mono focus:border-emerald-500 outline-none text-white text-right"
                     placeholder="직접 입력 (%)"
                   />
+                  <p className="text-[9px] text-sleek-text-secondary mt-1.5 leading-normal">
+                    * <strong>수수료/제세금 방어 보정 활성화</strong>: 봇이 진입 평단가 대비 실제 거래 비용(국내 약 0.22%, 미국 약 0.03%)을 자동으로 가산하여 <strong>순수익이 {scalpingTargetProfit}% 이상</strong> 발생하는 시점에만 매도를 실행합니다.
+                  </p>
                 </div>
 
                 {/* 5. Stop Loss (손절 기준률) */}
