@@ -418,6 +418,8 @@ export default function App() {
   const [gapTradeCount, setGapTradeCount] = useState<number>(0);
   const [lastTradeType, setLastTradeType] = useState<'BUY' | 'SELL' | null>(null);
   const [gapInventory, setGapInventory] = useState<number[]>([]);
+  const [immediateEntry, setImmediateEntry] = useState<boolean>(true);
+  const [scalperMessage, setScalperMessage] = useState<string>("대기 중...");
   const gapInventoryRef = React.useRef<number[]>([]);
   useEffect(() => {
     gapInventoryRef.current = gapInventory;
@@ -1805,10 +1807,40 @@ export default function App() {
   useEffect(() => {
     if (!isGapBotActive || !selectedStock) {
       setGapInventory([]); // Reset grid inventory when stopped
+      setScalperMessage("대기 중...");
       return;
     }
 
     let lastPrice = selectedStock.price;
+
+    // A. Start-up: If immediateEntry is checked and inventory is empty, enter first buy position immediately if in range!
+    const runImmediateBuy = async (currentPrice: number) => {
+      if (gapBuyPrice <= 0 || gapSellPrice <= 0) return;
+      if (currentPrice < gapBuyPrice || currentPrice > gapSellPrice) {
+        setScalperMessage(`현재가(₩${currentPrice.toLocaleString()})가 설정 범위를 벗어나 대기 중`);
+        return;
+      }
+
+      const priceInKrw = marketType === 'US' ? currentPrice * exchangeRate : currentPrice;
+      const cost = priceInKrw * tradeQuantity;
+
+      if (balance >= cost || kisConfig.isConnected) {
+        setScalperMessage(`[최초 즉시 진입] ₩${currentPrice.toLocaleString()} 1단계 최초 매수 완료...`);
+        setBotStatus(`[최초 즉시 진입] ₩${currentPrice.toLocaleString()} 1단계 최초 매수 완료...`);
+        await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${currentPrice.toLocaleString()} 시작 즉시 1단계 최초 매수 진입`);
+        setGapInventory([currentPrice]);
+        setLastTradeType('BUY');
+        setGapTradeCount(prev => prev + 1);
+        showNotification(`${selectedStock.name} 시작 즉시 1단계 매수 완료`, "success");
+        playScalpingSound('BUY');
+      } else {
+        setScalperMessage("잔액 부족으로 최초 즉시 매수 실패");
+      }
+    };
+
+    if (immediateEntry && gapInventoryRef.current.length === 0) {
+      runImmediateBuy(selectedStock.price);
+    }
 
     const gapInterval = setInterval(async () => {
       // Find the latest price in current stocks array
@@ -1827,19 +1859,23 @@ export default function App() {
           const isDipping = currentPrice < lastPrice;
           const isRising = currentPrice > lastPrice;
 
-          // A. BUY Condition: Current price is dipping and in the lower 50% of the range
-          if (isDipping && currentPrice < centerPrice) {
-            // Require dynamic spacing based on range depth to avoid over-concentration
-            const minSpacing = (maxPrice - minPrice) * 0.06; 
-            const currentInventory = gapInventoryRef.current;
-            const hasNearbyBuy = currentInventory.some(buyPrice => Math.abs(buyPrice - currentPrice) < minSpacing);
+          // A. BUY Condition: Current price is dipping below center OR is at strong buy zone near bottom
+          const minSpacing = (maxPrice - minPrice) * 0.06; 
+          const currentInventory = gapInventoryRef.current;
+          const hasNearbyBuy = currentInventory.some(buyPrice => Math.abs(buyPrice - currentPrice) < minSpacing);
 
+          const meetsBuyTarget = (currentPrice <= minPrice + (maxPrice - minPrice) * 0.1) || // Lowest 10% strong buy zone
+                               (isDipping && currentPrice < centerPrice) || 
+                               (currentInventory.length === 0);
+
+          if (meetsBuyTarget) {
             // Limit maximum inventory to 6 slots
             if (!hasNearbyBuy && currentInventory.length < 6) {
               const priceInKrw = marketType === 'US' ? currentPrice * exchangeRate : currentPrice;
               const cost = priceInKrw * tradeQuantity;
 
               if (balance >= cost || kisConfig.isConnected) {
+                setScalperMessage(`[매수 완료] ₩${currentPrice.toLocaleString()}`);
                 setBotStatus(`[스캘퍼] ₩${currentPrice.toLocaleString()} 찰나의 낙폭 매수...`);
                 await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${currentPrice.toLocaleString()} 미세 변동 매수 진입`);
                 
@@ -1848,21 +1884,39 @@ export default function App() {
                 setGapTradeCount(prev => prev + 1);
                 showNotification(`${selectedStock.name} 스캘퍼 자동 매수 진입 완료`, "success");
                 playScalpingSound('BUY');
+              } else {
+                setScalperMessage("잔액 부족으로 매수 대기");
+                setBotStatus("잔액 부족으로 매수 취소");
               }
+            } else {
+              if (currentInventory.length >= 6) {
+                setScalperMessage("최대 보유 슬롯(6개) 초과로 추가 매수 대기");
+              } else if (hasNearbyBuy) {
+                setScalperMessage("기존 체결가 부근 추가 매수 방지 (최소 간격 대기)");
+              }
+            }
+          } else {
+            // No buy happened - explain what we are waiting for!
+            if (currentInventory.length === 0) {
+              setScalperMessage(`최초 진입 대기 중 (현재가: ₩${currentPrice.toLocaleString()} / 매수 기준가: ₩${Math.round(centerPrice).toLocaleString()} 미만)`);
+            } else if (currentPrice >= centerPrice) {
+              setScalperMessage(`현재가(₩${currentPrice.toLocaleString()})가 매수 범위(₩${Math.round(centerPrice).toLocaleString()} 미만)보다 높아 대기 중`);
+            } else {
+              setScalperMessage(`현재가(₩${currentPrice.toLocaleString()}) 관망 및 추가 하락/상승 신호 감시 중`);
             }
           }
 
           // B. SELL Condition: Scan inventory to take profits OR trigger stop-loss
-          const currentInventory = gapInventoryRef.current;
-          if (currentInventory.length > 0) {
+          const currentInventory2 = gapInventoryRef.current;
+          if (currentInventory2.length > 0) {
             // Profit Margin Check
-            const profitableBuys = currentInventory.filter(buyPrice => {
+            const profitableBuys = currentInventory2.filter(buyPrice => {
               const profitRatio = (currentPrice - buyPrice) / buyPrice;
               return profitRatio >= scalpingTargetProfit / 100;
             });
 
             // Stop Loss Check
-            const stopLossBuys = currentInventory.filter(buyPrice => {
+            const stopLossBuys = currentInventory2.filter(buyPrice => {
               const lossRatio = (currentPrice - buyPrice) / buyPrice;
               return lossRatio <= scalpingStopLoss / 100;
             });
@@ -1874,6 +1928,7 @@ export default function App() {
               const sellQty = Math.min(qty, tradeQuantity) || tradeQuantity;
 
               if (sellQty > 0 || kisConfig.isConnected) {
+                setScalperMessage(`[매도 완료] ₩${currentPrice.toLocaleString()} (+${scalpingTargetProfit}%)`);
                 setBotStatus(`[스캘퍼] ₩${currentPrice.toLocaleString()} 목표 차익 매도 진행...`);
                 await executeTrade('SELL', selectedStock, sellQty, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} 익절 완료 (+${scalpingTargetProfit}%)`);
                 
@@ -1894,6 +1949,7 @@ export default function App() {
               const sellQty = Math.min(qty, tradeQuantity) || tradeQuantity;
 
               if (sellQty > 0 || kisConfig.isConnected) {
+                setScalperMessage(`[손절 완료] ₩${currentPrice.toLocaleString()} (${scalpingStopLoss}%)`);
                 setBotStatus(`[스캘퍼] ₩${currentPrice.toLocaleString()} 리스크 관리 손절...`);
                 await executeTrade('SELL', selectedStock, sellQty, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} 손절 완료 (${scalpingStopLoss}%)`);
                 
@@ -1910,13 +1966,15 @@ export default function App() {
             }
           }
         }
+      } else {
+        setScalperMessage(`현재가(₩${currentPrice.toLocaleString()})가 설정 범위(₩${minPrice.toLocaleString()}~₩${maxPrice.toLocaleString()})를 벗어나 감시 대기 중`);
       }
 
       lastPrice = currentPrice;
     }, scalpingSpeed); // Custom intervals for incredible fast speed execution
 
     return () => clearInterval(gapInterval);
-  }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled]);
+  }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry]);
 
   const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string) => {
     if (action === 'HOLD' || amount <= 0) return;
@@ -3105,11 +3163,18 @@ export default function App() {
                 </div>
                 <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest">스캘퍼 엔진 상태</span>
               </div>
-              <div className={cn(
-                "text-2xl font-black italic tracking-tighter",
-                isGapBotActive ? "text-emerald-400 animate-pulse" : "text-sleek-text-secondary"
-              )}>
-                {isGapBotActive ? "RUNNING" : "STOPPED"}
+              <div className="flex flex-col">
+                <div className={cn(
+                  "text-2xl font-black italic tracking-tighter",
+                  isGapBotActive ? "text-emerald-400 animate-pulse" : "text-sleek-text-secondary"
+                )}>
+                  {isGapBotActive ? "RUNNING" : "STOPPED"}
+                </div>
+                {isGapBotActive && (
+                  <span className="text-[10px] text-sleek-blue font-bold mt-1 line-clamp-1 animate-pulse">
+                    ● {scalperMessage}
+                  </span>
+                )}
               </div>
             </div>
           </div>
@@ -3350,8 +3415,22 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* 7. Engine Activation Toggle */}
-                <div className="pt-3">
+                {/* 7. Immediate Entry Checkbox */}
+                <div className="flex items-center justify-between p-3.5 bg-white/5 border border-white/5 rounded-2xl text-xs">
+                  <div className="flex flex-col">
+                    <span className="font-bold text-white">시작 즉시 최초 매수 진입</span>
+                    <span className="text-[9px] text-sleek-text-secondary">보유 슬롯이 비어있을 때 시작 버튼 클릭 즉시 1단계 매수 주문 체결</span>
+                  </div>
+                  <input 
+                    type="checkbox" 
+                    checked={immediateEntry}
+                    onChange={(e) => setImmediateEntry(e.target.checked)}
+                    className="w-4 h-4 rounded-lg accent-sleek-blue cursor-pointer"
+                  />
+                </div>
+
+                {/* 8. Engine Activation Toggle */}
+                <div className="pt-2">
                   <button 
                     onClick={() => {
                       if (!isGapBotActive) {
