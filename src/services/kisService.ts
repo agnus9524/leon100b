@@ -334,10 +334,10 @@ class KISService {
     return domesticData;
   }
 
-  public async order(symbol: string, side: 'BUY' | 'SELL', price: string, qty: string) {
+  public async order(symbol: string, side: 'BUY' | 'SELL', price: string, qty: string, ordDvsn?: string) {
     const isKR = /^\d{6}$/.test(symbol);
     if (isKR) {
-      return this.orderDomestic(symbol, side, price, qty);
+      return this.orderDomestic(symbol, side, price, qty, ordDvsn);
     } else {
       return this.orderOverseas(symbol, side, price, qty);
     }
@@ -531,7 +531,7 @@ class KISService {
     return res.data;
   }
 
-  public async orderDomestic(symbol: string, side: 'BUY' | 'SELL', price: string, qty: string, ordDvsn: string = '01') {
+  public async orderDomestic(symbol: string, side: 'BUY' | 'SELL', price: string, qty: string, ordDvsn: string = '00') {
     if (!this.config) throw new Error("KIS Config not initialized");
     try {
       const token = await this.getAccessToken();

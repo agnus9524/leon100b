@@ -386,7 +386,8 @@ export default function App() {
     accountCode: '01',
     accountPw: '',
     isRealServer: true,
-    isConnected: false
+    isConnected: false,
+    domesticOrderType: '00' // '00' (지정가 - Limit), '01' (시장가 - Market)
   });
 
   // Helper to get active config
@@ -1983,7 +1984,8 @@ export default function App() {
                 stock.symbol, 
                 action, 
                 stock.price.toString(), 
-                amount.toString()
+                amount.toString(),
+                kisConfig.domesticOrderType || '00'
             );
             
             if (res.rt_cd === '0') {
@@ -2446,6 +2448,21 @@ export default function App() {
                        {showKisPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                      </button>
                    </div>
+                </div>
+                <div>
+                   <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">국내 주문 구분 (Order Type)</label>
+                   <select
+                     value={kisConfig.domesticOrderType || '00'}
+                     onChange={(e) => setKisConfig(prev => ({ ...prev, domesticOrderType: e.target.value }))}
+                     className="w-full bg-black/40 border border-sleek-border rounded-lg p-3 text-xs focus:border-sleek-blue outline-none text-white appearance-none"
+                     style={{ colorScheme: 'dark' }}
+                   >
+                     <option value="00" className="bg-sleek-card text-white">지정가 (Limit) - 현재가 주문 [권장]</option>
+                     <option value="01" className="bg-sleek-card text-white">시장가 (Market) - 즉시 체결 주문</option>
+                   </select>
+                   <p className="text-[9px] text-sleek-text-secondary mt-1 leading-normal">
+                     * 시장가(Market)는 증권사 규정상 상한가 기준 보증금(최대 130%)을 예치하므로, 소액 계좌에서는 <strong>"주문가능금액 초과 (APBK0952)"</strong> 오류가 발생합니다. 안정적인 구동을 위해 <strong>지정가(Limit)</strong> 사용을 적극 권장합니다.
+                   </p>
                 </div>
               </div>
 
