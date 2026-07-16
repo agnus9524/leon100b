@@ -1239,23 +1239,36 @@ export default function App() {
         ordDvsn
       );
 
+      let qty = 0;
       if (res && res.rt_cd === '0' && res.output) {
         const nrcy = parseInt(res.output.nrcy_buy_qty || res.output.nrcy_ord_psbl_qty || '0', 10);
         const maxQty = parseInt(res.output.max_ord_qty || res.output.tot_ord_psbl_qty || res.output.max_buy_qty || '0', 10);
         const ordPsbl = parseInt(res.output.ord_psbl_qty || res.output.psbl_qty || '0', 10);
         
-        const qty = Math.max(nrcy, maxQty, ordPsbl);
-        if (!isNaN(qty)) {
-          setKisBuyableQty(qty);
-          return;
-        }
+        qty = Math.max(nrcy, maxQty, ordPsbl);
+      }
+
+      // 실제 계좌의 현금(balance)으로 계산하여 보완 (KIS API가 0을 반환했거나 결과가 부실한 경우)
+      if ((qty === 0 || isNaN(qty)) && balance > 0 && tradePrice > 0) {
+        qty = Math.floor(balance / tradePrice);
+      }
+
+      if (!isNaN(qty) && qty >= 0) {
+        setKisBuyableQty(qty);
+        return;
       }
       setKisBuyableQty(null);
     } catch (err) {
       console.warn("Failed to update KIS buyable quantity:", err);
-      setKisBuyableQty(null);
+      // API 실패 시에도 실제 계좌 현금을 기준으로 계산하여 폴백
+      if (balance > 0 && selectedStock.price > 0) {
+        const fallbackQty = Math.floor(balance / selectedStock.price);
+        setKisBuyableQty(fallbackQty);
+      } else {
+        setKisBuyableQty(null);
+      }
     }
-  }, [kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, selectedStock]);
+  }, [kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, selectedStock, balance]);
 
   useEffect(() => {
     updateKisBuyableQty();
@@ -2061,7 +2074,13 @@ export default function App() {
                         const maxQty = parseInt(psblRes.output.max_ord_qty || psblRes.output.tot_ord_psbl_qty || psblRes.output.max_buy_qty || '0', 10);
                         const ordPsbl = parseInt(psblRes.output.ord_psbl_qty || psblRes.output.psbl_qty || '0', 10);
                         
-                        const parsedQty = Math.max(nrcy, maxQty, ordPsbl);
+                        let parsedQty = Math.max(nrcy, maxQty, ordPsbl);
+                        
+                        // 실제 계좌의 현금(balance)으로 계산하여 보완 (KIS API가 0을 반환했거나 결과가 부실한 경우)
+                        if ((parsedQty === 0 || isNaN(parsedQty)) && balance > 0 && tradePrice > 0) {
+                            parsedQty = Math.floor(balance / tradePrice);
+                        }
+
                         if (!isNaN(parsedQty)) {
                             if (parsedQty <= 0) {
                                 setBotStatus(`[매수 취소] 주문 가능 수량 부족 (0주)`);
