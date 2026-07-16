@@ -1830,14 +1830,17 @@ export default function App() {
       const cost = priceInKrw * tradeQuantity;
 
       if (balance >= cost || kisConfig.isConnected) {
-        setScalperMessage(`[최초 즉시 진입] ₩${buyPrice.toLocaleString()} 1단계 최초 매수 완료...`);
-        setBotStatus(`[최초 즉시 진입] ₩${buyPrice.toLocaleString()} 1단계 최초 매수 완료...`);
-        await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${buyPrice.toLocaleString()} 시작 즉시 1단계 최초 매수 진입`, buyPrice);
-        setGapInventory([buyPrice]);
-        setLastTradeType('BUY');
-        setGapTradeCount(prev => prev + 1);
-        showNotification(`${selectedStock.name} 시작 즉시 1단계 매수 완료`, "success");
-        playScalpingSound('BUY');
+        setScalperMessage(`[최초 즉시 진입] ₩${buyPrice.toLocaleString()} 매수 가능 수량 조회 중...`);
+        const executedQty = await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${buyPrice.toLocaleString()} 시작 즉시 1단계 최초 매수 진입`, buyPrice);
+        if (executedQty > 0) {
+          setScalperMessage(`[최초 즉시 진입] ₩${buyPrice.toLocaleString()} 1단계 최초 매수 완료 (${executedQty}주)`);
+          setBotStatus(`[최초 즉시 진입] ₩${buyPrice.toLocaleString()} 1단계 최초 매수 완료 (${executedQty}주)`);
+          setGapInventory([buyPrice]);
+          setLastTradeType('BUY');
+          setGapTradeCount(prev => prev + 1);
+          showNotification(`${selectedStock.name} 시작 즉시 1단계 매수 완료 (${executedQty}주)`, "success");
+          playScalpingSound('BUY');
+        }
       } else {
         setScalperMessage("잔액 부족으로 최초 즉시 매수 실패");
       }
@@ -1881,15 +1884,18 @@ export default function App() {
               const cost = priceInKrw * tradeQuantity;
 
               if (balance >= cost || kisConfig.isConnected) {
-                setScalperMessage(`[매수 완료] ₩${targetBuyPrice.toLocaleString()}`);
-                setBotStatus(`[스캘퍼] ₩${targetBuyPrice.toLocaleString()} ${lowestBidOnlyMode ? '최하단 호가' : '찰나의 낙폭'} 매수...`);
-                await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} ${lowestBidOnlyMode ? '(최하단 호가)' : ''} 미세 변동 매수 진입`, targetBuyPrice);
+                setScalperMessage(`[매수 진행 중] ₩${targetBuyPrice.toLocaleString()}...`);
+                const executedQty = await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} ${lowestBidOnlyMode ? '(최하단 호가)' : ''} 미세 변동 매수 진입`, targetBuyPrice);
                 
-                setGapInventory(prev => [...prev, targetBuyPrice]);
-                setLastTradeType('BUY');
-                setGapTradeCount(prev => prev + 1);
-                showNotification(`${selectedStock.name} 스캘퍼 자동 매수 진입 완료`, "success");
-                playScalpingSound('BUY');
+                if (executedQty > 0) {
+                  setScalperMessage(`[매수 완료] ₩${targetBuyPrice.toLocaleString()} (${executedQty}주)`);
+                  setBotStatus(`[스캘퍼] ₩${targetBuyPrice.toLocaleString()} ${lowestBidOnlyMode ? '최하단 호가 완료' : '찰나의 낙폭 완료'} (${executedQty}주)`);
+                  setGapInventory(prev => [...prev, targetBuyPrice]);
+                  setLastTradeType('BUY');
+                  setGapTradeCount(prev => prev + 1);
+                  showNotification(`${selectedStock.name} 스캘퍼 자동 매수 완료 (${executedQty}주)`, "success");
+                  playScalpingSound('BUY');
+                }
               } else {
                 setScalperMessage("잔액 부족으로 매수 대기");
                 setBotStatus("잔액 부족으로 매수 취소");
@@ -1984,50 +1990,89 @@ export default function App() {
     return () => clearInterval(gapInterval);
   }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, lowestBidOnlyMode]);
 
-  const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number) => {
-    if (action === 'HOLD' || amount <= 0) return;
+  const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number): Promise<number> => {
+    if (action === 'HOLD' || amount <= 0) return 0;
 
     const tradePrice = customPrice !== undefined ? customPrice : stock.price;
+    let finalAmount = amount;
 
     // KIS API가 연결되어 있다면 실제 주문을 라이브 인터페이스를 통해 시도
     if (kisConfig.isConnected) {
+        if (action === 'BUY') {
+            try {
+                const isKR = /^\d{6}$/.test(stock.symbol);
+                if (isKR) {
+                    setBotStatus(`[KIS API] ${stock.symbol} 매수 가능 수량 조회 중...`);
+                    const psblRes = await kisService.getDomesticBuyableAmount(stock.symbol, tradePrice.toString(), kisConfig.domesticOrderType || '00');
+                    if (psblRes && psblRes.rt_cd === '0' && psblRes.output) {
+                        const nrcy = psblRes.output.nrcy_buy_qty ? parseInt(psblRes.output.nrcy_buy_qty, 10) : 0;
+                        const maxQty = psblRes.output.max_ord_qty ? parseInt(psblRes.output.max_ord_qty, 10) : 0;
+                        const ordPsbl = psblRes.output.ord_psbl_qty ? parseInt(psblRes.output.ord_psbl_qty, 10) : 0;
+                        
+                        const parsedQty = Math.max(nrcy, maxQty, ordPsbl);
+                        if (!isNaN(parsedQty)) {
+                            if (parsedQty <= 0) {
+                                setBotStatus(`[매수 취소] 주문 가능 수량 부족 (0주)`);
+                                setScalperMessage("실제 주문 가능 수량 부족 (0주)으로 진입 건너뜀");
+                                addLog(stock.symbol, '매수', tradePrice, amount, `[주문취소] KIS 매수 가능 수량 부족 (0주)`);
+                                showNotification(`매수 스킵: 실제 계좌의 매수 가능 수량이 0주입니다.`, "error");
+                                return 0;
+                            }
+                            if (parsedQty < finalAmount) {
+                                console.log(`[KIS Scalper Safety] Adjusting order quantity from ${finalAmount} to ${parsedQty} due to KIS limits.`);
+                                finalAmount = parsedQty;
+                                showNotification(`주문 수량 자동 제한: 실제 매수 가능 수량이 부족하여 ${amount}주 -> ${finalAmount}주로 조절하여 주문합니다.`, "info");
+                            }
+                        }
+                    }
+                }
+            } catch (err: any) {
+                console.error("Failed to query domestic buyable amount:", err);
+                setBotStatus("매수 가능 수량 조회 실패");
+                showNotification(`매수 가능 수량 조회 실패: ${err.message}`, "error");
+                return 0; // KIS API 오류 시 안전을 위해 진입하지 않음
+            }
+        }
+
         try {
             setBotStatus(`[KIS API] ${stock.symbol} ${action === 'BUY' ? '매수' : '매도'} 주문 전송 중...`);
             const res = await kisService.order(
                 stock.symbol, 
                 action, 
                 tradePrice.toString(), 
-                amount.toString(),
+                finalAmount.toString(),
                 kisConfig.domesticOrderType || '00'
             );
             
             if (res.rt_cd === '0') {
-               addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, amount, `[실제계좌 주문완료] ${reason}`);
+               addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[실제계좌 주문완료] ${reason}`);
                showNotification(`${stock.name} ${action === 'BUY' ? '매수' : '매도'} 주문 성공`, "success");
             } else {
                setBotStatus(`[KIS API 오류] ${res.msg1}`);
-               addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, amount, `[주문실패] ${res.msg1}`);
+               addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[주문실패] ${res.msg1}`);
                showNotification(`주문 실패: ${res.msg1}`, "error");
-               return; // 실제 주문 실패시 잔고를 업데이트 하지 않음
+               return 0; // 실제 주문 실패시 잔고를 업데이트 하지 않음
             }
         } catch (e: any) {
             console.error("KIS Order Error", e);
             setBotStatus("증권사 API 서버 통신 오류");
             showNotification(`KIS 통신 오류: ${e.message}`, "error");
-            return;
+            return 0;
         }
     }
 
     const priceInKrw = marketType === 'US' ? tradePrice * exchangeRate : tradePrice; 
-    const cost = priceInKrw * amount;
+    const cost = priceInKrw * finalAmount;
 
     if (action === 'BUY') {
       if (balance >= cost || kisConfig.isConnected) {
         setBalance(prev => Math.max(0, prev - cost));
-        const newHoldings = { ...holdings, [stock.symbol]: Number(((holdings[stock.symbol] || 0) + amount).toFixed(4)) };
+        const newHoldings = { ...holdings, [stock.symbol]: Number(((holdings[stock.symbol] || 0) + finalAmount).toFixed(4)) };
         setHoldings(newHoldings);
         if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-        addLog(stock.symbol, '매수', tradePrice, amount, reason);
+        if (!kisConfig.isConnected) {
+            addLog(stock.symbol, '매수', tradePrice, finalAmount, reason);
+        }
 
         // KIS API 연결 상태라면 실제 계좌 잔고를 비동기로 동기화
         if (kisConfig.isConnected) {
@@ -2035,18 +2080,22 @@ export default function App() {
             handleSyncKIS();
           }, 1000);
         }
+        return finalAmount;
       } else {
         setBotStatus("잔액 부족으로 매수 취소");
+        return 0;
       }
     } else if (action === 'SELL') {
       const currentHoldings = holdings[stock.symbol] || 0;
-      const sellAmount = kisConfig.isConnected ? amount : Math.min(amount, currentHoldings);
+      const sellAmount = kisConfig.isConnected ? finalAmount : Math.min(finalAmount, currentHoldings);
       if (sellAmount > 0) {
         setBalance(prev => prev + priceInKrw * sellAmount);
         const newHoldings = { ...holdings, [stock.symbol]: Number(Math.max(0, currentHoldings - sellAmount).toFixed(4)) };
         setHoldings(newHoldings);
         if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-        addLog(stock.symbol, '매도', tradePrice, sellAmount, reason);
+        if (!kisConfig.isConnected) {
+            addLog(stock.symbol, '매도', tradePrice, sellAmount, reason);
+        }
 
         // KIS API 연결 상태라면 실제 계좌 잔고를 비동기로 동기화
         if (kisConfig.isConnected) {
@@ -2054,8 +2103,11 @@ export default function App() {
             handleSyncKIS();
           }, 1000);
         }
+        return sellAmount;
       }
+      return 0;
     }
+    return 0;
   };
 
   const addLog = (symbol: string, type: 'BUY' | 'SELL' | '매수' | '매도', price: number, amount: number, reason: string) => {
