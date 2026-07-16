@@ -1338,7 +1338,7 @@ export default function App() {
         if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output2?.[0]) {
           foundAnyData = true;
           const out2 = domesticBalanceData.output2[0];
-          const domesticCash = Number(out2.dncl_amt || out2.prsm_dncl_amt || out2.tot_evlu_amt || 0);
+          const domesticCash = Number(out2.d2_dncl_amt || out2.dncl_amt || out2.prsm_dncl_amt || out2.tot_evlu_amt || 0);
           const domesticPurchase = Number(out2.pchs_amt_smtl_amt || 0);
           
           totalConvertedBalance += domesticCash;
@@ -1386,7 +1386,7 @@ export default function App() {
           const assetStatus = await kisService.getInvestmentAssetStatus();
           if (assetStatus?.output2) {
             const out2 = assetStatus.output2;
-            const dncl_amt = Number(out2.dncl_amt || 0);
+            const dncl_amt = Number(out2.d2_dncl_amt || out2.dncl_amt || 0);
             const tot_asst_amt = Number(out2.tot_asst_amt || 0);
             
             // If we got valid data from here, it's often more accurate for "Total" accounts
