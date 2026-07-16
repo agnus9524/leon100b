@@ -387,7 +387,8 @@ export default function App() {
     accountPw: '',
     isRealServer: true,
     isConnected: false,
-    domesticOrderType: '00' // '00' (지정가 - Limit), '01' (시장가 - Market)
+    domesticOrderType: '00', // '00' (지정가 - Limit), '01' (시장가 - Market)
+    isRealOrderEnabled: true // 실제 주문 전송 여부 (false일 경우 KIS 연동 가상 매매)
   });
 
   // Helper to get active config
@@ -663,11 +664,16 @@ export default function App() {
                     accountCode: activeData.accountCode || '01',
                     accountPw: activeData.accountPw || '',
                     isRealServer: activeData.isRealServer !== undefined ? activeData.isRealServer : true,
-                    isConnected: loadedConfig.isConnected || false
+                    isConnected: loadedConfig.isConnected || false,
+                    domesticOrderType: activeData.domesticOrderType || '00',
+                    isRealOrderEnabled: activeData.isRealOrderEnabled !== undefined ? activeData.isRealOrderEnabled : true
                  };
               } else {
                  if (finalConfig.isRealServer === undefined) {
                     finalConfig.isRealServer = true;
+                 }
+                 if (finalConfig.isRealOrderEnabled === undefined) {
+                    finalConfig.isRealOrderEnabled = true;
                  }
               }
               
@@ -1212,7 +1218,7 @@ export default function App() {
   };
 
   const updateKisBuyableQty = useCallback(async () => {
-    if (!kisConfig.isConnected || !selectedStock) {
+    if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled || !selectedStock) {
       setKisBuyableQty(null);
       return;
     }
@@ -1234,9 +1240,9 @@ export default function App() {
       );
 
       if (res && res.rt_cd === '0' && res.output) {
-        const nrcy = res.output.nrcy_buy_qty ? parseInt(res.output.nrcy_buy_qty, 10) : 0;
-        const maxQty = res.output.max_ord_qty ? parseInt(res.output.max_ord_qty, 10) : 0;
-        const ordPsbl = res.output.ord_psbl_qty ? parseInt(res.output.ord_psbl_qty, 10) : 0;
+        const nrcy = parseInt(res.output.nrcy_buy_qty || res.output.nrcy_ord_psbl_qty || '0', 10);
+        const maxQty = parseInt(res.output.max_ord_qty || res.output.tot_ord_psbl_qty || res.output.max_buy_qty || '0', 10);
+        const ordPsbl = parseInt(res.output.ord_psbl_qty || res.output.psbl_qty || '0', 10);
         
         const qty = Math.max(nrcy, maxQty, ordPsbl);
         if (!isNaN(qty)) {
@@ -1249,11 +1255,11 @@ export default function App() {
       console.warn("Failed to update KIS buyable quantity:", err);
       setKisBuyableQty(null);
     }
-  }, [kisConfig.isConnected, kisConfig.domesticOrderType, selectedStock]);
+  }, [kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, selectedStock]);
 
   useEffect(() => {
     updateKisBuyableQty();
-  }, [selectedSymbol, balance, kisConfig.isConnected, kisConfig.domesticOrderType, updateKisBuyableQty]);
+  }, [selectedSymbol, balance, kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, updateKisBuyableQty]);
 
   const handleSyncKIS = async () => {
     if (!kisConfig.isConnected) return;
@@ -2042,8 +2048,8 @@ export default function App() {
     const tradePrice = customPrice !== undefined ? customPrice : stock.price;
     let finalAmount = amount;
 
-    // KIS API가 연결되어 있다면 실제 주문을 라이브 인터페이스를 통해 시도
-    if (kisConfig.isConnected) {
+    // KIS API가 연결되어 있고 실제 주문 전송이 활성화된 경우 실제 주문을 라이브 인터페이스를 통해 시도
+    if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
         if (action === 'BUY') {
             try {
                 const isKR = /^\d{6}$/.test(stock.symbol);
@@ -2051,9 +2057,9 @@ export default function App() {
                     setBotStatus(`[KIS API] ${stock.symbol} 매수 가능 수량 조회 중...`);
                     const psblRes = await kisService.getDomesticBuyableAmount(stock.symbol, tradePrice.toString(), kisConfig.domesticOrderType || '00');
                     if (psblRes && psblRes.rt_cd === '0' && psblRes.output) {
-                        const nrcy = psblRes.output.nrcy_buy_qty ? parseInt(psblRes.output.nrcy_buy_qty, 10) : 0;
-                        const maxQty = psblRes.output.max_ord_qty ? parseInt(psblRes.output.max_ord_qty, 10) : 0;
-                        const ordPsbl = psblRes.output.ord_psbl_qty ? parseInt(psblRes.output.ord_psbl_qty, 10) : 0;
+                        const nrcy = parseInt(psblRes.output.nrcy_buy_qty || psblRes.output.nrcy_ord_psbl_qty || '0', 10);
+                        const maxQty = parseInt(psblRes.output.max_ord_qty || psblRes.output.tot_ord_psbl_qty || psblRes.output.max_buy_qty || '0', 10);
+                        const ordPsbl = parseInt(psblRes.output.ord_psbl_qty || psblRes.output.psbl_qty || '0', 10);
                         
                         const parsedQty = Math.max(nrcy, maxQty, ordPsbl);
                         if (!isNaN(parsedQty)) {
@@ -2061,7 +2067,7 @@ export default function App() {
                                 setBotStatus(`[매수 취소] 주문 가능 수량 부족 (0주)`);
                                 setScalperMessage("실제 주문 가능 수량 부족 (0주)으로 진입 건너뜀");
                                 addLog(stock.symbol, '매수', tradePrice, amount, `[주문취소] KIS 매수 가능 수량 부족 (0주)`);
-                                showNotification(`매수 스킵: 실제 계좌의 매수 가능 수량이 0주입니다.`, "error");
+                                showNotification(`매수 스킵: 실제 계좌의 매수 가능 수량이 0주입니다. 실제 예수금을 확인하시거나 KIS 설정에서 '실제 주문 전송'을 끄고 가상 잔고로 테스트하세요.`, "error");
                                 return 0;
                             }
                             if (parsedQty < finalAmount) {
@@ -2111,17 +2117,17 @@ export default function App() {
     const cost = priceInKrw * finalAmount;
 
     if (action === 'BUY') {
-      if (balance >= cost || kisConfig.isConnected) {
+      if (balance >= cost || (kisConfig.isConnected && kisConfig.isRealOrderEnabled)) {
         setBalance(prev => Math.max(0, prev - cost));
         const newHoldings = { ...holdings, [stock.symbol]: Number(((holdings[stock.symbol] || 0) + finalAmount).toFixed(4)) };
         setHoldings(newHoldings);
         if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-        if (!kisConfig.isConnected) {
+        if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
             addLog(stock.symbol, '매수', tradePrice, finalAmount, reason);
         }
 
-        // KIS API 연결 상태라면 실제 계좌 잔고를 비동기로 동기화
-        if (kisConfig.isConnected) {
+        // KIS API 연결 상태이고 실제 주문 전송이 활성화된 경우 실제 계좌 잔고를 비동기로 동기화
+        if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
           setTimeout(() => {
             handleSyncKIS();
           }, 1000);
@@ -2132,7 +2138,7 @@ export default function App() {
         return 0;
       }
     } else if (action === 'SELL') {
-        if (kisConfig.isConnected) {
+        if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
             try {
                 const isKR = /^\d{6}$/.test(stock.symbol);
                 if (isKR) {
@@ -2165,18 +2171,18 @@ export default function App() {
         }
 
       const currentHoldings = holdings[stock.symbol] || 0;
-      const sellAmount = kisConfig.isConnected ? finalAmount : Math.min(finalAmount, currentHoldings);
+      const sellAmount = kisConfig.isConnected && kisConfig.isRealOrderEnabled ? finalAmount : Math.min(finalAmount, currentHoldings);
       if (sellAmount > 0) {
         setBalance(prev => prev + priceInKrw * sellAmount);
         const newHoldings = { ...holdings, [stock.symbol]: Number(Math.max(0, currentHoldings - sellAmount).toFixed(4)) };
         setHoldings(newHoldings);
         if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-        if (!kisConfig.isConnected) {
+        if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
             addLog(stock.symbol, '매도', tradePrice, sellAmount, reason);
         }
 
-        // KIS API 연결 상태라면 실제 계좌 잔고를 비동기로 동기화
-        if (kisConfig.isConnected) {
+        // KIS API 연결 상태이고 실제 주문 전송이 활성화된 경우 실제 계좌 잔고를 비동기로 동기화
+        if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
           setTimeout(() => {
             handleSyncKIS();
           }, 1000);
@@ -2607,6 +2613,29 @@ export default function App() {
                      * 시장가(Market)는 증권사 규정상 상한가 기준 보증금(최대 130%)을 예치하므로, 소액 계좌에서는 <strong>"주문가능금액 초과 (APBK0952)"</strong> 오류가 발생합니다. 안정적인 구동을 위해 <strong>지정가(Limit)</strong> 사용을 적극 권장합니다.
                    </p>
                 </div>
+                 <div className="flex items-center justify-between p-3.5 rounded-xl bg-black/40 border border-sleek-border mt-4">
+                    <div className="max-w-[75%] text-left">
+                      <label className="text-xs font-bold text-white block">실제 주문 전송 (Live Ordering)</label>
+                      <p className="text-[9px] text-sleek-text-secondary leading-normal mt-1">
+                        활성화 시 KIS 실제/모의 계좌로 즉시 주문을 전송합니다. 비활성화 시 KIS 실시간 시세만 연동하고 가상 잔액(로컬)으로 거래하여 <strong>매수 가능량 0주 문제 및 자산 손실 위험을 방지</strong>합니다.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setKisConfig(prev => ({ ...prev, isRealOrderEnabled: !prev.isRealOrderEnabled }))}
+                      className={cn(
+                        "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
+                        kisConfig.isRealOrderEnabled ? "bg-sleek-blue" : "bg-white/10"
+                      )}
+                    >
+                      <span
+                        className={cn(
+                          "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out",
+                          kisConfig.isRealOrderEnabled ? "translate-x-5" : "translate-x-0"
+                        )}
+                      />
+                    </button>
+                 </div>
               </div>
 
               <div className="flex gap-3 mt-8">
@@ -3222,7 +3251,7 @@ export default function App() {
                   <div className="flex justify-between text-[10px] uppercase">
                     <span className="text-sleek-text-secondary">매수 가능</span>
                     <span className="text-sleek-blue font-bold">
-                      {kisConfig.isConnected && kisBuyableQty !== null 
+                      {kisConfig.isConnected && kisConfig.isRealOrderEnabled && kisBuyableQty !== null 
                         ? `${kisBuyableQty.toLocaleString()} 주 (실계좌)` 
                         : `${Math.floor(balance / (selectedStock.price || 1)).toLocaleString()} 주 (로컬)`}
                     </span>
@@ -3447,7 +3476,7 @@ export default function App() {
                   </div>
                   <div className="grid grid-cols-4 gap-1.5 mt-2">
                     {[0.1, 0.25, 0.5, 1.0].map(ratio => {
-                      const maxBuyable = kisConfig.isConnected && kisBuyableQty !== null 
+                      const maxBuyable = kisConfig.isConnected && kisConfig.isRealOrderEnabled && kisBuyableQty !== null 
                         ? kisBuyableQty 
                         : Math.floor(balance / (selectedStock?.price || 1));
                       const targetQty = Math.max(1, Math.floor(maxBuyable * ratio));
