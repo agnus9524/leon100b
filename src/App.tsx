@@ -1217,7 +1217,7 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  const updateKisBuyableQty = useCallback(async () => {
+  const updateKisBuyableQty = useCallback(async (overrideBalance?: number) => {
     if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled || !selectedStock) {
       setKisBuyableQty(null);
       return;
@@ -1227,6 +1227,8 @@ export default function App() {
       setKisBuyableQty(null);
       return;
     }
+
+    const currentBalance = overrideBalance !== undefined ? overrideBalance : balance;
 
     try {
       const ordDvsn = kisConfig.domesticOrderType || '00';
@@ -1248,9 +1250,10 @@ export default function App() {
         qty = Math.max(nrcy, maxQty, ordPsbl);
       }
 
-      // 실제 계좌의 현금(balance)으로 계산하여 보완 (KIS API가 0을 반환했거나 결과가 부실한 경우)
-      if ((qty === 0 || isNaN(qty)) && balance > 0 && tradePrice > 0) {
-        qty = Math.floor(balance / tradePrice);
+      // 실제 계좌의 현금(currentBalance)으로 계산하여 보강 또는 보정 (특히 KIS API 결과가 0이거나 미흡할 때)
+      if (currentBalance > 0 && tradePrice > 0) {
+        const calculatedQty = Math.floor(currentBalance / tradePrice);
+        qty = Math.max(qty, calculatedQty);
       }
 
       if (!isNaN(qty) && qty >= 0) {
@@ -1261,8 +1264,8 @@ export default function App() {
     } catch (err) {
       console.warn("Failed to update KIS buyable quantity:", err);
       // API 실패 시에도 실제 계좌 현금을 기준으로 계산하여 폴백
-      if (balance > 0 && selectedStock.price > 0) {
-        const fallbackQty = Math.floor(balance / selectedStock.price);
+      if (currentBalance > 0 && selectedStock.price > 0) {
+        const fallbackQty = Math.floor(currentBalance / selectedStock.price);
         setKisBuyableQty(fallbackQty);
       } else {
         setKisBuyableQty(null);
@@ -1453,7 +1456,7 @@ export default function App() {
       }
       
       setBotStatus("상태 동기화 완료");
-      await updateKisBuyableQty();
+      await updateKisBuyableQty(totalConvertedBalance);
     } catch (e: any) {
       console.error("KIS Sync Error", e);
       const msg = e.response?.data?.msg1 || e.message;
@@ -2076,9 +2079,10 @@ export default function App() {
                         
                         let parsedQty = Math.max(nrcy, maxQty, ordPsbl);
                         
-                        // 실제 계좌의 현금(balance)으로 계산하여 보완 (KIS API가 0을 반환했거나 결과가 부실한 경우)
-                        if ((parsedQty === 0 || isNaN(parsedQty)) && balance > 0 && tradePrice > 0) {
-                            parsedQty = Math.floor(balance / tradePrice);
+                        // 실제 계좌의 현금(balance)으로 계산하여 보강 또는 보정 (특히 KIS API 결과가 0이거나 미흡할 때)
+                        if (balance > 0 && tradePrice > 0) {
+                            const calculatedQty = Math.floor(balance / tradePrice);
+                            parsedQty = Math.max(parsedQty, calculatedQty);
                         }
 
                         if (!isNaN(parsedQty)) {
