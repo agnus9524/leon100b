@@ -420,6 +420,7 @@ export default function App() {
   const [lastTradeType, setLastTradeType] = useState<'BUY' | 'SELL' | null>(null);
   const [gapInventory, setGapInventory] = useState<number[]>([]);
   const [immediateEntry, setImmediateEntry] = useState<boolean>(true);
+  const [lowestBidOnlyMode, setLowestBidOnlyMode] = useState<boolean>(true); // 하단 호가 진입 모드 (기본 true)
   const [scalperMessage, setScalperMessage] = useState<string>("대기 중...");
   const gapInventoryRef = React.useRef<number[]>([]);
   useEffect(() => {
@@ -1822,14 +1823,17 @@ export default function App() {
         return;
       }
 
-      const priceInKrw = marketType === 'US' ? currentPrice * exchangeRate : currentPrice;
+      const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
+      const buyPrice = lowestBidOnlyMode ? (currentPrice - 5 * tickSize) : currentPrice;
+
+      const priceInKrw = marketType === 'US' ? buyPrice * exchangeRate : buyPrice;
       const cost = priceInKrw * tradeQuantity;
 
       if (balance >= cost || kisConfig.isConnected) {
-        setScalperMessage(`[최초 즉시 진입] ₩${currentPrice.toLocaleString()} 1단계 최초 매수 완료...`);
-        setBotStatus(`[최초 즉시 진입] ₩${currentPrice.toLocaleString()} 1단계 최초 매수 완료...`);
-        await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${currentPrice.toLocaleString()} 시작 즉시 1단계 최초 매수 진입`);
-        setGapInventory([currentPrice]);
+        setScalperMessage(`[최초 즉시 진입] ₩${buyPrice.toLocaleString()} 1단계 최초 매수 완료...`);
+        setBotStatus(`[최초 즉시 진입] ₩${buyPrice.toLocaleString()} 1단계 최초 매수 완료...`);
+        await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${buyPrice.toLocaleString()} 시작 즉시 1단계 최초 매수 진입`, buyPrice);
+        setGapInventory([buyPrice]);
         setLastTradeType('BUY');
         setGapTradeCount(prev => prev + 1);
         showNotification(`${selectedStock.name} 시작 즉시 1단계 매수 완료`, "success");
@@ -1861,24 +1865,27 @@ export default function App() {
           const isRising = currentPrice > lastPrice;
 
           // A. BUY Condition: Current price is dipping and within range, allowing active use of all 5 slots
+          const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
+          const targetBuyPrice = lowestBidOnlyMode ? (currentPrice - 5 * tickSize) : currentPrice;
+
           const minSpacing = (maxPrice - minPrice) * 0.04; // 4% of range spacing to easily fit 5 slots
           const currentInventory = gapInventoryRef.current;
-          const hasNearbyBuy = currentInventory.some(buyPrice => Math.abs(buyPrice - currentPrice) < minSpacing);
+          const hasNearbyBuy = currentInventory.some(buyPrice => Math.abs(buyPrice - targetBuyPrice) < minSpacing);
 
           const meetsBuyTarget = isDipping || (currentInventory.length === 0);
 
           if (meetsBuyTarget) {
             // Limit maximum inventory to 5 slots to match UI
             if (!hasNearbyBuy && currentInventory.length < 5) {
-              const priceInKrw = marketType === 'US' ? currentPrice * exchangeRate : currentPrice;
+              const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
               const cost = priceInKrw * tradeQuantity;
 
               if (balance >= cost || kisConfig.isConnected) {
-                setScalperMessage(`[매수 완료] ₩${currentPrice.toLocaleString()}`);
-                setBotStatus(`[스캘퍼] ₩${currentPrice.toLocaleString()} 찰나의 낙폭 매수...`);
-                await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${currentPrice.toLocaleString()} 미세 변동 매수 진입`);
+                setScalperMessage(`[매수 완료] ₩${targetBuyPrice.toLocaleString()}`);
+                setBotStatus(`[스캘퍼] ₩${targetBuyPrice.toLocaleString()} ${lowestBidOnlyMode ? '최하단 호가' : '찰나의 낙폭'} 매수...`);
+                await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} ${lowestBidOnlyMode ? '(최하단 호가)' : ''} 미세 변동 매수 진입`, targetBuyPrice);
                 
-                setGapInventory(prev => [...prev, currentPrice]);
+                setGapInventory(prev => [...prev, targetBuyPrice]);
                 setLastTradeType('BUY');
                 setGapTradeCount(prev => prev + 1);
                 showNotification(`${selectedStock.name} 스캘퍼 자동 매수 진입 완료`, "success");
@@ -1931,7 +1938,7 @@ export default function App() {
               if (sellQty > 0 || kisConfig.isConnected) {
                 setScalperMessage(`[매도 완료] ₩${currentPrice.toLocaleString()} (+${scalpingTargetProfit}%)`);
                 setBotStatus(`[스캘퍼] ₩${currentPrice.toLocaleString()} 목표 차익 매도 진행...`);
-                await executeTrade('SELL', selectedStock, sellQty, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} 익절 완료 (+${scalpingTargetProfit}%)`);
+                await executeTrade('SELL', selectedStock, sellQty, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} 익절 완료 (+${scalpingTargetProfit}%)`, currentPrice);
                 
                 setGapInventory(prev => prev.filter(p => p !== targetBuyPrice));
                 setLastTradeType('SELL');
@@ -1952,7 +1959,7 @@ export default function App() {
               if (sellQty > 0 || kisConfig.isConnected) {
                 setScalperMessage(`[손절 완료] ₩${currentPrice.toLocaleString()} (${scalpingStopLoss}%)`);
                 setBotStatus(`[스캘퍼] ₩${currentPrice.toLocaleString()} 리스크 관리 손절...`);
-                await executeTrade('SELL', selectedStock, sellQty, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} 손절 완료 (${scalpingStopLoss}%)`);
+                await executeTrade('SELL', selectedStock, sellQty, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} 손절 완료 (${scalpingStopLoss}%)`, currentPrice);
                 
                 setGapInventory(prev => prev.filter(p => p !== targetBuyPrice));
                 setLastTradeType('SELL');
@@ -1975,10 +1982,12 @@ export default function App() {
     }, scalpingSpeed); // Custom intervals for incredible fast speed execution
 
     return () => clearInterval(gapInterval);
-  }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry]);
+  }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, lowestBidOnlyMode]);
 
-  const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string) => {
+  const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number) => {
     if (action === 'HOLD' || amount <= 0) return;
+
+    const tradePrice = customPrice !== undefined ? customPrice : stock.price;
 
     // KIS API가 연결되어 있다면 실제 주문을 라이브 인터페이스를 통해 시도
     if (kisConfig.isConnected) {
@@ -1987,17 +1996,17 @@ export default function App() {
             const res = await kisService.order(
                 stock.symbol, 
                 action, 
-                stock.price.toString(), 
+                tradePrice.toString(), 
                 amount.toString(),
                 kisConfig.domesticOrderType || '00'
             );
             
             if (res.rt_cd === '0') {
-               addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', stock.price, amount, `[실제계좌 주문완료] ${reason}`);
+               addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, amount, `[실제계좌 주문완료] ${reason}`);
                showNotification(`${stock.name} ${action === 'BUY' ? '매수' : '매도'} 주문 성공`, "success");
             } else {
                setBotStatus(`[KIS API 오류] ${res.msg1}`);
-               addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', stock.price, amount, `[주문실패] ${res.msg1}`);
+               addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, amount, `[주문실패] ${res.msg1}`);
                showNotification(`주문 실패: ${res.msg1}`, "error");
                return; // 실제 주문 실패시 잔고를 업데이트 하지 않음
             }
@@ -2009,7 +2018,7 @@ export default function App() {
         }
     }
 
-    const priceInKrw = marketType === 'US' ? stock.price * exchangeRate : stock.price; 
+    const priceInKrw = marketType === 'US' ? tradePrice * exchangeRate : tradePrice; 
     const cost = priceInKrw * amount;
 
     if (action === 'BUY') {
@@ -2018,7 +2027,7 @@ export default function App() {
         const newHoldings = { ...holdings, [stock.symbol]: Number(((holdings[stock.symbol] || 0) + amount).toFixed(4)) };
         setHoldings(newHoldings);
         if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-        addLog(stock.symbol, '매수', stock.price, amount, reason);
+        addLog(stock.symbol, '매수', tradePrice, amount, reason);
 
         // KIS API 연결 상태라면 실제 계좌 잔고를 비동기로 동기화
         if (kisConfig.isConnected) {
@@ -2037,7 +2046,7 @@ export default function App() {
         const newHoldings = { ...holdings, [stock.symbol]: Number(Math.max(0, currentHoldings - sellAmount).toFixed(4)) };
         setHoldings(newHoldings);
         if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-        addLog(stock.symbol, '매도', stock.price, sellAmount, reason);
+        addLog(stock.symbol, '매도', tradePrice, sellAmount, reason);
 
         // KIS API 연결 상태라면 실제 계좌 잔고를 비동기로 동기화
         if (kisConfig.isConnected) {
@@ -3433,6 +3442,48 @@ export default function App() {
                       체결 성공 및 정밀 진입 시 고주파 비프 알림음이 작동합니다.
                     </div>
                   </div>
+                </div>
+
+                {/* 6.5 Entry Price Level Selector */}
+                <div className="flex flex-col p-3.5 bg-white/5 border border-white/5 rounded-2xl text-xs space-y-2">
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <span className="font-bold text-white flex items-center gap-1.5">
+                        <TrendingDown className="w-3.5 h-3.5 text-amber-400" />
+                        진입 호가 방식 (Entry Price Level)
+                      </span>
+                      <span className="text-[9px] text-sleek-text-secondary">매수 진입 시 주문을 넣을 호가 단계를 설정합니다.</span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5 mt-1">
+                    <button
+                      type="button"
+                      onClick={() => setLowestBidOnlyMode(true)}
+                      className={cn(
+                        "py-2 rounded-lg text-[10px] font-bold transition-all border text-center",
+                        lowestBidOnlyMode
+                          ? "bg-amber-500/10 border-amber-500/30 text-amber-400 font-black"
+                          : "bg-black/20 border-white/5 text-sleek-text-secondary hover:bg-white/5"
+                      )}
+                    >
+                      최하단 호가 (매수 5단계) [기본값]
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setLowestBidOnlyMode(false)}
+                      className={cn(
+                        "py-2 rounded-lg text-[10px] font-bold transition-all border text-center",
+                        !lowestBidOnlyMode
+                          ? "bg-sleek-blue/10 border-sleek-blue/30 text-sleek-blue font-black"
+                          : "bg-black/20 border-white/5 text-sleek-text-secondary hover:bg-white/5"
+                      )}
+                    >
+                      현재 체결가 (시장/시가)
+                    </button>
+                  </div>
+                  <p className="text-[8px] text-sleek-text-secondary leading-normal">
+                    * <strong>최하단 호가 진입</strong>: 호가창의 가장 아래인 매수 5단계(최하단 호가)에 지정가 매수 주문을 넣어, 주가가 하락 진동할 때 최저가에서 물량을 체결합니다.
+                  </p>
                 </div>
 
                 {/* 7. Immediate Entry Checkbox */}
