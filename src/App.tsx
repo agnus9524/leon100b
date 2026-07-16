@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   TrendingUp, 
   TrendingDown,
@@ -415,6 +415,7 @@ export default function App() {
   const [gapSellPrice, setGapSellPrice] = useState<number>(0);
   const [tradeQuantity, setTradeQuantity] = useState<number>(1);
   const [isGapBotActive, setIsGapBotActive] = useState<boolean>(false);
+  const [kisBuyableQty, setKisBuyableQty] = useState<number | null>(null);
   const [gapTradingProfit, setGapTradingProfit] = useState<number>(0);
   const [gapTradeCount, setGapTradeCount] = useState<number>(0);
   const [lastTradeType, setLastTradeType] = useState<'BUY' | 'SELL' | null>(null);
@@ -1210,6 +1211,50 @@ export default function App() {
     document.body.removeChild(link);
   };
 
+  const updateKisBuyableQty = useCallback(async () => {
+    if (!kisConfig.isConnected || !selectedStock) {
+      setKisBuyableQty(null);
+      return;
+    }
+    const isKR = /^\d{6}$/.test(selectedStock.symbol);
+    if (!isKR) {
+      setKisBuyableQty(null);
+      return;
+    }
+
+    try {
+      const ordDvsn = kisConfig.domesticOrderType || '00';
+      const tradePrice = selectedStock.price;
+      const queryPrice = ordDvsn === '00' ? tradePrice.toString() : '0';
+
+      const res = await kisService.getDomesticBuyableAmount(
+        selectedStock.symbol,
+        queryPrice,
+        ordDvsn
+      );
+
+      if (res && res.rt_cd === '0' && res.output) {
+        const nrcy = res.output.nrcy_buy_qty ? parseInt(res.output.nrcy_buy_qty, 10) : 0;
+        const maxQty = res.output.max_ord_qty ? parseInt(res.output.max_ord_qty, 10) : 0;
+        const ordPsbl = res.output.ord_psbl_qty ? parseInt(res.output.ord_psbl_qty, 10) : 0;
+        
+        const qty = Math.max(nrcy, maxQty, ordPsbl);
+        if (!isNaN(qty)) {
+          setKisBuyableQty(qty);
+          return;
+        }
+      }
+      setKisBuyableQty(null);
+    } catch (err) {
+      console.warn("Failed to update KIS buyable quantity:", err);
+      setKisBuyableQty(null);
+    }
+  }, [kisConfig.isConnected, kisConfig.domesticOrderType, selectedStock]);
+
+  useEffect(() => {
+    updateKisBuyableQty();
+  }, [selectedSymbol, balance, kisConfig.isConnected, kisConfig.domesticOrderType, updateKisBuyableQty]);
+
   const handleSyncKIS = async () => {
     if (!kisConfig.isConnected) return;
     
@@ -1389,6 +1434,7 @@ export default function App() {
       }
       
       setBotStatus("상태 동기화 완료");
+      await updateKisBuyableQty();
     } catch (e: any) {
       console.error("KIS Sync Error", e);
       const msg = e.response?.data?.msg1 || e.message;
@@ -3175,7 +3221,11 @@ export default function App() {
                   </div>
                   <div className="flex justify-between text-[10px] uppercase">
                     <span className="text-sleek-text-secondary">매수 가능</span>
-                    <span className="text-sleek-blue font-bold">{Math.floor(balance / (selectedStock.price || 1))} 주</span>
+                    <span className="text-sleek-blue font-bold">
+                      {kisConfig.isConnected && kisBuyableQty !== null 
+                        ? `${kisBuyableQty.toLocaleString()} 주 (실계좌)` 
+                        : `${Math.floor(balance / (selectedStock.price || 1)).toLocaleString()} 주 (로컬)`}
+                    </span>
                   </div>
                 </div>
               </div>
@@ -3394,6 +3444,24 @@ export default function App() {
                     >
                       +
                     </button>
+                  </div>
+                  <div className="grid grid-cols-4 gap-1.5 mt-2">
+                    {[0.1, 0.25, 0.5, 1.0].map(ratio => {
+                      const maxBuyable = kisConfig.isConnected && kisBuyableQty !== null 
+                        ? kisBuyableQty 
+                        : Math.floor(balance / (selectedStock?.price || 1));
+                      const targetQty = Math.max(1, Math.floor(maxBuyable * ratio));
+                      return (
+                        <button
+                          key={ratio}
+                          type="button"
+                          onClick={() => setTradeQuantity(targetQty)}
+                          className="py-1 bg-white/5 border border-white/5 rounded-lg text-[9px] font-bold hover:bg-white/10 text-sleek-text-secondary font-mono"
+                        >
+                          {ratio === 1.0 ? '최대(100%)' : `${ratio * 100}%`}
+                        </button>
+                      );
+                    })}
                   </div>
                 </div>
 

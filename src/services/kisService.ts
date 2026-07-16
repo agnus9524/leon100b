@@ -464,10 +464,11 @@ class KISService {
       CANO: this.config.accountNo,
       ACNT_PRDT_CD: this.config.accountCode,
       PDNO: symbol,
-      ORD_UNPR: price,
+      ORD_UNPR: ordDvsn === '00' ? price : '0',
       ORD_DVSN: ordDvsn,
       CMA_EVLU_AMT_ICLD_YN: 'N',
-      OVRS_ICLD_YN: 'N'
+      OVRS_ICLD_YN: 'N',
+      CANO_PWD: this.config.accountPw || ''
     };
 
     const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
