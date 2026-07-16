@@ -2086,6 +2086,38 @@ export default function App() {
         return 0;
       }
     } else if (action === 'SELL') {
+        if (kisConfig.isConnected) {
+            try {
+                const isKR = /^\d{6}$/.test(stock.symbol);
+                if (isKR) {
+                    setBotStatus(`[KIS API] ${stock.symbol} 매도 가능 수량 조회 중...`);
+                    const sellableRes = await kisService.getDomesticSellableQuantity(stock.symbol);
+                    if (sellableRes && sellableRes.rt_cd === '0' && sellableRes.output) {
+                        const actualSellable = sellableRes.output.nrc_psbl_qty ? parseInt(sellableRes.output.nrc_psbl_qty, 10) : 0;
+                        if (!isNaN(actualSellable)) {
+                            if (actualSellable <= 0) {
+                                setBotStatus(`[매도 건너뜀] KIS 실제 매도 가능 수량 0주`);
+                                setScalperMessage("실제 보유 주식이 없거나 미체결 상태여서 매도 대기 (실거래 미체결 대기)");
+                                addLog(stock.symbol, '매도', tradePrice, finalAmount, `[주문건너뜀] KIS 실제 매도 가능 수량 0주 (미체결 대기)`);
+                                showNotification(`매도 대기: 실제 계좌에 보유 중인 ${stock.name} 매도 가능 수량이 0주입니다.`, "info");
+                                return 0;
+                            }
+                            if (actualSellable < finalAmount) {
+                                console.log(`[KIS Scalper Safety] Adjusting sell quantity from ${finalAmount} to ${actualSellable} due to KIS limits.`);
+                                finalAmount = actualSellable;
+                                showNotification(`매도 수량 자동 조정: 실제 매도 가능 수량에 맞춰 ${finalAmount}주로 조절하여 주문합니다.`, "info");
+                            }
+                        }
+                    }
+                }
+            } catch (err: any) {
+                console.error("Failed to query domestic sellable quantity:", err);
+                setBotStatus("매도 가능 수량 조회 실패");
+                showNotification(`매도 가능 수량 조회 실패: ${err.message}`, "error");
+                return 0; // KIS API 오류 시 안전을 위해 매도하지 않음
+            }
+        }
+
       const currentHoldings = holdings[stock.symbol] || 0;
       const sellAmount = kisConfig.isConnected ? finalAmount : Math.min(finalAmount, currentHoldings);
       if (sellAmount > 0) {
@@ -3536,6 +3568,13 @@ export default function App() {
                   <p className="text-[8px] text-sleek-text-secondary leading-normal">
                     * <strong>최하단 호가 진입</strong>: 호가창의 가장 아래인 매수 5단계(최하단 호가)에 지정가 매수 주문을 넣어, 주가가 하락 진동할 때 최저가에서 물량을 체결합니다.
                   </p>
+                  {kisConfig.isConnected && lowestBidOnlyMode && (
+                    <div className="p-2 bg-amber-500/10 border border-amber-500/25 rounded-lg text-[9px] text-amber-400 leading-normal space-y-1">
+                      <p>⚠️ <strong>실거래 연동 안내:</strong> 최하단 호가 주문은 한국투자증권 호가창 하단에 지정가 대기 주문으로 접수됩니다.</p>
+                      <p className="opacity-90">* 주가가 5단계 아래로 완전히 도달하여 <strong>체결(Fill)</strong>되기 전까지는 실제 잔고가 0주이므로 매도가 나가지 않고 대기합니다.</p>
+                      <p className="opacity-90">* 즉시 체결과 연속적인 회전을 원하신다면 <strong>"현재 체결가 (시장/시가)"</strong> 방식을 사용하는 것이 유리합니다.</p>
+                    </div>
+                  )}
                 </div>
 
                 {/* 7. Immediate Entry Checkbox */}
