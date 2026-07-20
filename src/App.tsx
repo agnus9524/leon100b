@@ -2247,7 +2247,7 @@ export default function App() {
       const priceInKrw = marketType === 'US' ? buyPrice * exchangeRate : buyPrice;
       const cost = priceInKrw * tradeQuantity;
 
-      if (balance >= cost || kisConfig.isConnected) {
+      if (balance >= cost || (kisConfig.isConnected && kisConfig.isRealOrderEnabled)) {
         setScalperMessage(`[최초 즉시 진입] ₩${buyPrice.toLocaleString()} 매수 가능 수량 조회 중...`);
         const executedQty = await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${buyPrice.toLocaleString()} 시작 즉시 1단계 최초 매수 진입`, buyPrice);
         if (executedQty > 0) {
@@ -2301,7 +2301,7 @@ export default function App() {
               const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
               const cost = priceInKrw * tradeQuantity;
 
-              if (balance >= cost || kisConfig.isConnected) {
+              if (balance >= cost || (kisConfig.isConnected && kisConfig.isRealOrderEnabled)) {
                 setScalperMessage(`[매수 진행 중] ₩${targetBuyPrice.toLocaleString()}...`);
                 const executedQty = await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} ${lowestBidOnlyMode ? '(최하단 호가)' : ''} 미세 변동 매수 진입`, targetBuyPrice);
                 
@@ -2444,9 +2444,11 @@ export default function App() {
                                 return 0;
                             }
                             if (parsedQty < finalAmount) {
-                                console.log(`[KIS Scalper Safety] Adjusting order quantity from ${finalAmount} to ${parsedQty} due to KIS limits.`);
-                                finalAmount = parsedQty;
-                                showNotification(`주문 수량 자동 제한: 실제 매수 가능 수량이 부족하여 ${amount}주 -> ${finalAmount}주로 조절하여 주문합니다.`, "info");
+                                setBotStatus(`[매수 진입 차단] 주문 가능 수량 부족 (요청: ${finalAmount}주 / 가능: ${parsedQty}주)`);
+                                setScalperMessage(`실제 주문 가능 수량 부족으로 진입 건너뜀 (가능: ${parsedQty}주)`);
+                                addLog(stock.symbol, '매수', tradePrice, amount, `[진입스킵] 실시간 주문 가능 금액/수량 초과 (요청: ${amount}주 / 가능: ${parsedQty}주)`);
+                                showNotification(`매수 진입 차단: 실시간 주문 가능 금액/수량을 초과하여 진입하지 않습니다. (요청: ${amount}주, 가능: ${parsedQty}주)`, "error");
+                                return 0;
                             }
                         }
                     }
