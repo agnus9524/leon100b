@@ -4341,13 +4341,7 @@ export default function App() {
 
                         <div className="flex-1 bg-sleek-card/30 rounded-3xl border border-sleek-border p-6 relative shadow-inner min-h-[340px]">
                           <ResponsiveContainer width="100%" height="100%">
-                            <AreaChart data={selectedStock.history}>
-                              <defs>
-                                <linearGradient id="colorPrice" x1="0" y1="0" x2="0" y2="1">
-                                  <stop offset="5%" stopColor="#3B82F6" stopOpacity={0.3}/>
-                                  <stop offset="95%" stopColor="#3B82F6" stopOpacity={0}/>
-                                </linearGradient>
-                              </defs>
+                            <BarChart data={selectedStock.history}>
                               <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.05} />
                               <XAxis 
                                 dataKey="time" 
@@ -4367,13 +4361,10 @@ export default function App() {
                                 contentStyle={{ backgroundColor: '#1A1D23', border: '1px solid #2D3139', borderRadius: '12px' }}
                                 itemStyle={{ fontSize: '10px' }}
                               />
-                              <Area 
-                                type="monotone" 
+                              <Bar 
                                 dataKey="price" 
-                                stroke="#3B82F6" 
-                                strokeWidth={3}
-                                fillOpacity={1} 
-                                fill="url(#colorPrice)" 
+                                fill="#3B82F6"
+                                radius={[4, 4, 0, 0]}
                                 animationDuration={500}
                               />
                               
@@ -4398,7 +4389,7 @@ export default function App() {
                                   <Label value="SELL BOUND" position="left" fill="#10B981" fontSize={10} fontWeight="bold" />
                                 </ReferenceLine>
                               )}
-                            </AreaChart>
+                            </BarChart>
                           </ResponsiveContainer>
                         </div>
                       </div>
