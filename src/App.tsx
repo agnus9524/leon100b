@@ -448,9 +448,9 @@ export default function App() {
   }, [gapInventory]);
 
   // Automated Scalping Configuration States
-  const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.3); // 0.3%
-  const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-0.5); // -0.5%
-  const [scalpingSpeed, setScalpingSpeed] = useState<number>(1500); // 1500ms
+  const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.6); // Increased to 0.6% for net profit safety
+  const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-1.0); // -1.0% stop loss
+  const [scalpingSpeed, setScalpingSpeed] = useState<number>(2000); // 2000ms for stable execution
   const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(true);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
@@ -1818,42 +1818,50 @@ export default function App() {
         const currentNews = newsCache[stockToAnalyze.symbol]?.data || [];
         const newsContext = currentNews.map(n => `제목: ${n.title}, 요약: ${n.summary}`).join('\n');
 
-        const prompt = `당신은 세계 최고 수준의 AI 트레이딩 엔진입니다. 다음 3단계 우선순위에 따라 ${stockToAnalyze.symbol} 종목을 분석하고 매매 결정을 내리세요.
+        const historyPrices = stockToAnalyze.history.map(h => h.price);
+        const rsi = calculateRSI(historyPrices, 14);
+        const bb = calculateBollingerBands(historyPrices, 20, 2);
+        const sma5 = calculateSMA(historyPrices, 5);
+        const sma20 = calculateSMA(historyPrices, 20);
+
+        const prompt = `당신은 수익 극대화에 미친 세계 최고의 퀀트 트레이더 'PROFIT-MAX-V3'입니다. 
+        모든 감정을 배제하고 오직 수학적 데이터와 승률만을 계산하여 ${stockToAnalyze.symbol}에 대한 초정밀 매매 지시를 내리세요.
         
-        최우선 목표: 연 수익률 15% 이상 달성 (수수료 제외)
+        핵심 목표: 연 수익률 40% 이상의 공격적 자산 증식
         
-        분석 우선순위:
-        1순위 (뉴스 분석): 최신 뉴스 및 시장 센티먼트 파악
-        2순위 (모멘텀): 가격의 추세 및 변동 속도 분석
-        3순위 (차트 패턴): 주요 기술적 분석 패턴 파악
+        기술적 데이터:
+        - 현재가: $${stockToAnalyze.price} (최근 5봉: ${JSON.stringify(stockToAnalyze.history.slice(-5))})
+        - RSI(14): ${rsi.toFixed(2)} (${rsi < 30 ? '과매도' : rsi > 70 ? '과매수' : '중립'})
+        - 볼린저 밴드: 상단($${bb.upper.toFixed(2)}), 중단($${bb.middle.toFixed(2)}), 하단($${bb.lower.toFixed(2)})
+        - 이동평균선: SMA5($${sma5.toFixed(2)}), SMA20($${sma20.toFixed(2)}) -> ${sma5 > sma20 ? '골든크로스/상승추세' : '데드크로스/하락추세'}
         
-        데이터:
-        - 종목: ${stockToAnalyze.symbol} (${stockToAnalyze.name})
-        - 현재가: $${stockToAnalyze.price}
-        - 최근 변동: ${stockToAnalyze.changePercent}%
-        - 가격 이력(최근 5봉): ${JSON.stringify(stockToAnalyze.history.slice(-5))}
-        - 관련 뉴스:
-        ${newsContext || "최신 뉴스 없음. 시장 일반 성향 참조."}
+        시장 분석 데이터 (뉴스/센티먼트):
+        ${newsContext || "뉴스 없음. 기술적 지표에만 의존하여 판단할 것."}
         
         계좌 상황:
-        - 현재 잔고: ₩${balance.toLocaleString()}
-        - ${stockToAnalyze.symbol} 보유량: ${holdings[stockToAnalyze.symbol] || 0}
+        - 가용 잔고: ₩${balance.toLocaleString()}
+        - ${stockToAnalyze.symbol} 보유: ${holdings[stockToAnalyze.symbol] || 0}
+        
+        매매 규칙:
+        1. RSI가 70 이상이거나 볼린저 상단 터치 시 강력 매도 고려
+        2. RSI가 30 이하이거나 볼린저 하단 지지 확인 시 강력 매수 고려
+        3. 추세가 불분명할 경우(SMA5/20 혼조) HOLD 유지하여 자산 보호
         
         반드시 다음 JSON 형식으로만 응답하세요:
         {
           "action": "BUY" | "SELL" | "HOLD",
           "amount": number,
-          "reason": "한국어로 된 핵심 매매 근거 (뉴스/모멘텀/차트 결합)",
+          "reason": "수익 극대화를 위한 논리적/수학적 근거 (한국어)",
           "scores": {
-            "news": number (1-10),
-            "momentum": number (1-10),
-            "pattern": number (1-10)
+            "technical": number (1-10),
+            "sentiment": number (1-10),
+            "overall_confidence": number (1-10)
           },
-          "expectedAnnualReturn": number (예상 연수익률),
+          "expectedAnnualReturn": number,
           "analysis": {
-            "sentiment": "긍정" | "중립" | "부정",
-            "trend": "상승" | "횡보" | "하락",
-            "detectedPattern": "패턴 이름"
+            "rsi_status": "${rsi.toFixed(1)}",
+            "trend_strength": "강력" | "보통" | "약함",
+            "risk_score": number (1-10)
           }
         }`;
 
@@ -1890,10 +1898,10 @@ export default function App() {
             // Update AI Intelligence result for UI
             setAiAnalysisResult({
               symbol: stockToAnalyze.symbol,
-              newsScore: decision.scores.news,
-              momentumScore: decision.scores.momentum,
-              patternScore: decision.scores.pattern,
-              finalScore: Math.round((decision.scores.news * 0.5 + decision.scores.momentum * 0.3 + decision.scores.pattern * 0.2) * 10),
+              newsScore: decision.scores.sentiment,
+              momentumScore: decision.scores.technical,
+              patternScore: decision.scores.overall_confidence,
+              finalScore: decision.scores.overall_confidence * 10,
               recommendation: decision.reason,
               expectedAnnualReturn: decision.expectedAnnualReturn
             });
@@ -2206,7 +2214,48 @@ export default function App() {
     checkOrders();
   }, [pendingBuyOrders, stocks, autoCancelThreshold, marketType, exchangeRate, holdings, currentUser, playScalpingSound]);
 
-  // 2. High-speed automatic trading decisions (Scalping Bot Engine)
+  // Technical Indicators Utility Functions
+  const calculateSMA = (data: number[], period: number) => {
+    if (data.length < period) return data.length > 0 ? data[data.length - 1] : 0;
+    const slice = data.slice(-period);
+    return slice.reduce((a, b) => a + b, 0) / period;
+  };
+
+  const calculateRSI = (data: number[], period: number = 14) => {
+    if (data.length <= period) return 50;
+    let gains = 0;
+    let losses = 0;
+
+    for (let i = data.length - period; i < data.length; i++) {
+      const diff = data[i] - data[i - 1];
+      if (diff >= 0) gains += diff;
+      else losses -= diff;
+    }
+
+    const avgGain = gains / period;
+    const avgLoss = losses / period;
+    if (avgLoss === 0) return 100;
+    const rs = avgGain / avgLoss;
+    return 100 - (100 / (1 + rs));
+  };
+
+  const calculateBollingerBands = (data: number[], period: number = 20, multiplier: number = 2) => {
+    if (data.length < period) return { upper: 0, middle: 0, lower: 0 };
+    const sma = calculateSMA(data, period);
+    const slice = data.slice(-period);
+    const variance = slice.reduce((a, b) => a + Math.pow(b - sma, 2), 0) / period;
+    const stdDev = Math.sqrt(variance);
+    return {
+      upper: sma + multiplier * stdDev,
+      middle: sma,
+      lower: sma - multiplier * stdDev
+    };
+  };
+
+  // Trailing Stop Loss State to track the peak price after each buy
+  const [highWaterMark, setHighWaterMark] = useState<{ [price: number]: number }>({});
+
+  // 2. High-speed automatic trading decisions (Profit Maximizer Engine)
   useEffect(() => {
     if (!isGapBotActive || !selectedStock) {
       setGapInventory([]); // Reset grid inventory when stopped
@@ -2217,193 +2266,137 @@ export default function App() {
 
     let lastPrice = selectedStock.price;
 
-    // A. Start-up: If immediateEntry is checked and inventory is empty, enter first buy position immediately if in range!
-    const runImmediateBuy = async () => {
-      if (!selectedStock) return;
-      if (gapBuyPrice <= 0 || gapSellPrice <= 0) return;
-
-      let currentPrice = selectedStock.price;
-
-      // If KIS is connected, fetch the absolute latest real-time price first to prevent stale prices!
-      if (kisConfig.isConnected) {
-        try {
-          const liveData = await kisService.getPrice(selectedStock.symbol);
-          if (liveData) {
-            currentPrice = liveData.current;
-          }
-        } catch (e) {
-          console.warn("[Immediate Buy] Live KIS price fetch failed, using state price:", e);
-        }
-      }
-
-      if (currentPrice < gapBuyPrice || currentPrice > gapSellPrice) {
-        setScalperMessage(`현재가(₩${currentPrice.toLocaleString()})가 설정 범위를 벗어나 대기 중`);
-        return;
-      }
-
-      const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
-      const buyPrice = lowestBidOnlyMode ? (currentPrice - 5 * tickSize) : currentPrice;
-
-      const priceInKrw = marketType === 'US' ? buyPrice * exchangeRate : buyPrice;
-      const cost = priceInKrw * tradeQuantity;
-
-      if (balance >= cost || (kisConfig.isConnected && kisConfig.isRealOrderEnabled)) {
-        setScalperMessage(`[최초 즉시 진입] ₩${buyPrice.toLocaleString()} 매수 가능 수량 조회 중...`);
-        const executedQty = await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${buyPrice.toLocaleString()} 시작 즉시 1단계 최초 매수 진입`, buyPrice);
-        if (executedQty > 0) {
-          setScalperMessage(`[최초 즉시 진입] ₩${buyPrice.toLocaleString()} 1단계 최초 매수 완료 (${executedQty}주)`);
-          setBotStatus(`[최초 즉시 진입] ₩${buyPrice.toLocaleString()} 1단계 최초 매수 완료 (${executedQty}주)`);
-          setGapInventory([buyPrice]);
-          setLastTradeType('BUY');
-          setGapTradeCount(prev => prev + 1);
-          showNotification(`${selectedStock.name} 시작 즉시 1단계 매수 완료 (${executedQty}주)`, "success");
-          playScalpingSound('BUY');
-        }
-      } else {
-        setScalperMessage("잔액 부족으로 최초 즉시 매수 실패");
-      }
-    };
-
-    if (immediateEntry && gapInventoryRef.current.length === 0) {
-      runImmediateBuy();
-    }
-
     const gapInterval = setInterval(async () => {
       // Find the latest price in current stocks array
       const currentStock = stocksRef.current.find(s => s.symbol === selectedStock.symbol) || selectedStock;
       const currentPrice = currentStock.price;
+      const historyPrices = currentStock.history.map(h => h.price);
 
       if (gapBuyPrice <= 0 || gapSellPrice <= 0) return;
 
+      // 1. Calculate Indicators for Precise Entry/Exit
+      const rsi = calculateRSI(historyPrices, 14);
+      const bb = calculateBollingerBands(historyPrices, 20, 2);
+      const sma5 = calculateSMA(historyPrices, 5);
+      const sma20 = calculateSMA(historyPrices, 20);
+      
       const minPrice = gapBuyPrice;
       const maxPrice = gapSellPrice;
-      const centerPrice = (minPrice + maxPrice) / 2;
+
+      // 2. High-Performance Market State Analysis
+      const isOverSold = rsi < 35;
+      const isOverBought = rsi > 65;
+      const isNearLowerBand = currentPrice <= bb.lower * 1.005; // Tight 0.5% threshold
+      const isNearUpperBand = currentPrice >= bb.upper * 0.995; 
+      const momentumPositive = sma5 > sma20;
 
       // Only trade inside the defined range
       if (currentPrice >= minPrice && currentPrice <= maxPrice) {
         if (lastPrice > 0) {
-          const isDipping = currentPrice < lastPrice;
-          const isRising = currentPrice > lastPrice;
-
-          // A. BUY Condition: Current price is dipping and within range, allowing active use of all 5 slots
+          // A. PROFIT MAX BUY Condition: 
+          // Strategy: Buy when Oversold or at BB Lower Band AND showing slight upward reversal (Price >= SMA5)
+          const meetsBuyCriteria = (isOverSold || isNearLowerBand) && (currentPrice >= sma5);
+          
           const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
           const targetBuyPrice = lowestBidOnlyMode ? (currentPrice - 5 * tickSize) : currentPrice;
 
-          const minSpacing = (maxPrice - minPrice) / (maxSlots + 1); // Dynamic Equal Spacing to maximize slot utilization
+          const minSpacing = (maxPrice - minPrice) / (maxSlots + 1);
           const currentInventory = gapInventoryRef.current;
           const hasNearbyBuy = currentInventory.some(buyPrice => Math.abs(buyPrice - targetBuyPrice) < minSpacing);
 
-          const meetsBuyTarget = isDipping || (currentInventory.length === 0);
+          if (meetsBuyCriteria && !hasNearbyBuy && currentInventory.length < maxSlots) {
+            const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
+            const cost = priceInKrw * tradeQuantity;
 
-          if (meetsBuyTarget) {
-            // Dynamic Slot Maximization
-            if (!hasNearbyBuy && currentInventory.length < maxSlots) {
-              const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
-              const cost = priceInKrw * tradeQuantity;
-
-              if (balance >= cost || (kisConfig.isConnected && kisConfig.isRealOrderEnabled)) {
-                setScalperMessage(`[매수 진행 중] ₩${targetBuyPrice.toLocaleString()}...`);
-                const executedQty = await executeTrade('BUY', selectedStock, tradeQuantity, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} ${lowestBidOnlyMode ? '(최하단 호가)' : ''} 미세 변동 매수 진입`, targetBuyPrice);
-                
-                if (executedQty > 0) {
-                  setScalperMessage(`[매수 완료] ₩${targetBuyPrice.toLocaleString()} (${executedQty}주)`);
-                  setBotStatus(`[스캘퍼] ₩${targetBuyPrice.toLocaleString()} ${lowestBidOnlyMode ? '최하단 호가 완료' : '찰나의 낙폭 완료'} (${executedQty}주)`);
-                  setGapInventory(prev => [...prev, targetBuyPrice]);
-                  setLastTradeType('BUY');
-                  setGapTradeCount(prev => prev + 1);
-                  showNotification(`${selectedStock.name} 스캘퍼 자동 매수 완료 (${executedQty}주)`, "success");
-                  playScalpingSound('BUY');
-                }
-              } else {
-                setScalperMessage("잔액 부족으로 매수 대기");
-                setBotStatus("잔액 부족으로 매수 취소");
-              }
-            } else {
-              if (currentInventory.length >= maxSlots) {
-                setScalperMessage(`최대 보유 슬롯(${maxSlots}개) 초과로 추가 매수 대기`);
-              } else if (hasNearbyBuy) {
-                setScalperMessage("기존 체결가 부근 추가 매수 방지 (최소 간격 대기)");
+            if (balance >= cost || (kisConfig.isConnected && kisConfig.isRealOrderEnabled)) {
+              setScalperMessage(`[매수 진입] RSI:${Math.round(rsi)} ₩${targetBuyPrice.toLocaleString()}...`);
+              const executedQty = await executeTrade('BUY', selectedStock, tradeQuantity, `Profit Max: RSI(${Math.round(rsi)}) 과매도권/밴드하단 반등 진입`, targetBuyPrice);
+              
+              if (executedQty > 0) {
+                setScalperMessage(`[매수 완료] ₩${targetBuyPrice.toLocaleString()} (${executedQty}주)`);
+                setBotStatus(`[수익극대화] ₩${targetBuyPrice.toLocaleString()} 지표 기반 매수 완료`);
+                setGapInventory(prev => [...prev, targetBuyPrice]);
+                setHighWaterMark(prev => ({ ...prev, [targetBuyPrice]: targetBuyPrice }));
+                setLastTradeType('BUY');
+                setGapTradeCount(prev => prev + 1);
+                showNotification(`${selectedStock.name} 지표 기반 매수 완료`, "success");
+                playScalpingSound('BUY');
               }
             }
           } else {
-            // No buy happened - explain what we are waiting for!
-            if (currentInventory.length === 0) {
-              setScalperMessage(`최초 진입 대기 중 (현재가: ₩${currentPrice.toLocaleString()})`);
-            } else {
-              setScalperMessage(`현재가(₩${currentPrice.toLocaleString()}) 관망 및 추가 하락/진입 신호 감시 중 (슬롯: ${currentInventory.length}/${maxSlots})`);
-            }
+            // Context-Aware Status Messages
+            if (isOverSold) setScalperMessage(`과매도 포착 (RSI: ${Math.round(rsi)}). 반등 시점 감시 중`);
+            else if (isNearLowerBand) setScalperMessage(`지지선(BB Lower) 도달. 매수 타점 분석 중...`);
+            else setScalperMessage(`관망 중 (RSI: ${Math.round(rsi)}, 슬롯: ${currentInventory.length}/${maxSlots})`);
           }
 
-          // B. SELL Condition: Scan inventory to take profits OR trigger stop-loss
+          // B. PROFIT MAX SELL Condition: Scan inventory for Trailing Stop or Indicator Signals
           const currentInventory2 = gapInventoryRef.current;
           if (currentInventory2.length > 0) {
-            // Profit Margin Check (including transaction fees and taxes to ensure positive net yield)
-            const profitableBuys = currentInventory2.filter(buyPrice => {
-              const profitRatio = (currentPrice - buyPrice) / buyPrice;
-              // 국내 주식은 제세금(증권거래세+농특세 약 0.18%) 및 왕복 수수료(약 0.03%~0.04%) 포함 약 0.22%의 고정 거래비용이 발생합니다.
-              // 미국 주식은 SEC Fee 및 유관기관 수수료 포함 약 0.03%의 거래비용이 발생합니다.
-              const estimatedFees = marketType === 'US' ? 0.0003 : 0.0022;
-              const netProfitRatio = profitRatio - estimatedFees;
-              return netProfitRatio >= scalpingTargetProfit / 100;
-            });
-
-            // Stop Loss Check
-            const stopLossBuys = currentInventory2.filter(buyPrice => {
-              const lossRatio = (currentPrice - buyPrice) / buyPrice;
-              return lossRatio <= scalpingStopLoss / 100;
-            });
-
-            if (profitableBuys.length > 0) {
-              // Sell the oldest/lowest buy slot for maximum profit (Take Profit)
-              const targetBuyPrice = Math.min(...profitableBuys);
-              const qty = holdings[selectedStock.symbol] || 0;
-              const sellQty = Math.min(qty, tradeQuantity) || tradeQuantity;
-
-              if (sellQty > 0 || kisConfig.isConnected) {
-                setScalperMessage(`[매도 완료] ₩${currentPrice.toLocaleString()} (+${scalpingTargetProfit}%)`);
-                setBotStatus(`[스캘퍼] ₩${currentPrice.toLocaleString()} 목표 차익 매도 진행...`);
-                await executeTrade('SELL', selectedStock, sellQty, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} 익절 완료 (+${scalpingTargetProfit}%)`, currentPrice);
-                
-                setGapInventory(prev => prev.filter(p => p !== targetBuyPrice));
-                setLastTradeType('SELL');
-                setGapTradeCount(prev => prev + 1);
-                setScalpingWins(prev => prev + 1);
-
-                const profit = (currentPrice - targetBuyPrice) * sellQty * (marketType === 'US' ? exchangeRate : 1);
-                setGapTradingProfit(prev => prev + profit);
-                showNotification(`${selectedStock.name} 익절 자동 매도 완료 (+₩${Math.round(profit).toLocaleString()})`, "success");
-                playScalpingSound('SELL');
+            for (const buyPrice of currentInventory2) {
+              // Update High Water Mark for Trailing Stop Loss
+              if (currentPrice > (highWaterMark[buyPrice] || buyPrice)) {
+                setHighWaterMark(prev => ({ ...prev, [buyPrice]: currentPrice }));
               }
-            } else if (stopLossBuys.length > 0) {
-              // Trigger stop loss for the worst slot to control damage
-              const targetBuyPrice = Math.max(...stopLossBuys);
-              const qty = holdings[selectedStock.symbol] || 0;
-              const sellQty = Math.min(qty, tradeQuantity) || tradeQuantity;
 
-              if (sellQty > 0 || kisConfig.isConnected) {
-                setScalperMessage(`[손절 완료] ₩${currentPrice.toLocaleString()} (${scalpingStopLoss}%)`);
-                setBotStatus(`[스캘퍼] ₩${currentPrice.toLocaleString()} 리스크 관리 손절...`);
-                await executeTrade('SELL', selectedStock, sellQty, `AI Scalper: ₩${targetBuyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} 손절 완료 (${scalpingStopLoss}%)`, currentPrice);
-                
-                setGapInventory(prev => prev.filter(p => p !== targetBuyPrice));
-                setLastTradeType('SELL');
-                setGapTradeCount(prev => prev + 1);
-                setScalpingLosses(prev => prev + 1);
+              const profitRatio = (currentPrice - buyPrice) / buyPrice;
+              const currentHigh = highWaterMark[buyPrice] || buyPrice;
+              const dropFromPeak = (currentHigh - currentPrice) / currentHigh;
 
-                const loss = (currentPrice - targetBuyPrice) * sellQty * (marketType === 'US' ? exchangeRate : 1);
-                setGapTradingProfit(prev => prev + loss);
-                showNotification(`${selectedStock.name} 리스크 관리 손절 매도 완료 (₩${Math.round(loss).toLocaleString()})`, "error");
-                playScalpingSound('SELL');
+              // 1. Trailing Stop Loss: Lock in gains. If price drops 0.4% from peak after 0.2% profit.
+              const isTrailingStop = profitRatio > 0.002 && dropFromPeak > 0.004; 
+              
+              // 2. High-Momentum Exit: Overbought OR Near Upper Band
+              const isProfitTarget = (isOverBought || isNearUpperBand) && (profitRatio > (scalpingTargetProfit/100));
+              
+              // 3. Fixed Stop Loss: Absolute bottom line
+              const isStopLoss = profitRatio <= scalpingStopLoss / 100;
+
+              if (isTrailingStop || isProfitTarget || isStopLoss) {
+                const qty = holdings[selectedStock.symbol] || 0;
+                const sellQty = Math.min(qty, tradeQuantity) || tradeQuantity;
+
+                if (sellQty > 0 || kisConfig.isConnected) {
+                  let sellReason = "";
+                  if (isTrailingStop) sellReason = "트레일링 스탑 (수익 보존)";
+                  else if (isProfitTarget) sellReason = "과매수/밴드상단 목표 달성";
+                  else sellReason = "리스크 관리 손절";
+
+                  setScalperMessage(`[매도 진행] ${sellReason} ₩${currentPrice.toLocaleString()}`);
+                  await executeTrade('SELL', selectedStock, sellQty, `Profit Max: ${sellReason} (${(profitRatio * 100).toFixed(2)}%)`, currentPrice);
+                  
+                  setGapInventory(prev => prev.filter(p => p !== buyPrice));
+                  setHighWaterMark(prev => {
+                    const next = { ...prev };
+                    delete next[buyPrice];
+                    return next;
+                  });
+                  setLastTradeType('SELL');
+                  setGapTradeCount(prev => prev + 1);
+                  
+                  if (profitRatio > 0) {
+                    setScalpingWins(prev => prev + 1);
+                    showNotification(`${selectedStock.name} ${sellReason} 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
+                  } else {
+                    setScalpingLosses(prev => prev + 1);
+                    showNotification(`${selectedStock.name} ${sellReason} 완료 (${(profitRatio * 100).toFixed(2)}%)`, "error");
+                  }
+
+                  const profit = (currentPrice - buyPrice) * sellQty * (marketType === 'US' ? exchangeRate : 1);
+                  setGapTradingProfit(prev => prev + profit);
+                  playScalpingSound('SELL');
+                  break; // Process one sell per tick for stability
+                }
               }
             }
           }
         }
       } else {
-        setScalperMessage(`현재가(₩${currentPrice.toLocaleString()})가 설정 범위(₩${minPrice.toLocaleString()}~₩${maxPrice.toLocaleString()})를 벗어나 감시 대기 중`);
+        setScalperMessage(`범위 외 관망 (₩${minPrice.toLocaleString()}~₩${maxPrice.toLocaleString()})`);
       }
 
       lastPrice = currentPrice;
-    }, scalpingSpeed); // Custom intervals for incredible fast speed execution
+    }, scalpingSpeed);
 
     return () => clearInterval(gapInterval);
   }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, lowestBidOnlyMode, maxSlots]);
@@ -4293,17 +4286,29 @@ export default function App() {
                     <Activity className="w-6 h-6 text-sleek-blue animate-pulse" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-black text-white uppercase italic tracking-tighter">AI SCALPING TERMINAL</h3>
+                    <h3 className="text-sm font-black text-white uppercase italic tracking-tighter">PROFIT MAXIMIZER ENGINE</h3>
                     <div className="flex items-center gap-2">
                       <div className="w-1.5 h-1.5 rounded-full bg-sleek-green animate-pulse"></div>
-                      <span className="text-[10px] font-bold text-sleek-text-secondary uppercase">Live Market Data Stream</span>
+                      <span className="text-[10px] font-bold text-sleek-text-secondary uppercase">Extreme Performance Active</span>
                     </div>
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className="text-[10px] text-sleek-text-secondary uppercase font-black">Target Price Range</div>
-                  <div className="text-sm font-black text-sleek-blue italic">
-                    ₩{gapBuyPrice && gapSellPrice ? (gapSellPrice - gapBuyPrice).toLocaleString() : '0'}
+                <div className="text-right flex items-center gap-6">
+                  <div>
+                    <div className="text-[10px] text-sleek-text-secondary uppercase font-black">RSI (14)</div>
+                    <div className={cn(
+                      "text-sm font-black italic",
+                      calculateRSI(selectedStock.history.map(h => h.price)) < 30 ? "text-sleek-red" : 
+                      calculateRSI(selectedStock.history.map(h => h.price)) > 70 ? "text-sleek-green" : "text-sleek-blue"
+                    )}>
+                      {Math.round(calculateRSI(selectedStock.history.map(h => h.price)))}
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-[10px] text-sleek-text-secondary uppercase font-black">Target Price Range</div>
+                    <div className="text-sm font-black text-sleek-blue italic">
+                      ₩{gapBuyPrice && gapSellPrice ? (gapSellPrice - gapBuyPrice).toLocaleString() : '0'}
+                    </div>
                   </div>
                 </div>
               </div>
