@@ -1,3 +1,6 @@
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import axios from 'axios';
 import https from 'https';
@@ -5,7 +8,7 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import iconv from 'iconv-lite';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -58,9 +61,19 @@ async function fetchKrxStocks() {
   }
 }
 
-// Initialize Gemini with provided key as fallback or environment variable
-const GEMINI_KEY = process.env.GEMINI_API_KEY || "AIzaSyCemXrlOW04-GFPaK2nWRWr7YHUe99__jc";
-const genAI = new GoogleGenerativeAI(GEMINI_KEY);
+// Initialize Gemini with process.env.GEMINI_API_KEY
+const GEMINI_KEY = process.env.GEMINI_API_KEY;
+if (!GEMINI_KEY) {
+  console.warn("WARNING: GEMINI_API_KEY environment variable is missing.");
+}
+const ai = new GoogleGenAI({
+  apiKey: GEMINI_KEY || "",
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
+    }
+  }
+});
 
 async function startServer() {
   // Populate the high-speed local KRX stock list cache immediately on boot
@@ -108,19 +121,16 @@ async function startServer() {
     `;
 
     try {
-      const model = genAI.getGenerativeModel({
-        model: "gemini-1.5-flash",
-        systemInstruction: "You are the XTX-PRO Predictive Engine. You output precise, cold-logical HFT analysis in JSON format."
-      });
-
-      const result = await model.generateContent({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: {
+      const result = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          systemInstruction: "You are the XTX-PRO Predictive Engine. You output precise, cold-logical HFT analysis in JSON format.",
           responseMimeType: "application/json",
         }
       });
 
-      res.json(JSON.parse(result.response.text()));
+      res.json(JSON.parse(result.text || '{}'));
     } catch (error: any) {
       console.error("Gemini AI Proxy Error:", error);
       res.status(500).json({ error: "AI Analysis failed", message: error.message });
@@ -145,9 +155,11 @@ async function startServer() {
     `;
 
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const result = await model.generateContent(`${systemPrompt}\n\nUser Request: ${prompt}`);
-      const text = result.response.text();
+      const result = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: `${systemPrompt}\n\nUser Request: ${prompt}`
+      });
+      const text = result.text || "";
       
       const jsonMatch = text.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
@@ -170,9 +182,11 @@ async function startServer() {
     `;
 
     try {
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const result = await model.generateContent(prompt);
-      res.json(result.response.text());
+      const result = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt
+      });
+      res.json(result.text);
     } catch (error: any) {
       console.error("Gemini Analysis Error:", error);
       res.status(500).json({ error: "Market analysis failed", message: error.message });
@@ -182,12 +196,14 @@ async function startServer() {
   app.post('/api/ai/bot-decision', async (req, res) => {
     const { prompt } = req.body;
     try {
-      const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
-        generationConfig: { responseMimeType: "application/json" }
+      const result = await ai.models.generateContent({
+        model: "gemini-3.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json"
+        }
       });
-      const result = await model.generateContent(prompt);
-      res.json({ text: result.response.text() });
+      res.json({ text: result.text });
     } catch (error: any) {
       console.error("Bot Decision Error:", error);
       res.status(error.status || 500).json({ error: "Bot analysis failed", message: error.message });
