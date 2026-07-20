@@ -950,6 +950,44 @@ export default function App() {
       return;
     }
 
+    if (kisConfig.isConnected) {
+      setIsSearchingStock(true);
+      setSearchError(null);
+      try {
+        const livePriceData = await kisService.getPrice(symbolToUse);
+        if (livePriceData) {
+          const liveName = livePriceData.name || customName || `(국내) ${symbolToUse}`;
+          const newStock: Stock = {
+            symbol: symbolToUse,
+            name: liveName,
+            price: livePriceData.current,
+            change: livePriceData.change,
+            changePercent: livePriceData.changePercent,
+            volume: livePriceData.volume,
+            history: Array.from({ length: 40 }, (_, i) => ({ 
+              time: `${i}:00`, 
+              price: livePriceData.current * (0.98 + Math.random() * 0.04) 
+            })),
+            isAI: false
+          };
+          setStocks(prev => {
+            if (prev.some(s => s.symbol === symbolToUse)) {
+              return prev.map(s => s.symbol === symbolToUse ? newStock : s);
+            }
+            return [newStock, ...prev];
+          });
+          setSelectedSymbol(symbolToUse);
+          setSearchSymbol("");
+          addLog('SYSTEM', '매수', 0, 0, `[KIS 종목 추가] ${liveName}(${symbolToUse}) 종목이 실시간 연동 등록되었습니다 (현재가: ₩${livePriceData.current.toLocaleString()}).`);
+          setIsSearchingStock(false);
+          return;
+        }
+      } catch (err: any) {
+        console.warn("[KIS Search Fallback] Live fetch failed, falling back to Gemini:", err);
+      }
+      setIsSearchingStock(false);
+    }
+
     if (customName) {
       const initialPrice = marketType === 'KR' ? 5000 : 100;
       const newStock: Stock = {
@@ -1339,7 +1377,7 @@ export default function App() {
         if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output2?.[0]) {
           foundAnyData = true;
           const out2 = domesticBalanceData.output2[0];
-          const domesticCash = Number(out2.d2_dncl_amt || out2.dncl_amt || out2.prsm_dncl_amt || out2.tot_evlu_amt || 0);
+          const domesticCash = Number(out2.d2_dncl_amt || out2.dncl_amt || out2.prsm_dncl_amt || 0);
           const domesticPurchase = Number(out2.pchs_amt_smtl_amt || 0);
           
           totalConvertedBalance += domesticCash;
@@ -1950,8 +1988,24 @@ export default function App() {
     let lastPrice = selectedStock.price;
 
     // A. Start-up: If immediateEntry is checked and inventory is empty, enter first buy position immediately if in range!
-    const runImmediateBuy = async (currentPrice: number) => {
+    const runImmediateBuy = async () => {
+      if (!selectedStock) return;
       if (gapBuyPrice <= 0 || gapSellPrice <= 0) return;
+
+      let currentPrice = selectedStock.price;
+
+      // If KIS is connected, fetch the absolute latest real-time price first to prevent stale prices!
+      if (kisConfig.isConnected) {
+        try {
+          const liveData = await kisService.getPrice(selectedStock.symbol);
+          if (liveData) {
+            currentPrice = liveData.current;
+          }
+        } catch (e) {
+          console.warn("[Immediate Buy] Live KIS price fetch failed, using state price:", e);
+        }
+      }
+
       if (currentPrice < gapBuyPrice || currentPrice > gapSellPrice) {
         setScalperMessage(`현재가(₩${currentPrice.toLocaleString()})가 설정 범위를 벗어나 대기 중`);
         return;
@@ -1981,7 +2035,7 @@ export default function App() {
     };
 
     if (immediateEntry && gapInventoryRef.current.length === 0) {
-      runImmediateBuy(selectedStock.price);
+      runImmediateBuy();
     }
 
     const gapInterval = setInterval(async () => {

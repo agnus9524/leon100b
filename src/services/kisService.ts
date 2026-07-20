@@ -20,6 +20,7 @@ export interface NormalizedPrice {
   change: number;
   changePercent: number;
   volume: string;
+  name?: string;
 }
 
 class KISService {
@@ -302,7 +303,8 @@ class KISService {
           prevClose: Number(data.stck_sdpr),
           change: Number(data.prdy_vrss),
           changePercent: Number(data.prdy_ctrt),
-          volume: data.acml_vol || '0'
+          volume: data.acml_vol || '0',
+          name: data.hts_kor_isnm || undefined
         };
       } else {
         const data = await this.getOverseasPrice(symbol);
@@ -318,7 +320,8 @@ class KISService {
           prevClose,
           change,
           changePercent,
-          volume: data.tvol || '0'
+          volume: data.tvol || '0',
+          name: data.name || data.orgr_isnm || undefined
         };
       }
     } catch (e) {
