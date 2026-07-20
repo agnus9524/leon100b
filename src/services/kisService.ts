@@ -532,6 +532,74 @@ class KISService {
     return res.data;
   }
 
+  public async getDomesticOrderExecutions(startDate: string, endDate: string, oderFg: '00' | '01' | '02' = '00', prcsDvsn: '00' | '01' | '02' = '00') {
+    if (!this.config) throw new Error("KIS Config not initialized");
+
+    const token = await this.getAccessToken();
+    const endpoint = '/uapi/domestic-stock/v1/trading/inquire-ccnl';
+    
+    const headers = {
+      'content-type': 'application/json',
+      'authorization': `Bearer ${token}`,
+      'appkey': this.config.appKey,
+      'appsecret': this.config.appSecret,
+      'tr-id': this.config.isRealServer === false ? 'VTTC8001R' : 'TTTC8001R',
+      'custtype': 'P',
+    };
+
+    const params = {
+      CANO: this.config.accountNo,
+      ACNT_PRDT_CD: this.config.accountCode,
+      INQR_STRT_DT: startDate,
+      INQR_END_DT: endDate,
+      SND_CD: '',
+      SMRT_OTSN_YN: 'N',
+      SMRT_SND_CD: '',
+      ODER_FG_CD: oderFg,
+      CTX_AREA_FK100: '',
+      CTX_AREA_NK100: '',
+      INQR_DVSN: '00',
+      PRCS_DVSN: prcsDvsn,
+      CANO_PWD: this.config.accountPw || ''
+    };
+
+    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+    return res.data;
+  }
+
+  public async checkOrderExecution(odno: string) {
+    if (!this.config) throw new Error("KIS Config not initialized");
+    
+    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    try {
+      const res = await this.getDomesticOrderExecutions(todayStr, todayStr);
+      if (res && res.rt_cd === '0' && res.output1 && Array.isArray(res.output1)) {
+        const order = res.output1.find((item: any) => item.odno === odno);
+        if (order) {
+          const ordQty = Number(order.ord_qty || 0);
+          const ccldQty = Number(order.tot_ccld_qty || 0);
+          const rmndQty = Number(order.rmnd_qty || 0);
+          const prpr = Number(order.avg_prvs || order.ord_unpr || 0);
+          
+          return {
+            found: true,
+            ordQty,
+            ccldQty,
+            rmndQty,
+            isFullyFilled: ccldQty === ordQty && ordQty > 0,
+            isPartiallyFilled: ccldQty > 0 && ccldQty < ordQty,
+            isUnfilled: ccldQty === 0,
+            price: prpr
+          };
+        }
+      }
+      return { found: false, isFullyFilled: false, isPartiallyFilled: false, isUnfilled: true, price: 0 };
+    } catch (e) {
+      console.error("[KIS Service] checkOrderExecution error:", e);
+      return { found: false, isFullyFilled: false, isPartiallyFilled: false, isUnfilled: true, price: 0, error: e };
+    }
+  }
+
   public async orderDomestic(symbol: string, side: 'BUY' | 'SELL', price: string, qty: string, ordDvsn: string = '00') {
     if (!this.config) throw new Error("KIS Config not initialized");
     try {
