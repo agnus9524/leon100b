@@ -4985,7 +4985,7 @@ export default function App() {
             
             {/* 1. Real-time Gap Monitor Gauge */}
             {isGapBotActive && selectedStock && gapBuyPrice > 0 && gapSellPrice > 0 && (
-              <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-3xl p-5 space-y-4">
+              <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-3xl p-5 space-y-4 shrink-0">
                 <div className="flex items-center justify-between">
                   <h3 className="text-[10px] font-black text-sleek-blue uppercase tracking-widest flex items-center gap-2">
                     <TrendingUp className="w-3 h-3 animate-bounce" /> 실시간 구간 모니터
@@ -5127,17 +5127,17 @@ export default function App() {
             )}
 
             {/* 2. Trade Logs */}
-            <div className="flex-1 flex flex-col min-h-0">
-              <div className="flex items-center justify-between mb-4">
+            <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
+              <div className="flex items-center justify-between mb-4 shrink-0">
                 <h3 className="text-[10px] font-black text-white uppercase tracking-widest flex items-center gap-2">
                   <Activity className="w-3 h-3 text-sleek-blue" /> Trade Logs
                 </h3>
                 <span className="text-[9px] font-mono text-sleek-text-secondary bg-white/5 px-2 py-0.5 rounded">Real-time</span>
               </div>
               
-              <div className="flex-1 overflow-y-auto space-y-3 pr-2 scrollbar-thin scrollbar-thumb-white/5">
+              <div className="flex-1 overflow-y-auto space-y-3 pr-2 custom-scrollbar min-h-0">
                 {tradeLogs.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center opacity-20 text-center gap-4">
+                  <div className="h-full flex flex-col items-center justify-center opacity-20 text-center gap-4 py-8">
                     <Zap className="w-8 h-8" />
                     <p className="text-[10px] font-black uppercase tracking-widest">No trades executed</p>
                   </div>
@@ -5182,7 +5182,7 @@ export default function App() {
             </div>
 
             {/* 3. System Diagnostics */}
-            <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-3xl p-5 space-y-4">
+            <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-3xl p-5 space-y-4 shrink-0">
               <h3 className="text-[10px] font-black text-sleek-blue uppercase tracking-widest flex items-center gap-2">
                 <Bot className="w-3 h-3" /> System Diagnostics
               </h3>
