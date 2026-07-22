@@ -1102,7 +1102,7 @@ export default function App() {
       try {
         const livePriceData = await kisService.getPrice(symbolToUse);
         if (livePriceData) {
-          const liveName = livePriceData.name || customName || `(국내) ${symbolToUse}`;
+          const liveName = livePriceData.name || customName || symbolToUse;
           const newStock: Stock = {
             symbol: symbolToUse,
             name: liveName,
@@ -1531,7 +1531,7 @@ export default function App() {
       // Final Check: If absolutely no data was fetched and there was a domestic error, notify user
       if (!foundAnyData && domesticError) {
          setBotStatus("연동 데이터 수신 실패");
-         showNotification(`KIS 국내 잔고 수신 실패: ${domesticError}`, "error");
+         showNotification(`KIS 계좌 잔고 수신 실패: ${domesticError}`, "error");
          return;
       }
 
@@ -1575,7 +1575,7 @@ export default function App() {
             if (p) {
               return {
                 symbol: sym,
-                name: /^\d{6}$/.test(sym) ? `(국내) ${sym}` : `(해외) ${sym}`,
+                name: p.name || sym,
                 price: p.current,
                 change: p.change,
                 changePercent: p.changePercent,
@@ -3224,7 +3224,7 @@ export default function App() {
                    </div>
                 </div>
                 <div>
-                   <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">국내 주문 구분 (Order Type)</label>
+                   <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">주문 구분 (Order Type)</label>
                    <select
                      value={kisConfig.domesticOrderType || '00'}
                      onChange={(e) => setKisConfig(prev => ({ ...prev, domesticOrderType: e.target.value }))}
@@ -4312,7 +4312,7 @@ export default function App() {
                     placeholder="직접 입력 (%)"
                   />
                   <p className="text-[9px] text-sleek-text-secondary mt-1.5 leading-normal">
-                    * <strong>수수료/제세금 방어 보정 활성화</strong>: 봇이 진입 평단가 대비 실제 거래 비용(국내 약 0.22%, 미국 약 0.03%)을 자동으로 가산하여 <strong>순수익이 {scalpingTargetProfit}% 이상</strong> 발생하는 시점에만 매도를 실행합니다.
+                    * <strong>수수료/제세금 방어 보정 활성화</strong>: 봇이 진입 평단가 대비 실제 거래 비용(한국주식 약 0.22%, 미국주식 약 0.03%)을 자동으로 가산하여 <strong>순수익이 {scalpingTargetProfit}% 이상</strong> 발생하는 시점에만 매도를 실행합니다.
                   </p>
                 </div>
 
@@ -4997,7 +4997,10 @@ export default function App() {
                             "w-2 h-2 rounded-full",
                             log.type === 'BUY' ? "bg-up shadow-[0_0_10px_#10B981]" : "bg-down shadow-[0_0_10px_#EF4444]"
                           )} />
-                          <span className="text-xs font-black text-white">{log.symbol}</span>
+                          {(() => {
+                            const found = stocks.find(s => s.symbol === log.symbol) || INITIAL_STOCKS_KR.find(s => s.symbol === log.symbol) || INITIAL_STOCKS.find(s => s.symbol === log.symbol);
+                            return <span className="text-xs font-black text-white">{found ? `${found.name} (${log.symbol})` : log.symbol}</span>;
+                          })()}
                         </div>
                         <span className="text-[9px] font-mono text-sleek-text-secondary opacity-50">{log.time}</span>
                       </div>
@@ -5052,8 +5055,8 @@ export default function App() {
         <div className="flex px-4 animate-[marquee_60s_linear_infinite] gap-12 text-[10px] font-mono">
           {stocks.map(s => (
             <div key={s.symbol} className="flex gap-2">
-              <span className="text-white font-bold">{s.symbol}</span>
-              <span className="text-gray-500">${s.price}</span>
+              <span className="text-white font-bold">{s.name} ({s.symbol})</span>
+              <span className="text-gray-500">₩{s.price?.toLocaleString()}</span>
               <span className={s.change >= 0 ? "text-up" : "text-down"}>{s.changePercent}%</span>
             </div>
           ))}
