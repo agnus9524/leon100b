@@ -693,6 +693,72 @@ export default function App() {
     };
   }, [balance, holdings, stocks, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, principal, pnl, pnlPercent]);
 
+  // Scalper Engine Optimal Top 5 Stocks
+  const scalperTop5Stocks = useMemo(() => {
+    const candidateMap = new Map<string, Stock>();
+    
+    // Add current stocks
+    stocks.forEach(s => candidateMap.set(s.symbol, s));
+    
+    // Add default market stocks if not present
+    const defaults = marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS;
+    defaults.forEach(s => {
+      if (!candidateMap.has(s.symbol)) {
+        candidateMap.set(s.symbol, s);
+      }
+    });
+
+    const candidates = Array.from(candidateMap.values());
+
+    return candidates.map((stock) => {
+      // Calculate price oscillation amplitude (%) from history
+      let oscillation = 1.8;
+      if (stock.history && stock.history.length > 1) {
+        const prices = stock.history.map(h => h.price).filter(p => p > 0);
+        if (prices.length > 0) {
+          const minP = Math.min(...prices);
+          const maxP = Math.max(...prices);
+          oscillation = ((maxP - minP) / (minP || 1)) * 100;
+        }
+      }
+
+      // Dynamic Scalper Fitness Score Calculation
+      let volScore = Math.min(30, oscillation * 8);
+      let changeScore = Math.min(25, Math.abs(stock.changePercent) * 4);
+      
+      let rawVol = 100;
+      if (typeof stock.volume === 'string') {
+        if (stock.volume.endsWith('M')) rawVol = parseFloat(stock.volume) * 1000;
+        else if (stock.volume.endsWith('K')) rawVol = parseFloat(stock.volume);
+        else rawVol = parseFloat(stock.volume) || 100;
+      } else if (typeof stock.volume === 'number') {
+        rawVol = stock.volume;
+      }
+      let liquidityScore = Math.min(25, Math.log10(rawVol + 10) * 6);
+
+      // Deterministic seed for stock stability per symbol
+      const charSum = stock.symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+      const seed = (charSum % 12);
+
+      const rawTotal = 42 + volScore + changeScore + liquidityScore + seed;
+      const scalpScore = Math.min(99, Math.max(82, Math.round(rawTotal)));
+
+      // Primary reason tag for scalping engine
+      let reasonTag = "호가 진동 유망";
+      if (oscillation > 2.0) reasonTag = `⚡ 호가진동 ${oscillation.toFixed(1)}%`;
+      else if (Math.abs(stock.changePercent) > 2.0) reasonTag = `🔥 고변동 모멘텀`;
+      else if (rawVol > 500) reasonTag = `💧 체결 유동성 우수`;
+      else reasonTag = `📈 XTX 상승 수급`;
+
+      return {
+        ...stock,
+        scalpScore,
+        oscillation,
+        reasonTag
+      };
+    }).sort((a, b) => b.scalpScore - a.scalpScore).slice(0, 5);
+  }, [stocks, marketType]);
+
   // Real-time Exchange Rate Fetcher & Simulator
   const fetchRealExchangeRate = React.useCallback(async () => {
     try {
@@ -3901,6 +3967,98 @@ export default function App() {
                 </div>
               </div>
             )}
+
+            {/* 스캘퍼 엔진 최적 종목 TOP 5 Ranking Widget */}
+            <div className="space-y-3 pt-4 border-t border-white/10">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <div className="p-1 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-400">
+                    <Zap className="w-3.5 h-3.5 fill-amber-400/30 animate-pulse" />
+                  </div>
+                  <div>
+                    <h2 className="text-[11px] font-black text-white uppercase tracking-wider flex items-center gap-1.5">
+                      스캘퍼 최적 종목 TOP 5
+                      <span className="relative flex h-2 w-2">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                      </span>
+                    </h2>
+                  </div>
+                </div>
+                <span className="text-[9px] font-mono text-amber-300 font-bold px-2 py-0.5 bg-amber-500/10 rounded-full border border-amber-500/20">
+                  {marketType === 'KR' ? '국내' : '미국'}
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {scalperTop5Stocks.map((st, idx) => {
+                  const isSelected = selectedSymbol === st.symbol;
+                  const isUS = /^[A-Z]/.test(st.symbol);
+                  const pricePrefix = isUS ? '$' : '₩';
+                  
+                  return (
+                    <motion.div
+                      key={st.symbol}
+                      whileHover={{ scale: 1.01 }}
+                      onClick={() => {
+                        if (!stocks.some(s => s.symbol === st.symbol)) {
+                          setStocks(prev => [...prev, st]);
+                        }
+                        setSelectedSymbol(st.symbol);
+                        showNotification(`[스캘퍼 종목 지정] ${st.name}(${st.symbol}) 종목이 스캘핑 엔진에 선택되었습니다.`, "info");
+                      }}
+                      className={cn(
+                        "p-2.5 rounded-xl border transition-all cursor-pointer group relative overflow-hidden",
+                        isSelected
+                          ? "bg-amber-500/15 border-amber-500/50 shadow-md shadow-amber-500/5"
+                          : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-amber-500/30"
+                      )}
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        {/* Left: Rank Badge + Stock Name & Symbol */}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <div className={cn(
+                            "w-5 h-5 rounded-md text-[10px] font-black font-mono flex items-center justify-center shrink-0 shadow-sm border",
+                            idx === 0 ? "bg-gradient-to-br from-amber-400 to-yellow-600 text-black border-amber-300 font-extrabold" :
+                            idx === 1 ? "bg-gradient-to-br from-slate-300 to-slate-500 text-black border-slate-200" :
+                            idx === 2 ? "bg-gradient-to-br from-amber-700 to-amber-900 text-amber-200 border-amber-600" :
+                            "bg-white/10 text-slate-300 border-white/10"
+                          )}>
+                            {idx === 0 ? '1' : idx === 1 ? '2' : idx === 2 ? '3' : `${idx + 1}`}
+                          </div>
+
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-xs font-bold text-white truncate">{st.name}</span>
+                              <span className="text-[9px] font-mono text-sleek-text-secondary shrink-0">({st.symbol})</span>
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              <span className="text-[9px] font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
+                                {st.reasonTag}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Right: Score + Price */}
+                        <div className="text-right shrink-0">
+                          <div className="flex items-center justify-end gap-1">
+                            <span className="text-[9px] text-sleek-text-secondary">적합도</span>
+                            <span className="text-xs font-black font-mono text-emerald-400">{st.scalpScore}점</span>
+                          </div>
+                          <div className="text-[10px] font-mono font-bold text-slate-200 mt-0.5">
+                            {pricePrefix}{st.price?.toLocaleString()}
+                            <span className={cn("ml-1 text-[9px]", (st.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                              {(st.changePercent || 0) >= 0 ? '+' : ''}{(st.changePercent || 0).toFixed(1)}%
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
+              </div>
+            </div>
 
             <div className="space-y-4">
               <h2 className="text-[10px] font-bold text-sleek-text-secondary uppercase tracking-widest">실시간 계좌 현황</h2>
