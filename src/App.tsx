@@ -16,6 +16,7 @@ import {
   Bell, 
   User, 
   CircleDollarSign,
+  Briefcase,
   Zap,
   Clock,
   Play,
@@ -455,6 +456,20 @@ export default function App() {
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
   const [maxSlots, setMaxSlots] = useState<number>(10);
+
+  // Manual Limit Sell States
+  const [manualSellWatches, setManualSellWatches] = useState<{
+    id: string;
+    symbol: string;
+    stockName: string;
+    targetPrice: number;
+    quantity: number;
+    createdAt: number;
+  }[]>([]);
+  const [manualSellModalOpen, setManualSellModalOpen] = useState<boolean>(false);
+  const [manualSellPrice, setManualSellPrice] = useState<number>(0);
+  const [manualSellQty, setManualSellQty] = useState<number>(1);
+  const [isTargetWatchMode, setIsTargetWatchMode] = useState<boolean>(true);
 
   // Direct Key Login fallback states
   const [isDirectLoginOpen, setIsDirectLoginOpen] = useState(false);
@@ -2255,6 +2270,33 @@ export default function App() {
   // Trailing Stop Loss State to track the peak price after each buy
   const [highWaterMark, setHighWaterMark] = useState<{ [price: number]: number }>({});
 
+  // Background Watcher for Manual Target Sell Orders (수동 지정가 매도 감시)
+  useEffect(() => {
+    if (manualSellWatches.length === 0) return;
+
+    const watchInterval = setInterval(() => {
+      manualSellWatches.forEach(async (watch) => {
+        const currentStock = stocksRef.current.find(s => s.symbol === watch.symbol);
+        if (!currentStock) return;
+
+        if (currentStock.price >= watch.targetPrice) {
+          const heldQty = holdings[watch.symbol] || 0;
+          const sellQty = Math.min(watch.quantity, heldQty > 0 ? heldQty : watch.quantity);
+
+          if (sellQty > 0 || (kisConfig.isConnected && kisConfig.isRealOrderEnabled)) {
+            showNotification(`[지정가 매도 체결] ${currentStock.name} 현재가(₩${currentStock.price.toLocaleString()})가 목표가(₩${watch.targetPrice.toLocaleString()})에 도달하여 수동 매도가 실행되었습니다!`, "success");
+            await executeTrade('SELL', currentStock, sellQty, `[수동 지정가 감시] 목표가 ₩${watch.targetPrice.toLocaleString()} 도달 체결`, currentStock.price);
+            
+            setManualSellWatches(prev => prev.filter(w => w.id !== watch.id));
+            playScalpingSound('SELL');
+          }
+        }
+      });
+    }, 1000);
+
+    return () => clearInterval(watchInterval);
+  }, [manualSellWatches, holdings, kisConfig.isConnected, kisConfig.isRealOrderEnabled]);
+
   // 2. High-speed automatic trading decisions (Profit Maximizer Engine)
   useEffect(() => {
     if (!isGapBotActive || !selectedStock) {
@@ -2650,6 +2692,53 @@ export default function App() {
       time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
       symbol, type, price, amount, reason
     }, ...prev].slice(0, 50));
+  };
+
+  const handleExecuteManualSell = async () => {
+    if (!selectedStock) {
+      showNotification("매도할 종목을 선택해 주세요.", "error");
+      return;
+    }
+
+    const heldQty = holdings[selectedStock.symbol] || 0;
+    if (manualSellQty <= 0) {
+      showNotification("올바른 매도 수량을 입력해 주세요.", "error");
+      return;
+    }
+
+    if (manualSellQty > heldQty && (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled)) {
+      showNotification(`보유 수량(${heldQty}주)을 초과하여 매도할 수 없습니다.`, "error");
+      return;
+    }
+
+    if (manualSellPrice <= 0) {
+      showNotification("올바른 매도 희망 단가를 입력해 주세요.", "error");
+      return;
+    }
+
+    const currentPrice = selectedStock.price;
+
+    if (currentPrice >= manualSellPrice || !isTargetWatchMode) {
+      showNotification(`${selectedStock.name} ₩${manualSellPrice.toLocaleString()} 지정가 매도 진행 중...`, "info");
+      const executed = await executeTrade('SELL', selectedStock, manualSellQty, `[수동 지정가 매도] 희망가 ₩${manualSellPrice.toLocaleString()} 실행`, manualSellPrice);
+      if (executed > 0) {
+        showNotification(`${selectedStock.name} ₩${manualSellPrice.toLocaleString()} 지정가 매도 완료 (${executed}주)`, "success");
+        playScalpingSound('SELL');
+        setManualSellModalOpen(false);
+      }
+    } else {
+      const newWatch = {
+        id: `WATCH-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        symbol: selectedStock.symbol,
+        stockName: selectedStock.name,
+        targetPrice: manualSellPrice,
+        quantity: manualSellQty,
+        createdAt: Date.now()
+      };
+      setManualSellWatches(prev => [...prev, newWatch]);
+      showNotification(`[지정가 매도 예약 등록] ${selectedStock.name} 목표가 ₩${manualSellPrice.toLocaleString()} 도달 시 자동 매도됩니다.`, "success");
+      setManualSellModalOpen(false);
+    }
   };
 
   const handleExecuteXtxSignal = (sig: MarketSignal) => {
@@ -3619,18 +3708,35 @@ export default function App() {
               </div>
             </div>
           </div>
-          <button 
-            onClick={() => setIsGapBotActive(!isGapBotActive)}
-            className={cn(
-              "flex items-center gap-2 px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-bold text-[10px] md:text-xs transition-all",
-              isGapBotActive 
-                ? "bg-sleek-red/20 text-sleek-red border border-sleek-red/30 hover:bg-sleek-red hover:text-white" 
-                : "bg-sleek-blue/20 text-sleek-blue border border-sleek-blue/30 hover:bg-sleek-blue hover:text-white"
-            )}
-          >
-            {isGapBotActive ? <Square className="w-2.5 h-2.5 fill-current" /> : <Play className="w-2.5 h-2.5 fill-current" />}
-            {isGapBotActive ? "정지" : "자동 스캘핑 시작"}
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (selectedStock) {
+                  const held = holdings[selectedStock.symbol] || 1;
+                  setManualSellPrice(selectedStock.price || 0);
+                  setManualSellQty(held > 0 ? held : 1);
+                }
+                setManualSellModalOpen(true);
+              }}
+              className="flex items-center gap-2 px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-bold text-[10px] md:text-xs bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500 hover:text-white transition-all shadow-sm"
+            >
+              <CircleDollarSign className="w-3.5 h-3.5" />
+              <span>수동 지정가 매도</span>
+            </button>
+
+            <button 
+              onClick={() => setIsGapBotActive(!isGapBotActive)}
+              className={cn(
+                "flex items-center gap-2 px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-bold text-[10px] md:text-xs transition-all",
+                isGapBotActive 
+                  ? "bg-sleek-red/20 text-sleek-red border border-sleek-red/30 hover:bg-sleek-red hover:text-white" 
+                  : "bg-sleek-blue/20 text-sleek-blue border border-sleek-blue/30 hover:bg-sleek-blue hover:text-white"
+              )}
+            >
+              {isGapBotActive ? <Square className="w-2.5 h-2.5 fill-current" /> : <Play className="w-2.5 h-2.5 fill-current" />}
+              {isGapBotActive ? "정지" : "자동 스캘핑 시작"}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -3728,9 +3834,97 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            {/* 하단 보유 주식 현황 리스트 Widget */}
+            <div className="space-y-3 pt-4 border-t border-white/10">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Briefcase className="w-4 h-4 text-sleek-blue" />
+                  <h2 className="text-[11px] font-bold text-white uppercase tracking-wider">보유 주식 현황</h2>
+                </div>
+                <span className="text-[10px] font-mono text-sleek-blue font-bold px-2 py-0.5 bg-sleek-blue/10 rounded-full border border-sleek-blue/20">
+                  {Object.entries(holdings).filter(([_, qty]) => Number(qty) > 0).length} 종목
+                </span>
+              </div>
+
+              <div className="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar pr-1">
+                {Object.entries(holdings).filter(([_, qty]) => Number(qty) > 0).length === 0 ? (
+                  <div className="bg-white/5 border border-white/5 rounded-2xl p-4 text-center">
+                    <p className="text-[11px] text-sleek-text-secondary">현재 보유 중인 주식이 없습니다.</p>
+                  </div>
+                ) : (
+                  Object.entries(holdings)
+                    .filter(([_, qty]) => Number(qty) > 0)
+                    .map(([sym, rawQty]) => {
+                      const qty = Number(rawQty);
+                      const st = stocks.find(s => s.symbol === sym) || { name: sym, symbol: sym, price: 0, changePercent: 0 };
+                      const evalValue = (st.price || 0) * qty;
+                      const isSelected = selectedSymbol === sym;
+
+                      return (
+                        <div 
+                          key={sym}
+                          className={cn(
+                            "p-3 rounded-2xl border transition-all flex items-center justify-between text-xs",
+                            isSelected 
+                              ? "bg-sleek-blue/15 border-sleek-blue/40" 
+                              : "bg-white/5 border-white/5 hover:bg-white/10"
+                          )}
+                        >
+                          <div 
+                            className="cursor-pointer flex-1 min-w-0 pr-2"
+                            onClick={() => {
+                              setSelectedSymbol(sym);
+                              setManualSellPrice(st.price || 0);
+                              setManualSellQty(qty);
+                            }}
+                          >
+                            <div className="font-bold text-white truncate flex items-center gap-1.5">
+                              <span className="truncate">{st.name}</span>
+                              <span className="text-[9px] font-mono text-sleek-text-secondary shrink-0">({sym})</span>
+                            </div>
+                            <div className="text-[10px] text-sleek-text-secondary mt-1 flex items-center gap-2">
+                              <span className="font-bold text-emerald-400">{qty.toLocaleString()} 주</span>
+                              <span>•</span>
+                              <span>₩{Math.round(evalValue).toLocaleString()}</span>
+                            </div>
+                          </div>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedSymbol(sym);
+                              setManualSellPrice(st.price || 0);
+                              setManualSellQty(qty);
+                              setManualSellModalOpen(true);
+                            }}
+                            className="px-2.5 py-1.5 bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/30 rounded-xl text-[10px] font-bold transition-all shrink-0 flex items-center gap-1 shadow-sm"
+                          >
+                            수동 매도
+                          </button>
+                        </div>
+                      );
+                    })
+                )}
+              </div>
+            </div>
           </div>
 
-          <div className="mt-auto pt-6 border-t border-white/5">
+          <div className="mt-auto pt-6 border-t border-white/5 space-y-2">
+            <button
+              onClick={() => {
+                if (selectedStock) {
+                  const held = holdings[selectedStock.symbol] || 1;
+                  setManualSellPrice(selectedStock.price || 0);
+                  setManualSellQty(held > 0 ? held : 1);
+                }
+                setManualSellModalOpen(true);
+              }}
+              className="w-full flex items-center justify-center gap-2 p-3 rounded-2xl bg-gradient-to-r from-rose-500/20 to-amber-500/20 border border-rose-500/30 text-rose-300 hover:bg-rose-500/30 transition-all font-bold text-xs shadow-lg"
+            >
+              <CircleDollarSign className="w-4 h-4 text-rose-400" />
+              <span>원하는 금액에 수동 매도 (지정가)</span>
+            </button>
+
             <button 
               onClick={() => setShowKisModal(true)}
               className="w-full flex items-center justify-between p-4 rounded-2xl bg-white/5 border border-white/5 hover:bg-white/10 transition-all text-left"
@@ -4727,6 +4921,229 @@ export default function App() {
           ))}
         </div>
       </footer>
+
+      {/* Manual Target Price Sell Modal (수동 지정가 매도 모달) */}
+      <AnimatePresence>
+        {manualSellModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-sleek-card border border-sleek-border rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl space-y-6 relative overflow-hidden"
+            >
+              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-500/20 border border-rose-500/30 flex items-center justify-center text-rose-400">
+                    <CircleDollarSign className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white">수동 지정가 매도 주문</h3>
+                    <p className="text-xs text-sleek-text-secondary">자동 스캘핑과 상관없이 원하는 금액에 매도합니다.</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setManualSellModalOpen(false)}
+                  className="p-2 rounded-xl bg-white/5 text-sleek-text-secondary hover:text-white hover:bg-white/10 transition-all"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Selected Stock Info */}
+              {selectedStock ? (
+                <div className="bg-sleek-bg/80 border border-sleek-border rounded-2xl p-4 space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm font-black text-white">{selectedStock.name} ({selectedStock.symbol})</span>
+                    <span className="text-xs font-mono font-bold text-sleek-blue">현재가: ₩{selectedStock.price?.toLocaleString()}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-sleek-text-secondary pt-2 border-t border-white/5">
+                    <span>보유 수량: <strong className="text-white">{holdings[selectedStock.symbol] || 0} 주</strong></span>
+                    <span>평가금액: ₩{Math.round((holdings[selectedStock.symbol] || 0) * (selectedStock.price || 0)).toLocaleString()}</span>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-center py-4 text-xs text-rose-400 bg-rose-500/10 rounded-2xl border border-rose-500/20">
+                  종목이 선택되지 않았습니다. 매도할 종목을 먼저 선택해 주세요.
+                </div>
+              )}
+
+              {/* Price and Quantity Inputs */}
+              <div className="space-y-4">
+                {/* Target Sell Price Input */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-xs font-bold text-sleek-text-secondary">
+                    <span>매도 희망 단가 (원하는 금액)</span>
+                    {selectedStock && manualSellPrice > 0 && (
+                      <span className={cn(
+                        "font-mono text-[11px]",
+                        manualSellPrice >= (selectedStock.price || 0) ? "text-emerald-400" : "text-rose-400"
+                      )}>
+                        현재가 대비 {(((manualSellPrice - selectedStock.price) / selectedStock.price) * 100).toFixed(2)}%
+                      </span>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <input 
+                      type="number"
+                      value={manualSellPrice || ''}
+                      onChange={(e) => setManualSellPrice(Number(e.target.value))}
+                      placeholder="희망 매도가 입력 (원)"
+                      className="w-full bg-sleek-bg border border-sleek-border rounded-2xl py-3 px-4 text-sm font-mono font-bold text-white focus:border-rose-500 outline-none transition-all"
+                    />
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-sleek-text-secondary">KRW</span>
+                  </div>
+
+                  {/* Quick Price Adjust Buttons */}
+                  {selectedStock && (
+                    <div className="flex flex-wrap gap-1.5 pt-1">
+                      <button
+                        onClick={() => setManualSellPrice(selectedStock.price)}
+                        className="px-2.5 py-1 bg-white/5 hover:bg-white/10 rounded-xl text-[10px] font-bold text-sleek-text-secondary hover:text-white transition-all border border-white/5"
+                      >
+                        현재가 (₩{selectedStock.price.toLocaleString()})
+                      </button>
+                      <button
+                        onClick={() => setManualSellPrice(Math.round(selectedStock.price * 1.005))}
+                        className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-bold transition-all border border-emerald-500/20"
+                      >
+                        +0.5%
+                      </button>
+                      <button
+                        onClick={() => setManualSellPrice(Math.round(selectedStock.price * 1.01))}
+                        className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-bold transition-all border border-emerald-500/20"
+                      >
+                        +1.0%
+                      </button>
+                      <button
+                        onClick={() => setManualSellPrice(Math.round(selectedStock.price * 1.02))}
+                        className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-bold transition-all border border-emerald-500/20"
+                      >
+                        +2.0%
+                      </button>
+                      <button
+                        onClick={() => setManualSellPrice(Math.round(selectedStock.price * 1.05))}
+                        className="px-2.5 py-1 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 rounded-xl text-[10px] font-bold transition-all border border-emerald-500/20"
+                      >
+                        +5.0%
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                {/* Sell Quantity Input */}
+                <div className="space-y-2">
+                  <div className="flex justify-between items-center text-xs font-bold text-sleek-text-secondary">
+                    <span>매도 수량</span>
+                    <span>최대 {selectedStock ? (holdings[selectedStock.symbol] || 0) : 0}주</span>
+                  </div>
+                  <div className="relative">
+                    <input 
+                      type="number"
+                      value={manualSellQty || ''}
+                      onChange={(e) => setManualSellQty(Number(e.target.value))}
+                      placeholder="매도 수량 입력"
+                      className="w-full bg-sleek-bg border border-sleek-border rounded-2xl py-3 px-4 text-sm font-mono font-bold text-white focus:border-rose-500 outline-none transition-all"
+                    />
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-sleek-text-secondary">주</span>
+                  </div>
+
+                  {/* Quick Quantity Buttons */}
+                  {selectedStock && (
+                    <div className="flex gap-1.5 pt-1">
+                      {[0.25, 0.5, 0.75, 1.0].map((ratio) => {
+                        const maxQty = holdings[selectedStock.symbol] || 1;
+                        const calculated = Math.max(1, Math.floor(maxQty * ratio));
+                        return (
+                          <button
+                            key={ratio}
+                            onClick={() => setManualSellQty(calculated)}
+                            className="flex-1 py-1 bg-white/5 hover:bg-white/10 rounded-xl text-[10px] font-bold text-sleek-text-secondary hover:text-white transition-all border border-white/5"
+                          >
+                            {ratio * 100}% {ratio === 1.0 ? '(전량)' : ''}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Sell Order Mode Toggle */}
+                <div className="bg-sleek-bg p-3 rounded-2xl border border-sleek-border flex items-center justify-between">
+                  <div>
+                    <div className="text-xs font-bold text-white">목표가 도달 시 자동 감시 매도</div>
+                    <div className="text-[10px] text-sleek-text-secondary">희망 가격에 도달할 때까지 실시간 감시 후 체결시킵니다.</div>
+                  </div>
+                  <button
+                    onClick={() => setIsTargetWatchMode(!isTargetWatchMode)}
+                    className={cn(
+                      "w-12 h-6 rounded-full transition-colors relative p-1 shadow-inner",
+                      isTargetWatchMode ? "bg-rose-500" : "bg-white/20"
+                    )}
+                  >
+                    <div className={cn(
+                      "w-4 h-4 rounded-full bg-white transition-transform shadow-md",
+                      isTargetWatchMode ? "translate-x-6" : "translate-x-0"
+                    )} />
+                  </button>
+                </div>
+
+                {/* Expected Revenue Summary */}
+                {manualSellPrice > 0 && manualSellQty > 0 && (
+                  <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 flex justify-between items-center">
+                    <span className="text-xs text-rose-300 font-bold">총 매도 예상 금액</span>
+                    <span className="text-lg font-black font-mono text-rose-400">
+                      ₩{Math.round(manualSellPrice * manualSellQty).toLocaleString()}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setManualSellModalOpen(false)}
+                  className="flex-1 py-3 rounded-2xl bg-white/5 border border-white/10 hover:bg-white/10 font-bold text-xs text-sleek-text-secondary hover:text-white transition-all"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={handleExecuteManualSell}
+                  className="flex-1 py-3 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-black text-xs transition-all shadow-lg shadow-rose-500/25 flex items-center justify-center gap-2"
+                >
+                  <CircleDollarSign className="w-4 h-4" />
+                  {isTargetWatchMode ? "목표가 감시 매도 예약 등록" : "즉시 지정가 수동 매도 실행"}
+                </button>
+              </div>
+
+              {/* Active Watches Section inside Modal */}
+              {manualSellWatches.length > 0 && (
+                <div className="pt-4 border-t border-white/10 space-y-2">
+                  <div className="text-xs font-bold text-sleek-text-secondary flex items-center justify-between">
+                    <span>현재 활성 지정가 매도 예약 ({manualSellWatches.length}건)</span>
+                  </div>
+                  <div className="space-y-1.5 max-h-[120px] overflow-y-auto custom-scrollbar">
+                    {manualSellWatches.map((w) => (
+                      <div key={w.id} className="p-2.5 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between text-xs">
+                        <div>
+                          <span className="font-bold text-white">{w.stockName}</span>
+                          <span className="text-[10px] text-sleek-text-secondary ml-2">목표: ₩{w.targetPrice.toLocaleString()} ({w.quantity}주)</span>
+                        </div>
+                        <button
+                          onClick={() => setManualSellWatches(prev => prev.filter(item => item.id !== w.id))}
+                          className="text-[10px] text-rose-400 hover:text-rose-300 font-bold px-2 py-1 bg-rose-500/10 rounded-lg hover:bg-rose-500/20 transition-all"
+                        >
+                          취소
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
         </>
       )}
     </div>
