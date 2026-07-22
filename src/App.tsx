@@ -331,6 +331,17 @@ export default function App() {
   const [balance, setBalance] = useState(0); // User's money (will be synced via KIS)
   const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
   const [holdings, setHoldings] = useState<Record<string, number>>({});
+  const [avgPrices, setAvgPrices] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem('sleek_avg_prices') || '{}'); } catch { return {}; }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sleek_avg_prices', JSON.stringify(avgPrices));
+    } catch (e) {
+      console.error("Failed to persist avgPrices", e);
+    }
+  }, [avgPrices]);
   const [sellableHoldings, setSellableHoldings] = useState<Record<string, number>>({});
   const [isBotActive, setIsBotActive] = useState(false);
   const [tradeLogs, setTradeLogs] = useState<TradeLog[]>([]);
@@ -1373,6 +1384,8 @@ export default function App() {
       setBotStatus("실거래 계좌 동기화 중...");
       
       const newHoldings: Record<string, number> = {};
+      const newAvgPrices: Record<string, number> = {};
+      const newStockNames: Record<string, string> = {};
       let totalConvertedBalance = 0;
       let totalConvertedPrincipal = 0;
       let overseasError = null;
@@ -1404,7 +1417,13 @@ export default function App() {
           holdingsData.output1.forEach((item: any) => {
             if (item.pdno) {
               const qty = Number(item.ccl_qty || item.hldg_qty || 0);
-              if (qty > 0) newHoldings[item.pdno] = (newHoldings[item.pdno] || 0) + qty;
+              const avgP = Number(item.pchs_avg_pric || item.pchs_unpr || item.pchs_avg_price || 0);
+              const name = item.ovrs_item_name || item.item_name || item.prdt_name;
+              if (qty > 0) {
+                newHoldings[item.pdno] = (newHoldings[item.pdno] || 0) + qty;
+                if (avgP > 0) newAvgPrices[item.pdno] = avgP;
+                if (name) newStockNames[item.pdno] = name;
+              }
             }
           });
         }
@@ -1432,8 +1451,12 @@ export default function App() {
           for (const item of domesticBalanceData.output1) {
             if (item.pdno && item.pdno !== '000000') {
               const qty = Number(item.hldg_qty || item.hldg_qty_2 || 0);
+              const avgP = Number(item.pchs_avg_pric || item.pchs_unpr || item.pchs_avg_price || (item.pchs_amt && qty ? item.pchs_amt / qty : 0) || 0);
+              const name = item.prdt_name;
               if (qty > 0) {
                 newHoldings[item.pdno] = (newHoldings[item.pdno] || 0) + qty;
+                if (avgP > 0) newAvgPrices[item.pdno] = avgP;
+                if (name) newStockNames[item.pdno] = name;
                 
                 try {
                   const sellableData = await kisService.getDomesticSellableQuantity(item.pdno);
@@ -1532,6 +1555,7 @@ export default function App() {
       setPrincipal(totalConvertedPrincipal);
       
       setHoldings(newHoldings);
+      setAvgPrices(prev => ({ ...prev, ...newAvgPrices }));
       if (currentUser) {
         saveUserHoldings(currentUser.uid, newHoldings);
       }
@@ -2142,8 +2166,13 @@ export default function App() {
           if (order.isSimulated) {
             // Fill simulated order
             setGapInventory(prev => [...prev, orderPrice]);
-            const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + order.quantity).toFixed(4)) };
+            const oldQty = holdings[order.symbol] || 0;
+            const oldAvg = avgPrices[order.symbol] || orderPrice;
+            const newQty = oldQty + order.quantity;
+            const newAvg = newQty > 0 ? Math.round(((oldQty * oldAvg) + (order.quantity * orderPrice)) / newQty) : orderPrice;
+            const newHoldings = { ...holdings, [order.symbol]: Number(newQty.toFixed(4)) };
             setHoldings(newHoldings);
+            setAvgPrices(prev => ({ ...prev, [order.symbol]: newAvg }));
             if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
             
             addLog(order.symbol, '매수', orderPrice, order.quantity, `[모의 체결] 주문가 ₩${orderPrice.toLocaleString()} 체결 완료 (현재가: ₩${currentPrice.toLocaleString()})`);
@@ -2610,8 +2639,13 @@ export default function App() {
         }
 
         setBalance(prev => Math.max(0, prev - cost));
-        const newHoldings = { ...holdings, [stock.symbol]: Number(((holdings[stock.symbol] || 0) + finalAmount).toFixed(4)) };
+        const oldQty = holdings[stock.symbol] || 0;
+        const oldAvg = avgPrices[stock.symbol] || tradePrice;
+        const newQty = oldQty + finalAmount;
+        const newAvg = newQty > 0 ? Math.round(((oldQty * oldAvg) + (finalAmount * tradePrice)) / newQty) : tradePrice;
+        const newHoldings = { ...holdings, [stock.symbol]: Number(newQty.toFixed(4)) };
         setHoldings(newHoldings);
+        setAvgPrices(prev => ({ ...prev, [stock.symbol]: newAvg }));
         if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
         if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
             addLog(stock.symbol, '매수', tradePrice, finalAmount, reason);
@@ -3857,50 +3891,85 @@ export default function App() {
                     .filter(([_, qty]) => Number(qty) > 0)
                     .map(([sym, rawQty]) => {
                       const qty = Number(rawQty);
-                      const st = stocks.find(s => s.symbol === sym) || { name: sym, symbol: sym, price: 0, changePercent: 0 };
+                      const st = stocks.find(s => s.symbol === sym) || 
+                                 INITIAL_STOCKS_KR.find(s => s.symbol === sym) || 
+                                 INITIAL_STOCKS.find(s => s.symbol === sym) || 
+                                 { name: sym, symbol: sym, price: 0, changePercent: 0 };
+                      
+                      let avgPrice = avgPrices[sym] || 0;
+                      if (avgPrice <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
+                        avgPrice = Math.round(gapInventory.reduce((a, b) => a + b, 0) / gapInventory.length);
+                      }
+                      if (avgPrice <= 0) {
+                        avgPrice = st.price || 0;
+                      }
+
                       const evalValue = (st.price || 0) * qty;
+                      const profitRatio = avgPrice > 0 ? (((st.price || 0) - avgPrice) / avgPrice) * 100 : 0;
                       const isSelected = selectedSymbol === sym;
 
                       return (
                         <div 
                           key={sym}
                           className={cn(
-                            "p-3 rounded-2xl border transition-all flex items-center justify-between text-xs",
+                            "p-3 rounded-2xl border transition-all space-y-2 text-xs",
                             isSelected 
-                              ? "bg-sleek-blue/15 border-sleek-blue/40" 
+                              ? "bg-sleek-blue/15 border-sleek-blue/40 shadow-sm shadow-sleek-blue/5" 
                               : "bg-white/5 border-white/5 hover:bg-white/10"
                           )}
                         >
-                          <div 
-                            className="cursor-pointer flex-1 min-w-0 pr-2"
-                            onClick={() => {
-                              setSelectedSymbol(sym);
-                              setManualSellPrice(st.price || 0);
-                              setManualSellQty(qty);
-                            }}
-                          >
-                            <div className="font-bold text-white truncate flex items-center gap-1.5">
-                              <span className="truncate">{st.name}</span>
-                              <span className="text-[9px] font-mono text-sleek-text-secondary shrink-0">({sym})</span>
+                          <div className="flex items-start justify-between gap-2">
+                            <div 
+                              className="cursor-pointer flex-1 min-w-0"
+                              onClick={() => {
+                                setSelectedSymbol(sym);
+                                setManualSellPrice(st.price || 0);
+                                setManualSellQty(qty);
+                              }}
+                            >
+                              {/* Stock Name & Ticker Symbol */}
+                              <div className="font-bold text-white truncate flex items-center gap-1.5">
+                                <span className="truncate font-black text-xs text-white">{st.name}</span>
+                                <span className="text-[10px] font-mono text-sleek-text-secondary shrink-0">({sym})</span>
+                              </div>
+
+                              {/* Average Purchase Price & Return % */}
+                              <div className="flex items-center gap-2 mt-1.5 flex-wrap text-[10px]">
+                                <span className="text-amber-300 font-bold bg-amber-500/10 px-2 py-0.5 rounded-md border border-amber-500/20">
+                                  평단가 ₩{Math.round(avgPrice).toLocaleString()}
+                                </span>
+                                <span className={cn(
+                                  "font-mono font-bold px-1.5 py-0.5 rounded-md border",
+                                  profitRatio > 0 
+                                    ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" 
+                                    : profitRatio < 0 
+                                    ? "text-rose-400 bg-rose-500/10 border-rose-500/20" 
+                                    : "text-slate-400 bg-white/5 border-white/10"
+                                )}>
+                                  {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(2)}%
+                                </span>
+                              </div>
                             </div>
-                            <div className="text-[10px] text-sleek-text-secondary mt-1 flex items-center gap-2">
-                              <span className="font-bold text-emerald-400">{qty.toLocaleString()} 주</span>
-                              <span>•</span>
-                              <span>₩{Math.round(evalValue).toLocaleString()}</span>
-                            </div>
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedSymbol(sym);
+                                setManualSellPrice(st.price || 0);
+                                setManualSellQty(qty);
+                                setManualSellModalOpen(true);
+                              }}
+                              className="px-2.5 py-1.5 bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/30 rounded-xl text-[10px] font-bold transition-all shrink-0 flex items-center gap-1 shadow-sm mt-0.5"
+                            >
+                              수동 매도
+                            </button>
                           </div>
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setSelectedSymbol(sym);
-                              setManualSellPrice(st.price || 0);
-                              setManualSellQty(qty);
-                              setManualSellModalOpen(true);
-                            }}
-                            className="px-2.5 py-1.5 bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/30 rounded-xl text-[10px] font-bold transition-all shrink-0 flex items-center gap-1 shadow-sm"
-                          >
-                            수동 매도
-                          </button>
+
+                          {/* Quantity and Evaluated Amount Row */}
+                          <div className="flex items-center justify-between text-[10px] pt-1.5 border-t border-white/5 text-sleek-text-secondary">
+                            <span>수량: <strong className="text-white font-mono ml-0.5">{qty.toLocaleString()} 주</strong></span>
+                            <span>평가금: <strong className="text-white font-mono ml-0.5">₩{Math.round(evalValue).toLocaleString()}</strong></span>
+                          </div>
                         </div>
                       );
                     })
@@ -4957,9 +5026,10 @@ export default function App() {
                     <span className="text-sm font-black text-white">{selectedStock.name} ({selectedStock.symbol})</span>
                     <span className="text-xs font-mono font-bold text-sleek-blue">현재가: ₩{selectedStock.price?.toLocaleString()}</span>
                   </div>
-                  <div className="flex justify-between text-xs text-sleek-text-secondary pt-2 border-t border-white/5">
-                    <span>보유 수량: <strong className="text-white">{holdings[selectedStock.symbol] || 0} 주</strong></span>
-                    <span>평가금액: ₩{Math.round((holdings[selectedStock.symbol] || 0) * (selectedStock.price || 0)).toLocaleString()}</span>
+                  <div className="flex justify-between items-center text-xs text-sleek-text-secondary pt-2 border-t border-white/5">
+                    <span>평단가: <strong className="text-amber-300 font-mono">₩{Math.round(avgPrices[selectedStock.symbol] || selectedStock.price || 0).toLocaleString()}</strong></span>
+                    <span>보유수량: <strong className="text-white font-mono">{holdings[selectedStock.symbol] || 0} 주</strong></span>
+                    <span>평가금액: <strong className="text-white font-mono">₩{Math.round((holdings[selectedStock.symbol] || 0) * (selectedStock.price || 0)).toLocaleString()}</strong></span>
                   </div>
                 </div>
               ) : (
