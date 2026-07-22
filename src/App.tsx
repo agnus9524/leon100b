@@ -2488,39 +2488,36 @@ export default function App() {
           const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
           const targetBuyPrice = lowestBidOnlyMode ? (currentPrice - 5 * tickSize) : currentPrice;
 
-          // Step spacing logic for flexible multi-level slots:
-          // Divide price range into maxSlots steps, with minimum spacing
-          const stepSpacing = Math.max((maxPrice - minPrice) / (maxSlots || 5), tickSize * 3);
           const currentInventory = gapInventoryRef.current;
 
-          // Check if ANY active position or pending order exists at this price step level
-          const hasNearbyBuy = currentInventory.some(buyPrice => Math.abs(buyPrice - targetBuyPrice) < stepSpacing * 0.85) ||
-            pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.orderPrice - targetBuyPrice) < stepSpacing * 0.85);
+          // Check if an active slot or pending order already exists at this EXACT same price level (1-tick threshold)
+          const isSamePriceEntry = currentInventory.some(buyPrice => Math.abs(buyPrice - targetBuyPrice) < tickSize * 0.9) ||
+            pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.orderPrice - targetBuyPrice) < tickSize * 0.9);
 
           const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
           const cost = priceInKrw * tradeQuantity;
 
-          if (meetsBuyCriteria) {
-            if (hasNearbyBuy) {
-              setScalperMessage(`[진입 대기] ₩${targetBuyPrice.toLocaleString()} 단계에 이미 슬롯 보유 중 (매도 완료 전 중복진입 불가)`);
+          // Buy Trigger: Meets buy criteria (Oversold/LowerBand) OR immediate step entry mode when a distinct price level appears
+          if (meetsBuyCriteria || (immediateEntry && currentInventory.length < maxSlots)) {
+            if (isSamePriceEntry) {
+              setScalperMessage(`[동일가격 중복 차단] ₩${targetBuyPrice.toLocaleString()} 슬롯 보유 중 (다른 진입가격 발생 시 즉시 개별진입)`);
             } else if (currentInventory.length >= maxSlots) {
-              setScalperMessage(`[슬롯 가득 참] 전체 ${maxSlots}단계 슬롯 차있음 (매도 대기)`);
+              setScalperMessage(`[슬롯 가득 참] 전체 ${maxSlots}개 슬롯 보유 중 (매도 대기)`);
             } else if (balance < cost) {
-              // STRICT AVAILABLE BALANCE CHECK
               setScalperMessage(`[매수 차단] 예수금 부족 (필요: ₩${Math.round(cost).toLocaleString()} / 가능: ₩${Math.round(balance).toLocaleString()})`);
             } else {
               const currentStep = currentInventory.length + 1;
-              setScalperMessage(`[단계 진입] ${currentStep}단계 (${tradeQuantity}주) ₩${targetBuyPrice.toLocaleString()}...`);
-              const executedQty = await executeTrade('BUY', selectedStock, tradeQuantity, `Scalper Step ${currentStep}: RSI(${Math.round(rsi)}) ₩${targetBuyPrice.toLocaleString()} 1회 진입`, targetBuyPrice);
+              setScalperMessage(`[슬롯#${currentStep} 진입] ₩${targetBuyPrice.toLocaleString()} (${tradeQuantity}주)...`);
+              const executedQty = await executeTrade('BUY', selectedStock, tradeQuantity, `Scalper Slot #${currentStep}: ₩${targetBuyPrice.toLocaleString()} 1회 진입`, targetBuyPrice);
               
               if (executedQty > 0) {
-                setScalperMessage(`[매수 완료] ${currentStep}단계 ₩${targetBuyPrice.toLocaleString()} (${executedQty}주)`);
-                setBotStatus(`[스캘퍼 엔진] ${currentStep}단계 ₩${targetBuyPrice.toLocaleString()} ${tradeQuantity}주 진입 완료`);
+                setScalperMessage(`[매수 완료] 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${executedQty}주)`);
+                setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} ${tradeQuantity}주 진입 완료`);
                 setGapInventory(prev => [...prev, targetBuyPrice]);
                 setHighWaterMark(prev => ({ ...prev, [targetBuyPrice]: targetBuyPrice }));
                 setLastTradeType('BUY');
                 setGapTradeCount(prev => prev + 1);
-                showNotification(`${selectedStock.name} ${currentStep}단계 ₩${targetBuyPrice.toLocaleString()} (${tradeQuantity}주) 매수 완료`, "success");
+                showNotification(`${selectedStock.name} 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${tradeQuantity}주) 독립 매수 완료`, "success");
                 playScalpingSound('BUY');
               }
             }
@@ -2528,14 +2525,14 @@ export default function App() {
             // Context-Aware Status Messages
             if (isOverSold) setScalperMessage(`과매도 포착 (RSI: ${Math.round(rsi)}). 반등 시점 감시 중`);
             else if (isNearLowerBand) setScalperMessage(`지지선(BB Lower) 도달. 매수 타점 분석 중...`);
-            else setScalperMessage(`관망 중 (RSI: ${Math.round(rsi)}, 슬롯: ${currentInventory.length}/${maxSlots})`);
+            else setScalperMessage(`관망 중 (RSI: ${Math.round(rsi)}, 보유 슬롯: ${currentInventory.length}/${maxSlots})`);
           }
 
-          // B. PROFIT MAX SELL Condition: Scan inventory for Trailing Stop or Indicator Signals
+          // B. PROFIT MAX SELL Condition: Scan inventory and process each distinct slot independently
           const currentInventory2 = gapInventoryRef.current;
           if (currentInventory2.length > 0) {
             for (const buyPrice of currentInventory2) {
-              // Update High Water Mark for Trailing Stop Loss
+              // Update High Water Mark for Trailing Stop Loss per slot
               if (currentPrice > (highWaterMark[buyPrice] || buyPrice)) {
                 setHighWaterMark(prev => ({ ...prev, [buyPrice]: currentPrice }));
               }
@@ -2547,8 +2544,8 @@ export default function App() {
               // 1. Trailing Stop Loss: Lock in gains. If price drops 0.4% from peak after 0.2% profit.
               const isTrailingStop = profitRatio > 0.002 && dropFromPeak > 0.004; 
               
-              // 2. High-Momentum Exit: Overbought OR Near Upper Band
-              const isProfitTarget = (isOverBought || isNearUpperBand) && (profitRatio > (scalpingTargetProfit/100));
+              // 2. Target Profit Exit: Overbought OR Near Upper Band OR target profit % hit
+              const isProfitTarget = (isOverBought || isNearUpperBand || profitRatio >= (scalpingTargetProfit / 100)) && (profitRatio > 0);
               
               // 3. Fixed Stop Loss: Absolute bottom line
               const isStopLoss = profitRatio <= scalpingStopLoss / 100;
@@ -2560,13 +2557,22 @@ export default function App() {
                 if (sellQty > 0 || kisConfig.isConnected) {
                   let sellReason = "";
                   if (isTrailingStop) sellReason = "트레일링 스탑 (수익 보존)";
-                  else if (isProfitTarget) sellReason = "과매수/밴드상단 목표 달성";
+                  else if (isProfitTarget) sellReason = `목표 수익 달성 (+${(profitRatio * 100).toFixed(2)}%)`;
                   else sellReason = "리스크 관리 손절";
 
-                  setScalperMessage(`[매도 진행] ${sellReason} ₩${currentPrice.toLocaleString()}`);
-                  await executeTrade('SELL', selectedStock, sellQty, `Profit Max: ${sellReason} (${(profitRatio * 100).toFixed(2)}%)`, currentPrice);
+                  setScalperMessage(`[슬롯 개별 매도] ₩${buyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} (${sellReason})`);
+                  await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ₩${buyPrice.toLocaleString()}): ${sellReason}`, currentPrice);
                   
-                  setGapInventory(prev => prev.filter(p => p !== buyPrice));
+                  // Remove this exact slot buyPrice from gapInventory
+                  setGapInventory(prev => {
+                    const idx = prev.indexOf(buyPrice);
+                    if (idx > -1) {
+                      const copy = [...prev];
+                      copy.splice(idx, 1);
+                      return copy;
+                    }
+                    return prev.filter(p => p !== buyPrice);
+                  });
                   setHighWaterMark(prev => {
                     const next = { ...prev };
                     delete next[buyPrice];
@@ -2577,16 +2583,16 @@ export default function App() {
                   
                   if (profitRatio > 0) {
                     setScalpingWins(prev => prev + 1);
-                    showNotification(`${selectedStock.name} ${sellReason} 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
+                    showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}) 개별 슬롯 매도 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
+                    playScalpingSound('SELL');
                   } else {
                     setScalpingLosses(prev => prev + 1);
-                    showNotification(`${selectedStock.name} ${sellReason} 완료 (${(profitRatio * 100).toFixed(2)}%)`, "error");
+                    showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}) 개별 슬롯 매도 완료 (${(profitRatio * 100).toFixed(2)}%)`, "error");
                   }
 
                   const profit = (currentPrice - buyPrice) * sellQty * (marketType === 'US' ? exchangeRate : 1);
                   setGapTradingProfit(prev => prev + profit);
-                  playScalpingSound('SELL');
-                  break; // Process one sell per tick for stability
+                  break; // Process one slot exit per interval to prevent state race condition
                 }
               }
             }
