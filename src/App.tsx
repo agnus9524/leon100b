@@ -56,7 +56,10 @@ import {
   Layers,
   Percent,
   ShieldAlert,
-  Trash2
+  Trash2,
+  PieChart,
+  Calculator,
+  Coins
 } from 'lucide-react';
 import { 
   XAxis, 
@@ -599,6 +602,96 @@ export default function App() {
   const convertedPnl = displayCurrency === 'USD' ? pnl / exchangeRate : pnl;
   const convertedPrincipal = displayCurrency === 'USD' ? principal / exchangeRate : principal;
   const curPrefix = displayCurrency === 'USD' ? '$' : '₩';
+
+  const [isAssetAnalysisModalOpen, setIsAssetAnalysisModalOpen] = useState<boolean>(false);
+
+  const assetAnalysis = useMemo(() => {
+    let totalStockValue = 0;
+    let totalStockInvested = 0;
+    const stockList: Array<{
+      symbol: string;
+      name: string;
+      qty: number;
+      avgPrice: number;
+      currentPrice: number;
+      investedAmount: number;
+      evaluatedAmount: number;
+      pnlAmount: number;
+      pnlPercent: number;
+      portfolioShare: number;
+    }> = [];
+
+    Object.entries(holdings).forEach(([sym, rawQty]) => {
+      const qty = Number(rawQty);
+      if (qty <= 0) return;
+
+      const st = stocks.find(s => s.symbol === sym) ||
+                 INITIAL_STOCKS_KR.find(s => s.symbol === sym) ||
+                 INITIAL_STOCKS.find(s => s.symbol === sym) ||
+                 { name: sym, symbol: sym, price: 0 };
+
+      const isUS = /^[A-Z]/.test(sym);
+      const currentPriceKRW = isUS ? (st.price || 0) * exchangeRate : (st.price || 0);
+
+      let avgP = avgPrices[sym] || 0;
+      if (avgP <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
+        avgP = Math.round(gapInventory.reduce((a, b) => a + b, 0) / gapInventory.length);
+      }
+      if (avgP <= 0) avgP = st.price || 0;
+      const avgPriceKRW = isUS ? avgP * exchangeRate : avgP;
+
+      const invested = qty * avgPriceKRW;
+      const evaluated = qty * currentPriceKRW;
+      const pnlAmt = evaluated - invested;
+      const pnlPct = invested > 0 ? (pnlAmt / invested) * 100 : 0;
+
+      totalStockValue += evaluated;
+      totalStockInvested += invested;
+
+      stockList.push({
+        symbol: sym,
+        name: st.name || sym,
+        qty,
+        avgPrice: avgPriceKRW,
+        currentPrice: currentPriceKRW,
+        investedAmount: invested,
+        evaluatedAmount: evaluated,
+        pnlAmount: pnlAmt,
+        pnlPercent: pnlPct,
+        portfolioShare: 0
+      });
+    });
+
+    stockList.forEach(item => {
+      item.portfolioShare = totalValue > 0 ? (item.evaluatedAmount / totalValue) * 100 : 0;
+    });
+
+    const pendingOrderReserve = pendingBuyOrders.reduce((acc, order) => {
+      if (!order.isSimulated) return acc;
+      const isUS = /^[A-Z]/.test(order.symbol);
+      const priceKRW = isUS ? order.orderPrice * exchangeRate : order.orderPrice;
+      return acc + order.quantity * priceKRW;
+    }, 0);
+
+    const cashShare = totalValue > 0 ? (balance / totalValue) * 100 : 0;
+    const stockShare = totalValue > 0 ? (totalStockValue / totalValue) * 100 : 0;
+    const pendingShare = totalValue > 0 ? (pendingOrderReserve / totalValue) * 100 : 0;
+
+    return {
+      cashBalance: balance,
+      stockValue: totalStockValue,
+      stockInvested: totalStockInvested,
+      pendingReserve: pendingOrderReserve,
+      totalCalculatedAsset: totalValue,
+      principal,
+      totalPnL: pnl,
+      totalPnLPercent: pnlPercent,
+      cashShare,
+      stockShare,
+      pendingShare,
+      stockList
+    };
+  }, [balance, holdings, stocks, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, principal, pnl, pnlPercent]);
 
   // Real-time Exchange Rate Fetcher & Simulator
   const fetchRealExchangeRate = React.useCallback(async () => {
@@ -3818,10 +3911,28 @@ export default function App() {
                     ₩{balance.toLocaleString()}
                   </div>
                 </div>
-                <div className="bg-sleek-card/20 p-4 rounded-2xl border border-sleek-border">
-                  <div className="text-[9px] text-sleek-text-secondary uppercase mb-1">총 자산 평가</div>
-                  <div className="text-lg font-black text-sleek-blue tracking-tighter italic">
-                    ₩{totalValue.toLocaleString()}
+                <div 
+                  onClick={() => setIsAssetAnalysisModalOpen(true)}
+                  className="bg-sleek-card/20 p-4 rounded-2xl border border-sleek-border hover:border-sleek-blue/50 hover:bg-sleek-blue/5 transition-all cursor-pointer group relative overflow-hidden shadow-sm"
+                  title="총 자산 평가 분석 팝업 열기"
+                >
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-[9px] text-sleek-text-secondary uppercase flex items-center gap-1">
+                      <span>총 자산 평가</span>
+                      <Sparkles className="w-2.5 h-2.5 text-sleek-blue animate-pulse" />
+                    </div>
+                    <span className="text-[9px] text-sleek-blue font-bold px-1.5 py-0.5 bg-sleek-blue/10 rounded-md border border-sleek-blue/20 group-hover:bg-sleek-blue group-hover:text-white transition-all flex items-center gap-1">
+                      분석 팝업 ↗
+                    </span>
+                  </div>
+                  <div className="text-lg font-black text-sleek-blue tracking-tighter italic flex items-baseline justify-between">
+                    <span>₩{totalValue.toLocaleString()}</span>
+                    <span className={cn(
+                      "text-[10px] font-mono not-italic font-bold ml-2",
+                      pnl >= 0 ? "text-emerald-400" : "text-rose-400"
+                    )}>
+                      {pnl >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
+                    </span>
                   </div>
                 </div>
               </div>
@@ -5168,6 +5279,253 @@ export default function App() {
                   </div>
                 </div>
               )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Total Asset Evaluation Analysis Modal (총 자산 평가 분석 팝업) */}
+      <AnimatePresence>
+        {isAssetAnalysisModalOpen && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-sleek-card border border-sleek-border rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl relative"
+            >
+              {/* Modal Header */}
+              <div className="p-5 md:p-6 border-b border-sleek-border flex items-center justify-between bg-sleek-bg/60">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 bg-sleek-blue/15 border border-sleek-blue/30 rounded-2xl text-sleek-blue">
+                    <PieChart className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-black text-white flex items-center gap-2">
+                      총 자산 평가 산출 & 분석 리포트
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-sleek-blue/10 text-sleek-blue rounded-full border border-sleek-blue/20">
+                        {kisConfig.isConnected ? "실계좌 연동" : "시뮬레이션 계좌"}
+                      </span>
+                    </h3>
+                    <p className="text-xs text-sleek-text-secondary mt-0.5">
+                      가용 현금과 실시간 주식 평가금액이 산출된 세부 내역 및 공식입니다.
+                    </p>
+                  </div>
+                </div>
+                <button 
+                  onClick={() => setIsAssetAnalysisModalOpen(false)}
+                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-sleek-text-secondary hover:text-white transition-all"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Modal Body (Scrollable) */}
+              <div className="p-5 md:p-6 overflow-y-auto space-y-6 custom-scrollbar flex-1">
+                {/* 1. Overall Total Asset Hero Card */}
+                <div className="bg-gradient-to-br from-sleek-blue/20 via-slate-900/40 to-slate-900 border border-sleek-blue/30 rounded-2xl p-5 space-y-4 relative overflow-hidden">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-white/10">
+                    <div>
+                      <div className="text-[11px] font-bold text-sleek-text-secondary uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                        <span>현재 총 자산 평가금액</span>
+                        <Calculator className="w-3.5 h-3.5 text-sleek-blue" />
+                      </div>
+                      <div className="text-2xl md:text-3xl font-black text-white tracking-tight">
+                        ₩{assetAnalysis.totalCalculatedAsset.toLocaleString()}
+                      </div>
+                    </div>
+                    
+                    <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex items-center gap-4 shrink-0">
+                      <div>
+                        <div className="text-[10px] text-sleek-text-secondary font-bold">투자 원금</div>
+                        <div className="text-xs font-mono font-bold text-slate-300">₩{assetAnalysis.principal.toLocaleString()}</div>
+                      </div>
+                      <div className="h-6 w-px bg-white/10" />
+                      <div>
+                        <div className="text-[10px] text-sleek-text-secondary font-bold">원금 대비 손익</div>
+                        <div className={cn(
+                          "text-xs font-mono font-bold flex items-center gap-0.5",
+                          assetAnalysis.totalPnL >= 0 ? "text-emerald-400" : "text-rose-400"
+                        )}>
+                          {assetAnalysis.totalPnL >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                          <span>{assetAnalysis.totalPnL >= 0 ? '+' : ''}₩{Math.round(assetAnalysis.totalPnL).toLocaleString()}</span>
+                          <span className="text-[10px]">({assetAnalysis.totalPnLPercent >= 0 ? '+' : ''}{assetAnalysis.totalPnLPercent.toFixed(2)}%)</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Portfolio Proportion Progress Bar */}
+                  <div className="space-y-1.5">
+                    <div className="flex justify-between text-[11px] font-bold text-sleek-text-secondary">
+                      <span>자산 구성 비중</span>
+                      <div className="flex items-center gap-3 text-[10px]">
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sleek-blue inline-block" /> 현금 {assetAnalysis.cashShare.toFixed(1)}%</span>
+                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> 주식 {assetAnalysis.stockShare.toFixed(1)}%</span>
+                        {assetAnalysis.pendingReserve > 0 && (
+                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> 예약금 {assetAnalysis.pendingShare.toFixed(1)}%</span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="h-3 w-full bg-white/5 rounded-full overflow-hidden flex gap-0.5 p-0.5 border border-white/10">
+                      {assetAnalysis.cashShare > 0 && (
+                        <div style={{ width: `${assetAnalysis.cashShare}%` }} className="bg-sleek-blue rounded-full h-full transition-all" title={`현금: ${assetAnalysis.cashShare.toFixed(1)}%`} />
+                      )}
+                      {assetAnalysis.stockShare > 0 && (
+                        <div style={{ width: `${assetAnalysis.stockShare}%` }} className="bg-emerald-400 rounded-full h-full transition-all" title={`주식 평가: ${assetAnalysis.stockShare.toFixed(1)}%`} />
+                      )}
+                      {assetAnalysis.pendingShare > 0 && (
+                        <div style={{ width: `${assetAnalysis.pendingShare}%` }} className="bg-amber-400 rounded-full h-full transition-all" title={`예약금: ${assetAnalysis.pendingShare.toFixed(1)}%`} />
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* 2. Three Component Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  {/* Card 1: Cash */}
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-3.5 space-y-1">
+                    <div className="text-[10px] text-sleek-text-secondary font-bold flex items-center justify-between">
+                      <span className="flex items-center gap-1"><Wallet className="w-3 h-3 text-sleek-blue" /> 가용 현금 잔고</span>
+                      <span className="text-sleek-blue font-mono">{assetAnalysis.cashShare.toFixed(1)}%</span>
+                    </div>
+                    <div className="text-base font-black font-mono text-white">
+                      ₩{assetAnalysis.cashBalance.toLocaleString()}
+                    </div>
+                    <p className="text-[10px] text-sleek-text-secondary">주식 매매에 즉시 사용 가능한 예수금</p>
+                  </div>
+
+                  {/* Card 2: Stock Evaluation */}
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-3.5 space-y-1">
+                    <div className="text-[10px] text-sleek-text-secondary font-bold flex items-center justify-between">
+                      <span className="flex items-center gap-1"><Briefcase className="w-3 h-3 text-emerald-400" /> 보유 주식 평가액</span>
+                      <span className="text-emerald-400 font-mono">{assetAnalysis.stockShare.toFixed(1)}%</span>
+                    </div>
+                    <div className="text-base font-black font-mono text-white">
+                      ₩{Math.round(assetAnalysis.stockValue).toLocaleString()}
+                    </div>
+                    <p className="text-[10px] text-sleek-text-secondary">현재 시장가 × 보유 주식 수의 합산</p>
+                  </div>
+
+                  {/* Card 3: Pending Order Reserve */}
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-3.5 space-y-1">
+                    <div className="text-[10px] text-sleek-text-secondary font-bold flex items-center justify-between">
+                      <span className="flex items-center gap-1"><Coins className="w-3 h-3 text-amber-400" /> 미체결 매수 예약금</span>
+                      <span className="text-amber-400 font-mono">{assetAnalysis.pendingShare.toFixed(1)}%</span>
+                    </div>
+                    <div className="text-base font-black font-mono text-white">
+                      ₩{Math.round(assetAnalysis.pendingReserve).toLocaleString()}
+                    </div>
+                    <p className="text-[10px] text-sleek-text-secondary">모의/지정가 매수 대기 중 잠긴 예수금</p>
+                  </div>
+                </div>
+
+                {/* 3. Valuation Formula Explanation Banner */}
+                <div className="bg-sleek-bg p-4 rounded-2xl border border-sleek-border space-y-2">
+                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                    <Info className="w-4 h-4 text-sleek-blue" />
+                    <span>총 자산 평가액 산출 공식 (Calculation Logic)</span>
+                  </div>
+                  <div className="bg-black/40 p-3 rounded-xl font-mono text-xs text-amber-300 font-bold border border-white/5 overflow-x-auto">
+                    총 자산 = [ 가용 현금 ] + ∑( 보유 수량 × 실시간 현재가 ) + [ 매수 예약금 ]
+                  </div>
+                  <p className="text-[11px] text-sleek-text-secondary leading-relaxed">
+                    실시간 현재가 변화에 따라 보유 주식 평가액이 실시간 반영되며, 해외 주식의 경우 현재 환율(₩{exchangeRate.toLocaleString()}/$)로 원화 변환되어 통합 계산됩니다.
+                  </p>
+                </div>
+
+                {/* 4. Individual Stock Breakdown */}
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between">
+                    <h4 className="text-xs font-bold text-white flex items-center gap-2">
+                      <Briefcase className="w-3.5 h-3.5 text-sleek-blue" />
+                      보유 종목별 세부 평가 내역 ({assetAnalysis.stockList.length}개 종목)
+                    </h4>
+                    {assetAnalysis.stockList.length > 0 && (
+                      <span className="text-[10px] text-sleek-text-secondary font-mono">
+                        총 매수가: ₩{Math.round(assetAnalysis.stockInvested).toLocaleString()}
+                      </span>
+                    )}
+                  </div>
+
+                  {assetAnalysis.stockList.length === 0 ? (
+                    <div className="bg-white/5 border border-white/5 rounded-2xl p-6 text-center text-sleek-text-secondary text-xs">
+                      현재 보유 중인 주식이 없습니다. 가용 현금(₩{balance.toLocaleString()})이 총 자산으로 평가됩니다.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar pr-1">
+                      {assetAnalysis.stockList.map((item) => (
+                        <div 
+                          key={item.symbol} 
+                          className="bg-white/5 border border-white/5 hover:border-white/10 rounded-2xl p-3.5 transition-all text-xs space-y-2"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-white text-sm">{item.name}</span>
+                              <span className="text-[10px] font-mono text-sleek-text-secondary">({item.symbol})</span>
+                              <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 bg-white/10 text-slate-300 rounded-md">
+                                포트폴리오 비중 {item.portfolioShare.toFixed(1)}%
+                              </span>
+                            </div>
+                            <div className={cn(
+                              "font-mono font-bold text-xs px-2 py-0.5 rounded-lg border",
+                              item.pnlAmount >= 0 
+                                ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" 
+                                : "text-rose-400 bg-rose-500/10 border-rose-500/20"
+                            )}>
+                              {item.pnlAmount >= 0 ? '+' : ''}{Math.round(item.pnlAmount).toLocaleString()}원 ({item.pnlPercent >= 0 ? '+' : ''}{item.pnlPercent.toFixed(2)}%)
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px] pt-2 border-t border-white/5 text-sleek-text-secondary font-mono">
+                            <div>
+                              <span>보유수량: </span>
+                              <strong className="text-white">{item.qty.toLocaleString()} 주</strong>
+                            </div>
+                            <div>
+                              <span>매수평단: </span>
+                              <strong className="text-amber-300">₩{Math.round(item.avgPrice).toLocaleString()}</strong>
+                            </div>
+                            <div>
+                              <span>실시간현재가: </span>
+                              <strong className="text-white">₩{Math.round(item.currentPrice).toLocaleString()}</strong>
+                            </div>
+                            <div>
+                              <span>현재평가금: </span>
+                              <strong className="text-sleek-blue font-bold">₩{Math.round(item.evaluatedAmount).toLocaleString()}</strong>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* 5. Summary / Insight Box */}
+                <div className="bg-sleek-blue/10 border border-sleek-blue/20 rounded-2xl p-4 flex items-start gap-3">
+                  <Sparkles className="w-4 h-4 text-sleek-blue shrink-0 mt-0.5" />
+                  <div className="text-xs space-y-1">
+                    <div className="font-bold text-white">포트폴리오 평가 총평</div>
+                    <p className="text-sleek-text-secondary text-[11px] leading-relaxed">
+                      {assetAnalysis.cashShare > 70 
+                        ? `가용 현금 비중이 ${assetAnalysis.cashShare.toFixed(1)}%로 안정적인 현금 유동성을 확보하고 있어, 추가 매수 타점 포착 시 즉각적인 대응이 가능합니다.`
+                        : assetAnalysis.stockShare > 70
+                        ? `주식 보유 비중이 ${assetAnalysis.stockShare.toFixed(1)}%로 주가 상승 시 높은 수익률을 기대할 수 있으나, 시장 변동성에 유의할 필요가 있습니다.`
+                        : `현금(${assetAnalysis.cashShare.toFixed(1)}%)과 주식(${assetAnalysis.stockShare.toFixed(1)}%)의 균형 잡힌 포트폴리오로 안정적인 리스크 관리가 이루어지고 있습니다.`}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer */}
+              <div className="p-4 border-t border-sleek-border bg-sleek-bg/60 flex justify-end">
+                <button
+                  onClick={() => setIsAssetAnalysisModalOpen(false)}
+                  className="px-6 py-2.5 rounded-xl bg-sleek-blue hover:bg-sleek-blue/90 text-white font-bold text-xs transition-all shadow-lg shadow-sleek-blue/20"
+                >
+                  확인 (닫기)
+                </button>
+              </div>
             </motion.div>
           </div>
         )}
