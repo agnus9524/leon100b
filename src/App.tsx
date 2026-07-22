@@ -2488,26 +2488,39 @@ export default function App() {
           const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
           const targetBuyPrice = lowestBidOnlyMode ? (currentPrice - 5 * tickSize) : currentPrice;
 
-          const minSpacing = (maxPrice - minPrice) / (maxSlots + 1);
+          // Step spacing logic for flexible multi-level slots:
+          // Divide price range into maxSlots steps, with minimum spacing
+          const stepSpacing = Math.max((maxPrice - minPrice) / (maxSlots || 5), tickSize * 3);
           const currentInventory = gapInventoryRef.current;
-          const hasNearbyBuy = currentInventory.some(buyPrice => Math.abs(buyPrice - targetBuyPrice) < minSpacing);
 
-          if (meetsBuyCriteria && !hasNearbyBuy && currentInventory.length < maxSlots) {
-            const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
-            const cost = priceInKrw * tradeQuantity;
+          // Check if ANY active position or pending order exists at this price step level
+          const hasNearbyBuy = currentInventory.some(buyPrice => Math.abs(buyPrice - targetBuyPrice) < stepSpacing * 0.85) ||
+            pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.orderPrice - targetBuyPrice) < stepSpacing * 0.85);
 
-            if (balance >= cost || (kisConfig.isConnected && kisConfig.isRealOrderEnabled)) {
-              setScalperMessage(`[매수 진입] RSI:${Math.round(rsi)} ₩${targetBuyPrice.toLocaleString()}...`);
-              const executedQty = await executeTrade('BUY', selectedStock, tradeQuantity, `Profit Max: RSI(${Math.round(rsi)}) 과매도권/밴드하단 반등 진입`, targetBuyPrice);
+          const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
+          const cost = priceInKrw * tradeQuantity;
+
+          if (meetsBuyCriteria) {
+            if (hasNearbyBuy) {
+              setScalperMessage(`[진입 대기] ₩${targetBuyPrice.toLocaleString()} 단계에 이미 슬롯 보유 중 (매도 완료 전 중복진입 불가)`);
+            } else if (currentInventory.length >= maxSlots) {
+              setScalperMessage(`[슬롯 가득 참] 전체 ${maxSlots}단계 슬롯 차있음 (매도 대기)`);
+            } else if (balance < cost) {
+              // STRICT AVAILABLE BALANCE CHECK
+              setScalperMessage(`[매수 차단] 예수금 부족 (필요: ₩${Math.round(cost).toLocaleString()} / 가능: ₩${Math.round(balance).toLocaleString()})`);
+            } else {
+              const currentStep = currentInventory.length + 1;
+              setScalperMessage(`[단계 진입] ${currentStep}단계 (${tradeQuantity}주) ₩${targetBuyPrice.toLocaleString()}...`);
+              const executedQty = await executeTrade('BUY', selectedStock, tradeQuantity, `Scalper Step ${currentStep}: RSI(${Math.round(rsi)}) ₩${targetBuyPrice.toLocaleString()} 1회 진입`, targetBuyPrice);
               
               if (executedQty > 0) {
-                setScalperMessage(`[매수 완료] ₩${targetBuyPrice.toLocaleString()} (${executedQty}주)`);
-                setBotStatus(`[수익극대화] ₩${targetBuyPrice.toLocaleString()} 지표 기반 매수 완료`);
+                setScalperMessage(`[매수 완료] ${currentStep}단계 ₩${targetBuyPrice.toLocaleString()} (${executedQty}주)`);
+                setBotStatus(`[스캘퍼 엔진] ${currentStep}단계 ₩${targetBuyPrice.toLocaleString()} ${tradeQuantity}주 진입 완료`);
                 setGapInventory(prev => [...prev, targetBuyPrice]);
                 setHighWaterMark(prev => ({ ...prev, [targetBuyPrice]: targetBuyPrice }));
                 setLastTradeType('BUY');
                 setGapTradeCount(prev => prev + 1);
-                showNotification(`${selectedStock.name} 지표 기반 매수 완료`, "success");
+                showNotification(`${selectedStock.name} ${currentStep}단계 ₩${targetBuyPrice.toLocaleString()} (${tradeQuantity}주) 매수 완료`, "success");
                 playScalpingSound('BUY');
               }
             }
@@ -2732,53 +2745,56 @@ export default function App() {
     const cost = priceInKrw * finalAmount;
 
     if (action === 'BUY') {
-      if (balance >= cost || (kisConfig.isConnected && kisConfig.isRealOrderEnabled)) {
-        if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
-          // Simulated Mode: Place as pending buy order instead of instant fill!
-          const simOrderId = `SIM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-          
-          setBalance(prev => Math.max(0, prev - cost)); // Reserve balance
-          
-          const newPending: PendingBuyOrder = {
-            id: simOrderId,
-            symbol: stock.symbol,
-            orderPrice: tradePrice,
-            quantity: finalAmount,
-            createdAt: Date.now(),
-            isSimulated: true
-          };
-          
-          setPendingBuyOrders(prev => [...prev, newPending]);
-          addLog(stock.symbol, '매수', tradePrice, finalAmount, `[모의 주문접수] ${reason}`);
-          showNotification(`${stock.name} 모의 매수 주문 접수 완료 (체결 대기 중...)`, "info");
-          setBotStatus(`[모의 대기] 주문가 ₩${tradePrice.toLocaleString()} 체결 대기 중...`);
-          return 0; // Return 0 so it's not added to gapInventory immediately!
-        }
-
-        setBalance(prev => Math.max(0, prev - cost));
-        const oldQty = holdings[stock.symbol] || 0;
-        const oldAvg = avgPrices[stock.symbol] || tradePrice;
-        const newQty = oldQty + finalAmount;
-        const newAvg = newQty > 0 ? Math.round(((oldQty * oldAvg) + (finalAmount * tradePrice)) / newQty) : tradePrice;
-        const newHoldings = { ...holdings, [stock.symbol]: Number(newQty.toFixed(4)) };
-        setHoldings(newHoldings);
-        setAvgPrices(prev => ({ ...prev, [stock.symbol]: newAvg }));
-        if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-        if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
-            addLog(stock.symbol, '매수', tradePrice, finalAmount, reason);
-        }
-
-        // KIS API 연결 상태이고 실제 주문 전송이 활성화된 경우 실제 계좌 잔고를 비동기로 동기화
-        if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
-          setTimeout(() => {
-            handleSyncKIS();
-          }, 1000);
-        }
-        return finalAmount;
-      } else {
-        setBotStatus("잔액 부족으로 매수 취소");
+      if (balance < cost) {
+        setBotStatus(`[매수 진입 차단] 예수금 부족 (필요: ₩${Math.round(cost).toLocaleString()} / 가능: ₩${Math.round(balance).toLocaleString()})`);
+        setScalperMessage(`[매수 차단] 예수금 부족으로 진입 취소`);
+        addLog(stock.symbol, '매수', tradePrice, finalAmount, `[진입차단] 예수금(매수 가능 금액) 초과 (필요: ₩${Math.round(cost).toLocaleString()}, 예수금: ₩${Math.round(balance).toLocaleString()})`);
+        showNotification(`매수 진입 차단: 매수 가능 금액(예수금)을 초과하여 진입하지 않습니다.`, "error");
         return 0;
       }
+
+      if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
+        // Simulated Mode: Place as pending buy order instead of instant fill!
+        const simOrderId = `SIM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        
+        setBalance(prev => Math.max(0, prev - cost)); // Reserve balance
+        
+        const newPending: PendingBuyOrder = {
+          id: simOrderId,
+          symbol: stock.symbol,
+          orderPrice: tradePrice,
+          quantity: finalAmount,
+          createdAt: Date.now(),
+          isSimulated: true
+        };
+        
+        setPendingBuyOrders(prev => [...prev, newPending]);
+        addLog(stock.symbol, '매수', tradePrice, finalAmount, `[모의 주문접수] ${reason}`);
+        showNotification(`${stock.name} 모의 매수 주문 접수 완료 (체결 대기 중...)`, "info");
+        setBotStatus(`[모의 대기] 주문가 ₩${tradePrice.toLocaleString()} 체결 대기 중...`);
+        return 0; // Return 0 so it's not added to gapInventory immediately!
+      }
+
+      setBalance(prev => Math.max(0, prev - cost));
+      const oldQty = holdings[stock.symbol] || 0;
+      const oldAvg = avgPrices[stock.symbol] || tradePrice;
+      const newQty = oldQty + finalAmount;
+      const newAvg = newQty > 0 ? Math.round(((oldQty * oldAvg) + (finalAmount * tradePrice)) / newQty) : tradePrice;
+      const newHoldings = { ...holdings, [stock.symbol]: Number(newQty.toFixed(4)) };
+      setHoldings(newHoldings);
+      setAvgPrices(prev => ({ ...prev, [stock.symbol]: newAvg }));
+      if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
+      if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
+          addLog(stock.symbol, '매수', tradePrice, finalAmount, reason);
+      }
+
+      // KIS API 연결 상태이고 실제 주문 전송이 활성화된 경우 실제 계좌 잔고를 비동기로 동기화
+      if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
+        setTimeout(() => {
+          handleSyncKIS();
+        }, 1000);
+      }
+      return finalAmount;
     } else if (action === 'SELL') {
         if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
             try {
