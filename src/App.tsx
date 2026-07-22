@@ -1388,51 +1388,10 @@ export default function App() {
       const newStockNames: Record<string, string> = {};
       let totalConvertedBalance = 0;
       let totalConvertedPrincipal = 0;
-      let overseasError = null;
       let domesticError = null;
       let foundAnyData = false;
-      
-      // Use fallback if exchange rate is missing or invalid
-      const currentRate = exchangeRate > 0 ? exchangeRate : 1400;
 
-      // Fetch real-time exchange rate using the robust callback
-      await fetchRealExchangeRate();
-
-      // 1. Overseas Stock Sync (TTTS3012R / VTTS3012R)
-      try {
-        const balanceData = await kisService.getOverseasBalance();
-        if (balanceData?.rt_cd === '0' && balanceData.output2?.[0]) {
-          foundAnyData = true;
-          const out2 = balanceData.output2[0];
-          const foreignCash = Number(out2.frcr_dncl_amt_2 || out2.frcr_dncl_amt_1 || out2.frcr_evlu_amt2 || 0); 
-          const purchaseAmt = Number(out2.frcr_buy_amt_smtl || out2.frcr_pchs_amt1 || 0); 
-          
-          totalConvertedBalance += foreignCash * currentRate;
-          totalConvertedPrincipal += (foreignCash + purchaseAmt) * currentRate;
-        }
-        
-        const holdingsData = await kisService.getOverseasHoldings(); // CTRP6504R
-        if (holdingsData?.rt_cd === '0' && holdingsData.output1 && Array.isArray(holdingsData.output1)) {
-          foundAnyData = true;
-          holdingsData.output1.forEach((item: any) => {
-            if (item.pdno) {
-              const qty = Number(item.ccl_qty || item.hldg_qty || 0);
-              const avgP = Number(item.pchs_avg_pric || item.pchs_unpr || item.pchs_avg_price || 0);
-              const name = item.ovrs_item_name || item.item_name || item.prdt_name;
-              if (qty > 0) {
-                newHoldings[item.pdno] = (newHoldings[item.pdno] || 0) + qty;
-                if (avgP > 0) newAvgPrices[item.pdno] = avgP;
-                if (name) newStockNames[item.pdno] = name;
-              }
-            }
-          });
-        }
-      } catch (err: any) {
-        console.warn("Overseas Sync Skip:", err);
-        overseasError = err.message;
-      }
-
-      // 2. Domestic Stock Sync (TTTC8434R / VTTC8434R)
+      // Domestic Stock Sync (TTTC8434R / VTTC8434R)
       try {
         const domesticBalanceData = await kisService.getDomesticBalance();
         if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output2?.[0]) {
@@ -1473,14 +1432,13 @@ export default function App() {
         }
       } catch (err: any) {
         console.warn("Domestic Sync Skip:", err);
-        domesticError = domesticError || err.message;
+        domesticError = err.message;
       }
 
-      // Final Check: If absolutely no data was fetched and there were errors, notify user
-      if (!foundAnyData && (overseasError || domesticError)) {
+      // Final Check: If absolutely no data was fetched and there was a domestic error, notify user
+      if (!foundAnyData && domesticError) {
          setBotStatus("연동 데이터 수신 실패");
-         const finalMsg = [overseasError, domesticError].filter(Boolean).join(", ");
-         showNotification(`KIS 데이터 수신 실패: ${finalMsg}`, "error");
+         showNotification(`KIS 국내 잔고 수신 실패: ${domesticError}`, "error");
          return;
       }
 

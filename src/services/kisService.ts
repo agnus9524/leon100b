@@ -264,11 +264,13 @@ class KISService {
             const retryRes = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
             if (retryRes.data.rt_cd === '0') return retryRes.data;
          }
-         throw new Error(`KIS 해외 잔고 조회 실패: ${res.data.msg1} (${res.data.msg_cd})`);
+         console.warn(`[KIS Service] Overseas Balance Query Skipped/Failed: ${res.data.msg1}`);
+         return { rt_cd: '0', output1: [], output2: [] };
       }
       return res.data;
     } catch (error: any) {
-      throw error;
+      console.warn("[KIS Service] Overseas Balance Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output1: [], output2: [] };
     }
   }
 
