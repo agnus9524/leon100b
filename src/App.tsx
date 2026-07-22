@@ -693,6 +693,82 @@ export default function App() {
     };
   }, [balance, holdings, stocks, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, principal, pnl, pnlPercent]);
 
+  // 1. Limit Price & Scalper Target Setting Modal State
+  const [limitPriceModalState, setLimitPriceModalState] = useState<{
+    isOpen: boolean;
+    stock: Stock | null;
+    upperLimit: number;
+    lowerLimit: number;
+    targetBuyPrice: number;
+    targetSellPrice: number;
+  }>({
+    isOpen: false,
+    stock: null,
+    upperLimit: 0,
+    lowerLimit: 0,
+    targetBuyPrice: 0,
+    targetSellPrice: 0
+  });
+
+  // 2. Scalper Engine Top 5 Recommendation Stocks Ranking
+  const topScalpingStocks = useMemo(() => {
+    return stocks.map(s => {
+      const absChange = Math.abs(s.changePercent || 0);
+      const vol = s.volume || 15000;
+      const curPrice = s.price || 1000;
+
+      // Scalping Suitability Score Calculation (50 ~ 99 pts)
+      const volatilityPart = Math.min(absChange * 12, 55);
+      const volumePart = Math.min((vol / 30000) * 25, 30);
+      const pricePart = curPrice > 500 ? 14 : 5;
+      const scalpScore = Math.min(99, Math.max(52, Math.round(volatilityPart + volumePart + pricePart)));
+
+      let tag = "박스권 미세진동 유망";
+      if (absChange >= 8) tag = "고변동성 급등주";
+      else if (absChange >= 4) tag = "단기 강세 모멘텀";
+      else if (vol >= 80000) tag = "대량 거래 체결 유월";
+      else tag = "안정적 파동 형성";
+
+      const basePrice = curPrice / (1 + (s.changePercent || 0) / 100);
+      const isKR = /^\d{6}$/.test(s.symbol);
+      const upperLimit = isKR ? Math.floor(basePrice * 1.30) : Math.floor(curPrice * 1.30);
+      const lowerLimit = isKR ? Math.floor(basePrice * 0.70) : Math.floor(curPrice * 0.70);
+
+      return {
+        ...s,
+        scalpScore,
+        tag,
+        upperLimit,
+        lowerLimit
+      };
+    }).sort((a, b) => b.scalpScore - a.scalpScore).slice(0, 5);
+  }, [stocks]);
+
+  // Handler to open limit price & target setting modal for a stock
+  const openLimitPriceModal = (stock: Stock) => {
+    const curPrice = stock.price || 1000;
+    const basePrice = curPrice / (1 + (stock.changePercent || 0) / 100);
+    const isKR = /^\d{6}$/.test(stock.symbol);
+    const upperLimit = isKR ? Math.floor(basePrice * 1.30) : Math.floor(curPrice * 1.30);
+    const lowerLimit = isKR ? Math.floor(basePrice * 0.70) : Math.floor(curPrice * 0.70);
+
+    const initialBuy = selectedSymbol === stock.symbol && gapBuyPrice > 0 
+      ? gapBuyPrice 
+      : Math.floor(curPrice * 0.992);
+    const initialSell = selectedSymbol === stock.symbol && gapSellPrice > 0 
+      ? gapSellPrice 
+      : Math.floor(curPrice * 1.015);
+
+    setLimitPriceModalState({
+      isOpen: true,
+      stock,
+      upperLimit,
+      lowerLimit,
+      targetBuyPrice: initialBuy,
+      targetSellPrice: initialSell
+    });
+  };
+
   // Real-time Exchange Rate Fetcher & Simulator
   const fetchRealExchangeRate = React.useCallback(async () => {
     try {
@@ -1462,14 +1538,16 @@ export default function App() {
     updateKisBuyableQty();
   }, [selectedSymbol, balance, kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, updateKisBuyableQty]);
 
-  const handleSyncKIS = async () => {
+  const handleSyncKIS = async (isAutoTrigger = false) => {
     if (!kisConfig.isConnected) return;
     
     // Check for password
     const activeConfig = getActiveKisConfig(kisConfig);
     if (!activeConfig.accountPw) {
-      setBotStatus("연동 실패: 계좌 비밀번호가 필요합니다.");
-      alert("계좌 비밀번호(4자리)가 입력되지 않았습니다. [설정 > KIS 연동]에서 비밀번호를 입력해주세요.");
+      setBotStatus("실계좌 연동 대기: 비밀번호 설정이 필요합니다.");
+      if (!isAutoTrigger) {
+        alert("계좌 비밀번호(4자리)가 입력되지 않았습니다. [설정 > KIS 연동]에서 비밀번호를 입력해주세요.");
+      }
       return;
     }
 
@@ -1676,6 +1754,16 @@ export default function App() {
       setBotStatus(`증권사 동기화 실패: ${msg}`);
     }
   };
+
+  // 프로그램 시작 시 실제 계좌 연동 자동 실행 (Startup Auto-Sync)
+  const hasAutoSyncedOnStartupRef = React.useRef(false);
+  useEffect(() => {
+    if (!hasAutoSyncedOnStartupRef.current && kisConfig.isConnected) {
+      hasAutoSyncedOnStartupRef.current = true;
+      console.log("[Auto-Sync] 프로그램 시작 시 계좌 잔고 및 보유 종목을 자동 동기화합니다.");
+      handleSyncKIS(true);
+    }
+  }, [kisConfig.isConnected]);
 
   // Unified Gap Trading logic is now placed in the main bot effect below.
 
@@ -3899,8 +3987,97 @@ export default function App() {
                     </span>
                   </div>
                 </div>
+
+                <button
+                  onClick={() => openLimitPriceModal(selectedStock)}
+                  className="w-full py-2 bg-sleek-blue/20 hover:bg-sleek-blue text-sleek-blue hover:text-white border border-sleek-blue/30 rounded-xl text-[11px] font-bold transition-all flex items-center justify-center gap-1.5 shadow-sm"
+                >
+                  <Sliders className="w-3.5 h-3.5" />
+                  상/하한가 및 스캘핑 지정가 설정
+                </button>
               </div>
             )}
+
+            {/* TOP 5 Scalper Optimal Stocks Ranking Panel */}
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                  <h2 className="text-[11px] font-bold text-white uppercase tracking-wider">
+                    Scalper 최적 추천 TOP 5
+                  </h2>
+                </div>
+                <span className="text-[9px] font-mono text-amber-300 bg-amber-500/10 px-2 py-0.5 rounded-full border border-amber-500/20 font-bold">
+                  실시간 순위
+                </span>
+              </div>
+
+              <div className="space-y-2">
+                {topScalpingStocks.map((stock, rankIdx) => {
+                  const isSelected = selectedSymbol === stock.symbol;
+                  const rankBadgeColor = rankIdx === 0 
+                    ? "bg-amber-400 text-black font-black" 
+                    : rankIdx === 1 
+                    ? "bg-slate-300 text-black font-black" 
+                    : rankIdx === 2 
+                    ? "bg-amber-700 text-white font-black" 
+                    : "bg-white/10 text-white font-bold";
+
+                  return (
+                    <div
+                      key={stock.symbol}
+                      onClick={() => {
+                        setSelectedSymbol(stock.symbol);
+                        openLimitPriceModal(stock);
+                      }}
+                      className={cn(
+                        "p-3 rounded-2xl border transition-all cursor-pointer group space-y-1.5",
+                        isSelected
+                          ? "bg-sleek-blue/20 border-sleek-blue/50 shadow-md shadow-sleek-blue/10"
+                          : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-sleek-blue/30"
+                      )}
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className={cn("w-5 h-5 rounded-full text-[10px] flex items-center justify-center shrink-0", rankBadgeColor)}>
+                            {rankIdx + 1}
+                          </span>
+                          <div className="min-w-0">
+                            <div className="font-bold text-xs text-white truncate group-hover:text-sleek-blue transition-colors">
+                              {stock.name}
+                            </div>
+                            <div className="text-[10px] text-sleek-text-secondary font-mono">
+                              {stock.symbol}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="text-right">
+                          <div className="text-xs font-mono font-bold text-white">
+                            ₩{(stock.price || 0).toLocaleString()}
+                          </div>
+                          <div className={cn(
+                            "text-[10px] font-mono font-bold",
+                            (stock.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400"
+                          )}>
+                            {(stock.changePercent || 0) >= 0 ? '+' : ''}{(stock.changePercent || 0).toFixed(2)}%
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center justify-between text-[9px] pt-1.5 border-t border-white/5">
+                        <span className="text-amber-300/90 bg-amber-500/10 px-1.5 py-0.5 rounded border border-amber-500/20 font-bold">
+                          {stock.tag}
+                        </span>
+                        <span className="text-sleek-blue font-bold flex items-center gap-1 group-hover:underline">
+                          상/하한가 설정 ⚙️
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
 
             <div className="space-y-4">
               <h2 className="text-[10px] font-bold text-sleek-text-secondary uppercase tracking-widest">실시간 계좌 현황</h2>
@@ -5527,6 +5704,263 @@ export default function App() {
                   className="px-6 py-2.5 rounded-xl bg-sleek-blue hover:bg-sleek-blue/90 text-white font-bold text-xs transition-all shadow-lg shadow-sleek-blue/20"
                 >
                   확인 (닫기)
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* 6. 상한가 / 하한가 및 스캘핑 지정가 설정 모달 */}
+      <AnimatePresence>
+        {limitPriceModalState.isOpen && limitPriceModalState.stock && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-sleek-card border border-sleek-border rounded-3xl p-6 max-w-lg w-full space-y-6 shadow-2xl overflow-hidden max-h-[90vh] overflow-y-auto"
+            >
+              {/* Header */}
+              <div className="flex items-start justify-between border-b border-white/10 pb-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-mono font-bold text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded border border-amber-500/20">
+                      Scalper 한계 가격 분석
+                    </span>
+                    <span className="text-[10px] text-sleek-text-secondary font-mono">
+                      {limitPriceModalState.stock.symbol}
+                    </span>
+                  </div>
+                  <h3 className="text-xl font-black text-white flex items-center gap-2">
+                    {limitPriceModalState.stock.name}
+                  </h3>
+                </div>
+                <button
+                  onClick={() => setLimitPriceModalState(prev => ({ ...prev, isOpen: false }))}
+                  className="p-2 hover:bg-white/10 rounded-full text-sleek-text-secondary hover:text-white transition-all"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {/* Current Price & Upper/Lower Limit Cards */}
+              <div className="grid grid-cols-3 gap-2 text-center">
+                {/* Lower Limit Card */}
+                <div className="bg-rose-500/10 border border-rose-500/30 rounded-2xl p-3 space-y-1">
+                  <div className="text-[10px] text-rose-400 font-bold">당일 하한가 (-30%)</div>
+                  <div className="text-sm font-black font-mono text-rose-300">
+                    ₩{limitPriceModalState.lowerLimit.toLocaleString()}
+                  </div>
+                </div>
+
+                {/* Current Price Card */}
+                <div className="bg-sleek-blue/10 border border-sleek-blue/30 rounded-2xl p-3 space-y-1">
+                  <div className="text-[10px] text-sleek-blue font-bold">실시간 현재가</div>
+                  <div className="text-sm font-black font-mono text-white">
+                    ₩{(limitPriceModalState.stock.price || 0).toLocaleString()}
+                  </div>
+                  <div className={cn(
+                    "text-[10px] font-mono font-bold",
+                    (limitPriceModalState.stock.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400"
+                  )}>
+                    {(limitPriceModalState.stock.changePercent || 0) >= 0 ? '+' : ''}{(limitPriceModalState.stock.changePercent || 0).toFixed(2)}%
+                  </div>
+                </div>
+
+                {/* Upper Limit Card */}
+                <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-2xl p-3 space-y-1">
+                  <div className="text-[10px] text-emerald-400 font-bold">당일 상한가 (+30%)</div>
+                  <div className="text-sm font-black font-mono text-emerald-300">
+                    ₩{limitPriceModalState.upperLimit.toLocaleString()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Visual Range Mapping Bar */}
+              <div className="bg-black/30 p-4 rounded-2xl border border-white/5 space-y-2">
+                <div className="flex justify-between text-[10px] font-mono text-sleek-text-secondary">
+                  <span>하한 ₩{limitPriceModalState.lowerLimit.toLocaleString()}</span>
+                  <span className="text-white font-bold">현재 ₩{(limitPriceModalState.stock.price || 0).toLocaleString()}</span>
+                  <span>상한 ₩{limitPriceModalState.upperLimit.toLocaleString()}</span>
+                </div>
+
+                <div className="relative h-4 bg-white/5 rounded-full overflow-hidden border border-white/10 flex items-center">
+                  <div className="absolute inset-y-0 bg-gradient-to-r from-rose-500/30 via-sleek-blue/40 to-emerald-500/30 w-full" />
+                  
+                  {/* Buy Marker */}
+                  {limitPriceModalState.upperLimit > limitPriceModalState.lowerLimit && (
+                    <div 
+                      style={{ 
+                        left: `${Math.min(95, Math.max(5, ((limitPriceModalState.targetBuyPrice - limitPriceModalState.lowerLimit) / (limitPriceModalState.upperLimit - limitPriceModalState.lowerLimit)) * 100))}%` 
+                      }}
+                      className="absolute -top-1 bottom-0 w-1 bg-amber-400 shadow-[0_0_10px_#F59E0B] z-10"
+                      title={`스캘핑 진입가: ₩${limitPriceModalState.targetBuyPrice.toLocaleString()}`}
+                    />
+                  )}
+
+                  {/* Sell Marker */}
+                  {limitPriceModalState.upperLimit > limitPriceModalState.lowerLimit && (
+                    <div 
+                      style={{ 
+                        left: `${Math.min(95, Math.max(5, ((limitPriceModalState.targetSellPrice - limitPriceModalState.lowerLimit) / (limitPriceModalState.upperLimit - limitPriceModalState.lowerLimit)) * 100))}%` 
+                      }}
+                      className="absolute -top-1 bottom-0 w-1 bg-emerald-400 shadow-[0_0_10px_#34D399] z-10"
+                      title={`스캘핑 목표가: ₩${limitPriceModalState.targetSellPrice.toLocaleString()}`}
+                    />
+                  )}
+                </div>
+
+                <div className="flex justify-between text-[9px] font-mono text-sleek-text-secondary pt-1">
+                  <span className="text-amber-400 font-bold">■ 매수지정가: ₩{limitPriceModalState.targetBuyPrice.toLocaleString()}</span>
+                  <span className="text-emerald-400 font-bold">■ 매도목표가: ₩{limitPriceModalState.targetSellPrice.toLocaleString()}</span>
+                </div>
+              </div>
+
+              {/* Custom Inputs */}
+              <div className="space-y-4">
+                <h4 className="text-xs font-bold text-white flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5 text-sleek-blue" />
+                  상/하한가 제한 및 스캘핑 지정가 직접 설정
+                </h4>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Buy Target */}
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-3.5 space-y-2">
+                    <label className="text-[11px] font-bold text-amber-300 block">
+                      매수 지정 진입가 (Buy Target)
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-sleek-text-secondary">₩</span>
+                      <input
+                        type="number"
+                        value={limitPriceModalState.targetBuyPrice}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          setLimitPriceModalState(prev => ({ ...prev, targetBuyPrice: val }));
+                        }}
+                        className="w-full bg-black/50 border border-sleek-border rounded-xl py-2 pl-8 pr-3 text-xs font-mono text-white focus:border-amber-400 outline-none"
+                      />
+                    </div>
+                    <div className="flex gap-1.5">
+                      {[-0.5, -1.0, -2.0].map(pct => (
+                        <button
+                          key={pct}
+                          onClick={() => {
+                            const cur = limitPriceModalState.stock?.price || 1000;
+                            const calculated = Math.floor(cur * (1 + pct / 100));
+                            setLimitPriceModalState(prev => ({ ...prev, targetBuyPrice: calculated }));
+                          }}
+                          className="flex-1 py-1 bg-white/5 hover:bg-white/15 text-[9px] font-mono text-sleek-text-secondary hover:text-white rounded-lg border border-white/5 transition-all"
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Sell Target */}
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-3.5 space-y-2">
+                    <label className="text-[11px] font-bold text-emerald-400 block">
+                      매도 목표가 (Sell Target)
+                    </label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xs font-bold text-sleek-text-secondary">₩</span>
+                      <input
+                        type="number"
+                        value={limitPriceModalState.targetSellPrice}
+                        onChange={(e) => {
+                          const val = Number(e.target.value);
+                          setLimitPriceModalState(prev => ({ ...prev, targetSellPrice: val }));
+                        }}
+                        className="w-full bg-black/50 border border-sleek-border rounded-xl py-2 pl-8 pr-3 text-xs font-mono text-white focus:border-emerald-400 outline-none"
+                      />
+                    </div>
+                    <div className="flex gap-1.5">
+                      {[+0.5, +1.0, +2.0].map(pct => (
+                        <button
+                          key={pct}
+                          onClick={() => {
+                            const cur = limitPriceModalState.stock?.price || 1000;
+                            const calculated = Math.floor(cur * (1 + pct / 100));
+                            setLimitPriceModalState(prev => ({ ...prev, targetSellPrice: calculated }));
+                          }}
+                          className="flex-1 py-1 bg-white/5 hover:bg-white/15 text-[9px] font-mono text-sleek-text-secondary hover:text-white rounded-lg border border-white/5 transition-all"
+                        >
+                          +{pct}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Custom Upper/Lower Limit Inputs */}
+                <div className="grid grid-cols-2 gap-3 pt-2">
+                  <div>
+                    <label className="text-[10px] text-rose-400 font-bold block mb-1">
+                      사용자 정의 하한선 (₩)
+                    </label>
+                    <input
+                      type="number"
+                      value={limitPriceModalState.lowerLimit}
+                      onChange={(e) => setLimitPriceModalState(prev => ({ ...prev, lowerLimit: Number(e.target.value) }))}
+                      className="w-full bg-black/30 border border-rose-500/20 rounded-xl p-2 text-xs font-mono text-rose-300 outline-none"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[10px] text-emerald-400 font-bold block mb-1">
+                      사용자 정의 상한선 (₩)
+                    </label>
+                    <input
+                      type="number"
+                      value={limitPriceModalState.upperLimit}
+                      onChange={(e) => setLimitPriceModalState(prev => ({ ...prev, upperLimit: Number(e.target.value) }))}
+                      className="w-full bg-black/30 border border-emerald-500/20 rounded-xl p-2 text-xs font-mono text-emerald-300 outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Estimated Yield Box */}
+              <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-2xl p-4 flex items-center justify-between">
+                <div className="space-y-0.5">
+                  <div className="text-[10px] text-sleek-text-secondary uppercase">진입 대비 예상 수익률</div>
+                  <div className="text-sm font-black font-mono text-emerald-400">
+                    +{(((limitPriceModalState.targetSellPrice - limitPriceModalState.targetBuyPrice) / (limitPriceModalState.targetBuyPrice || 1)) * 100).toFixed(2)}%
+                  </div>
+                </div>
+                <div className="text-right space-y-0.5">
+                  <div className="text-[10px] text-sleek-text-secondary uppercase">주당 예상 순수익</div>
+                  <div className="text-sm font-black font-mono text-white">
+                    ₩{Math.max(0, limitPriceModalState.targetSellPrice - limitPriceModalState.targetBuyPrice).toLocaleString()}
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-2">
+                <button
+                  onClick={() => setLimitPriceModalState(prev => ({ ...prev, isOpen: false }))}
+                  className="flex-1 py-3 bg-white/5 hover:bg-white/10 text-sleek-text-secondary hover:text-white rounded-2xl text-xs font-bold transition-all border border-white/5"
+                >
+                  취소
+                </button>
+                <button
+                  onClick={() => {
+                    const stock = limitPriceModalState.stock!;
+                    setSelectedSymbol(stock.symbol);
+                    setGapBuyPrice(limitPriceModalState.targetBuyPrice);
+                    setGapSellPrice(limitPriceModalState.targetSellPrice);
+                    setLimitPriceModalState(prev => ({ ...prev, isOpen: false }));
+                    showNotification(
+                      `[${stock.name}] 종목 선택 및 상하한/스캘핑 지정가 설정 완료 (매수: ₩${limitPriceModalState.targetBuyPrice.toLocaleString()}, 매도: ₩${limitPriceModalState.targetSellPrice.toLocaleString()})`,
+                      "success"
+                    );
+                  }}
+                  className="flex-2 py-3 bg-sleek-blue hover:bg-blue-600 text-white rounded-2xl text-xs font-bold transition-all shadow-lg shadow-sleek-blue/20 flex items-center justify-center gap-2"
+                >
+                  <Check className="w-4 h-4" />
+                  이 종목 선택 및 상하한/스캘핑 설정 적용
                 </button>
               </div>
             </motion.div>
