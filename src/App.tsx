@@ -2556,7 +2556,9 @@ export default function App() {
                   if (executedQty > 0) {
                     setScalperMessage(`[매수 완료] 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${executedQty}주)`);
                     setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} ${executedQty}주 가중 진입 완료`);
-                    setGapInventory(prev => [...prev, { price: targetBuyPrice, quantity: executedQty }]);
+                    const newSlotList = [...gapInventoryRef.current, { price: targetBuyPrice, quantity: executedQty }];
+                    gapInventoryRef.current = newSlotList;
+                    setGapInventory(newSlotList);
                     setHighWaterMark(prev => ({ ...prev, [targetBuyPrice]: targetBuyPrice }));
                     setLastTradeType('BUY');
                     setGapTradeCount(prev => prev + 1);
@@ -2597,6 +2599,7 @@ export default function App() {
           setScalperMessage(`[통합 평단가 일괄 익절] ₩${Math.round(weightedAvgPrice).toLocaleString()} -> ₩${currentPrice.toLocaleString()} (+${(overallProfitRatio * 100).toFixed(2)}%)`);
           await executeTrade('SELL', selectedStock, totalHeldQty, `통합 평단가 일괄 익절 (+${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice);
           
+          gapInventoryRef.current = [];
           setGapInventory([]);
           setHighWaterMark({});
           setLastTradeType('SELL');
@@ -2611,9 +2614,11 @@ export default function App() {
         }
       }
 
-      // Technique 2: INDIVIDUAL SLOT PROFIT EXIT (슬롯별 독립 익절/손절)
-      if (currentInventory2.length > 0) {
-        for (const slot of currentInventory2) {
+      // Technique 2: INDIVIDUAL SLOT PROFIT EXIT (슬롯별 독립 익절/손절 - 병렬 연속 즉시 매도 처리)
+      let activeSlots = [...gapInventoryRef.current];
+      if (activeSlots.length > 0) {
+        const slotsToProcess = [...activeSlots];
+        for (const slot of slotsToProcess) {
           const buyPrice = typeof slot === 'number' ? slot : (slot.price || 0);
           const buyQty = typeof slot === 'number' ? tradeQuantity : (slot.quantity || tradeQuantity || 1);
           if (!buyPrice || buyPrice <= 0) continue;
@@ -2649,19 +2654,14 @@ export default function App() {
               else if (isProfitTarget) sellReason = `목표 수익 달성 (+${(profitRatio * 100).toFixed(2)}%)`;
               else sellReason = "리스크 관리 손절";
 
-              setScalperMessage(`[슬롯 개별 매도] ₩${buyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} (${sellReason})`);
+              setScalperMessage(`[목표수익 즉시 매도] ₩${buyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} (${sellReason})`);
               await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ₩${buyPrice.toLocaleString()}, 수량: ${sellQty}): ${sellReason}`, currentPrice);
               
-              // Remove this exact slot from gapInventory
-              setGapInventory(prev => {
-                const idx = prev.findIndex(s => (typeof s === 'number' ? s : s.price) === buyPrice);
-                if (idx > -1) {
-                  const copy = [...prev];
-                  copy.splice(idx, 1);
-                  return copy;
-                }
-                return prev.filter(s => (typeof s === 'number' ? s : s.price) !== buyPrice);
-              });
+              // Remove this exact slot synchronously from ref and state
+              const updatedRef = gapInventoryRef.current.filter(s => (typeof s === 'number' ? s : s.price) !== buyPrice);
+              gapInventoryRef.current = updatedRef;
+              setGapInventory(updatedRef);
+
               setHighWaterMark(prev => {
                 const next = { ...prev };
                 delete next[buyPrice];
@@ -2672,16 +2672,16 @@ export default function App() {
               
               if (profitRatio > 0) {
                 setScalpingWins(prev => prev + 1);
-                showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}, ${sellQty}주) 개별 슬롯 매도 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
+                showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}, ${sellQty}주) 목표수익 매도 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
                 playScalpingSound('SELL');
               } else {
                 setScalpingLosses(prev => prev + 1);
-                showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}, ${sellQty}주) 개별 슬롯 매도 완료 (${(profitRatio * 100).toFixed(2)}%)`, "error");
+                showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}, ${sellQty}주) 손절 매도 완료 (${(profitRatio * 100).toFixed(2)}%)`, "error");
               }
 
               const profit = (currentPrice - buyPrice) * sellQty * (marketType === 'US' ? exchangeRate : 1);
               setGapTradingProfit(prev => prev + profit);
-              break; // Process one slot exit per interval to prevent state race condition
+              // Continue loop without break to clear all eligible profitable slots in parallel!
             }
           }
         }
