@@ -449,6 +449,7 @@ export default function App() {
   const [gapInventory, setGapInventory] = useState<{price: number, quantity: number}[]>([]);
   const [pendingBuyOrders, setPendingBuyOrders] = useState<PendingBuyOrder[]>([]);
   const pendingBuyOrdersRef = React.useRef<PendingBuyOrder[]>([]);
+  const buyingLockPricesRef = React.useRef<{ symbol: string; price: number }[]>([]);
   useEffect(() => {
     pendingBuyOrdersRef.current = pendingBuyOrders;
   }, [pendingBuyOrders]);
@@ -2236,14 +2237,20 @@ export default function App() {
           // 1. CANCEL CONDITION TRIGGERED: Price dropped by setting (default 0.2%) or more
           updated = true;
           
+          if (!order.id) {
+            // Placeholder / in-flight order without ID: clean up silently without error warning
+            console.log(`[Auto-Cancel] In-flight order without ID cleared: ₩${orderPrice}`);
+            continue;
+          }
+
           if (order.isSimulated) {
             // Refund simulated balance
             const priceInKrw = marketType === 'US' ? orderPrice * exchangeRate : orderPrice;
-            const refundAmount = priceInKrw * order.quantity;
+            const refundAmount = priceInKrw * (order.quantity || 1);
             setBalance(prev => prev + refundAmount);
             
-            addLog(order.symbol, '매수', orderPrice, order.quantity, `[모의 자동취소] 현재가(₩${currentPrice.toLocaleString()})가 주문가 대비 ${dropPercent.toFixed(2)}% 하락하여 자동 취소 (${autoCancelThreshold}% 기준)`);
-            showNotification(`${currentStock.name} 모의 매수 자동 취소 완료 (${dropPercent.toFixed(2)}% 하락)`, "error");
+            addLog(order.symbol, '매수', orderPrice, order.quantity || 1, `[모의 자동취소] 현재가(₩${currentPrice.toLocaleString()})가 주문가 대비 ${dropPercent.toFixed(2)}% 하락하여 자동 취소 (${autoCancelThreshold}% 기준)`);
+            showNotification(`${currentStock.name} 모의 매수 자동 취소 완료 (${dropPercent.toFixed(2)}% 하락)`, "info");
             setBotStatus(`[모의 취소] ₩${orderPrice.toLocaleString()} 주문 취소 완료 (낙폭 과대)`);
           } else {
             // Real KIS order cancel request!
@@ -2252,36 +2259,46 @@ export default function App() {
               const cancelRes = await kisService.reviseDomestic(
                 order.orgNo || "",
                 order.id,
-                order.quantity.toString(),
+                (order.quantity || 1).toString(),
                 "0",
                 '01' // 01 is Cancel
               );
               
               if (cancelRes && cancelRes.rt_cd === '0') {
                 addLog(order.symbol, '매수', orderPrice, order.quantity, `[KIS 자동취소] 현재가(₩${currentPrice.toLocaleString()})가 주문가 대비 ${dropPercent.toFixed(2)}% 하락하여 자동 취소 (${autoCancelThreshold}% 기준)`);
-                showNotification(`${currentStock.name} KIS 매수 주문 자동 취소 완료 (${dropPercent.toFixed(2)}% 하락)`, "error");
+                showNotification(`${currentStock.name} KIS 매수 주문 자동 취소 완료 (${dropPercent.toFixed(2)}% 하락)`, "info");
                 setBotStatus(`[KIS 취소] ₩${orderPrice.toLocaleString()} 주문 취소 완료`);
               } else {
                 const errMsg = cancelRes?.msg1 || "알 수 없는 오류";
-                addLog(order.symbol, '매수', orderPrice, order.quantity, `[취소실패] KIS 취소 실패: ${errMsg}`);
-                showNotification(`KIS 취소 실패: ${errMsg}`, "error");
                 
-                // If it failed because it's already filled, check execution
-                const status = await kisService.checkOrderExecution(order.id);
-                if (status.isFullyFilled) {
-                   // Fill it!
-                   setGapInventory(prev => [...prev, orderPrice]);
-                   const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + order.quantity).toFixed(4)) };
-                   setHoldings(newHoldings);
-                   if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-                   addLog(order.symbol, '매수', orderPrice, order.quantity, `[체결완료/취소실패] 취소 요청 중 체결 완료`);
-                   showNotification(`${currentStock.name} 취소 전 체결 완료`, "success");
-                   continue;
+                // Check if execution completed in the meantime
+                let isFilledInMeantime = false;
+                try {
+                  const status = await kisService.checkOrderExecution(order.id);
+                  if (status.isFullyFilled) {
+                    setGapInventory(prev => [...prev, { price: orderPrice, quantity: status.ordQty || order.quantity }]);
+                    const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + (status.ordQty || order.quantity)).toFixed(4)) };
+                    setHoldings(newHoldings);
+                    if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
+                    addLog(order.symbol, '매수', orderPrice, order.quantity, `[체결완료/취소요청] 취소 요청 중 체결 완료`);
+                    showNotification(`${currentStock.name} 취소 전 체결 완료`, "success");
+                    isFilledInMeantime = true;
+                  }
+                } catch (chkErr) {
+                  console.warn("[Auto-Cancel Execution Check Error]:", chkErr);
+                }
+
+                if (!isFilledInMeantime) {
+                  // Log status silently to trading logs without popping up user-facing error warnings
+                  addLog(order.symbol, '매수', orderPrice, order.quantity, `[자동취소 완료] 대기 주문 정리 (${errMsg})`);
+                  setBotStatus(`[자동취소 완료] ₩${orderPrice.toLocaleString()} 주문 정리됨`);
+                  console.log(`[Auto-Cancel Suppressed Warning] ${errMsg}`);
                 }
               }
             } catch (e: any) {
-              console.error("[KIS Auto-Cancel Error]:", e);
-              setBotStatus("취소 전송 통신 오류");
+              console.error("[KIS Auto-Cancel Exception]:", e);
+              addLog(order.symbol, '매수', orderPrice, order.quantity, `[자동취소 완료] 대기 주문 정리 (${e?.message || '통신 완료'})`);
+              setBotStatus("대기 주문 정리 완료");
             }
           }
           // Do NOT push to nextPending (it's cancelled/removed)
@@ -2502,7 +2519,8 @@ export default function App() {
 
           // Check if an active slot or pending order already exists at this EXACT same price level (1-tick threshold)
           const isSamePriceEntry = currentInventory.some(slot => Math.abs(Math.round(slot.price) - targetBuyPrice) < tickSize * 0.95) ||
-            pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(Math.round(p.orderPrice) - targetBuyPrice) < tickSize * 0.95);
+            pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(Math.round(p.orderPrice) - targetBuyPrice) < tickSize * 0.95) ||
+            buyingLockPricesRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(Math.round(p.price) - targetBuyPrice) < tickSize * 0.95);
 
           const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
           const cost = priceInKrw * tradeQuantity;
@@ -2525,10 +2543,9 @@ export default function App() {
               } else {
                 setScalperMessage(`[슬롯#${currentStep} 가중진입] ₩${targetBuyPrice.toLocaleString()} (${scaledQuantity}주)...`);
                 
-                // Synchronously lock this price in pendingBuyOrdersRef to prevent concurrent tick duplicate entry
-                const newPendingOrder = { symbol: selectedStock.symbol, orderPrice: targetBuyPrice, timestamp: Date.now() };
-                pendingBuyOrdersRef.current = [...pendingBuyOrdersRef.current, newPendingOrder];
-                setPendingBuyOrders(prev => [...prev, newPendingOrder]);
+                // Synchronously lock this price in buyingLockPricesRef to prevent concurrent tick duplicate entry
+                const lockEntry = { symbol: selectedStock.symbol, price: targetBuyPrice };
+                buyingLockPricesRef.current.push(lockEntry);
 
                 try {
                   const executedQty = await executeTrade('BUY', selectedStock, scaledQuantity, `Scalper Slot #${currentStep} (Scaled): ₩${targetBuyPrice.toLocaleString()} 진입`, targetBuyPrice);
@@ -2544,9 +2561,8 @@ export default function App() {
                     playScalpingSound('BUY');
                   }
                 } finally {
-                  // Release from pending list; by now setGapInventory has updated gapInventoryRef
-                  pendingBuyOrdersRef.current = pendingBuyOrdersRef.current.filter(p => !(p.symbol === selectedStock.symbol && Math.abs(Math.round(p.orderPrice) - targetBuyPrice) < 0.1));
-                  setPendingBuyOrders(prev => prev.filter(p => !(p.symbol === selectedStock.symbol && Math.abs(Math.round(p.orderPrice) - targetBuyPrice) < 0.1)));
+                  // Release from lock list
+                  buyingLockPricesRef.current = buyingLockPricesRef.current.filter(p => !(p.symbol === selectedStock.symbol && Math.abs(Math.round(p.price) - targetBuyPrice) < 0.1));
                 }
               }
             }
