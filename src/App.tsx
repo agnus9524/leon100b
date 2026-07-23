@@ -5002,8 +5002,8 @@ export default function App() {
                         </div>
 
                         {/* Right Side: Live Order Book Section (매도5단계 ~ 매수5단계) */}
-                        <div className="w-full lg:w-[280px] shrink-0 flex flex-col">
-                          <div className="bg-black/40 rounded-2xl border border-sleek-border p-2.5 flex flex-col justify-between h-[270px]">
+                        <div className="w-full lg:w-[290px] shrink-0 flex flex-col">
+                          <div className="bg-black/40 rounded-2xl border border-sleek-border p-3 flex flex-col justify-between min-h-[300px]">
                             <div>
                               <div className="text-center font-black text-sleek-text-secondary uppercase text-xs tracking-widest pb-1 border-b border-white/5 mb-1.5">
                                 실시간 잔량 호가창 (Live Order Book)
@@ -5015,7 +5015,7 @@ export default function App() {
                                   const vol = getLevelVolume(lvlPrice);
                                   const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
                                   return (
-                                    <div key={`ask-${lvlPrice}`} className="grid grid-cols-[3fr_4fr_3fr] items-center py-0.5 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group">
+                                    <div key={`ask-${lvlPrice}`} className="grid grid-cols-[3.2fr_3.8fr_3fr] items-center py-0.5 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group">
                                       <div className="absolute right-0 top-0 bottom-0 bg-sky-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
                                       <span className="text-[10px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis">매도 {5 - idx}단계</span>
                                       <span className={cn(
@@ -5031,7 +5031,7 @@ export default function App() {
                               </div>
 
                               {/* Spread Line */}
-                              <div className="my-1 py-1 px-2 bg-white/5 border-y border-white/10 flex items-center justify-between rounded-lg">
+                              <div className="my-1.5 py-1 px-2 bg-white/5 border-y border-white/10 flex items-center justify-between rounded-lg">
                                 <span className="text-[10px] font-black text-sleek-text-secondary uppercase">현재 체결가</span>
                                 <span className={cn("font-black text-sm font-mono animate-pulse", selectedStock.change >= 0 ? "text-sleek-green" : "text-sleek-red")}>
                                   ₩{currentPrice.toLocaleString()}
@@ -5045,7 +5045,7 @@ export default function App() {
                                   const vol = getLevelVolume(lvlPrice);
                                   const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
                                   return (
-                                    <div key={`bid-${lvlPrice}`} className="grid grid-cols-[3fr_4fr_3fr] items-center py-0.5 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group">
+                                    <div key={`bid-${lvlPrice}`} className="grid grid-cols-[3.2fr_3.8fr_3fr] items-center py-0.5 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group">
                                       <div className="absolute right-0 top-0 bottom-0 bg-rose-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
                                       <span className="text-[10px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis">매수 {idx + 1}단계</span>
                                       <span className={cn(
@@ -5062,7 +5062,7 @@ export default function App() {
                             </div>
 
                             {/* Order Book Pressure Gauge */}
-                            <div className="pt-1 border-t border-white/5 space-y-1">
+                            <div className="pt-1.5 border-t border-white/5 space-y-1">
                               <div className="flex justify-between text-[10px] text-sleek-text-secondary font-bold font-sans">
                                 <span className="text-sky-400">매도잔량 47.8%</span>
                                 <span className="text-rose-400">매수잔량 52.2%</span>
@@ -5076,10 +5076,10 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Bottom Row: 실시간 계좌 현황창 + 보유 주식 현황 (Placed under Chart as requested) */}
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2.5 border-t border-white/10">
+                      {/* Bottom Row: 실시간 계좌 현황창 + 보유 주식 현황 (Placed clearly lower under Chart & Orderbook) */}
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 mt-4 pt-3.5 border-t border-white/10">
                         {/* 1. 실시간 계좌 현황창 */}
-                        <div className="bg-black/30 border border-white/10 rounded-2xl p-3 space-y-2">
+                        <div className="bg-black/30 border border-white/10 rounded-2xl p-3.5 space-y-2.5">
                           <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
                             <div className="flex items-center gap-1.5">
                               <CircleDollarSign className="w-4 h-4 text-sleek-blue" />
@@ -5090,14 +5090,25 @@ export default function App() {
                             </span>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                            <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                              <span className="text-[11px] text-sleek-text-secondary uppercase block">가용 자산 (KRW)</span>
-                              <span className="text-base font-black text-white italic">₩{Math.round(balance).toLocaleString()}</span>
+                          <div className="grid grid-cols-2 gap-2.5 text-xs font-mono">
+                            <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
+                              <span className="text-[11px] text-sleek-text-secondary uppercase block font-bold">가용 자산 (KRW)</span>
+                              <span className="text-base font-black text-white italic mt-0.5 block">₩{Math.round(balance).toLocaleString()}</span>
                             </div>
-                            <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                              <span className="text-[11px] text-sleek-text-secondary uppercase block">총 자산 평가</span>
-                              <div className="flex items-baseline justify-between">
+                            <div 
+                              onClick={() => setIsAssetAnalysisModalOpen(true)}
+                              className="bg-white/5 hover:bg-white/10 p-2.5 rounded-xl border border-white/10 hover:border-sleek-blue/50 transition-all cursor-pointer group relative"
+                              title="클릭 시 총 자산 평가 세부 산출 내역 팝업 보기"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-[11px] text-sleek-text-secondary uppercase font-bold flex items-center gap-1 group-hover:text-sleek-blue transition-colors">
+                                  총 자산 평가 <Calculator className="w-3 h-3 text-sleek-blue" />
+                                </span>
+                                <span className="text-[9px] font-bold text-sleek-blue bg-sleek-blue/10 px-1.5 py-0.5 rounded border border-sleek-blue/20">
+                                  산출내역 📊
+                                </span>
+                              </div>
+                              <div className="flex items-baseline justify-between mt-1">
                                 <span className="text-base font-black text-sleek-blue italic">₩{totalValue.toLocaleString()}</span>
                                 <span className={cn("text-xs font-bold", pnl >= 0 ? "text-emerald-400" : "text-rose-400")}>
                                   {pnl >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
