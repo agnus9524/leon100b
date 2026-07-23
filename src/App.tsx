@@ -4360,11 +4360,11 @@ export default function App() {
 
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-bold text-white truncate">{st.name}</span>
-                              <span className="text-[9px] font-mono text-sleek-text-secondary shrink-0">({st.symbol})</span>
+                              <span className="text-sm font-bold text-white truncate">{st.name}</span>
+                              <span className="text-[11px] font-mono text-sleek-text-secondary shrink-0">({st.symbol})</span>
                             </div>
                             <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-[9px] font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
+                              <span className="text-[10px] font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
                                 {st.reasonTag}
                               </span>
                             </div>
@@ -4374,12 +4374,12 @@ export default function App() {
                         {/* Right: Score + Price */}
                         <div className="text-right shrink-0">
                           <div className="flex items-center justify-end gap-1">
-                            <span className="text-[9px] text-sleek-text-secondary">적합도</span>
-                            <span className="text-xs font-black font-mono text-emerald-400">{st.scalpScore}점</span>
+                            <span className="text-[10px] text-sleek-text-secondary">적합도</span>
+                            <span className="text-sm font-black font-mono text-emerald-400">{st.scalpScore}점</span>
                           </div>
-                          <div className="text-[10px] font-mono font-bold text-slate-200 mt-0.5">
+                          <div className="text-xs font-mono font-bold text-slate-200 mt-0.5">
                             {pricePrefix}{st.price?.toLocaleString()}
-                            <span className={cn("ml-1 text-[9px]", (st.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                            <span className={cn("ml-1 text-[11px]", (st.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
                               {(st.changePercent || 0) >= 0 ? '+' : ''}{(st.changePercent || 0).toFixed(1)}%
                             </span>
                           </div>
@@ -4401,11 +4401,11 @@ export default function App() {
             <div className="bg-sleek-card border border-sleek-border p-3.5 rounded-2xl shadow-lg relative overflow-hidden group flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-0.5">
-                  <Target className="w-3.5 h-3.5 text-sleek-blue" />
-                  <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest">실시간 스캘핑 총 수익</span>
+                  <Target className="w-4 h-4 text-sleek-blue" />
+                  <span className="text-xs font-black text-sleek-text-secondary uppercase tracking-widest">실시간 스캘핑 총 수익</span>
                 </div>
                 <div className={cn(
-                  "text-xl font-black italic tracking-tighter font-mono",
+                  "text-2xl font-black italic tracking-tighter font-mono",
                   gapTradingProfit >= 0 ? "text-sleek-green" : "text-sleek-red"
                 )}>
                   ₩{gapTradingProfit.toLocaleString()}
@@ -4416,11 +4416,11 @@ export default function App() {
             <div className="bg-sleek-card border border-sleek-border p-3.5 rounded-2xl shadow-lg relative overflow-hidden group flex items-center justify-between">
               <div>
                 <div className="flex items-center gap-2 mb-0.5">
-                  <Activity className="w-3.5 h-3.5 text-sleek-purple" />
-                  <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest">오늘 체결 횟수</span>
+                  <Activity className="w-4 h-4 text-sleek-purple" />
+                  <span className="text-xs font-black text-sleek-text-secondary uppercase tracking-widest">오늘 체결 횟수</span>
                 </div>
-                <div className="text-xl font-black text-white italic tracking-tighter font-mono">
-                  {gapTradeCount} <span className="text-[10px] font-normal text-sleek-text-secondary opacity-50 not-italic">TRADES</span>
+                <div className="text-2xl font-black text-white italic tracking-tighter font-mono">
+                  {gapTradeCount} <span className="text-xs font-normal text-sleek-text-secondary opacity-50 not-italic">TRADES</span>
                 </div>
               </div>
             </div>
@@ -4429,12 +4429,12 @@ export default function App() {
             <div className="bg-sleek-card border border-sleek-blue/40 p-3.5 rounded-2xl shadow-lg relative overflow-hidden group sm:col-span-2 lg:col-span-2 flex flex-col justify-between">
               <div className="flex items-center justify-between mb-1">
                 <div className="flex items-center gap-2">
-                  <Zap className="w-3.5 h-3.5 text-sleek-blue animate-pulse" />
-                  <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest">스캘퍼 엔진 상세 상태</span>
-                  <span className="text-xs font-bold text-white font-mono ml-1">[{selectedStock?.name || '종목 미선택'} ({selectedStock?.symbol || '-'})]</span>
+                  <Zap className="w-4 h-4 text-sleek-blue animate-pulse" />
+                  <span className="text-xs font-black text-sleek-text-secondary uppercase tracking-widest">스캘퍼 엔진 상세 상태</span>
+                  <span className="text-sm font-bold text-white font-mono ml-1">[{selectedStock?.name || '종목 미선택'} ({selectedStock?.symbol || '-'})]</span>
                 </div>
                 <div className={cn(
-                  "px-2.5 py-0.5 rounded-full text-[10px] font-black italic tracking-wider flex items-center gap-1 border",
+                  "px-2.5 py-0.5 rounded-full text-xs font-black italic tracking-wider flex items-center gap-1 border",
                   isGapBotActive 
                     ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 animate-pulse" 
                     : "bg-white/5 text-sleek-text-secondary border-white/10"
@@ -4444,23 +4444,23 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1 border-t border-white/5 font-mono text-[10px]">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1 border-t border-white/5 font-mono text-xs">
                 <div>
-                  <span className="text-[9px] text-sleek-text-secondary uppercase block">상태 메시지</span>
+                  <span className="text-[10px] text-sleek-text-secondary uppercase block">상태 메시지</span>
                   <span className="font-bold text-sleek-blue truncate block">{scalperMessage || "대기 중..."}</span>
                 </div>
                 <div>
-                  <span className="text-[9px] text-sleek-text-secondary uppercase block">활성 슬롯</span>
+                  <span className="text-[10px] text-sleek-text-secondary uppercase block">활성 슬롯</span>
                   <span className="font-bold text-white block">{gapInventory.length} / {maxSlots} 개</span>
                 </div>
                 <div>
-                  <span className="text-[9px] text-sleek-text-secondary uppercase block">목표 가격 구간</span>
+                  <span className="text-[10px] text-sleek-text-secondary uppercase block">목표 가격 구간</span>
                   <span className="font-bold text-emerald-400 block truncate">
                     ₩{gapBuyPrice.toLocaleString()} ~ ₩{gapSellPrice.toLocaleString()}
                   </span>
                 </div>
                 <div>
-                  <span className="text-[9px] text-sleek-text-secondary uppercase block">실행 속도</span>
+                  <span className="text-[10px] text-sleek-text-secondary uppercase block">실행 속도</span>
                   <span className="font-bold text-amber-400 block">{scalpingSpeed}ms</span>
                 </div>
               </div>
@@ -4473,12 +4473,12 @@ export default function App() {
             <div className="bg-sleek-card border border-sleek-border p-4 rounded-3xl shadow-xl space-y-2.5 xl:col-span-1">
               <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
                 <div className="flex flex-col">
-                  <h2 className="text-sm font-black text-white italic uppercase tracking-tighter">AI SCALPING CONFIG</h2>
-                  <span className="text-[9px] text-sleek-text-secondary">초단기 자동 스캘퍼 전략 엔진 설정</span>
+                  <h2 className="text-base font-black text-white italic uppercase tracking-tighter">AI SCALPING CONFIG</h2>
+                  <span className="text-[11px] text-sleek-text-secondary">초단기 자동 스캘퍼 전략 엔진 설정</span>
                 </div>
                 <div className="flex items-center gap-1.5">
                   <span className="w-1.5 h-1.5 rounded-full bg-sleek-blue animate-ping"></span>
-                  <span className="text-[9px] font-bold text-sleek-blue uppercase">Live Engine</span>
+                  <span className="text-[11px] font-bold text-sleek-blue uppercase">Live Engine</span>
                 </div>
               </div>
 
@@ -4487,16 +4487,16 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-2">
                   <div className="bg-black/30 p-2 rounded-xl border border-sleek-border">
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-[9px] font-black text-sleek-text-secondary uppercase flex items-center gap-1">
-                        <TrendingUp className="w-2.5 h-2.5 text-sleek-green" /> 상한가
+                      <label className="text-[11px] font-black text-sleek-text-secondary uppercase flex items-center gap-1">
+                        <TrendingUp className="w-3 h-3 text-sleek-green" /> 상한가
                       </label>
-                      <span className="text-[10px] font-bold text-sleek-green">₩{gapSellPrice.toLocaleString()}</span>
+                      <span className="text-xs font-bold text-sleek-green">₩{gapSellPrice.toLocaleString()}</span>
                     </div>
                     <input 
                       type="number" 
                       value={gapSellPrice || ''}
                       onChange={(e) => setGapSellPrice(Number(e.target.value))}
-                      className="w-full bg-black/40 border border-sleek-border rounded-lg p-1.5 text-xs font-bold focus:border-sleek-green outline-none text-white font-mono"
+                      className="w-full bg-black/40 border border-sleek-border rounded-lg p-1.5 text-sm font-bold focus:border-sleek-green outline-none text-white font-mono"
                       placeholder="상한선 금액"
                     />
                     <div className="grid grid-cols-4 gap-0.5 mt-1">
@@ -4505,7 +4505,7 @@ export default function App() {
                           key={adj}
                           type="button"
                           onClick={() => setGapSellPrice(prev => Math.max(0, prev + adj))}
-                          className="py-0.5 bg-white/5 rounded text-[8px] font-bold hover:bg-white/10 text-sleek-text-secondary font-mono"
+                          className="py-0.5 bg-white/5 rounded text-[10px] font-bold hover:bg-white/10 text-sleek-text-secondary font-mono"
                         >
                           {adj > 0 ? `+${adj}` : adj}
                         </button>
@@ -4515,16 +4515,16 @@ export default function App() {
 
                   <div className="bg-black/30 p-2 rounded-xl border border-sleek-border">
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-[9px] font-black text-sleek-text-secondary uppercase flex items-center gap-1">
-                        <TrendingDown className="w-2.5 h-2.5 text-sleek-red" /> 하한가
+                      <label className="text-[11px] font-black text-sleek-text-secondary uppercase flex items-center gap-1">
+                        <TrendingDown className="w-3 h-3 text-sleek-red" /> 하한가
                       </label>
-                      <span className="text-[10px] font-bold text-sleek-red">₩{gapBuyPrice.toLocaleString()}</span>
+                      <span className="text-xs font-bold text-sleek-red">₩{gapBuyPrice.toLocaleString()}</span>
                     </div>
                     <input 
                       type="number" 
                       value={gapBuyPrice || ''}
                       onChange={(e) => setGapBuyPrice(Number(e.target.value))}
-                      className="w-full bg-black/40 border border-sleek-border rounded-lg p-1.5 text-xs font-bold focus:border-sleek-red outline-none text-white font-mono"
+                      className="w-full bg-black/40 border border-sleek-border rounded-lg p-1.5 text-sm font-bold focus:border-sleek-red outline-none text-white font-mono"
                       placeholder="하한선 금액"
                     />
                     <div className="grid grid-cols-4 gap-0.5 mt-1">
@@ -4533,7 +4533,7 @@ export default function App() {
                           key={adj}
                           type="button"
                           onClick={() => setGapBuyPrice(prev => Math.max(0, prev + adj))}
-                          className="py-0.5 bg-white/5 rounded text-[8px] font-bold hover:bg-white/10 text-sleek-text-secondary font-mono"
+                          className="py-0.5 bg-white/5 rounded text-[10px] font-bold hover:bg-white/10 text-sleek-text-secondary font-mono"
                         >
                           {adj > 0 ? `+${adj}` : adj}
                         </button>
@@ -4546,16 +4546,16 @@ export default function App() {
                 <div className="grid grid-cols-2 gap-2">
                   <div className="bg-black/30 p-2 rounded-xl border border-sleek-border">
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-[9px] font-black text-sleek-text-secondary uppercase flex items-center gap-1">
-                        <Layers className="w-2.5 h-2.5 text-sleek-blue" /> 1회 거래수량
+                      <label className="text-[11px] font-black text-sleek-text-secondary uppercase flex items-center gap-1">
+                        <Layers className="w-3 h-3 text-sleek-blue" /> 1회 거래수량
                       </label>
-                      <span className="text-[10px] font-bold text-white font-mono">{tradeQuantity}주</span>
+                      <span className="text-xs font-bold text-white font-mono">{tradeQuantity}주</span>
                     </div>
                     <div className="flex items-center gap-1">
                       <button 
                         type="button"
                         onClick={() => setTradeQuantity(prev => Math.max(1, prev - 1))}
-                        className="w-6 h-6 rounded bg-white/5 flex items-center justify-center hover:bg-white/10 text-white font-bold text-xs"
+                        className="w-6 h-6 rounded bg-white/5 flex items-center justify-center hover:bg-white/10 text-white font-bold text-sm"
                       >
                         -
                       </button>
@@ -4563,12 +4563,12 @@ export default function App() {
                         type="number" 
                         value={tradeQuantity}
                         onChange={(e) => setTradeQuantity(Math.max(1, Number(e.target.value)))}
-                        className="flex-1 bg-black/40 border border-sleek-border rounded p-1 text-center text-xs font-bold outline-none text-white font-mono"
+                        className="flex-1 bg-black/40 border border-sleek-border rounded p-1 text-center text-sm font-bold outline-none text-white font-mono"
                       />
                       <button 
                         type="button"
                         onClick={() => setTradeQuantity(prev => prev + 1)}
-                        className="w-6 h-6 rounded bg-white/5 flex items-center justify-center hover:bg-white/10 text-white font-bold text-xs"
+                        className="w-6 h-6 rounded bg-white/5 flex items-center justify-center hover:bg-white/10 text-white font-bold text-sm"
                       >
                         +
                       </button>
@@ -4577,8 +4577,8 @@ export default function App() {
 
                   <div className="bg-black/30 p-2 rounded-xl border border-sleek-border flex flex-col justify-between">
                     <div className="flex items-center justify-between">
-                      <span className="text-[9px] font-black text-sleek-text-secondary uppercase">목표 익절 / 손절</span>
-                      <span className="text-[9px] font-bold text-emerald-400 font-mono">+{scalpingTargetProfit}% / {scalpingStopLoss}%</span>
+                      <span className="text-[11px] font-black text-sleek-text-secondary uppercase">목표 익절 / 손절</span>
+                      <span className="text-xs font-bold text-emerald-400 font-mono">+{scalpingTargetProfit}% / {scalpingStopLoss}%</span>
                     </div>
                     <div className="grid grid-cols-2 gap-1 mt-1">
                       <input 
@@ -4586,7 +4586,7 @@ export default function App() {
                         step="0.05"
                         value={scalpingTargetProfit}
                         onChange={(e) => setScalpingTargetProfit(Math.max(0.01, Number(e.target.value)))}
-                        className="bg-black/40 border border-emerald-500/40 rounded p-1 text-[10px] font-mono outline-none text-emerald-400 text-center"
+                        className="bg-black/40 border border-emerald-500/40 rounded p-1 text-xs font-mono outline-none text-emerald-400 text-center font-bold"
                         placeholder="익절%"
                       />
                       <input 
@@ -4595,7 +4595,7 @@ export default function App() {
                         max="-0.01"
                         value={scalpingStopLoss}
                         onChange={(e) => setScalpingStopLoss(Math.min(-0.01, Number(e.target.value)))}
-                        className="bg-black/40 border border-rose-500/40 rounded p-1 text-[10px] font-mono outline-none text-rose-400 text-center"
+                        className="bg-black/40 border border-rose-500/40 rounded p-1 text-xs font-mono outline-none text-rose-400 text-center font-bold"
                         placeholder="손절%"
                       />
                     </div>
@@ -4608,14 +4608,14 @@ export default function App() {
                     type="button"
                     onClick={() => setAllowSamePriceEntry(!allowSamePriceEntry)}
                     className={cn(
-                      "p-2 rounded-xl border text-left flex items-center justify-between transition-all text-[9px]",
+                      "p-2 rounded-xl border text-left flex items-center justify-between transition-all text-xs",
                       allowSamePriceEntry
                         ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
                         : "bg-white/5 border-white/5 text-sleek-text-secondary opacity-60"
                     )}
                   >
                     <span className="font-bold">동일가 연속매수</span>
-                    <span className={cn("px-1.5 py-0.2 rounded font-mono font-bold text-[8px]", allowSamePriceEntry ? "bg-emerald-500/20 text-emerald-300" : "bg-white/10 text-gray-400")}>
+                    <span className={cn("px-1.5 py-0.2 rounded font-mono font-bold text-[10px]", allowSamePriceEntry ? "bg-emerald-500/20 text-emerald-300" : "bg-white/10 text-gray-400")}>
                       {allowSamePriceEntry ? "ON" : "OFF"}
                     </span>
                   </button>
@@ -4624,14 +4624,14 @@ export default function App() {
                     type="button"
                     onClick={() => setEnableCombinedAvgProfitExit(!enableCombinedAvgProfitExit)}
                     className={cn(
-                      "p-2 rounded-xl border text-left flex items-center justify-between transition-all text-[9px]",
+                      "p-2 rounded-xl border text-left flex items-center justify-between transition-all text-xs",
                       enableCombinedAvgProfitExit
                         ? "bg-sleek-blue/10 border-sleek-blue/30 text-sleek-blue"
                         : "bg-white/5 border-white/5 text-sleek-text-secondary opacity-60"
                     )}
                   >
                     <span className="font-bold">통합평단가 익절</span>
-                    <span className={cn("px-1.5 py-0.2 rounded font-mono font-bold text-[8px]", enableCombinedAvgProfitExit ? "bg-sleek-blue/20 text-sleek-blue" : "bg-white/10 text-gray-400")}>
+                    <span className={cn("px-1.5 py-0.2 rounded font-mono font-bold text-[10px]", enableCombinedAvgProfitExit ? "bg-sleek-blue/20 text-sleek-blue" : "bg-white/10 text-gray-400")}>
                       {enableCombinedAvgProfitExit ? "ON" : "OFF"}
                     </span>
                   </button>
@@ -4640,15 +4640,15 @@ export default function App() {
                 {/* 4. Entry Mode & Auto Cancel Drop Grid */}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="bg-white/5 p-2 rounded-xl border border-white/5 flex flex-col justify-between">
-                    <span className="text-[9px] font-bold text-white flex items-center gap-1 mb-1">
-                      <TrendingDown className="w-2.5 h-2.5 text-amber-400" /> 진입 호가 방식
+                    <span className="text-xs font-bold text-white flex items-center gap-1 mb-1">
+                      <TrendingDown className="w-3 h-3 text-amber-400" /> 진입 호가 방식
                     </span>
                     <div className="grid grid-cols-2 gap-1">
                       <button
                         type="button"
                         onClick={() => setLowestBidOnlyMode(true)}
                         className={cn(
-                          "py-1 rounded text-[8px] font-bold border text-center transition-all",
+                          "py-1 rounded text-[10px] font-bold border text-center transition-all",
                           lowestBidOnlyMode ? "bg-amber-500/20 border-amber-500/40 text-amber-300" : "bg-black/20 border-white/5 text-gray-400"
                         )}
                       >
@@ -4658,7 +4658,7 @@ export default function App() {
                         type="button"
                         onClick={() => setLowestBidOnlyMode(false)}
                         className={cn(
-                          "py-1 rounded text-[8px] font-bold border text-center transition-all",
+                          "py-1 rounded text-[10px] font-bold border text-center transition-all",
                           !lowestBidOnlyMode ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue" : "bg-black/20 border-white/5 text-gray-400"
                         )}
                       >
@@ -4669,10 +4669,10 @@ export default function App() {
 
                   <div className="bg-white/5 p-2 rounded-xl border border-white/5 flex flex-col justify-between">
                     <div className="flex justify-between items-center mb-1">
-                      <span className="text-[9px] font-bold text-white flex items-center gap-1">
-                        <Trash2 className="w-2.5 h-2.5 text-rose-400" /> 자동 취소 낙폭
+                      <span className="text-xs font-bold text-white flex items-center gap-1">
+                        <Trash2 className="w-3 h-3 text-rose-400" /> 자동 취소 낙폭
                       </span>
-                      <span className="text-[9px] font-bold text-rose-400 font-mono">-{autoCancelThreshold}%</span>
+                      <span className="text-xs font-bold text-rose-400 font-mono">-{autoCancelThreshold}%</span>
                     </div>
                     <div className="grid grid-cols-4 gap-0.5">
                       {[ 0.1, 0.2, 0.3, 0.5 ].map(pct => (
@@ -4681,7 +4681,7 @@ export default function App() {
                           type="button"
                           onClick={() => setAutoCancelThreshold(pct)}
                           className={cn(
-                            "py-0.5 rounded text-[8px] font-bold font-mono border text-center transition-all",
+                            "py-0.5 rounded text-[10px] font-bold font-mono border text-center transition-all",
                             autoCancelThreshold === pct ? "bg-rose-500/20 border-rose-500/40 text-rose-300" : "bg-black/20 border-white/5 text-gray-400"
                           )}
                         >
@@ -4695,7 +4695,7 @@ export default function App() {
                 {/* 5. Max Slots & Execution Speed Grid */}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="bg-white/5 p-2 rounded-xl border border-white/5 flex items-center justify-between">
-                    <span className="text-[9px] font-bold text-sleek-text-secondary uppercase">최대 슬롯 개수</span>
+                    <span className="text-xs font-bold text-sleek-text-secondary uppercase">최대 슬롯 개수</span>
                     <div className="flex items-center gap-1">
                       {[5, 10, 15, 20].map(sVal => (
                         <button
@@ -4704,7 +4704,7 @@ export default function App() {
                           disabled={isGapBotActive}
                           onClick={() => setMaxSlots(sVal)}
                           className={cn(
-                            "px-1.5 py-0.5 rounded text-[8px] font-mono transition-all",
+                            "px-1.5 py-0.5 rounded text-[10px] font-mono transition-all",
                             maxSlots === sVal 
                               ? "bg-sleek-blue/30 border border-sleek-blue/50 text-sleek-blue font-bold"
                               : "bg-white/5 text-sleek-text-secondary hover:bg-white/10"
@@ -4717,7 +4717,7 @@ export default function App() {
                   </div>
 
                   <div className="bg-white/5 p-2 rounded-xl border border-white/5 flex items-center justify-between">
-                    <span className="text-[9px] font-bold text-sleek-text-secondary uppercase">실행 속도</span>
+                    <span className="text-xs font-bold text-sleek-text-secondary uppercase">실행 속도</span>
                     <div className="flex items-center gap-1">
                       {[
                         { label: '0.3s', value: 300 },
@@ -4729,7 +4729,7 @@ export default function App() {
                           type="button"
                           onClick={() => setScalpingSpeed(opt.value)}
                           className={cn(
-                            "px-1.5 py-0.5 rounded text-[8px] font-mono font-bold transition-all",
+                            "px-1.5 py-0.5 rounded text-[10px] font-mono font-bold transition-all",
                             scalpingSpeed === opt.value
                               ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
                               : "bg-white/5 text-sleek-text-secondary hover:bg-white/10"
@@ -4760,13 +4760,13 @@ export default function App() {
                       setIsGapBotActive(!isGapBotActive);
                     }}
                     className={cn(
-                      "w-full py-3 rounded-2xl font-black text-xs italic tracking-tighter uppercase shadow-xl transition-all flex items-center justify-center gap-2",
+                      "w-full py-3 rounded-2xl font-black text-sm italic tracking-tighter uppercase shadow-xl transition-all flex items-center justify-center gap-2",
                       isGapBotActive 
                         ? "bg-sleek-red text-white shadow-sleek-red/20 hover:scale-[1.01]" 
                         : "bg-sleek-blue text-white shadow-sleek-blue/20 hover:scale-[1.01]"
                     )}
                   >
-                    {isGapBotActive ? <Square className="w-3.5 h-3.5 fill-current" /> : <Play className="w-3.5 h-3.5 fill-current" />}
+                    {isGapBotActive ? <Square className="w-4 h-4 fill-current" /> : <Play className="w-4 h-4 fill-current" />}
                     {isGapBotActive ? "SCALPER STOP" : "START AI SCALPER"}
                   </button>
                 </div>
@@ -4781,18 +4781,18 @@ export default function App() {
                     <Activity className="w-4 h-4 text-sleek-blue animate-pulse" />
                   </div>
                   <div>
-                    <h3 className="text-xs font-black text-white uppercase italic tracking-tighter">PROFIT MAXIMIZER ENGINE</h3>
+                    <h3 className="text-sm font-black text-white uppercase italic tracking-tighter">PROFIT MAXIMIZER ENGINE</h3>
                     <div className="flex items-center gap-1.5">
                       <div className="w-1.5 h-1.5 rounded-full bg-sleek-green animate-pulse"></div>
-                      <span className="text-[9px] font-bold text-sleek-text-secondary uppercase">Real-time Trading Stage</span>
+                      <span className="text-[11px] font-bold text-sleek-text-secondary uppercase">Real-time Trading Stage</span>
                     </div>
                   </div>
                 </div>
                 <div className="text-right flex items-center gap-4 text-xs font-mono">
                   <div>
-                    <span className="text-[9px] text-sleek-text-secondary uppercase block font-black">RSI (14)</span>
+                    <span className="text-[11px] text-sleek-text-secondary uppercase block font-black">RSI (14)</span>
                     <span className={cn(
-                      "font-black italic",
+                      "font-black italic text-sm",
                       calculateRSI(selectedStock?.history?.map(h => h.price) || []) < 30 ? "text-sleek-red" : 
                       calculateRSI(selectedStock?.history?.map(h => h.price) || []) > 70 ? "text-sleek-green" : "text-sleek-blue"
                     )}>
@@ -4800,8 +4800,8 @@ export default function App() {
                     </span>
                   </div>
                   <div>
-                    <span className="text-[9px] text-sleek-text-secondary uppercase block font-black">감시 구간 폭</span>
-                    <span className="font-black text-sleek-blue italic">
+                    <span className="text-[11px] text-sleek-text-secondary uppercase block font-black">감시 구간 폭</span>
+                    <span className="font-black text-sleek-blue italic text-sm">
                       ₩{gapBuyPrice && gapSellPrice ? (gapSellPrice - gapBuyPrice).toLocaleString() : '0'}
                     </span>
                   </div>
@@ -4858,11 +4858,11 @@ export default function App() {
                               <>
                                 <div className="mb-2 flex items-center justify-between gap-2">
                                   <div className="flex items-baseline gap-2.5">
-                                    <span className="text-2xl md:text-3xl font-black text-white italic tracking-tighter font-mono">
+                                    <span className="text-3xl md:text-4xl font-black text-white italic tracking-tighter font-mono">
                                       ₩{selectedStock.price.toLocaleString()}
                                     </span>
                                     <span className={cn(
-                                      "text-xs md:text-sm font-black italic",
+                                      "text-sm md:text-base font-black italic",
                                       selectedStock.change >= 0 ? "text-sleek-green" : "text-sleek-red"
                                     )}>
                                       {selectedStock.change >= 0 ? '▲' : '▼'} {selectedStock.changePercent.toFixed(2)}%
@@ -4877,7 +4877,7 @@ export default function App() {
                                         type="button"
                                         onClick={() => setSelectedTimeframeBar(tf)}
                                         className={cn(
-                                          "px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all font-mono",
+                                          "px-2 py-0.5 rounded-lg text-xs font-bold transition-all font-mono",
                                           selectedTimeframeBar === tf
                                             ? "bg-sleek-blue text-white shadow-sm"
                                             : "text-sleek-text-secondary hover:bg-white/5 hover:text-white"
@@ -4898,13 +4898,13 @@ export default function App() {
                                         dataKey="time" 
                                         axisLine={false} 
                                         tickLine={false} 
-                                        tick={{ fontSize: 9, fill: '#6B7280' }}
+                                        tick={{ fontSize: 11, fill: '#6B7280' }}
                                       />
                                       <YAxis 
                                         domain={['auto', 'auto']} 
                                         axisLine={false} 
                                         tickLine={false} 
-                                        tick={{ fontSize: 9, fill: '#6B7280' }}
+                                        tick={{ fontSize: 11, fill: '#6B7280' }}
                                         orientation="right"
                                       />
                                       <Tooltip 
@@ -4915,11 +4915,11 @@ export default function App() {
                                               <div className="bg-[#1A1D23] border border-[#2D3139] p-2.5 rounded-xl shadow-2xl space-y-1 text-xs font-mono">
                                                 <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-1">
                                                   <span className="text-sleek-text-secondary font-bold">{data.time}</span>
-                                                  <span className={cn("font-bold px-1 py-0.2 rounded text-[9px]", data.isUp ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400")}>
+                                                  <span className={cn("font-bold px-1 py-0.2 rounded text-[11px]", data.isUp ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400")}>
                                                     {data.isUp ? "양봉" : "음봉"}
                                                   </span>
                                                 </div>
-                                                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[10px] pt-0.5">
+                                                <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs pt-0.5">
                                                   <div>시가: <strong className="text-white">₩{data.open.toLocaleString()}</strong></div>
                                                   <div>고가: <strong className="text-emerald-400">₩{data.high.toLocaleString()}</strong></div>
                                                   <div>저가: <strong className="text-rose-400">₩{data.low.toLocaleString()}</strong></div>
@@ -4954,7 +4954,7 @@ export default function App() {
                                           strokeDasharray="4 4" 
                                           strokeWidth={1.5}
                                         >
-                                          <Label value="BUY" position="left" fill="#EF4444" fontSize={9} fontWeight="bold" />
+                                          <Label value="BUY" position="left" fill="#EF4444" fontSize={11} fontWeight="bold" />
                                         </ReferenceLine>
                                       )}
                                       {gapSellPrice > 0 && (
@@ -4964,7 +4964,7 @@ export default function App() {
                                           strokeDasharray="4 4" 
                                           strokeWidth={1.5}
                                         >
-                                          <Label value="SELL" position="left" fill="#10B981" fontSize={9} fontWeight="bold" />
+                                          <Label value="SELL" position="left" fill="#10B981" fontSize={11} fontWeight="bold" />
                                         </ReferenceLine>
                                       )}
                                     </BarChart>
@@ -4976,10 +4976,10 @@ export default function App() {
                         </div>
 
                         {/* Right Side: Live Order Book Section (매도5단계 ~ 매수5단계) */}
-                        <div className="w-full lg:w-[270px] shrink-0 flex flex-col">
+                        <div className="w-full lg:w-[280px] shrink-0 flex flex-col">
                           <div className="bg-black/40 rounded-2xl border border-sleek-border p-2.5 flex flex-col justify-between h-[270px]">
                             <div>
-                              <div className="text-center font-black text-sleek-text-secondary uppercase text-[9px] tracking-widest pb-1 border-b border-white/5 mb-1.5">
+                              <div className="text-center font-black text-sleek-text-secondary uppercase text-xs tracking-widest pb-1 border-b border-white/5 mb-1.5">
                                 실시간 잔량 호가창 (Live Order Book)
                               </div>
                               
@@ -4991,14 +4991,14 @@ export default function App() {
                                   return (
                                     <div key={`ask-${lvlPrice}`} className="grid grid-cols-3 items-center py-0.5 px-2 rounded hover:bg-white/5 transition-all relative overflow-hidden group">
                                       <div className="absolute right-0 top-0 bottom-0 bg-sky-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
-                                      <span className="text-[9px] text-sky-400 font-bold font-sans z-10">매도 {5 - idx}단계</span>
+                                      <span className="text-xs text-sky-400 font-bold font-sans z-10">매도 {5 - idx}단계</span>
                                       <span className={cn(
-                                        "text-right font-bold z-10 font-mono text-[10px]",
+                                        "text-right font-bold z-10 font-mono text-xs",
                                         isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-300"
                                       )}>
                                         ₩{lvlPrice.toLocaleString()}
                                       </span>
-                                      <span className="text-right text-sky-200/50 font-mono text-[9px] z-10">{vol.toLocaleString()}주</span>
+                                      <span className="text-right text-sky-200/50 font-mono text-[11px] z-10">{vol.toLocaleString()}주</span>
                                     </div>
                                   );
                                 })}
@@ -5006,11 +5006,11 @@ export default function App() {
 
                               {/* Spread Line */}
                               <div className="my-1 py-1 px-2 bg-white/5 border-y border-white/10 flex items-center justify-between rounded-lg">
-                                <span className="text-[8px] font-black text-sleek-text-secondary uppercase">현재 체결가</span>
-                                <span className={cn("font-black text-xs font-mono animate-pulse", selectedStock.change >= 0 ? "text-sleek-green" : "text-sleek-red")}>
+                                <span className="text-[10px] font-black text-sleek-text-secondary uppercase">현재 체결가</span>
+                                <span className={cn("font-black text-sm font-mono animate-pulse", selectedStock.change >= 0 ? "text-sleek-green" : "text-sleek-red")}>
                                   ₩{currentPrice.toLocaleString()}
                                 </span>
-                                <span className="text-[8px] text-sleek-text-secondary font-mono">{selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%</span>
+                                <span className="text-[10px] text-sleek-text-secondary font-mono">{selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%</span>
                               </div>
 
                               {/* Bid Levels (매수 1~5단계) */}
@@ -5021,14 +5021,14 @@ export default function App() {
                                   return (
                                     <div key={`bid-${lvlPrice}`} className="grid grid-cols-3 items-center py-0.5 px-2 rounded hover:bg-white/5 transition-all relative overflow-hidden group">
                                       <div className="absolute right-0 top-0 bottom-0 bg-rose-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
-                                      <span className="text-[9px] text-rose-400 font-bold font-sans z-10">매수 {idx + 1}단계</span>
+                                      <span className="text-xs text-rose-400 font-bold font-sans z-10">매수 {idx + 1}단계</span>
                                       <span className={cn(
-                                        "text-right font-bold z-10 font-mono text-[10px]",
+                                        "text-right font-bold z-10 font-mono text-xs",
                                         isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-300"
                                       )}>
                                         ₩{lvlPrice.toLocaleString()}
                                       </span>
-                                      <span className="text-right text-rose-200/50 font-mono text-[9px] z-10">{vol.toLocaleString()}주</span>
+                                      <span className="text-right text-rose-200/50 font-mono text-[11px] z-10">{vol.toLocaleString()}주</span>
                                     </div>
                                   );
                                 })}
@@ -5037,7 +5037,7 @@ export default function App() {
 
                             {/* Order Book Pressure Gauge */}
                             <div className="pt-1 border-t border-white/5 space-y-1">
-                              <div className="flex justify-between text-[8px] text-sleek-text-secondary font-bold font-sans">
+                              <div className="flex justify-between text-[10px] text-sleek-text-secondary font-bold font-sans">
                                 <span className="text-sky-400">매도잔량 47.8%</span>
                                 <span className="text-rose-400">매수잔량 52.2%</span>
                               </div>
@@ -5056,39 +5056,39 @@ export default function App() {
                         <div className="bg-black/30 border border-white/10 rounded-2xl p-3 space-y-2">
                           <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
                             <div className="flex items-center gap-1.5">
-                              <CircleDollarSign className="w-3.5 h-3.5 text-sleek-blue" />
-                              <h4 className="text-xs font-black text-white uppercase tracking-wider">실시간 계좌 현황</h4>
+                              <CircleDollarSign className="w-4 h-4 text-sleek-blue" />
+                              <h4 className="text-sm font-black text-white uppercase tracking-wider">실시간 계좌 현황</h4>
                             </div>
-                            <span className="text-[9px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                            <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
                               ACCOUNT LIVE
                             </span>
                           </div>
 
                           <div className="grid grid-cols-2 gap-2 text-xs font-mono">
                             <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                              <span className="text-[9px] text-sleek-text-secondary uppercase block">가용 자산 (KRW)</span>
-                              <span className="text-sm font-black text-white italic">₩{Math.round(balance).toLocaleString()}</span>
+                              <span className="text-[11px] text-sleek-text-secondary uppercase block">가용 자산 (KRW)</span>
+                              <span className="text-base font-black text-white italic">₩{Math.round(balance).toLocaleString()}</span>
                             </div>
                             <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                              <span className="text-[9px] text-sleek-text-secondary uppercase block">총 자산 평가</span>
+                              <span className="text-[11px] text-sleek-text-secondary uppercase block">총 자산 평가</span>
                               <div className="flex items-baseline justify-between">
-                                <span className="text-sm font-black text-sleek-blue italic">₩{totalValue.toLocaleString()}</span>
-                                <span className={cn("text-[10px] font-bold", pnl >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                <span className="text-base font-black text-sleek-blue italic">₩{totalValue.toLocaleString()}</span>
+                                <span className={cn("text-xs font-bold", pnl >= 0 ? "text-emerald-400" : "text-rose-400")}>
                                   {pnl >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
                                 </span>
                               </div>
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-2 gap-2 text-[10px] font-mono pt-1">
+                          <div className="grid grid-cols-2 gap-2 text-xs font-mono pt-1">
                             <div className="flex justify-between items-center bg-white/5 px-2.5 py-1 rounded-lg">
-                              <span className="text-sleek-text-secondary">누적 스캘핑 수익:</span>
+                              <span className="text-sleek-text-secondary text-[11px]">누적 스캘핑 수익:</span>
                               <span className={cn("font-bold", gapTradingProfit >= 0 ? "text-emerald-400" : "text-rose-400")}>
                                 ₩{gapTradingProfit.toLocaleString()}
                               </span>
                             </div>
                             <div className="flex justify-between items-center bg-white/5 px-2.5 py-1 rounded-lg">
-                              <span className="text-sleek-text-secondary">오늘 체결 건수:</span>
+                              <span className="text-sleek-text-secondary text-[11px]">오늘 체결 건수:</span>
                               <span className="font-bold text-white">{gapTradeCount} 회</span>
                             </div>
                           </div>
@@ -5098,10 +5098,10 @@ export default function App() {
                         <div className="bg-black/30 border border-white/10 rounded-2xl p-3 space-y-2 flex flex-col justify-between">
                           <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
                             <div className="flex items-center gap-1.5">
-                              <Briefcase className="w-3.5 h-3.5 text-amber-400" />
-                              <h4 className="text-xs font-black text-white uppercase tracking-wider">보유 주식 현황</h4>
+                              <Briefcase className="w-4 h-4 text-amber-400" />
+                              <h4 className="text-sm font-black text-white uppercase tracking-wider">보유 주식 현황</h4>
                             </div>
-                            <span className="text-[9px] font-mono text-amber-300 font-bold px-2 py-0.5 bg-amber-500/10 rounded-full border border-amber-500/20">
+                            <span className="text-[11px] font-mono text-amber-300 font-bold px-2 py-0.5 bg-amber-500/10 rounded-full border border-amber-500/20">
                               {Object.entries(holdings).filter(([_, qty]) => Number(qty) > 0).length} 종목 보유
                             </span>
                           </div>
@@ -5109,7 +5109,7 @@ export default function App() {
                           <div className="space-y-1.5 max-h-[110px] overflow-y-auto custom-scrollbar pr-1">
                             {Object.entries(holdings).filter(([_, qty]) => Number(qty) > 0).length === 0 ? (
                               <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center">
-                                <p className="text-[10px] text-sleek-text-secondary">현재 보유 중인 주식이 없습니다.</p>
+                                <p className="text-xs text-sleek-text-secondary">현재 보유 중인 주식이 없습니다.</p>
                               </div>
                             ) : (
                               Object.entries(holdings)
@@ -5141,14 +5141,14 @@ export default function App() {
                                   return (
                                     <div 
                                       key={sym}
-                                      className="p-2 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between text-[10px] font-mono"
+                                      className="p-2 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between text-xs font-mono"
                                     >
                                       <div className="flex flex-col gap-0.5">
                                         <div className="flex items-center gap-1.5">
-                                          <span className="font-bold text-white text-xs">{st.name}</span>
-                                          <span className="text-sleek-text-secondary text-[9px]">({sym})</span>
+                                          <span className="font-bold text-white text-sm">{st.name}</span>
+                                          <span className="text-sleek-text-secondary text-[11px]">({sym})</span>
                                         </div>
-                                        <div className="flex items-center gap-2 text-[9px]">
+                                        <div className="flex items-center gap-2 text-[11px]">
                                           <span className="text-amber-300">평단가 ₩{Math.round(avgPrice).toLocaleString()}</span>
                                           <span className={profitRatio >= 0 ? "text-emerald-400" : "text-rose-400"}>
                                             {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(2)}%
@@ -5159,7 +5159,7 @@ export default function App() {
                                       <div className="flex items-center gap-2">
                                         <div className="text-right">
                                           <div className="text-white font-bold">{qty.toLocaleString()} 주</div>
-                                          <div className="text-[9px] text-sleek-text-secondary">₩{Math.round(evalValue).toLocaleString()}</div>
+                                          <div className="text-[11px] text-sleek-text-secondary">₩{Math.round(evalValue).toLocaleString()}</div>
                                         </div>
                                         <button
                                           onClick={() => {
@@ -5168,7 +5168,7 @@ export default function App() {
                                             setManualSellQty(qty);
                                             setManualSellModalOpen(true);
                                           }}
-                                          className="px-2 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/30 rounded-lg text-[9px] font-bold transition-all"
+                                          className="px-2 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/30 rounded-lg text-[11px] font-bold transition-all"
                                         >
                                           수동매도
                                         </button>
@@ -5205,14 +5205,14 @@ export default function App() {
             {isGapBotActive && selectedStock && gapBuyPrice > 0 && gapSellPrice > 0 && (
               <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-3xl p-5 space-y-4 shrink-0">
                 <div className="flex items-center justify-between">
-                  <h3 className="text-[10px] font-black text-sleek-blue uppercase tracking-widest flex items-center gap-2">
-                    <TrendingUp className="w-3 h-3 animate-bounce" /> 실시간 구간 모니터
+                  <h3 className="text-xs font-black text-sleek-blue uppercase tracking-widest flex items-center gap-2">
+                    <TrendingUp className="w-3.5 h-3.5 animate-bounce" /> 실시간 구간 모니터
                   </h3>
-                  <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">GRID ACTIVE</span>
+                  <span className="text-[10px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full">GRID ACTIVE</span>
                 </div>
 
                 <div className="space-y-2">
-                  <div className="flex justify-between text-[10px] text-sleek-text-secondary font-mono">
+                  <div className="flex justify-between text-xs text-sleek-text-secondary font-mono">
                     <span>하한가 ₩{gapBuyPrice.toLocaleString()}</span>
                     <span>상한가 ₩{gapSellPrice.toLocaleString()}</span>
                   </div>
@@ -5232,16 +5232,16 @@ export default function App() {
                   </div>
 
                   <div className="flex justify-between items-center pt-1">
-                    <span className="text-[10px] text-sleek-text-secondary uppercase">현재가 위치</span>
-                    <span className="text-xs font-black text-white italic font-mono">{rangePercentage.toFixed(1)}%</span>
+                    <span className="text-xs text-sleek-text-secondary uppercase">현재가 위치</span>
+                    <span className="text-sm font-black text-white italic font-mono">{rangePercentage.toFixed(1)}%</span>
                   </div>
                 </div>
 
                 {/* Grid Inventory */}
                 <div className="space-y-2 pt-2 border-t border-white/5">
                   <div className="flex justify-between items-center">
-                    <span className="text-[10px] text-sleek-text-secondary uppercase font-black">체결 대기/보유 슬롯</span>
-                    <span className="text-[10px] font-bold text-white bg-white/10 px-2 rounded-full">{gapInventory.length} / {maxSlots}</span>
+                    <span className="text-xs text-sleek-text-secondary uppercase font-black">체결 대기/보유 슬롯</span>
+                    <span className="text-xs font-bold text-white bg-white/10 px-2 rounded-full">{gapInventory.length} / {maxSlots}</span>
                   </div>
 
                   {gapInventory.length > 0 && (() => {
@@ -5250,15 +5250,15 @@ export default function App() {
                     const avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
                     const avgProfitPct = avgPrice > 0 ? ((selectedStock.price - avgPrice) / avgPrice) * 100 : 0;
                     return (
-                      <div className="p-2.5 bg-gradient-to-r from-sleek-blue/10 to-emerald-500/10 border border-white/10 rounded-xl flex justify-between items-center text-[10px] font-mono">
+                      <div className="p-2.5 bg-gradient-to-r from-sleek-blue/10 to-emerald-500/10 border border-white/10 rounded-xl flex justify-between items-center text-xs font-mono">
                         <div>
-                          <span className="text-sleek-text-secondary block text-[8px] uppercase">통합 희석 평단가</span>
-                          <span className="text-white font-bold text-xs">₩{avgPrice.toLocaleString()}</span>
-                          <span className="text-[8px] text-sleek-text-secondary ml-1">({totalQty}주)</span>
+                          <span className="text-sleek-text-secondary block text-[10px] uppercase">통합 희석 평단가</span>
+                          <span className="text-white font-bold text-sm">₩{avgPrice.toLocaleString()}</span>
+                          <span className="text-[10px] text-sleek-text-secondary ml-1">({totalQty}주)</span>
                         </div>
                         <div className="text-right">
-                          <span className="text-sleek-text-secondary block text-[8px] uppercase">평단가 대비 손익</span>
-                          <span className={cn("font-bold text-xs", avgProfitPct >= 0 ? "text-up" : "text-down")}>
+                          <span className="text-sleek-text-secondary block text-[10px] uppercase">평단가 대비 손익</span>
+                          <span className={cn("font-bold text-sm", avgProfitPct >= 0 ? "text-up" : "text-down")}>
                             {avgProfitPct >= 0 ? "+" : ""}{avgProfitPct.toFixed(2)}%
                           </span>
                         </div>
@@ -5268,7 +5268,7 @@ export default function App() {
 
                   <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 scrollbar-thin">
                     {gapInventory.length === 0 ? (
-                      <div className="text-[9px] text-sleek-text-secondary opacity-40 italic py-2 text-center">
+                      <div className="text-xs text-sleek-text-secondary opacity-40 italic py-2 text-center">
                         현재 감시 구간 내 매수 체결 없음
                       </div>
                     ) : (
@@ -5277,14 +5277,14 @@ export default function App() {
                         const buyQty = typeof slot === 'number' ? tradeQuantity : (slot.quantity || 1);
                         const profitPct = buyPrice > 0 ? ((selectedStock.price - buyPrice) / buyPrice) * 100 : 0;
                         return (
-                          <div key={idx} className="flex justify-between items-center bg-white/5 rounded-xl px-3 py-1.5 border border-white/5 text-[10px]">
+                          <div key={idx} className="flex justify-between items-center bg-white/5 rounded-xl px-3 py-1.5 border border-white/5 text-xs">
                             <div className="flex flex-col gap-0.5 font-mono">
                               <div className="flex items-center gap-1.5">
                                 <span className="w-1.5 h-1.5 rounded-full bg-sleek-blue"></span>
                                 <span className="text-sleek-text-secondary">슬롯#{idx+1}</span>
                                 <span className="text-white font-bold">₩{buyPrice.toLocaleString()}</span>
                               </div>
-                              <div className="text-[8px] text-sleek-text-secondary pl-3">
+                              <div className="text-[10px] text-sleek-text-secondary pl-3">
                                 수량: <span className="text-white">{buyQty}주</span>
                               </div>
                             </div>
@@ -5304,15 +5304,15 @@ export default function App() {
                 {/* Pending Buy Orders */}
                 <div className="space-y-2 pt-2 border-t border-white/5">
                   <div className="flex justify-between items-center">
-                    <span className="text-[10px] text-sleek-text-secondary uppercase font-black flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-amber-400 animate-pulse" /> 대기 중인 매수 주문 (Pending)
+                    <span className="text-xs text-sleek-text-secondary uppercase font-black flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-amber-400 animate-pulse" /> 대기 중인 매수 주문 (Pending)
                     </span>
-                    <span className="text-[10px] font-bold text-white bg-amber-500/10 text-amber-400 px-2 rounded-full">{pendingBuyOrders.length}</span>
+                    <span className="text-xs font-bold text-white bg-amber-500/10 text-amber-400 px-2 rounded-full">{pendingBuyOrders.length}</span>
                   </div>
 
                   <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 scrollbar-thin">
                     {pendingBuyOrders.length === 0 ? (
-                      <div className="text-[9px] text-sleek-text-secondary opacity-40 italic py-2 text-center">
+                      <div className="text-xs text-sleek-text-secondary opacity-40 italic py-2 text-center">
                         대기 중인 지정가 매수 주문 없음
                       </div>
                     ) : (
@@ -5322,7 +5322,7 @@ export default function App() {
                         const cancelProgress = Math.min(100, Math.max(0, (dropPercent / autoCancelThreshold) * 100));
 
                         return (
-                          <div key={order.id || idx} className="flex flex-col bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1.5 text-[10px]">
+                          <div key={order.id || idx} className="flex flex-col bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1.5 text-xs">
                             <div className="flex justify-between items-center">
                               <div className="flex items-center gap-1.5 font-mono">
                                 <span className={cn(
@@ -5330,7 +5330,7 @@ export default function App() {
                                   order.isSimulated ? "bg-amber-400" : "bg-emerald-400 animate-pulse"
                                 )}></span>
                                 <span className="text-white font-bold">{currentStock.name} ({order.symbol})</span>
-                                <span className="text-[8px] font-bold text-sleek-text-secondary uppercase px-1 py-0.2 bg-white/5 rounded">
+                                <span className="text-[10px] font-bold text-sleek-text-secondary uppercase px-1 py-0.2 bg-white/5 rounded">
                                   {order.isSimulated ? "모의" : "KIS실전"}
                                 </span>
                               </div>
@@ -5339,7 +5339,7 @@ export default function App() {
                                 <button
                                   type="button"
                                   onClick={() => cancelPendingBuyOrder(order.id)}
-                                  className="text-[8px] font-bold text-amber-400 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/40 px-1.5 py-0.5 rounded transition-all ml-1"
+                                  className="text-[10px] font-bold text-amber-400 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/40 px-1.5 py-0.5 rounded transition-all ml-1"
                                 >
                                   취소
                                 </button>
@@ -5353,7 +5353,7 @@ export default function App() {
 
                             {/* Drop & Auto-Cancel Threshold gauge */}
                             <div className="space-y-1 pt-1 border-t border-white/5">
-                              <div className="flex justify-between items-center text-[8px] font-mono">
+                              <div className="flex justify-between items-center text-[10px] font-mono">
                                 <span className="text-sleek-text-secondary">하락 추이 / 자동 취소 기준</span>
                                 <span className={cn(
                                   "font-bold",
@@ -5382,15 +5382,15 @@ export default function App() {
                 {/* Pending Sell Orders */}
                 <div className="space-y-2 pt-2 border-t border-white/5">
                   <div className="flex justify-between items-center">
-                    <span className="text-[10px] text-sleek-text-secondary uppercase font-black flex items-center gap-1">
-                      <Clock className="w-3 h-3 text-rose-400 animate-pulse" /> 대기 중인 매도 주문 (Pending Sell)
+                    <span className="text-xs text-sleek-text-secondary uppercase font-black flex items-center gap-1">
+                      <Clock className="w-3.5 h-3.5 text-rose-400 animate-pulse" /> 대기 중인 매도 주문 (Pending Sell)
                     </span>
-                    <span className="text-[10px] font-bold text-white bg-rose-500/10 text-rose-400 px-2 rounded-full">{pendingSellOrders.length}</span>
+                    <span className="text-xs font-bold text-white bg-rose-500/10 text-rose-400 px-2 rounded-full">{pendingSellOrders.length}</span>
                   </div>
 
                   <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 scrollbar-thin">
                     {pendingSellOrders.length === 0 ? (
-                      <div className="text-[9px] text-sleek-text-secondary opacity-40 italic py-2 text-center">
+                      <div className="text-xs text-sleek-text-secondary opacity-40 italic py-2 text-center">
                         대기 중인 지정가 매도 주문 없음
                       </div>
                     ) : (
@@ -5400,7 +5400,7 @@ export default function App() {
                         const fillProgress = currentStock.price >= order.orderPrice ? 100 : Math.min(100, Math.max(0, (currentStock.price / order.orderPrice) * 100));
 
                         return (
-                          <div key={order.id || idx} className="flex flex-col bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1.5 text-[10px]">
+                          <div key={order.id || idx} className="flex flex-col bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1.5 text-xs">
                             <div className="flex justify-between items-center">
                               <div className="flex items-center gap-1.5 font-mono">
                                 <span className={cn(
@@ -5408,7 +5408,7 @@ export default function App() {
                                   order.isSimulated ? "bg-rose-400" : "bg-emerald-400 animate-pulse"
                                 )}></span>
                                 <span className="text-white font-bold">{currentStock.name} ({order.symbol})</span>
-                                <span className="text-[8px] font-bold text-rose-300 uppercase px-1 py-0.2 bg-rose-500/10 rounded">
+                                <span className="text-[10px] font-bold text-rose-300 uppercase px-1 py-0.2 bg-rose-500/10 rounded">
                                   {order.isSimulated ? "모의" : "KIS실전"}
                                 </span>
                               </div>
@@ -5417,7 +5417,7 @@ export default function App() {
                                 <button
                                   type="button"
                                   onClick={() => cancelPendingSellOrder(order.id)}
-                                  className="text-[8px] font-bold text-rose-400 hover:text-rose-200 bg-rose-500/20 hover:bg-rose-500/40 px-1.5 py-0.5 rounded transition-all ml-1"
+                                  className="text-[10px] font-bold text-rose-400 hover:text-rose-200 bg-rose-500/20 hover:bg-rose-500/40 px-1.5 py-0.5 rounded transition-all ml-1"
                                 >
                                   취소
                                 </button>
@@ -5431,7 +5431,7 @@ export default function App() {
 
                             {/* Target Distance & Fill gauge */}
                             <div className="space-y-1 pt-1 border-t border-white/5">
-                              <div className="flex justify-between items-center text-[8px] font-mono">
+                              <div className="flex justify-between items-center text-[10px] font-mono">
                                 <span className="text-sleek-text-secondary">목표 달성 괴리율</span>
                                 <span className={cn(
                                   "font-bold",
@@ -5463,10 +5463,10 @@ export default function App() {
             {/* 2. Trade Logs */}
             <div className="bg-white/5 border border-white/5 rounded-3xl p-5 flex flex-col shrink-0 max-h-[380px] overflow-hidden">
               <div className="flex items-center justify-between mb-3 shrink-0">
-                <h3 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2">
-                  <Activity className="w-3.5 h-3.5 text-sleek-blue" /> Trade Logs (실시간 체결 내역)
+                <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+                  <Activity className="w-4 h-4 text-sleek-blue" /> Trade Logs (실시간 체결 내역)
                 </h3>
-                <span className="text-[10px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">최근 {Math.min(30, tradeLogs.length)}건</span>
+                <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">최근 {Math.min(30, tradeLogs.length)}건</span>
               </div>
               
               <div className="overflow-y-auto space-y-2.5 pr-1 custom-scrollbar max-h-[310px]">
@@ -5491,22 +5491,22 @@ export default function App() {
                           )} />
                           {(() => {
                             const found = stocks.find(s => s.symbol === log.symbol) || INITIAL_STOCKS_KR.find(s => s.symbol === log.symbol) || INITIAL_STOCKS.find(s => s.symbol === log.symbol);
-                            return <span className="text-xs font-black text-white">{found ? `${found.name} (${log.symbol})` : log.symbol}</span>;
+                            return <span className="text-sm font-black text-white">{found ? `${found.name} (${log.symbol})` : log.symbol}</span>;
                           })()}
                         </div>
-                        <span className="text-[10px] font-mono text-sleek-text-secondary">{log.time}</span>
+                        <span className="text-xs font-mono text-sleek-text-secondary">{log.time}</span>
                       </div>
                       <div className="flex justify-between items-end font-mono">
                         <div className="flex flex-col">
-                          <span className="text-[10px] text-sleek-text-secondary uppercase">수량</span>
-                          <span className="text-xs font-bold text-white">{log.amount}주</span>
+                          <span className="text-[11px] text-sleek-text-secondary uppercase">수량</span>
+                          <span className="text-sm font-bold text-white">{log.amount}주</span>
                         </div>
                         <div className="text-right flex flex-col">
-                          <span className="text-[10px] text-sleek-text-secondary uppercase">체결가</span>
-                          <span className="text-xs font-black text-white italic tracking-tighter">₩{log.price.toLocaleString()}</span>
+                          <span className="text-[11px] text-sleek-text-secondary uppercase">체결가</span>
+                          <span className="text-sm font-black text-white italic tracking-tighter">₩{log.price.toLocaleString()}</span>
                         </div>
                       </div>
-                      <div className="pt-2 border-t border-white/5 text-[11px] text-sleek-text-secondary leading-snug italic line-clamp-2">
+                      <div className="pt-2 border-t border-white/5 text-xs text-sleek-text-secondary leading-snug italic line-clamp-2">
                         {log.reason}
                       </div>
                     </motion.div>
@@ -5517,17 +5517,17 @@ export default function App() {
 
             {/* 3. System Diagnostics */}
             <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-3xl p-5 space-y-4 shrink-0">
-              <h3 className="text-[10px] font-black text-sleek-blue uppercase tracking-widest flex items-center gap-2">
-                <Bot className="w-3 h-3" /> System Diagnostics
+              <h3 className="text-xs font-black text-sleek-blue uppercase tracking-widest flex items-center gap-2">
+                <Bot className="w-3.5 h-3.5" /> System Diagnostics
               </h3>
               <div className="space-y-3">
                 <div className="flex justify-between items-center">
-                  <span className="text-[10px] text-sleek-text-secondary uppercase">Loop Interval</span>
-                  <span className="text-[10px] font-bold text-emerald-400">1,500ms (High Speed)</span>
+                  <span className="text-xs text-sleek-text-secondary uppercase">Loop Interval</span>
+                  <span className="text-xs font-bold text-emerald-400">1,500ms (High Speed)</span>
                 </div>
                 <div className="flex justify-between items-center">
-                  <span className="text-[10px] text-sleek-text-secondary uppercase">Server Status</span>
-                  <span className="text-[10px] font-bold text-emerald-400">ACTIVE</span>
+                  <span className="text-xs text-sleek-text-secondary uppercase">Server Status</span>
+                  <span className="text-xs font-bold text-emerald-400">ACTIVE</span>
                 </div>
                 <div className="pt-2">
                   <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
