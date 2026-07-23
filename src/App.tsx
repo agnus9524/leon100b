@@ -591,17 +591,17 @@ export default function App() {
       return acc + order.quantity * priceInKRW;
     }, 0);
 
-    return balance + stockValue + pendingSimulatedValue;
+    return Math.round(balance + stockValue + pendingSimulatedValue);
   }, [balance, holdings, stocks, exchangeRate, pendingBuyOrders]);
 
-  const convertedValue = displayCurrency === 'USD' ? totalValue / exchangeRate : totalValue;
-  const convertedBalance = displayCurrency === 'USD' ? balance / exchangeRate : balance;
+  const convertedValue = displayCurrency === 'USD' ? Math.round(totalValue / exchangeRate) : Math.round(totalValue);
+  const convertedBalance = displayCurrency === 'USD' ? Math.round(balance / exchangeRate) : Math.round(balance);
   
-  const pnl = totalValue - principal;
+  const pnl = Math.round(totalValue - principal);
   const pnlPercent = principal > 0 ? (pnl / principal) * 100 : 0;
 
-  const convertedPnl = displayCurrency === 'USD' ? pnl / exchangeRate : pnl;
-  const convertedPrincipal = displayCurrency === 'USD' ? principal / exchangeRate : principal;
+  const convertedPnl = displayCurrency === 'USD' ? Math.round(pnl / exchangeRate) : Math.round(pnl);
+  const convertedPrincipal = displayCurrency === 'USD' ? Math.round(principal / exchangeRate) : Math.round(principal);
   const curPrefix = displayCurrency === 'USD' ? '$' : '₩';
 
   const [isAssetAnalysisModalOpen, setIsAssetAnalysisModalOpen] = useState<boolean>(false);
@@ -681,13 +681,13 @@ export default function App() {
     const pendingShare = totalValue > 0 ? (pendingOrderReserve / totalValue) * 100 : 0;
 
     return {
-      cashBalance: balance,
-      stockValue: totalStockValue,
-      stockInvested: totalStockInvested,
-      pendingReserve: pendingOrderReserve,
-      totalCalculatedAsset: totalValue,
-      principal,
-      totalPnL: pnl,
+      cashBalance: Math.round(balance),
+      stockValue: Math.round(totalStockValue),
+      stockInvested: Math.round(totalStockInvested),
+      pendingReserve: Math.round(pendingOrderReserve),
+      totalCalculatedAsset: Math.round(totalValue),
+      principal: Math.round(principal),
+      totalPnL: Math.round(pnl),
       totalPnLPercent: pnlPercent,
       cashShare,
       stockShare,
@@ -1594,22 +1594,16 @@ export default function App() {
         if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output2?.[0]) {
           foundAnyData = true;
           const out2 = domesticBalanceData.output2[0];
-          const rawDeposit = Number(out2.d2_dncl_amt || out2.dncl_amt || out2.prsm_dncl_amt || 0);
-          const domesticPurchase = Number(out2.pchs_amt_smtl_amt || 0);
           const ordPsblCash = Number(out2.ord_psbl_cash || out2.ord_psbl_amt || 0);
-
+          const d2Deposit = Number(out2.d2_dncl_amt || out2.dncl_amt || out2.prsm_dncl_amt || 0);
+          const domesticPurchase = Number(out2.pchs_amt_smtl_amt || 0);
           const actualPurchaseCost = Math.max(domesticPurchase, totalStockPurchaseCost);
 
-          let domesticCash = 0;
-          if (ordPsblCash > 0 && ordPsblCash < rawDeposit) {
-            domesticCash = ordPsblCash;
-          } else if (rawDeposit > 0) {
-            // Subtract total stock purchase amount from total deposit to get true available cash (주식을 사고 남은 가용 자산)
-            domesticCash = Math.max(0, rawDeposit - actualPurchaseCost);
-          }
+          // Direct cash in account (계좌 현금 / 주문가능금액)
+          const domesticCash = ordPsblCash > 0 ? ordPsblCash : d2Deposit;
           
           totalConvertedBalance += domesticCash;
-          totalConvertedPrincipal += (rawDeposit > 0 ? rawDeposit : (domesticCash + actualPurchaseCost));
+          totalConvertedPrincipal += (domesticCash + actualPurchaseCost);
         }
       } catch (err: any) {
         console.warn("Domestic Sync Skip:", err);
@@ -1629,19 +1623,13 @@ export default function App() {
           const assetStatus = await kisService.getInvestmentAssetStatus();
           if (assetStatus?.output2) {
             const out2 = assetStatus.output2;
-            const dncl_amt = Number(out2.d2_dncl_amt || out2.dncl_amt || 0);
+            const dncl_amt = Number(out2.d2_dncl_amt || out2.dncl_amt || out2.ord_psbl_cash || 0);
             const tot_asst_amt = Number(out2.tot_asst_amt || 0);
             
             // If we got valid data from here, it's often more accurate for "Total" accounts
             if (tot_asst_amt > 0) {
-              // Instead of overwriting, we can use it as a health check or a better source
-              // Some users have unified accounts where this covers both.
-              // For now, let's trust it if it's significantly larger or non-zero
               if (tot_asst_amt > totalConvertedPrincipal) {
-                const totalInvested = Object.entries(newHoldings).reduce((acc, [sym, qty]) => {
-                  return acc + (qty * (newAvgPrices[sym] || 0));
-                }, 0);
-                totalConvertedBalance = Math.max(0, dncl_amt - totalInvested);
+                totalConvertedBalance = dncl_amt;
                 totalConvertedPrincipal = tot_asst_amt;
               }
             }
@@ -2027,7 +2015,7 @@ export default function App() {
         ${newsContext || "뉴스 없음. 기술적 지표에만 의존하여 판단할 것."}
         
         계좌 상황:
-        - 가용 잔고: ₩${balance.toLocaleString()}
+        - 가용 잔고: ₩${Math.round(balance).toLocaleString()}
         - ${stockToAnalyze.symbol} 보유: ${holdings[stockToAnalyze.symbol] || 0}
         
         매매 규칙:
@@ -4159,7 +4147,7 @@ export default function App() {
                 <div className="bg-sleek-card/20 p-4 rounded-2xl border border-sleek-border">
                   <div className="text-[9px] text-sleek-text-secondary uppercase mb-1">가용 자산 (KRW)</div>
                   <div className="text-lg font-black text-white tracking-tighter italic">
-                    ₩{balance.toLocaleString()}
+                    ₩{Math.round(balance).toLocaleString()}
                   </div>
                 </div>
                 <div 
@@ -5711,7 +5699,7 @@ export default function App() {
 
                   {assetAnalysis.stockList.length === 0 ? (
                     <div className="bg-white/5 border border-white/5 rounded-2xl p-6 text-center text-sleek-text-secondary text-xs">
-                      현재 보유 중인 주식이 없습니다. 가용 현금(₩{balance.toLocaleString()})이 총 자산으로 평가됩니다.
+                      현재 보유 중인 주식이 없습니다. 가용 현금(₩{Math.round(balance).toLocaleString()})이 총 자산으로 평가됩니다.
                     </div>
                   ) : (
                     <div className="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar pr-1">
