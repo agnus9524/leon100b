@@ -136,6 +136,18 @@ interface PendingBuyOrder {
   isSimulated: boolean;
 }
 
+interface PendingSellOrder {
+  id: string; // generated SIM-ID, KIS odno, or watch ID
+  orgNo?: string; // KIS KRX_FWDG_ORD_ORGNO
+  symbol: string;
+  orderPrice: number;
+  quantity: number;
+  createdAt: number;
+  isSimulated: boolean;
+  type?: 'LIMIT_SELL' | 'TARGET_WATCH' | 'SCALPER_EXIT';
+  reason?: string;
+}
+
 interface AIAnalysisResult {
   symbol: string;
   newsScore: number; // 1-10
@@ -449,10 +461,15 @@ export default function App() {
   const [gapInventory, setGapInventory] = useState<{price: number, quantity: number}[]>([]);
   const [pendingBuyOrders, setPendingBuyOrders] = useState<PendingBuyOrder[]>([]);
   const pendingBuyOrdersRef = React.useRef<PendingBuyOrder[]>([]);
+  const [pendingSellOrders, setPendingSellOrders] = useState<PendingSellOrder[]>([]);
+  const pendingSellOrdersRef = React.useRef<PendingSellOrder[]>([]);
   const buyingLockPricesRef = React.useRef<{ symbol: string; price: number }[]>([]);
   useEffect(() => {
     pendingBuyOrdersRef.current = pendingBuyOrders;
   }, [pendingBuyOrders]);
+  useEffect(() => {
+    pendingSellOrdersRef.current = pendingSellOrders;
+  }, [pendingSellOrders]);
 
   const [autoCancelThreshold, setAutoCancelThreshold] = useState<number>(0.2); // 0.2%
   const [immediateEntry, setImmediateEntry] = useState<boolean>(true);
@@ -2183,18 +2200,73 @@ export default function App() {
     return () => clearInterval(simInterval);
   }, [isGapBotActive, selectedSymbol, kisConfig.isConnected, gapBuyPrice, gapSellPrice, scalpingSpeed, selectedStock]);
 
+  const cancelPendingBuyOrder = async (orderId: string) => {
+    const order = pendingBuyOrders.find(o => o.id === orderId);
+    if (!order) return;
+
+    if (order.isSimulated) {
+      const priceInKrw = marketType === 'US' ? order.orderPrice * exchangeRate : order.orderPrice;
+      const refundAmount = priceInKrw * order.quantity;
+      setBalance(prev => prev + refundAmount);
+      addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[모의 매수취소] 수동 취소`);
+    } else {
+      try {
+        await kisService.reviseDomestic(
+          order.orgNo || "",
+          order.id,
+          order.quantity.toString(),
+          "0",
+          '01'
+        );
+        addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 매수취소] 수동 취소`);
+      } catch (e) {
+        console.error("Failed to cancel KIS pending buy order:", e);
+      }
+    }
+
+    setPendingBuyOrders(prev => prev.filter(o => o.id !== orderId));
+    showNotification(`${order.symbol} 대기 중인 매수 주문이 취소되었습니다.`, "info");
+  };
+
+  const cancelPendingSellOrder = async (orderId: string) => {
+    const order = pendingSellOrders.find(o => o.id === orderId);
+    if (!order) return;
+
+    if (!order.isSimulated && kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
+      try {
+        await kisService.reviseDomestic(
+          order.orgNo || "",
+          order.id,
+          order.quantity.toString(),
+          "0",
+          '01'
+        );
+        addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소] 수동 취소`);
+      } catch (e) {
+        console.error("Failed to cancel KIS pending sell order:", e);
+      }
+    } else {
+      addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[매도취소] 수동 취소`);
+    }
+
+    setPendingSellOrders(prev => prev.filter(o => o.id !== orderId));
+    setManualSellWatches(prev => prev.filter(w => w.id !== orderId));
+    showNotification(`${order.symbol} 대기 중인 매도 주문이 취소되었습니다.`, "info");
+  };
+
   const cancelAllPendingOrders = useCallback(async () => {
-    const ordersToCancel = pendingBuyOrdersRef.current;
-    if (ordersToCancel.length === 0) return;
+    const buyOrdersToCancel = pendingBuyOrdersRef.current;
+    const sellOrdersToCancel = pendingSellOrdersRef.current;
+    if (buyOrdersToCancel.length === 0 && sellOrdersToCancel.length === 0) return;
 
     setBotStatus("모든 대기 주문 취소 중...");
 
-    for (const order of ordersToCancel) {
+    for (const order of buyOrdersToCancel) {
       if (order.isSimulated) {
         const priceInKrw = marketType === 'US' ? order.orderPrice * exchangeRate : order.orderPrice;
         const refundAmount = priceInKrw * order.quantity;
         setBalance(prev => prev + refundAmount);
-        addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[모의 주문취소] 봇 종료로 인한 미체결 주문 일괄 취소`);
+        addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[모의 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
       } else {
         try {
           await kisService.reviseDomestic(
@@ -2204,15 +2276,36 @@ export default function App() {
             "0",
             '01'
           );
-          addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 주문 일괄 취소`);
+          addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
         } catch (e) {
           console.error("Failed to cancel KIS pending order:", e);
         }
       }
     }
 
+    for (const order of sellOrdersToCancel) {
+      if (!order.isSimulated) {
+        try {
+          await kisService.reviseDomestic(
+            order.orgNo || "",
+            order.id,
+            order.quantity.toString(),
+            "0",
+            '01'
+          );
+          addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매도 주문 일괄 취소`);
+        } catch (e) {
+          console.error("Failed to cancel KIS pending sell order:", e);
+        }
+      } else {
+        addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[모의 주문취소] 봇 종료로 인한 미체결 매도 주문 일괄 취소`);
+      }
+    }
+
     setPendingBuyOrders([]);
-    showNotification("모든 대기 주문이 취소되었습니다.", "info");
+    setPendingSellOrders([]);
+    setManualSellWatches([]);
+    showNotification("모든 대기 (매수/매도) 주문이 취소되었습니다.", "info");
   }, [exchangeRate, marketType]);
 
   // Monitor Pending Buy Orders for Price Changes, Fills, and Auto-Cancellations
@@ -2405,6 +2498,82 @@ export default function App() {
 
     checkOrders();
   }, [pendingBuyOrders, stocks, autoCancelThreshold, marketType, exchangeRate, holdings, currentUser, playScalpingSound]);
+
+  // Monitor Pending Sell Orders for Price Changes, Fills, and Market Target Hits
+  useEffect(() => {
+    if (pendingSellOrders.length === 0) return;
+
+    let updated = false;
+    const currentPending = [...pendingSellOrders];
+    const nextPending: PendingSellOrder[] = [];
+
+    const checkSellOrders = async () => {
+      for (const order of currentPending) {
+        const currentStock = stocksRef.current.find(s => s.symbol === order.symbol);
+        if (!currentStock) {
+          nextPending.push(order);
+          continue;
+        }
+
+        if (order.isSimulated) {
+          // Simulated Mode: Check if market price reached or exceeded target sell price
+          if (currentStock.price >= order.orderPrice) {
+            updated = true;
+            const priceInKrw = marketType === 'US' ? currentStock.price * exchangeRate : currentStock.price;
+            setBalance(prev => prev + priceInKrw * order.quantity);
+
+            // Update holdings
+            const heldQty = holdings[order.symbol] || 0;
+            const newHoldings = { ...holdings, [order.symbol]: Number(Math.max(0, heldQty - order.quantity).toFixed(4)) };
+            setHoldings(newHoldings);
+            if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
+
+            addLog(order.symbol, '매도', currentStock.price, order.quantity, `[모의 지정가 매도 체결] 목표가 ₩${order.orderPrice.toLocaleString()} 도달`);
+            showNotification(`${currentStock.name} 대기 중인 매도 주문 체결 완료 (₩${currentStock.price.toLocaleString()}, ${order.quantity}주)`, "success");
+            playScalpingSound('SELL');
+          } else {
+            nextPending.push(order);
+          }
+        } else {
+          // KIS Real Mode: Query execution status
+          try {
+            const status = await kisService.checkOrderExecution(order.id);
+            if (status.isFullyFilled) {
+              updated = true;
+              addLog(order.symbol, '매도', status.price || order.orderPrice, status.ordQty || order.quantity, `[KIS 지정가 매도 체결] 전량 체결 완료`);
+              showNotification(`${currentStock.name} KIS 매도 주문 체결 완료!`, "success");
+              playScalpingSound('SELL');
+              setTimeout(() => handleSyncKIS(), 500);
+            } else if (status.ccldQty > 0) {
+              updated = true;
+              const remainingQty = (status.ordQty || order.quantity) - status.ccldQty;
+              if (remainingQty > 0) {
+                nextPending.push({
+                  ...order,
+                  quantity: remainingQty
+                });
+              }
+              addLog(order.symbol, '매도', status.price || order.orderPrice, status.ccldQty, `[KIS 지정가 매도 일부체결] ${status.ccldQty}주 체결`);
+              showNotification(`${currentStock.name} KIS 매도 주문 일부 체결 (${status.ccldQty}주)`, "info");
+              playScalpingSound('SELL');
+              setTimeout(() => handleSyncKIS(), 500);
+            } else {
+              nextPending.push(order);
+            }
+          } catch (e) {
+            console.warn(e);
+            nextPending.push(order);
+          }
+        }
+      }
+
+      if (updated) {
+        setPendingSellOrders(nextPending);
+      }
+    };
+
+    checkSellOrders();
+  }, [pendingSellOrders, stocks, marketType, exchangeRate, holdings, currentUser, playScalpingSound]);
 
   // Technical Indicators Utility Functions
   const calculateSMA = (data: number[], period: number) => {
@@ -2800,18 +2969,33 @@ export default function App() {
                        setBotStatus(`[미체결 상태] 주문 번호(${odno})가 아직 체결되지 않았습니다.`);
                        addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[주문접수/미체결] 실시간 체결 대기 및 동기화 감시`);
                        showNotification(`${stock.name} 주문 접수 완료 (미체결 상태). 체결 발생 시 잔고에 자동 동기화됩니다.`, "info");
-                       // Register as Pending Order for 0.2% drop cancel check
+                       // Register as Pending Order for execution check
                        const orgNo = res.output?.KRX_FWDG_ORD_ORGNO || res.output?.krx_fwdg_ord_orgno || "";
-                       const newPending: PendingBuyOrder = {
-                         id: odno,
-                         orgNo,
-                         symbol: stock.symbol,
-                         orderPrice: tradePrice,
-                         quantity: finalAmount,
-                         createdAt: Date.now(),
-                         isSimulated: false
-                       };
-                       setPendingBuyOrders(prev => [...prev, newPending]);
+                       if (action === 'BUY') {
+                         const newPending: PendingBuyOrder = {
+                           id: odno,
+                           orgNo,
+                           symbol: stock.symbol,
+                           orderPrice: tradePrice,
+                           quantity: finalAmount,
+                           createdAt: Date.now(),
+                           isSimulated: false
+                         };
+                         setPendingBuyOrders(prev => [...prev, newPending]);
+                       } else {
+                         const newPendingSell: PendingSellOrder = {
+                           id: odno,
+                           orgNo,
+                           symbol: stock.symbol,
+                           orderPrice: tradePrice,
+                           quantity: finalAmount,
+                           createdAt: Date.now(),
+                           isSimulated: false,
+                           type: 'LIMIT_SELL',
+                           reason
+                         };
+                         setPendingSellOrders(prev => [...prev, newPendingSell]);
+                       }
 
                        return 0; // Return 0 immediately so local state/slots do not optimistically update
                    }
@@ -2987,8 +3171,9 @@ export default function App() {
         setManualSellModalOpen(false);
       }
     } else {
+      const watchId = `WATCH-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
       const newWatch = {
-        id: `WATCH-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+        id: watchId,
         symbol: selectedStock.symbol,
         stockName: selectedStock.name,
         targetPrice: manualSellPrice,
@@ -2996,6 +3181,19 @@ export default function App() {
         createdAt: Date.now()
       };
       setManualSellWatches(prev => [...prev, newWatch]);
+
+      const newPendingSell: PendingSellOrder = {
+        id: watchId,
+        symbol: selectedStock.symbol,
+        orderPrice: manualSellPrice,
+        quantity: manualSellQty,
+        createdAt: Date.now(),
+        isSimulated: !kisConfig.isConnected || !kisConfig.isRealOrderEnabled,
+        type: 'TARGET_WATCH',
+        reason: '수동 지정가 매도 예약'
+      };
+      setPendingSellOrders(prev => [...prev, newPendingSell]);
+
       showNotification(`[지정가 매도 예약 등록] ${selectedStock.name} 목표가 ₩${manualSellPrice.toLocaleString()} 도달 시 자동 매도됩니다.`, "success");
       setManualSellModalOpen(false);
     }
@@ -5275,7 +5473,16 @@ export default function App() {
                                   {order.isSimulated ? "모의" : "KIS실전"}
                                 </span>
                               </div>
-                              <span className="text-sleek-text-secondary font-mono">수량: {order.quantity}주</span>
+                              <div className="flex items-center gap-1">
+                                <span className="text-sleek-text-secondary font-mono">수량: {order.quantity}주</span>
+                                <button
+                                  type="button"
+                                  onClick={() => cancelPendingBuyOrder(order.id)}
+                                  className="text-[8px] font-bold text-amber-400 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/40 px-1.5 py-0.5 rounded transition-all ml-1"
+                                >
+                                  취소
+                                </button>
+                              </div>
                             </div>
                             
                             <div className="flex justify-between items-center font-mono">
@@ -5301,6 +5508,84 @@ export default function App() {
                                     cancelProgress >= 80 ? "bg-rose-500" : "bg-amber-500"
                                   )}
                                   style={{ width: `${cancelProgress}%` }}
+                                />
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* Pending Sell Orders */}
+                <div className="space-y-2 pt-2 border-t border-white/5">
+                  <div className="flex justify-between items-center">
+                    <span className="text-[10px] text-sleek-text-secondary uppercase font-black flex items-center gap-1">
+                      <Clock className="w-3 h-3 text-rose-400 animate-pulse" /> 대기 중인 매도 주문 (Pending Sell)
+                    </span>
+                    <span className="text-[10px] font-bold text-white bg-rose-500/10 text-rose-400 px-2 rounded-full">{pendingSellOrders.length}</span>
+                  </div>
+
+                  <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 scrollbar-thin">
+                    {pendingSellOrders.length === 0 ? (
+                      <div className="text-[9px] text-sleek-text-secondary opacity-40 italic py-2 text-center">
+                        대기 중인 지정가 매도 주문 없음
+                      </div>
+                    ) : (
+                      pendingSellOrders.map((order, idx) => {
+                        const currentStock = stocks.find(s => s.symbol === order.symbol) || selectedStock;
+                        const targetDiffPercent = ((order.orderPrice - currentStock.price) / currentStock.price) * 100;
+                        const fillProgress = currentStock.price >= order.orderPrice ? 100 : Math.min(100, Math.max(0, (currentStock.price / order.orderPrice) * 100));
+
+                        return (
+                          <div key={order.id || idx} className="flex flex-col bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1.5 text-[10px]">
+                            <div className="flex justify-between items-center">
+                              <div className="flex items-center gap-1.5 font-mono">
+                                <span className={cn(
+                                  "w-1.5 h-1.5 rounded-full",
+                                  order.isSimulated ? "bg-rose-400" : "bg-emerald-400 animate-pulse"
+                                )}></span>
+                                <span className="text-white font-bold">{currentStock.name} ({order.symbol})</span>
+                                <span className="text-[8px] font-bold text-rose-300 uppercase px-1 py-0.2 bg-rose-500/10 rounded">
+                                  {order.isSimulated ? "모의" : "KIS실전"}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-1">
+                                <span className="text-sleek-text-secondary font-mono">수량: {order.quantity}주</span>
+                                <button
+                                  type="button"
+                                  onClick={() => cancelPendingSellOrder(order.id)}
+                                  className="text-[8px] font-bold text-rose-400 hover:text-rose-200 bg-rose-500/20 hover:bg-rose-500/40 px-1.5 py-0.5 rounded transition-all ml-1"
+                                >
+                                  취소
+                                </button>
+                              </div>
+                            </div>
+                            
+                            <div className="flex justify-between items-center font-mono">
+                              <span className="text-sleek-text-secondary">매도 지정가: <strong className="text-rose-400">₩{order.orderPrice.toLocaleString()}</strong></span>
+                              <span className="text-sleek-text-secondary">현재가: <strong className="text-white">₩{currentStock.price.toLocaleString()}</strong></span>
+                            </div>
+
+                            {/* Target Distance & Fill gauge */}
+                            <div className="space-y-1 pt-1 border-t border-white/5">
+                              <div className="flex justify-between items-center text-[8px] font-mono">
+                                <span className="text-sleek-text-secondary">목표 달성 괴리율</span>
+                                <span className={cn(
+                                  "font-bold",
+                                  targetDiffPercent <= 0 ? "text-rose-400 animate-pulse" : "text-amber-400"
+                                )}>
+                                  {targetDiffPercent <= 0 ? "체결 임박 (0%)" : `+${targetDiffPercent.toFixed(2)}% 잔여`}
+                                </span>
+                              </div>
+                              <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden relative">
+                                <div 
+                                  className={cn(
+                                    "h-full rounded-full transition-all duration-300",
+                                    fillProgress >= 99 ? "bg-emerald-400" : "bg-rose-500"
+                                  )}
+                                  style={{ width: `${fillProgress}%` }}
                                 />
                               </div>
                             </div>
