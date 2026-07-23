@@ -473,7 +473,7 @@ export default function App() {
 
   const [autoCancelThreshold, setAutoCancelThreshold] = useState<number>(0.2); // 0.2%
   const [immediateEntry, setImmediateEntry] = useState<boolean>(true);
-  const [lowestBidOnlyMode, setLowestBidOnlyMode] = useState<boolean>(true); // 하단 호가 진입 모드 (기본 true)
+  const [lowestBidOnlyMode, setLowestBidOnlyMode] = useState<boolean>(false); // 현재 체결가 진입 모드 (기본 false)
   const [scalperMessage, setScalperMessage] = useState<string>("대기 중...");
   const [selectedTimeframeBar, setSelectedTimeframeBar] = useState<'1m' | '3m' | '5m' | '10m'>('1m');
   const gapInventoryRef = React.useRef<{price: number, quantity: number}[]>([]);
@@ -482,13 +482,13 @@ export default function App() {
   }, [gapInventory]);
 
   // Automated Scalping Configuration States
-  const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.1); // Scalping micro target profit (0.1% default for quick exits)
+  const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.2); // Scalping net target profit (0.2% default excluding fees)
   const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-1.0); // -1.0% stop loss
-  const [scalpingSpeed, setScalpingSpeed] = useState<number>(500); // 500ms fast scalping speed
+  const [scalpingSpeed, setScalpingSpeed] = useState<number>(500); // 500ms (0.5s) fast scalping speed
   const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(true);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
-  const [maxSlots, setMaxSlots] = useState<number>(10);
+  const [maxSlots, setMaxSlots] = useState<number>(5);
   const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(true); // Allow same price entries for averaging down/accumulating
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(true); // Enable instant full position liquidation on weighted avg profit
 
@@ -788,7 +788,7 @@ export default function App() {
         oscillation,
         reasonTag
       };
-    }).sort((a, b) => b.scalpScore - a.scalpScore).slice(0, 5);
+    }).sort((a, b) => b.scalpScore - a.scalpScore).slice(0, 3);
   }, [stocks, marketType]);
 
   // Real-time Exchange Rate Fetcher & Simulator
@@ -4326,7 +4326,7 @@ export default function App() {
               </div>
             )}
 
-            {/* 스캘퍼 엔진 최적 종목 TOP 5 Ranking Widget */}
+            {/* 스캘퍼 엔진 최적 종목 TOP 3 Ranking Widget */}
             <div className="space-y-3 pt-4 border-t border-white/10">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
@@ -4335,7 +4335,7 @@ export default function App() {
                   </div>
                   <div>
                     <h2 className="text-[11px] font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                      스캘퍼 최적 종목 TOP 5
+                      스캘퍼 최적 종목 TOP 3
                       <span className="relative flex h-2 w-2">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
@@ -4372,11 +4372,11 @@ export default function App() {
                           : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-amber-500/30"
                       )}
                     >
-                      <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-start justify-between gap-2">
                         {/* Left: Rank Badge + Stock Name & Symbol */}
-                        <div className="flex items-center gap-2 min-w-0">
+                        <div className="flex items-start gap-2 min-w-0 flex-1">
                           <div className={cn(
-                            "w-5 h-5 rounded-md text-[10px] font-black font-mono flex items-center justify-center shrink-0 shadow-sm border",
+                            "w-5 h-5 rounded-md text-[10px] font-black font-mono flex items-center justify-center shrink-0 shadow-sm border mt-0.5",
                             idx === 0 ? "bg-gradient-to-br from-amber-400 to-yellow-600 text-black border-amber-300 font-extrabold" :
                             idx === 1 ? "bg-gradient-to-br from-slate-300 to-slate-500 text-black border-slate-200" :
                             idx === 2 ? "bg-gradient-to-br from-amber-700 to-amber-900 text-amber-200 border-amber-600" :
@@ -4385,13 +4385,17 @@ export default function App() {
                             {idx === 0 ? '1' : idx === 1 ? '2' : idx === 2 ? '3' : `${idx + 1}`}
                           </div>
 
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-sm font-bold text-white truncate">{st.name}</span>
-                              <span className="text-[11px] font-mono text-sleek-text-secondary shrink-0">({st.symbol})</span>
+                          <div className="min-w-0 flex-1">
+                            {/* Full Stock Name (No Truncation) */}
+                            <div className="text-xs font-bold text-white whitespace-normal break-words leading-snug">
+                              {st.name}
                             </div>
-                            <div className="flex items-center gap-1.5 mt-0.5">
-                              <span className="text-[10px] font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
+                            {/* Stock Symbol/Code below */}
+                            <div className="text-[10px] font-mono text-sleek-text-secondary mt-0.5">
+                              {st.symbol}
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <span className="text-[9px] font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
                                 {st.reasonTag}
                               </span>
                             </div>
@@ -4604,7 +4608,7 @@ export default function App() {
 
                   <div className="bg-black/30 p-2 rounded-xl border border-sleek-border flex flex-col justify-between">
                     <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-black text-sleek-text-secondary uppercase">목표 익절 / 손절</span>
+                      <span className="text-[11px] font-black text-sleek-text-secondary uppercase">목표 익절(수수료 제외 순%) / 손절</span>
                       <span className="text-xs font-bold text-emerald-400 font-mono">+{scalpingTargetProfit}% / {scalpingStopLoss}%</span>
                     </div>
                     <div className="grid grid-cols-2 gap-1 mt-1">
@@ -4724,7 +4728,7 @@ export default function App() {
                   <div className="bg-white/5 p-2 rounded-xl border border-white/5 flex items-center justify-between min-w-0">
                     <span className="text-xs font-bold text-sleek-text-secondary uppercase whitespace-nowrap shrink-0 mr-1">최대 슬롯 개수</span>
                     <div className="flex items-center gap-1 shrink-0">
-                      {[5, 10, 15, 20].map(sVal => (
+                      {[3, 5, 10, 15].map(sVal => (
                         <button
                           key={sVal}
                           type="button"
