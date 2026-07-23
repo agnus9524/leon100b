@@ -2311,7 +2311,7 @@ export default function App() {
           
           if (order.isSimulated) {
             // Fill simulated order
-            setGapInventory(prev => [...prev, orderPrice]);
+            setGapInventory(prev => [...prev, { price: orderPrice, quantity: order.quantity }]);
             const oldQty = holdings[order.symbol] || 0;
             const oldAvg = avgPrices[order.symbol] || orderPrice;
             const newQty = oldQty + order.quantity;
@@ -2332,8 +2332,8 @@ export default function App() {
             try {
               const status = await kisService.checkOrderExecution(order.id);
               if (status.isFullyFilled) {
-                setGapInventory(prev => [...prev, orderPrice]);
-                const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + order.quantity).toFixed(4)) };
+                setGapInventory(prev => [...prev, { price: orderPrice, quantity: status.ordQty || order.quantity }]);
+                const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + (status.ordQty || order.quantity)).toFixed(4)) };
                 setHoldings(newHoldings);
                 if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
                 
@@ -2352,7 +2352,7 @@ export default function App() {
                     quantity: remainingQty
                   });
                   // Add filled portion to inventory
-                  setGapInventory(prev => [...prev, orderPrice]);
+                  setGapInventory(prev => [...prev, { price: orderPrice, quantity: status.ccldQty }]);
                   const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + status.ccldQty).toFixed(4)) };
                   setHoldings(newHoldings);
                   if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
@@ -2375,8 +2375,8 @@ export default function App() {
                const status = await kisService.checkOrderExecution(order.id);
                if (status.isFullyFilled) {
                   updated = true;
-                  setGapInventory(prev => [...prev, orderPrice]);
-                  const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + order.quantity).toFixed(4)) };
+                  setGapInventory(prev => [...prev, { price: orderPrice, quantity: status.ordQty || order.quantity }]);
+                  const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + (status.ordQty || order.quantity)).toFixed(4)) };
                   setHoldings(newHoldings);
                   if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
                   
@@ -2507,11 +2507,9 @@ export default function App() {
       const isNearUpperBand = currentPrice >= bb.upper * 0.995; 
       const momentumPositive = sma5 > sma20;
 
-      // Only trade inside the defined range
+      // A. PROFIT MAX BUY Condition: Only check buys inside min ~ max range
       if (currentPrice >= minPrice && currentPrice <= maxPrice) {
         if (lastPrice > 0) {
-          // A. PROFIT MAX BUY Condition: 
-          // Strategy: Buy when Oversold or at BB Lower Band AND showing slight upward reversal (Price >= SMA5)
           const meetsBuyCriteria = (isOverSold || isNearLowerBand) && (currentPrice >= sma5);
           
           const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
@@ -2521,12 +2519,11 @@ export default function App() {
           const currentInventory = gapInventoryRef.current;
 
           // Check if an active slot or pending order already exists at this EXACT same price level (1-tick threshold)
-          const isSamePriceEntry = currentInventory.some(slot => Math.abs(Math.round(slot.price) - targetBuyPrice) < tickSize * 0.95) ||
+          const isSamePriceEntry = currentInventory.some(slot => Math.abs(Math.round(typeof slot === 'number' ? slot : slot.price) - targetBuyPrice) < tickSize * 0.95) ||
             pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(Math.round(p.orderPrice) - targetBuyPrice) < tickSize * 0.95) ||
             buyingLockPricesRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(Math.round(p.price) - targetBuyPrice) < tickSize * 0.95);
 
           const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
-          const cost = priceInKrw * tradeQuantity;
 
           // Buy Trigger: Meets buy criteria (Oversold/LowerBand) OR immediate step entry mode when a distinct price level appears
           if (meetsBuyCriteria || (immediateEntry && currentInventory.length < maxSlots)) {
@@ -2536,8 +2533,6 @@ export default function App() {
               setScalperMessage(`[슬롯 가득 참] 전체 ${maxSlots}개 슬롯 보유 중 (매도 대기)`);
             } else {
               const currentStep = currentInventory.length + 1;
-              // Martingale/Scaling Logic: Increase quantity for deeper slots to lower average price faster
-              // Progression: Step 1: 1x, Step 2: 2x, Step 3: 3x ... (or customized scaling)
               const scaledQuantity = tradeQuantity * currentStep; 
               const scaledCost = priceInKrw * scaledQuantity;
 
@@ -2546,7 +2541,6 @@ export default function App() {
               } else {
                 setScalperMessage(`[슬롯#${currentStep} 가중진입] ₩${targetBuyPrice.toLocaleString()} (${scaledQuantity}주)...`);
                 
-                // Synchronously lock this price in buyingLockPricesRef to prevent concurrent tick duplicate entry
                 const lockEntry = { symbol: selectedStock.symbol, price: targetBuyPrice };
                 buyingLockPricesRef.current.push(lockEntry);
 
@@ -2564,93 +2558,94 @@ export default function App() {
                     playScalpingSound('BUY');
                   }
                 } finally {
-                  // Release from lock list
                   buyingLockPricesRef.current = buyingLockPricesRef.current.filter(p => !(p.symbol === selectedStock.symbol && Math.abs(Math.round(p.price) - targetBuyPrice) < 0.1));
                 }
               }
             }
           } else {
-            // Context-Aware Status Messages
             if (isOverSold) setScalperMessage(`과매도 포착 (RSI: ${Math.round(rsi)}). 반등 시점 감시 중`);
             else if (isNearLowerBand) setScalperMessage(`지지선(BB Lower) 도달. 매수 타점 분석 중...`);
             else setScalperMessage(`관망 중 (RSI: ${Math.round(rsi)}, 보유 슬롯: ${currentInventory.length}/${maxSlots})`);
           }
+        }
+      } else {
+        if (gapInventoryRef.current.length === 0) {
+          setScalperMessage(`범위 외 관망 (₩${minPrice.toLocaleString()}~₩${maxPrice.toLocaleString()})`);
+        }
+      }
 
-          // B. PROFIT MAX SELL Condition: Scan inventory and process each distinct slot independently
-          const currentInventory2 = gapInventoryRef.current;
-          if (currentInventory2.length > 0) {
-            for (const slot of currentInventory2) {
-              const buyPrice = slot.price;
-              const buyQty = slot.quantity;
+      // B. PROFIT MAX SELL Condition: ALWAYS scan inventory and process each distinct slot independently (even if price is above gap range!)
+      const currentInventory2 = gapInventoryRef.current;
+      if (currentInventory2.length > 0) {
+        for (const slot of currentInventory2) {
+          const buyPrice = typeof slot === 'number' ? slot : (slot.price || 0);
+          const buyQty = typeof slot === 'number' ? tradeQuantity : (slot.quantity || tradeQuantity || 1);
+          if (!buyPrice || buyPrice <= 0) continue;
 
-              // Update High Water Mark for Trailing Stop Loss per slot
-              if (currentPrice > (highWaterMark[buyPrice] || buyPrice)) {
-                setHighWaterMark(prev => ({ ...prev, [buyPrice]: currentPrice }));
-              }
+          // Update High Water Mark for Trailing Stop Loss per slot
+          if (currentPrice > (highWaterMark[buyPrice] || buyPrice)) {
+            setHighWaterMark(prev => ({ ...prev, [buyPrice]: currentPrice }));
+          }
 
-              const profitRatio = (currentPrice - buyPrice) / buyPrice;
-              const currentHigh = highWaterMark[buyPrice] || buyPrice;
-              const dropFromPeak = (currentHigh - currentPrice) / currentHigh;
+          const profitRatio = (currentPrice - buyPrice) / buyPrice;
+          const currentHigh = highWaterMark[buyPrice] || buyPrice;
+          const dropFromPeak = (currentHigh - currentPrice) / currentHigh;
 
-              // 1. Trailing Stop Loss: Lock in gains. If price drops 0.4% from peak after 0.2% profit.
-              const isTrailingStop = profitRatio > 0.002 && dropFromPeak > 0.004; 
+          // 1. Trailing Stop Loss: Lock in gains. If price drops 0.4% from peak after 0.2% profit.
+          const isTrailingStop = profitRatio > 0.002 && dropFromPeak > 0.004; 
+          
+          // 2. Target Profit Exit: Overbought OR Near Upper Band OR target profit % hit (e.g. 0.1%)
+          const isProfitTarget = (isOverBought || isNearUpperBand || profitRatio >= (scalpingTargetProfit / 100)) && (profitRatio > 0);
+          
+          // 3. Fixed Stop Loss: Absolute bottom line
+          const isStopLoss = profitRatio <= scalpingStopLoss / 100;
+
+          if (isTrailingStop || isProfitTarget || isStopLoss) {
+            const heldQty = holdings[selectedStock.symbol] || 0;
+            const sellQty = Math.min(heldQty > 0 ? heldQty : buyQty, buyQty) || buyQty;
+
+            if (sellQty > 0 || kisConfig.isConnected) {
+              let sellReason = "";
+              if (isTrailingStop) sellReason = "트레일링 스탑 (수익 보존)";
+              else if (isProfitTarget) sellReason = `목표 수익 달성 (+${(profitRatio * 100).toFixed(2)}%)`;
+              else sellReason = "리스크 관리 손절";
+
+              setScalperMessage(`[슬롯 개별 매도] ₩${buyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} (${sellReason})`);
+              await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ₩${buyPrice.toLocaleString()}, 수량: ${sellQty}): ${sellReason}`, currentPrice);
               
-              // 2. Target Profit Exit: Overbought OR Near Upper Band OR target profit % hit
-              const isProfitTarget = (isOverBought || isNearUpperBand || profitRatio >= (scalpingTargetProfit / 100)) && (profitRatio > 0);
-              
-              // 3. Fixed Stop Loss: Absolute bottom line
-              const isStopLoss = profitRatio <= scalpingStopLoss / 100;
-
-              if (isTrailingStop || isProfitTarget || isStopLoss) {
-                const heldQty = holdings[selectedStock.symbol] || 0;
-                const sellQty = Math.min(heldQty, buyQty) || buyQty;
-
-                if (sellQty > 0 || kisConfig.isConnected) {
-                  let sellReason = "";
-                  if (isTrailingStop) sellReason = "트레일링 스탑 (수익 보존)";
-                  else if (isProfitTarget) sellReason = `목표 수익 달성 (+${(profitRatio * 100).toFixed(2)}%)`;
-                  else sellReason = "리스크 관리 손절";
-
-                  setScalperMessage(`[슬롯 개별 매도] ₩${buyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} (${sellReason})`);
-                  await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ₩${buyPrice.toLocaleString()}, 수량: ${sellQty}): ${sellReason}`, currentPrice);
-                  
-                  // Remove this exact slot from gapInventory
-                  setGapInventory(prev => {
-                    const idx = prev.findIndex(s => s.price === buyPrice && s.quantity === buyQty);
-                    if (idx > -1) {
-                      const copy = [...prev];
-                      copy.splice(idx, 1);
-                      return copy;
-                    }
-                    return prev.filter(s => s.price !== buyPrice);
-                  });
-                  setHighWaterMark(prev => {
-                    const next = { ...prev };
-                    delete next[buyPrice];
-                    return next;
-                  });
-                  setLastTradeType('SELL');
-                  setGapTradeCount(prev => prev + 1);
-                  
-                  if (profitRatio > 0) {
-                    setScalpingWins(prev => prev + 1);
-                    showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}, ${sellQty}주) 개별 슬롯 매도 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
-                    playScalpingSound('SELL');
-                  } else {
-                    setScalpingLosses(prev => prev + 1);
-                    showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}, ${sellQty}주) 개별 슬롯 매도 완료 (${(profitRatio * 100).toFixed(2)}%)`, "error");
-                  }
-
-                  const profit = (currentPrice - buyPrice) * sellQty * (marketType === 'US' ? exchangeRate : 1);
-                  setGapTradingProfit(prev => prev + profit);
-                  break; // Process one slot exit per interval to prevent state race condition
+              // Remove this exact slot from gapInventory
+              setGapInventory(prev => {
+                const idx = prev.findIndex(s => (typeof s === 'number' ? s : s.price) === buyPrice);
+                if (idx > -1) {
+                  const copy = [...prev];
+                  copy.splice(idx, 1);
+                  return copy;
                 }
+                return prev.filter(s => (typeof s === 'number' ? s : s.price) !== buyPrice);
+              });
+              setHighWaterMark(prev => {
+                const next = { ...prev };
+                delete next[buyPrice];
+                return next;
+              });
+              setLastTradeType('SELL');
+              setGapTradeCount(prev => prev + 1);
+              
+              if (profitRatio > 0) {
+                setScalpingWins(prev => prev + 1);
+                showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}, ${sellQty}주) 개별 슬롯 매도 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
+                playScalpingSound('SELL');
+              } else {
+                setScalpingLosses(prev => prev + 1);
+                showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}, ${sellQty}주) 개별 슬롯 매도 완료 (${(profitRatio * 100).toFixed(2)}%)`, "error");
               }
+
+              const profit = (currentPrice - buyPrice) * sellQty * (marketType === 'US' ? exchangeRate : 1);
+              setGapTradingProfit(prev => prev + profit);
+              break; // Process one slot exit per interval to prevent state race condition
             }
           }
         }
-      } else {
-        setScalperMessage(`범위 외 관망 (₩${minPrice.toLocaleString()}~₩${maxPrice.toLocaleString()})`);
       }
 
       lastPrice = currentPrice;
@@ -2887,7 +2882,8 @@ export default function App() {
         }
 
       const currentHoldings = holdings[stock.symbol] || 0;
-      const sellAmount = kisConfig.isConnected && kisConfig.isRealOrderEnabled ? finalAmount : Math.min(finalAmount, currentHoldings);
+      const effectiveHoldings = currentHoldings > 0 ? currentHoldings : finalAmount;
+      const sellAmount = kisConfig.isConnected && kisConfig.isRealOrderEnabled ? finalAmount : Math.min(finalAmount, effectiveHoldings);
       if (sellAmount > 0) {
         if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
           // 실제 주문인 경우: 로컬 상태를 임의로 차감하지 않고 실제 계좌 잔고 데이터를 fetch하여 즉시 UI에 반영
@@ -4199,7 +4195,15 @@ export default function App() {
                       
                       let avgPrice = avgPrices[sym] || 0;
                       if (avgPrice <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
-                        avgPrice = Math.round(gapInventory.reduce((a, b) => a + b, 0) / gapInventory.length);
+                        const totalCost = gapInventory.reduce((acc, slot) => {
+                          const p = typeof slot === 'number' ? slot : (slot.price || 0);
+                          const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
+                          return acc + (p * q);
+                        }, 0);
+                        const totalQty = gapInventory.reduce((acc, slot) => {
+                          return acc + (typeof slot === 'number' ? 1 : (slot.quantity || 1));
+                        }, 0);
+                        avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
                       }
                       if (avgPrice <= 0) {
                         avgPrice = st.price || 0;
