@@ -583,16 +583,8 @@ export default function App() {
       return acc + qty * priceInKRW;
     }, 0);
 
-    // Count the reserved/locked cash from pending simulated buy orders
-    const pendingSimulatedValue = pendingBuyOrders.reduce((acc, order) => {
-      if (!order.isSimulated) return acc;
-      const isUS = /^[A-Z]/.test(order.symbol);
-      const priceInKRW = isUS ? order.orderPrice * exchangeRate : order.orderPrice;
-      return acc + order.quantity * priceInKRW;
-    }, 0);
-
-    return Math.round(balance + stockValue + pendingSimulatedValue);
-  }, [balance, holdings, stocks, exchangeRate, pendingBuyOrders]);
+    return Math.round(balance + stockValue);
+  }, [balance, holdings, stocks, exchangeRate]);
 
   const convertedValue = displayCurrency === 'USD' ? Math.round(totalValue / exchangeRate) : Math.round(totalValue);
   const convertedBalance = displayCurrency === 'USD' ? Math.round(balance / exchangeRate) : Math.round(balance);
@@ -1594,16 +1586,16 @@ export default function App() {
         if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output2?.[0]) {
           foundAnyData = true;
           const out2 = domesticBalanceData.output2[0];
+          const dnclAmt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.prsm_dncl_amt || 0);
           const ordPsblCash = Number(out2.ord_psbl_cash || out2.ord_psbl_amt || 0);
-          const d2Deposit = Number(out2.d2_dncl_amt || out2.dncl_amt || out2.prsm_dncl_amt || 0);
           const domesticPurchase = Number(out2.pchs_amt_smtl_amt || 0);
           const actualPurchaseCost = Math.max(domesticPurchase, totalStockPurchaseCost);
 
-          // Direct cash in account (계좌 현금 / 주문가능금액)
-          const domesticCash = ordPsblCash > 0 ? ordPsblCash : d2Deposit;
+          // Direct deposit/cash balance in account
+          const domesticCash = dnclAmt > 0 ? dnclAmt : (ordPsblCash > 0 ? ordPsblCash : 0);
           
-          totalConvertedBalance += domesticCash;
-          totalConvertedPrincipal += (domesticCash + actualPurchaseCost);
+          totalConvertedBalance += Math.round(domesticCash);
+          totalConvertedPrincipal += Math.round(domesticCash + actualPurchaseCost);
         }
       } catch (err: any) {
         console.warn("Domestic Sync Skip:", err);
@@ -1623,14 +1615,15 @@ export default function App() {
           const assetStatus = await kisService.getInvestmentAssetStatus();
           if (assetStatus?.output2) {
             const out2 = assetStatus.output2;
-            const dncl_amt = Number(out2.d2_dncl_amt || out2.dncl_amt || out2.ord_psbl_cash || 0);
+            const dncl_amt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.ord_psbl_cash || 0);
             const tot_asst_amt = Number(out2.tot_asst_amt || 0);
             
-            // If we got valid data from here, it's often more accurate for "Total" accounts
             if (tot_asst_amt > 0) {
               if (tot_asst_amt > totalConvertedPrincipal) {
-                totalConvertedBalance = dncl_amt;
-                totalConvertedPrincipal = tot_asst_amt;
+                totalConvertedPrincipal = Math.round(tot_asst_amt);
+              }
+              if (dncl_amt > 0) {
+                totalConvertedBalance = Math.round(dncl_amt);
               }
             }
           }
@@ -5676,7 +5669,7 @@ export default function App() {
                     <span>총 자산 평가액 산출 공식 (Calculation Logic)</span>
                   </div>
                   <div className="bg-black/40 p-3 rounded-xl font-mono text-xs text-amber-300 font-bold border border-white/5 overflow-x-auto">
-                    총 자산 = [ 가용 현금 ] + ∑( 보유 수량 × 실시간 현재가 ) + [ 매수 예약금 ]
+                    총 자산 = [ 가용 자산 ] + ∑( 보유 수량 × 실시간 현재가 )
                   </div>
                   <p className="text-[11px] text-sleek-text-secondary leading-relaxed">
                     실시간 현재가 변화에 따라 보유 주식 평가액이 실시간 반영되며, 해외 주식의 경우 현재 환율(₩{exchangeRate.toLocaleString()}/$)로 원화 변환되어 통합 계산됩니다.
