@@ -2776,12 +2776,41 @@ export default function App() {
                     showNotification(`${selectedStock.name} 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${executedQty}주) 매수 완료`, "success");
                     playScalpingSound('BUY');
 
-                    // Automatically submit limit sell order for this slot at target profit %
+                    // Automatically submit/update limit sell order based on enableCombinedAvgProfitExit toggle
                     if (scalpingTargetProfit > 0) {
-                      const targetSellPrice = Math.round(targetBuyPrice * (1 + scalpingTargetProfit / 100));
-                      setTimeout(() => {
-                        executeTrade('SELL', selectedStock, executedQty, `[슬롯#${currentStep} 목표익절 매도] 매수가 ₩${targetBuyPrice.toLocaleString()} 대비 +${scalpingTargetProfit}%`, targetSellPrice);
-                      }, 100);
+                      if (enableCombinedAvgProfitExit) {
+                        // 통합평단가 익절 모드: 전체 통합 수량 및 평단가 산출 후 매도 주문 자동 갱신
+                        const prevQty = holdings[selectedStock.symbol] || 0;
+                        const prevAvg = avgPrices[selectedStock.symbol] || targetBuyPrice;
+                        const totalQty = prevQty + executedQty;
+                        const newAvg = totalQty > 0 ? Math.round(((prevQty * prevAvg) + (executedQty * targetBuyPrice)) / totalQty) : targetBuyPrice;
+                        const targetSellPrice = Math.round(newAvg * (1 + scalpingTargetProfit / 100));
+
+                        // 기존 해당 종목 대기 매도 주문이 있으면 취소 후 갱신
+                        setPendingSellOrders(prev => prev.filter(o => o.symbol !== selectedStock.symbol));
+
+                        setTimeout(() => {
+                          executeTrade(
+                            'SELL', 
+                            selectedStock, 
+                            totalQty, 
+                            `[통합평단가 목표익절] 평단가 ₩${newAvg.toLocaleString()} 대비 +${scalpingTargetProfit}% 갱신 주문`, 
+                            targetSellPrice
+                          );
+                        }, 100);
+                      } else {
+                        // 개별 슬롯 익절 모드: 각 슬롯별 매수가 기준 개별 매도 주문 등록
+                        const targetSellPrice = Math.round(targetBuyPrice * (1 + scalpingTargetProfit / 100));
+                        setTimeout(() => {
+                          executeTrade(
+                            'SELL', 
+                            selectedStock, 
+                            executedQty, 
+                            `[슬롯#${currentStep} 개별익절] 매수가 ₩${targetBuyPrice.toLocaleString()} 대비 +${scalpingTargetProfit}%`, 
+                            targetSellPrice
+                          );
+                        }, 100);
+                      }
                     }
                   }
                 } finally {
@@ -4466,9 +4495,9 @@ export default function App() {
           </div>
 
           {/* Terminal Core */}
-          <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
             {/* Left: AI Scalping Config Panel (Compact Grid View without Scroll) */}
-            <div className="bg-sleek-card border border-sleek-border p-4 rounded-3xl shadow-xl space-y-2.5 xl:col-span-1">
+            <div className="bg-sleek-card border border-sleek-border p-4 rounded-3xl shadow-xl space-y-2.5 xl:col-span-5">
               <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
                 <div className="flex flex-col">
                   <h2 className="text-base font-black text-white italic uppercase tracking-tighter">AI SCALPING CONFIG</h2>
@@ -4692,9 +4721,9 @@ export default function App() {
 
                 {/* 5. Max Slots & Execution Speed Grid */}
                 <div className="grid grid-cols-2 gap-2">
-                  <div className="bg-white/5 p-2 rounded-xl border border-white/5 flex items-center justify-between">
-                    <span className="text-xs font-bold text-sleek-text-secondary uppercase">최대 슬롯 개수</span>
-                    <div className="flex items-center gap-1">
+                  <div className="bg-white/5 p-2 rounded-xl border border-white/5 flex items-center justify-between min-w-0">
+                    <span className="text-xs font-bold text-sleek-text-secondary uppercase whitespace-nowrap shrink-0 mr-1">최대 슬롯 개수</span>
+                    <div className="flex items-center gap-1 shrink-0">
                       {[5, 10, 15, 20].map(sVal => (
                         <button
                           key={sVal}
@@ -4714,9 +4743,9 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="bg-white/5 p-2 rounded-xl border border-white/5 flex items-center justify-between">
-                    <span className="text-xs font-bold text-sleek-text-secondary uppercase">실행 속도</span>
-                    <div className="flex items-center gap-1">
+                  <div className="bg-white/5 p-2 rounded-xl border border-white/5 flex items-center justify-between min-w-0">
+                    <span className="text-xs font-bold text-sleek-text-secondary uppercase whitespace-nowrap shrink-0 mr-1">실행 속도</span>
+                    <div className="flex items-center gap-1 shrink-0">
                       {[
                         { label: '0.3s', value: 300 },
                         { label: '0.5s', value: 500 },
@@ -4772,7 +4801,7 @@ export default function App() {
             </div>
 
             {/* Center: PROFIT MAXIMIZER ENGINE (Chart + Order Book + Account/Holdings Below) */}
-            <div className="bg-sleek-card border border-sleek-border p-4 rounded-3xl shadow-2xl flex flex-col justify-between xl:col-span-2 space-y-3">
+            <div className="bg-sleek-card border border-sleek-border p-4 rounded-3xl shadow-2xl flex flex-col justify-between xl:col-span-7 space-y-3">
               <div className="flex items-center justify-between pb-2 border-b border-white/5">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-sleek-card border border-sleek-border rounded-xl flex items-center justify-center shadow-md">
@@ -4860,10 +4889,10 @@ export default function App() {
                                       ₩{selectedStock.price.toLocaleString()}
                                     </span>
                                     <span className={cn(
-                                      "text-sm md:text-base font-black italic",
-                                      selectedStock.change >= 0 ? "text-sleek-green" : "text-sleek-red"
+                                      "text-sm md:text-base font-black italic font-mono",
+                                      selectedStock.change >= 0 ? "text-rose-500" : "text-sky-400"
                                     )}>
-                                      {selectedStock.change >= 0 ? '▲' : '▼'} {selectedStock.changePercent.toFixed(2)}%
+                                      {selectedStock.change >= 0 ? '▲ +' : '▼ '}{selectedStock.changePercent.toFixed(2)}%
                                     </span>
                                   </div>
 
@@ -4888,7 +4917,7 @@ export default function App() {
                                 </div>
 
                                 {/* Chart Container: Height matched to Orderbook (230px) */}
-                                <div className="bg-sleek-card/30 rounded-2xl border border-sleek-border p-2.5 relative shadow-inner h-[230px] min-h-[230px]">
+                                <div className="bg-sleek-card/30 rounded-2xl border border-sleek-border p-2.5 relative shadow-inner h-[285px] min-h-[285px]">
                                   <ResponsiveContainer width="100%" height="100%">
                                     <BarChart data={candleData}>
                                       <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.05} />
@@ -4913,15 +4942,15 @@ export default function App() {
                                               <div className="bg-[#1A1D23] border border-[#2D3139] p-2.5 rounded-xl shadow-2xl space-y-1 text-xs font-mono">
                                                 <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-1">
                                                   <span className="text-sleek-text-secondary font-bold">{data.time}</span>
-                                                  <span className={cn("font-bold px-1 py-0.2 rounded text-[11px]", data.isUp ? "bg-emerald-500/20 text-emerald-400" : "bg-rose-500/20 text-rose-400")}>
-                                                    {data.isUp ? "양봉" : "음봉"}
+                                                  <span className={cn("font-bold px-1 py-0.2 rounded text-[11px]", data.isUp ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400")}>
+                                                    {data.isUp ? "양봉 (상승)" : "음봉 (하락)"}
                                                   </span>
                                                 </div>
                                                 <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs pt-0.5">
                                                   <div>시가: <strong className="text-white">₩{data.open.toLocaleString()}</strong></div>
-                                                  <div>고가: <strong className="text-emerald-400">₩{data.high.toLocaleString()}</strong></div>
-                                                  <div>저가: <strong className="text-rose-400">₩{data.low.toLocaleString()}</strong></div>
-                                                  <div>종가: <strong className="text-amber-400">₩{data.close.toLocaleString()}</strong></div>
+                                                  <div>고가: <strong className="text-rose-400">₩{data.high.toLocaleString()}</strong></div>
+                                                  <div>저가: <strong className="text-sky-400">₩{data.low.toLocaleString()}</strong></div>
+                                                  <div>종가: <strong className={data.close >= data.open ? "text-rose-400" : "text-sky-400"}>₩{data.close.toLocaleString()}</strong></div>
                                                 </div>
                                               </div>
                                             );
@@ -4937,8 +4966,8 @@ export default function App() {
                                         {candleData.map((candle, idx) => (
                                           <Cell 
                                             key={`candle-${idx}`} 
-                                            fill={candle.isUp ? '#10B981' : '#EF4444'} 
-                                            stroke={candle.isLive ? (candle.isUp ? '#34D399' : '#F87171') : 'none'}
+                                            fill={candle.isUp ? '#EF4444' : '#3B82F6'} 
+                                            stroke={candle.isLive ? (candle.isUp ? '#F87171' : '#60A5FA') : 'none'}
                                             strokeWidth={candle.isLive ? 2 : 0}
                                           />
                                         ))}
@@ -4958,11 +4987,11 @@ export default function App() {
                                       {gapSellPrice > 0 && (
                                         <ReferenceLine 
                                           y={gapSellPrice} 
-                                          stroke="#10B981" 
+                                          stroke="#3B82F6" 
                                           strokeDasharray="4 4" 
                                           strokeWidth={1.5}
                                         >
-                                          <Label value="SELL" position="left" fill="#10B981" fontSize={11} fontWeight="bold" />
+                                          <Label value="SELL" position="left" fill="#3B82F6" fontSize={11} fontWeight="bold" />
                                         </ReferenceLine>
                                       )}
                                     </BarChart>
@@ -5005,10 +5034,12 @@ export default function App() {
                               {/* Spread Line */}
                               <div className="my-1.5 py-1 px-2 bg-white/5 border-y border-white/10 flex items-center justify-between rounded-lg">
                                 <span className="text-[10px] font-black text-sleek-text-secondary uppercase">현재 체결가</span>
-                                <span className={cn("font-black text-sm font-mono animate-pulse", selectedStock.change >= 0 ? "text-sleek-green" : "text-sleek-red")}>
+                                <span className={cn("font-black text-sm font-mono animate-pulse", selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400")}>
                                   ₩{currentPrice.toLocaleString()}
                                 </span>
-                                <span className="text-[10px] text-sleek-text-secondary font-mono">{selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%</span>
+                                <span className={cn("text-[10px] font-mono font-bold", selectedStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
+                                  {selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%
+                                </span>
                               </div>
 
                               {/* Bid Levels (매수 1~5단계) */}
@@ -5082,7 +5113,7 @@ export default function App() {
                               </div>
                               <div className="flex items-baseline justify-between mt-1">
                                 <span className="text-base font-black text-sleek-blue italic">₩{totalValue.toLocaleString()}</span>
-                                <span className={cn("text-xs font-bold", pnl >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                                <span className={cn("text-xs font-bold", pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
                                   {pnl >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
                                 </span>
                               </div>
@@ -5092,7 +5123,7 @@ export default function App() {
                           <div className="grid grid-cols-2 gap-2 text-xs font-mono pt-1">
                             <div className="flex justify-between items-center bg-white/5 px-2.5 py-1 rounded-lg">
                               <span className="text-sleek-text-secondary text-[11px]">누적 스캘핑 수익:</span>
-                              <span className={cn("font-bold", gapTradingProfit >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                              <span className={cn("font-bold", gapTradingProfit >= 0 ? "text-rose-400" : "text-sky-400")}>
                                 ₩{gapTradingProfit.toLocaleString()}
                               </span>
                             </div>
@@ -5115,9 +5146,9 @@ export default function App() {
                             </span>
                           </div>
 
-                          <div className="space-y-1.5 max-h-[110px] overflow-y-auto custom-scrollbar pr-1">
+                          <div className="space-y-1.5 max-h-[115px] min-h-[115px] overflow-y-auto custom-scrollbar pr-1">
                             {Object.entries(holdings).filter(([_, qty]) => Number(qty) > 0).length === 0 ? (
-                              <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center">
+                              <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center h-[115px] flex items-center justify-center">
                                 <p className="text-xs text-sleek-text-secondary">현재 보유 중인 주식이 없습니다.</p>
                               </div>
                             ) : (
@@ -5150,7 +5181,7 @@ export default function App() {
                                   return (
                                     <div 
                                       key={sym}
-                                      className="p-2 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between text-xs font-mono"
+                                      className="p-2 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between text-xs font-mono shrink-0"
                                     >
                                       <div className="flex flex-col gap-0.5">
                                         <div className="flex items-center gap-1.5">
@@ -5159,7 +5190,7 @@ export default function App() {
                                         </div>
                                         <div className="flex items-center gap-2 text-[11px]">
                                           <span className="text-amber-300">평단가 ₩{Math.round(avgPrice).toLocaleString()}</span>
-                                          <span className={profitRatio >= 0 ? "text-emerald-400" : "text-rose-400"}>
+                                          <span className={profitRatio >= 0 ? "text-rose-400" : "text-sky-400"}>
                                             {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(2)}%
                                           </span>
                                         </div>
@@ -5177,7 +5208,7 @@ export default function App() {
                                             setManualSellQty(qty);
                                             setManualSellModalOpen(true);
                                           }}
-                                          className="px-2 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/30 rounded-lg text-[11px] font-bold transition-all"
+                                          className="px-2 py-1 bg-sky-500/20 hover:bg-sky-500 text-sky-400 hover:text-white border border-sky-500/30 rounded-lg text-[11px] font-bold transition-all"
                                         >
                                           수동매도
                                         </button>
@@ -5249,65 +5280,104 @@ export default function App() {
                 {/* Grid Inventory */}
                 <div className="space-y-2 pt-2 border-t border-white/5">
                   <div className="flex justify-between items-center">
-                    <span className="text-xs text-sleek-text-secondary uppercase font-black">체결 대기/보유 슬롯</span>
-                    <span className="text-xs font-bold text-white bg-white/10 px-2 rounded-full">{gapInventory.length} / {maxSlots}</span>
+                    <span className="text-xs text-sleek-text-secondary uppercase font-black flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-sleek-blue" />
+                      {enableCombinedAvgProfitExit ? "통합 평단가 익절 슬롯" : "개별 매수/매도 슬롯 현황"}
+                    </span>
+                    <span className="text-xs font-bold text-white bg-white/10 px-2 py-0.5 rounded-full font-mono">
+                      {enableCombinedAvgProfitExit ? (gapInventory.length > 0 ? "1 / 1 통합슬롯" : "0 슬롯") : `${gapInventory.length} / ${maxSlots} 슬롯`}
+                    </span>
                   </div>
 
-                  {gapInventory.length > 0 && (() => {
-                    const totalCost = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
-                    const totalQty = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
-                    const avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
-                    const avgProfitPct = avgPrice > 0 ? ((selectedStock.price - avgPrice) / avgPrice) * 100 : 0;
-                    return (
-                      <div className="p-2.5 bg-gradient-to-r from-sleek-blue/10 to-emerald-500/10 border border-white/10 rounded-xl flex justify-between items-center text-xs font-mono">
-                        <div>
-                          <span className="text-sleek-text-secondary block text-[10px] uppercase">통합 희석 평단가</span>
-                          <span className="text-white font-bold text-sm">₩{avgPrice.toLocaleString()}</span>
-                          <span className="text-[10px] text-sleek-text-secondary ml-1">({totalQty}주)</span>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-sleek-text-secondary block text-[10px] uppercase">평단가 대비 손익</span>
-                          <span className={cn("font-bold text-sm", avgProfitPct >= 0 ? "text-up" : "text-down")}>
-                            {avgProfitPct >= 0 ? "+" : ""}{avgProfitPct.toFixed(2)}%
-                          </span>
-                        </div>
+                  {enableCombinedAvgProfitExit ? (
+                    /* 통합평단가 익절 옵션 ON: 단일 통합 슬롯 표기 */
+                    gapInventory.length === 0 ? (
+                      <div className="text-xs text-sleek-text-secondary opacity-40 italic py-3 text-center bg-white/5 rounded-2xl border border-white/5">
+                        통합 매수 체결 내역 없음 (대기 중)
                       </div>
-                    );
-                  })()}
+                    ) : (() => {
+                      const totalCost = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
+                      const totalQty = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
+                      const avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
+                      const avgProfitPct = avgPrice > 0 ? ((selectedStock.price - avgPrice) / avgPrice) * 100 : 0;
+                      const targetSellPrice = Math.round(avgPrice * (1 + scalpingTargetProfit / 100));
 
-                  <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 scrollbar-thin">
-                    {gapInventory.length === 0 ? (
-                      <div className="text-xs text-sleek-text-secondary opacity-40 italic py-2 text-center">
-                        현재 감시 구간 내 매수 체결 없음
-                      </div>
-                    ) : (
-                      gapInventory.map((slot, idx) => {
-                        const buyPrice = typeof slot === 'number' ? slot : (slot.price || 0);
-                        const buyQty = typeof slot === 'number' ? tradeQuantity : (slot.quantity || 1);
-                        const profitPct = buyPrice > 0 ? ((selectedStock.price - buyPrice) / buyPrice) * 100 : 0;
-                        return (
-                          <div key={idx} className="flex justify-between items-center bg-white/5 rounded-xl px-3 py-1.5 border border-white/5 text-xs">
-                            <div className="flex flex-col gap-0.5 font-mono">
-                              <div className="flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-sleek-blue"></span>
-                                <span className="text-sleek-text-secondary">슬롯#{idx+1}</span>
-                                <span className="text-white font-bold">₩{buyPrice.toLocaleString()}</span>
-                              </div>
-                              <div className="text-[10px] text-sleek-text-secondary pl-3">
-                                수량: <span className="text-white">{buyQty}주</span>
-                              </div>
-                            </div>
-                            <span className={cn(
-                              "font-bold font-mono",
-                              profitPct >= 0 ? "text-up" : "text-down"
-                            )}>
-                              {profitPct >= 0 ? "+" : ""}{profitPct.toFixed(2)}%
+                      return (
+                        <div className="p-3 bg-gradient-to-r from-sleek-blue/20 via-indigo-500/10 to-emerald-500/10 border border-sleek-blue/30 rounded-2xl space-y-2 text-xs font-mono shadow-lg">
+                          <div className="flex justify-between items-center border-b border-white/10 pb-1.5">
+                            <span className="text-sleek-blue font-bold flex items-center gap-1">
+                              <span className="w-2 h-2 rounded-full bg-sleek-blue animate-pulse"></span>
+                              [통합 평단가 슬롯]
+                            </span>
+                            <span className="bg-sleek-blue/20 text-sleek-blue px-2 py-0.5 rounded text-[10px] font-bold">
+                              익절 목표 +{scalpingTargetProfit}%
                             </span>
                           </div>
-                        );
-                      })
-                    )}
-                  </div>
+
+                          <div className="grid grid-cols-2 gap-2 pt-0.5">
+                            <div>
+                              <span className="text-sleek-text-secondary block text-[10px] uppercase">통합 매수 평단가</span>
+                              <span className="text-white font-bold text-sm">₩{avgPrice.toLocaleString()}</span>
+                              <span className="text-[10px] text-amber-300 ml-1">({totalQty}주)</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-sleek-text-secondary block text-[10px] uppercase">목표 익절 매도가</span>
+                              <span className="text-rose-400 font-black text-sm">₩{targetSellPrice.toLocaleString()}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-between items-center pt-1.5 border-t border-white/10 text-[11px]">
+                            <span className="text-sleek-text-secondary">현재가 대비 수익률</span>
+                            <span className={cn("font-bold text-sm", avgProfitPct >= 0 ? "text-rose-400" : "text-sky-400")}>
+                              {avgProfitPct >= 0 ? "+" : ""}{avgProfitPct.toFixed(2)}%
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })()
+                  ) : (
+                    /* 통합평단가 익절 옵션 OFF: 각 슬롯별 매수/매도 한 쌍 개별 표기 */
+                    <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1 scrollbar-thin">
+                      {gapInventory.length === 0 ? (
+                        <div className="text-xs text-sleek-text-secondary opacity-40 italic py-3 text-center bg-white/5 rounded-2xl border border-white/5">
+                          개별 슬롯 매수 체결 내역 없음
+                        </div>
+                      ) : (
+                        gapInventory.map((slot, idx) => {
+                          const buyPrice = typeof slot === 'number' ? slot : (slot.price || 0);
+                          const buyQty = typeof slot === 'number' ? tradeQuantity : (slot.quantity || 1);
+                          const profitPct = buyPrice > 0 ? ((selectedStock.price - buyPrice) / buyPrice) * 100 : 0;
+                          const targetSellPrice = Math.round(buyPrice * (1 + scalpingTargetProfit / 100));
+
+                          return (
+                            <div key={idx} className="bg-white/5 rounded-2xl p-2.5 border border-white/10 space-y-1.5 text-xs font-mono">
+                              <div className="flex justify-between items-center">
+                                <div className="flex items-center gap-1.5">
+                                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
+                                  <span className="text-white font-bold">슬롯 #{idx + 1}</span>
+                                  <span className="text-[10px] text-sleek-text-secondary">({buyQty}주)</span>
+                                </div>
+                                <span className={cn("font-bold", profitPct >= 0 ? "text-rose-400" : "text-sky-400")}>
+                                  {profitPct >= 0 ? "+" : ""}{profitPct.toFixed(2)}%
+                                </span>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-1 text-[11px] bg-black/30 p-1.5 rounded-xl border border-white/5">
+                                <div>
+                                  <span className="text-sleek-text-secondary text-[10px] block">매수가</span>
+                                  <span className="text-emerald-400 font-bold">₩{buyPrice.toLocaleString()}</span>
+                                </div>
+                                <div className="text-right">
+                                  <span className="text-sleek-text-secondary text-[10px] block">목표 매도가 (+{scalpingTargetProfit}%)</span>
+                                  <span className="text-rose-400 font-bold">₩{targetSellPrice.toLocaleString()}</span>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Pending Buy Orders */}
