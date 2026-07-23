@@ -1560,15 +1560,7 @@ export default function App() {
       // Domestic Stock Sync (TTTC8434R / VTTC8434R)
       try {
         const domesticBalanceData = await kisService.getDomesticBalance();
-        if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output2?.[0]) {
-          foundAnyData = true;
-          const out2 = domesticBalanceData.output2[0];
-          const domesticCash = Number(out2.d2_dncl_amt || out2.dncl_amt || out2.prsm_dncl_amt || 0);
-          const domesticPurchase = Number(out2.pchs_amt_smtl_amt || 0);
-          
-          totalConvertedBalance += domesticCash;
-          totalConvertedPrincipal += (domesticCash + domesticPurchase);
-        }
+        let totalStockPurchaseCost = 0;
 
         if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output1 && Array.isArray(domesticBalanceData.output1)) {
           foundAnyData = true;
@@ -1583,6 +1575,8 @@ export default function App() {
                 if (avgP > 0) newAvgPrices[item.pdno] = avgP;
                 if (name) newStockNames[item.pdno] = name;
                 
+                totalStockPurchaseCost += (qty * (avgP > 0 ? avgP : 0));
+
                 try {
                   const sellableData = await kisService.getDomesticSellableQuantity(item.pdno);
                   if (sellableData?.output?.nrc_psbl_qty) {
@@ -1595,6 +1589,27 @@ export default function App() {
             }
           }
           setSellableHoldings(prev => ({ ...prev, ...newSellable }));
+        }
+
+        if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output2?.[0]) {
+          foundAnyData = true;
+          const out2 = domesticBalanceData.output2[0];
+          const rawDeposit = Number(out2.d2_dncl_amt || out2.dncl_amt || out2.prsm_dncl_amt || 0);
+          const domesticPurchase = Number(out2.pchs_amt_smtl_amt || 0);
+          const ordPsblCash = Number(out2.ord_psbl_cash || out2.ord_psbl_amt || 0);
+
+          const actualPurchaseCost = Math.max(domesticPurchase, totalStockPurchaseCost);
+
+          let domesticCash = 0;
+          if (ordPsblCash > 0 && ordPsblCash < rawDeposit) {
+            domesticCash = ordPsblCash;
+          } else if (rawDeposit > 0) {
+            // Subtract total stock purchase amount from total deposit to get true available cash (주식을 사고 남은 가용 자산)
+            domesticCash = Math.max(0, rawDeposit - actualPurchaseCost);
+          }
+          
+          totalConvertedBalance += domesticCash;
+          totalConvertedPrincipal += (rawDeposit > 0 ? rawDeposit : (domesticCash + actualPurchaseCost));
         }
       } catch (err: any) {
         console.warn("Domestic Sync Skip:", err);
@@ -1623,7 +1638,10 @@ export default function App() {
               // Some users have unified accounts where this covers both.
               // For now, let's trust it if it's significantly larger or non-zero
               if (tot_asst_amt > totalConvertedPrincipal) {
-                totalConvertedBalance = dncl_amt;
+                const totalInvested = Object.entries(newHoldings).reduce((acc, [sym, qty]) => {
+                  return acc + (qty * (newAvgPrices[sym] || 0));
+                }, 0);
+                totalConvertedBalance = Math.max(0, dncl_amt - totalInvested);
                 totalConvertedPrincipal = tot_asst_amt;
               }
             }
