@@ -1495,26 +1495,30 @@ export default function App() {
         ordDvsn
       );
 
-      let qty = 0;
       if (res && res.rt_cd === '0' && res.output) {
-        const nrcy = parseInt(res.output.nrcy_buy_qty || res.output.nrcy_ord_psbl_qty || '0', 10);
-        const maxQty = parseInt(res.output.max_ord_qty || res.output.tot_ord_psbl_qty || res.output.max_buy_qty || '0', 10);
-        const ordPsbl = parseInt(res.output.ord_psbl_qty || res.output.psbl_qty || '0', 10);
-        
-        qty = Math.max(nrcy, maxQty, ordPsbl);
-      }
+        const nrcyStr = res.output.nrcy_buy_qty || res.output.nrcy_ord_psbl_qty;
+        const ordPsblStr = res.output.ord_psbl_qty || res.output.psbl_qty;
+        const maxQtyStr = res.output.max_ord_qty || res.output.tot_ord_psbl_qty || res.output.max_buy_qty;
 
-      // 실제 계좌의 현금(currentBalance)으로 계산하여 보강 또는 보정 (특히 KIS API 결과가 0이거나 미흡할 때)
-      if (currentBalance > 0 && tradePrice > 0) {
-        const calculatedQty = Math.floor(currentBalance / tradePrice);
-        qty = Math.max(qty, calculatedQty);
-      }
+        let qty = 0;
+        if (nrcyStr !== undefined && nrcyStr !== null && nrcyStr !== '') {
+          qty = parseInt(nrcyStr, 10);
+        } else if (ordPsblStr !== undefined && ordPsblStr !== null && ordPsblStr !== '') {
+          qty = parseInt(ordPsblStr, 10);
+        } else if (maxQtyStr !== undefined && maxQtyStr !== null && maxQtyStr !== '') {
+          qty = parseInt(maxQtyStr, 10);
+        }
 
-      if (!isNaN(qty) && qty >= 0) {
+        if (isNaN(qty) || qty < 0) qty = 0;
         setKisBuyableQty(qty);
         return;
       }
-      setKisBuyableQty(null);
+
+      if (currentBalance > 0 && selectedStock.price > 0) {
+        setKisBuyableQty(Math.max(0, Math.floor(currentBalance / selectedStock.price)));
+      } else {
+        setKisBuyableQty(0);
+      }
     } catch (err) {
       console.warn("Failed to update KIS buyable quantity:", err);
       // API 실패 시에도 실제 계좌 현금을 기준으로 계산하여 폴백
@@ -2671,33 +2675,34 @@ export default function App() {
                     setBotStatus(`[KIS API] ${stock.symbol} 매수 가능 수량 조회 중...`);
                     const psblRes = await kisService.getDomesticBuyableAmount(stock.symbol, tradePrice.toString(), kisConfig.domesticOrderType || '00');
                     if (psblRes && psblRes.rt_cd === '0' && psblRes.output) {
-                        const nrcy = parseInt(psblRes.output.nrcy_buy_qty || psblRes.output.nrcy_ord_psbl_qty || '0', 10);
-                        const maxQty = parseInt(psblRes.output.max_ord_qty || psblRes.output.tot_ord_psbl_qty || psblRes.output.max_buy_qty || '0', 10);
-                        const ordPsbl = parseInt(psblRes.output.ord_psbl_qty || psblRes.output.psbl_qty || '0', 10);
-                        
-                        let parsedQty = Math.max(nrcy, maxQty, ordPsbl);
-                        
-                        // 실제 계좌의 현금(balance)으로 계산하여 보강 또는 보정 (특히 KIS API 결과가 0이거나 미흡할 때)
-                        if (balance > 0 && tradePrice > 0) {
-                            const calculatedQty = Math.floor(balance / tradePrice);
-                            parsedQty = Math.max(parsedQty, calculatedQty);
+                        const nrcyStr = psblRes.output.nrcy_buy_qty || psblRes.output.nrcy_ord_psbl_qty;
+                        const ordPsblStr = psblRes.output.ord_psbl_qty || psblRes.output.psbl_qty;
+                        const maxQtyStr = psblRes.output.max_ord_qty || psblRes.output.tot_ord_psbl_qty || psblRes.output.max_buy_qty;
+
+                        let parsedQty = 0;
+                        if (nrcyStr !== undefined && nrcyStr !== null && nrcyStr !== '') {
+                          parsedQty = parseInt(nrcyStr, 10);
+                        } else if (ordPsblStr !== undefined && ordPsblStr !== null && ordPsblStr !== '') {
+                          parsedQty = parseInt(ordPsblStr, 10);
+                        } else if (maxQtyStr !== undefined && maxQtyStr !== null && maxQtyStr !== '') {
+                          parsedQty = parseInt(maxQtyStr, 10);
                         }
 
-                        if (!isNaN(parsedQty)) {
-                            if (parsedQty <= 0) {
-                                setBotStatus(`[매수 취소] 주문 가능 수량 부족 (0주)`);
-                                setScalperMessage("실제 주문 가능 수량 부족 (0주)으로 진입 건너뜀");
-                                addLog(stock.symbol, '매수', tradePrice, amount, `[주문취소] KIS 매수 가능 수량 부족 (0주)`);
-                                showNotification(`매수 스킵: 실제 계좌의 매수 가능 수량이 0주입니다. 실제 예수금을 확인하시거나 KIS 설정에서 '실제 주문 전송'을 끄고 가상 잔고로 테스트하세요.`, "error");
-                                return 0;
-                            }
-                            if (parsedQty < finalAmount) {
-                                setBotStatus(`[매수 진입 차단] 주문 가능 수량 부족 (요청: ${finalAmount}주 / 가능: ${parsedQty}주)`);
-                                setScalperMessage(`실제 주문 가능 수량 부족으로 진입 건너뜀 (가능: ${parsedQty}주)`);
-                                addLog(stock.symbol, '매수', tradePrice, amount, `[진입스킵] 실시간 주문 가능 금액/수량 초과 (요청: ${amount}주 / 가능: ${parsedQty}주)`);
-                                showNotification(`매수 진입 차단: 실시간 주문 가능 금액/수량을 초과하여 진입하지 않습니다. (요청: ${amount}주, 가능: ${parsedQty}주)`, "error");
-                                return 0;
-                            }
+                        if (isNaN(parsedQty) || parsedQty < 0) parsedQty = 0;
+
+                        if (parsedQty <= 0) {
+                            setBotStatus(`[매수 취소] 실제 매수 가능 수량 0주`);
+                            setScalperMessage("실제 주문 가능 수량 부족 (0주)으로 진입 건너뜀");
+                            addLog(stock.symbol, '매수', tradePrice, amount, `[주문취소] KIS 매수 가능 수량 부족 (0주)`);
+                            showNotification(`매수 스킵: 실제 계좌의 매수 가능 수량이 0주입니다.`, "error");
+                            return 0;
+                        }
+                        if (parsedQty < finalAmount) {
+                            setBotStatus(`[매수 진입 차단] 주문 가능 수량 부족 (요청: ${finalAmount}주 / 가능: ${parsedQty}주)`);
+                            setScalperMessage(`실제 주문 가능 수량 부족으로 진입 건너뜀 (가능: ${parsedQty}주)`);
+                            addLog(stock.symbol, '매수', tradePrice, amount, `[진입스킵] 실시간 주문 가능 금액/수량 초과 (요청: ${amount}주 / 가능: ${parsedQty}주)`);
+                            showNotification(`매수 진입 차단: 실시간 주문 가능 금액/수량을 초과하여 진입하지 않습니다. (요청: ${amount}주, 가능: ${parsedQty}주)`, "error");
+                            return 0;
                         }
                     }
                 }
@@ -4490,7 +4495,7 @@ export default function App() {
                       const maxBuyable = kisConfig.isConnected && kisConfig.isRealOrderEnabled && kisBuyableQty !== null 
                         ? kisBuyableQty 
                         : Math.floor(balance / (selectedStock?.price || 1));
-                      const targetQty = Math.max(1, Math.floor(maxBuyable * ratio));
+                      const targetQty = maxBuyable > 0 ? Math.max(1, Math.floor(maxBuyable * ratio)) : 0;
                       return (
                         <button
                           key={ratio}
