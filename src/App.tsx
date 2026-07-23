@@ -754,10 +754,10 @@ export default function App() {
         }
       }
 
-      // Dynamic Scalper Fitness Score Calculation
-      let volScore = Math.min(30, oscillation * 8);
-      let changeScore = Math.min(25, Math.abs(stock.changePercent) * 4);
-      
+      // Dynamic Scalper Fitness Score Calculation focused on Rising Momentum (상승 조짐)
+      const isRising = stock.changePercent > 0;
+      const risingScore = isRising ? Math.min(40, stock.changePercent * 8 + 15) : -25;
+
       let rawVol = 100;
       if (typeof stock.volume === 'string') {
         if (stock.volume.endsWith('M')) rawVol = parseFloat(stock.volume) * 1000;
@@ -767,20 +767,21 @@ export default function App() {
         rawVol = stock.volume;
       }
       let liquidityScore = Math.min(25, Math.log10(rawVol + 10) * 6);
+      let volScore = Math.min(20, oscillation * 5);
 
       // Deterministic seed for stock stability per symbol
       const charSum = stock.symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-      const seed = (charSum % 12);
+      const seed = (charSum % 8);
 
-      const rawTotal = 42 + volScore + changeScore + liquidityScore + seed;
-      const scalpScore = Math.min(99, Math.max(82, Math.round(rawTotal)));
+      const rawTotal = 35 + risingScore + liquidityScore + volScore + seed;
+      const scalpScore = Math.min(99, Math.max(70, Math.round(rawTotal)));
 
-      // Primary reason tag for scalping engine
-      let reasonTag = "호가 진동 유망";
-      if (oscillation > 2.0) reasonTag = `⚡ 호가진동 ${oscillation.toFixed(1)}%`;
-      else if (Math.abs(stock.changePercent) > 2.0) reasonTag = `🔥 고변동 모멘텀`;
-      else if (rawVol > 500) reasonTag = `💧 체결 유동성 우수`;
-      else reasonTag = `📈 XTX 상승 수급`;
+      // Primary reason tag highlighting rising signals
+      let reasonTag = "🚀 상승 수급 포착";
+      if (stock.changePercent > 3.0) reasonTag = `🔥 당일 급등 모멘텀 (+${stock.changePercent.toFixed(1)}%)`;
+      else if (stock.changePercent > 0) reasonTag = `📈 상승 돌파 시그널 (+${stock.changePercent.toFixed(1)}%)`;
+      else if (oscillation > 2.0) reasonTag = `⚡ 호가 반등 진동 (${oscillation.toFixed(1)}%)`;
+      else reasonTag = `💧 거래량 유동성 우수`;
 
       return {
         ...stock,
@@ -788,7 +789,9 @@ export default function App() {
         oscillation,
         reasonTag
       };
-    }).sort((a, b) => b.scalpScore - a.scalpScore).slice(0, 3);
+    })
+    .sort((a, b) => b.scalpScore - a.scalpScore)
+    .slice(0, 3);
   }, [stocks, marketType]);
 
   // Real-time Exchange Rate Fetcher & Simulator
@@ -5543,57 +5546,147 @@ export default function App() {
               </div>
             )}
 
-            {/* 2. Trade Logs */}
-            <div className="bg-white/5 border border-white/5 rounded-3xl p-5 flex flex-col shrink-0 max-h-[380px] overflow-hidden">
+            {/* 2. Trade Logs / Active Slot Monitor */}
+            <div className="bg-white/5 border border-white/5 rounded-3xl p-5 flex flex-col shrink-0 max-h-[460px] overflow-hidden">
               <div className="flex items-center justify-between mb-3 shrink-0">
                 <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-                  <Activity className="w-4 h-4 text-sleek-blue" /> Trade Logs (실시간 체결 내역)
+                  <Layers className="w-4 h-4 text-sleek-blue" /> Trade Logs (실시간 슬롯 체결 현황)
                 </h3>
-                <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">최근 {Math.min(30, tradeLogs.length)}건</span>
+                <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">
+                  {enableCombinedAvgProfitExit 
+                    ? (gapInventory.length > 0 ? "통합 슬롯 (1/1)" : "통합 슬롯 (빈 슬롯)") 
+                    : `체결 슬롯 (${gapInventory.length} / ${maxSlots})`
+                  }
+                </span>
               </div>
               
-              <div className="overflow-y-auto space-y-2.5 pr-1 custom-scrollbar max-h-[310px]">
-                {tradeLogs.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center opacity-30 text-center gap-2 py-10">
-                    <Zap className="w-6 h-6 text-sleek-blue" />
-                    <p className="text-xs font-bold uppercase tracking-wider">체결 기록 없음</p>
-                  </div>
+              <div className="overflow-y-auto space-y-2.5 pr-1 custom-scrollbar max-h-[390px]">
+                {enableCombinedAvgProfitExit ? (
+                  /* Combined Average Profit Exit Mode (통합평단가 익절) */
+                  gapInventory.length === 0 ? (
+                    <div className="bg-black/20 border border-dashed border-white/10 rounded-2xl p-6 flex flex-col items-center justify-center text-center gap-2">
+                      <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-sleek-text-secondary">
+                        <Layers className="w-5 h-5 opacity-40" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-white block">[통합 슬롯] 빈 슬롯 (매수 대기 중)</span>
+                        <span className="text-[11px] text-sleek-text-secondary mt-1 block">
+                          매수가 체결되면 수량 및 통합 평단가가 자동 업데이트됩니다
+                        </span>
+                      </div>
+                    </div>
+                  ) : (() => {
+                    const totalCost = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
+                    const totalQty = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
+                    const avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
+                    const avgProfitPct = avgPrice > 0 ? ((selectedStock.price - avgPrice) / avgPrice) * 100 : 0;
+                    const targetSellPrice = Math.round(avgPrice * (1 + scalpingTargetProfit / 100));
+
+                    return (
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.98 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-gradient-to-r from-sleek-blue/20 via-indigo-950/40 to-slate-900/80 border border-sleek-blue/40 rounded-2xl p-4 space-y-3 shadow-xl"
+                      >
+                        <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse"></span>
+                            <span className="text-sm font-black text-white">{selectedStock.name}</span>
+                            <span className="text-xs font-mono text-sleek-text-secondary">({selectedStock.symbol})</span>
+                          </div>
+                          <span className="bg-sleek-blue/20 text-sleek-blue border border-sleek-blue/30 px-2 py-0.5 rounded text-[10px] font-bold">
+                            통합 슬롯 (보유 중)
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-black/40 p-2.5 rounded-xl border border-white/5">
+                          <div>
+                            <span className="text-[10px] text-sleek-text-secondary block uppercase">체결 매수 수량</span>
+                            <span className="text-base font-black text-amber-300">{totalQty}주</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-sleek-text-secondary block uppercase">통합 매수 평단가</span>
+                            <span className="text-sm font-bold text-white">₩{avgPrice.toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                          <div>
+                            <span className="text-[10px] text-sleek-text-secondary block">목표 매도가 (+{scalpingTargetProfit}%)</span>
+                            <span className="text-sm font-bold text-rose-400">₩{targetSellPrice.toLocaleString()}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-sleek-text-secondary block">평단 대비 손익률</span>
+                            <span className={cn("text-sm font-black", avgProfitPct >= 0 ? "text-rose-400" : "text-sky-400")}>
+                              {avgProfitPct >= 0 ? "+" : ""}{avgProfitPct.toFixed(2)}%
+                            </span>
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })()
                 ) : (
-                  tradeLogs.slice(0, 30).map((log, idx) => (
-                    <motion.div 
-                      key={idx}
-                      initial={{ opacity: 0, x: 20 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className="bg-black/30 border border-white/5 rounded-2xl p-3.5 space-y-2 text-xs"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div className={cn(
-                            "w-2 h-2 rounded-full",
-                            log.type === 'BUY' || log.type === '매수' ? "bg-emerald-400 shadow-[0_0_8px_#10B981]" : "bg-rose-400 shadow-[0_0_8px_#EF4444]"
-                          )} />
-                          {(() => {
-                            const found = stocks.find(s => s.symbol === log.symbol) || INITIAL_STOCKS_KR.find(s => s.symbol === log.symbol) || INITIAL_STOCKS.find(s => s.symbol === log.symbol);
-                            return <span className="text-sm font-black text-white">{found ? `${found.name} (${log.symbol})` : log.symbol}</span>;
-                          })()}
+                  /* Individual Slot Mode (개별 슬롯) */
+                  Array.from({ length: maxSlots }).map((_, slotIdx) => {
+                    const slot = gapInventory[slotIdx];
+                    if (!slot) {
+                      // Empty Slot (빈 슬롯)
+                      return (
+                        <div 
+                          key={`empty-slot-${slotIdx}`}
+                          className="bg-black/20 border border-dashed border-white/10 hover:border-white/20 rounded-2xl p-3 flex items-center justify-between text-xs transition-all"
+                        >
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-white/20"></span>
+                            <span className="font-bold text-sleek-text-secondary">슬롯 #{slotIdx + 1}</span>
+                            <span className="text-[11px] text-sleek-text-secondary opacity-60 ml-1">빈 슬롯 (매수 대기 중)</span>
+                          </div>
+                          <span className="text-[10px] text-emerald-400/70 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 font-mono">
+                            신규진입 가능
+                          </span>
                         </div>
-                        <span className="text-xs font-mono text-sleek-text-secondary">{log.time}</span>
-                      </div>
-                      <div className="flex justify-between items-end font-mono">
-                        <div className="flex flex-col">
-                          <span className="text-[11px] text-sleek-text-secondary uppercase">수량</span>
-                          <span className="text-sm font-bold text-white">{log.amount}주</span>
+                      );
+                    }
+
+                    // Active Slot (체결 및 매수 수량 반영된 슬롯)
+                    const buyPrice = typeof slot === 'number' ? slot : (slot.price || 0);
+                    const buyQty = typeof slot === 'number' ? tradeQuantity : (slot.quantity || 1);
+                    const profitPct = buyPrice > 0 ? ((selectedStock.price - buyPrice) / buyPrice) * 100 : 0;
+                    const targetSellPrice = Math.round(buyPrice * (1 + scalpingTargetProfit / 100));
+
+                    return (
+                      <motion.div 
+                        key={`active-slot-${slotIdx}`}
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        className="bg-black/40 border border-emerald-500/30 rounded-2xl p-3 space-y-2 text-xs font-mono shadow-md"
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse"></span>
+                            <span className="font-extrabold text-white">슬롯 #{slotIdx + 1}</span>
+                            <span className="text-[11px] text-amber-300 font-bold bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
+                              {buyQty}주 보유
+                            </span>
+                          </div>
+                          <span className={cn("font-extrabold text-xs", profitPct >= 0 ? "text-rose-400" : "text-sky-400")}>
+                            {profitPct >= 0 ? "+" : ""}{profitPct.toFixed(2)}%
+                          </span>
                         </div>
-                        <div className="text-right flex flex-col">
-                          <span className="text-[11px] text-sleek-text-secondary uppercase">체결가</span>
-                          <span className="text-sm font-black text-white italic tracking-tighter">₩{log.price.toLocaleString()}</span>
+
+                        <div className="grid grid-cols-2 gap-2 bg-white/5 p-2 rounded-xl border border-white/5 text-[11px]">
+                          <div>
+                            <span className="text-sleek-text-secondary text-[10px] block">체결 매수가</span>
+                            <span className="text-emerald-400 font-bold">₩{buyPrice.toLocaleString()}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-sleek-text-secondary text-[10px] block">목표 매도가 (+{scalpingTargetProfit}%)</span>
+                            <span className="text-rose-400 font-bold">₩{targetSellPrice.toLocaleString()}</span>
+                          </div>
                         </div>
-                      </div>
-                      <div className="pt-2 border-t border-white/5 text-xs text-sleek-text-secondary leading-snug italic line-clamp-2">
-                        {log.reason}
-                      </div>
-                    </motion.div>
-                  ))
+                      </motion.div>
+                    );
+                  })
                 )}
               </div>
             </div>
