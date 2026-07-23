@@ -512,15 +512,8 @@ export default function App() {
   const [directLoginError, setDirectLoginError] = useState<string | null>(null);
   const [isDirectLoggingIn, setIsDirectLoggingIn] = useState(false);
 
-  // Notification State & System Engine Messages Log
-  const [notifications, setNotifications] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string; timestamp: string }[]>([
-    {
-      id: 'init-0',
-      type: 'info',
-      message: '[스캘퍼 종목 지정] 네이버(035420) 종목이 스캘핑 엔진에 선택되었습니다.',
-      timestamp: new Date().toLocaleTimeString('ko-KR', { hour12: false })
-    }
-  ]);
+  // Notification State
+  const [notifications, setNotifications] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string }[]>([]);
 
   const playScalpingSound = (type: 'BUY' | 'SELL') => {
     if (!scalpingSoundEnabled) return;
@@ -571,8 +564,10 @@ export default function App() {
 
   const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Math.random().toString(36).substring(2, 9);
-    const timestamp = new Date().toLocaleTimeString('ko-KR', { hour12: false });
-    setNotifications(prev => [{ id, type, message, timestamp }, ...prev.slice(0, 29)]);
+    setNotifications(prev => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 5000);
   };
 
   // Confirmation Modal State
@@ -3496,34 +3491,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen flex flex-col bg-sleek-bg text-sleek-text-primary selection:bg-sleek-blue/30 overflow-hidden relative">
-      <AnimatePresence>
-        {notifications.map((notification) => (
-          <motion.div
-            key={notification.id}
-            initial={{ opacity: 0, x: 50, scale: 0.9 }}
-            animate={{ opacity: 1, x: 0, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-            className={cn(
-              "fixed bottom-6 right-6 z-[200] flex items-center gap-3 px-4 py-3 rounded-2xl border shadow-2xl backdrop-blur-md max-w-sm",
-              notification.type === 'success' ? "bg-sleek-green/10 border-sleek-green/30 text-sleek-green" :
-              notification.type === 'error' ? "bg-sleek-red/10 border-sleek-red/30 text-sleek-red" :
-              "bg-sleek-blue/10 border-sleek-blue/30 text-sleek-blue"
-            )}
-          >
-            {notification.type === 'success' ? <Check className="w-4 h-4 flex-shrink-0" /> :
-             notification.type === 'error' ? <Info className="w-4 h-4 flex-shrink-0" /> :
-             <Bell className="w-4 h-4 flex-shrink-0" />}
-            <span className="text-[12px] font-bold">{notification.message}</span>
-            <button 
-              onClick={() => setNotifications(prev => prev.filter(n => n.id !== notification.id))}
-              className="ml-2 opacity-50 hover:opacity-100"
-            >
-              <X className="w-3 h-3" />
-            </button>
-          </motion.div>
-        ))}
-      </AnimatePresence>
-
       <AnimatePresence mode="wait">
         {showKisModal && (
           <motion.div 
@@ -5106,10 +5073,10 @@ export default function App() {
                               title="클릭 시 총 자산 세부 산출 내역 팝업 보기"
                             >
                               <div className="flex items-center justify-between">
-                                <span className="text-[11px] text-sleek-text-secondary uppercase font-bold flex items-center gap-1 group-hover:text-sleek-blue transition-colors">
+                                <span className="text-[11px] text-sleek-text-secondary uppercase font-bold flex items-center gap-1 group-hover:text-sleek-blue transition-colors whitespace-nowrap">
                                   총 자산 <Calculator className="w-3 h-3 text-sleek-blue" />
                                 </span>
-                                <span className="text-[9px] font-bold text-sleek-blue bg-sleek-blue/10 px-1.5 py-0.5 rounded border border-sleek-blue/20">
+                                <span className="text-[9px] font-bold text-sleek-blue bg-sleek-blue/10 px-1.5 py-0.5 rounded border border-sleek-blue/20 shrink-0">
                                   산출내역
                                 </span>
                               </div>
@@ -5502,67 +5469,7 @@ export default function App() {
               </div>
             )}
 
-            {/* 2. System Notifications & Engine Messages (Trade Logs 가로 크기와 동일) */}
-            <div className="bg-white/5 border border-white/5 rounded-3xl p-4 flex flex-col shrink-0 max-h-[220px] overflow-hidden">
-              <div className="flex items-center justify-between mb-2 shrink-0">
-                <h3 className="text-xs font-black text-white uppercase tracking-widest flex items-center gap-2">
-                  <Bell className="w-3.5 h-3.5 text-amber-400 animate-pulse" /> 엔진 알림 & 시스템 메시지
-                </h3>
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-mono text-sleek-text-secondary bg-white/5 px-2 py-0.5 rounded-full border border-white/5">
-                    {notifications.length}건
-                  </span>
-                  {notifications.length > 0 && (
-                    <button 
-                      onClick={() => setNotifications([])}
-                      className="text-[10px] text-sleek-text-secondary hover:text-white bg-white/5 px-2 py-0.5 rounded-lg border border-white/5 transition-all"
-                    >
-                      지우기
-                    </button>
-                  )}
-                </div>
-              </div>
-              
-              <div className="overflow-y-auto space-y-2 pr-1 custom-scrollbar max-h-[160px]">
-                {notifications.length === 0 ? (
-                  <div className="flex flex-col items-center justify-center opacity-40 text-center gap-1 py-5">
-                    <Bell className="w-4 h-4 text-sleek-text-secondary" />
-                    <p className="text-[11px] font-bold">수신된 알림 메시지 없음</p>
-                  </div>
-                ) : (
-                  notifications.map((n) => (
-                    <motion.div 
-                      key={n.id}
-                      initial={{ opacity: 0, x: 15 }}
-                      animate={{ opacity: 1, x: 0 }}
-                      className={cn(
-                        "p-2.5 rounded-2xl border text-xs space-y-1 relative leading-snug",
-                        n.type === 'error' ? "bg-rose-500/15 border-rose-500/30 text-rose-200" :
-                        n.type === 'success' ? "bg-emerald-500/15 border-emerald-500/30 text-emerald-200" :
-                        "bg-sleek-blue/15 border-sleek-blue/30 text-slate-100"
-                      )}
-                    >
-                      <div className="flex items-center justify-between text-[10px] font-bold opacity-80">
-                        <span className={cn(
-                          "px-1.5 py-0.2 rounded font-sans uppercase font-bold",
-                          n.type === 'error' ? "bg-rose-500/20 text-rose-400" :
-                          n.type === 'success' ? "bg-emerald-500/20 text-emerald-400" :
-                          "bg-sleek-blue/20 text-sleek-blue"
-                        )}>
-                          {n.type === 'error' ? '오류' : n.type === 'success' ? '성공' : '스캘퍼 알림'}
-                        </span>
-                        <span className="text-sleek-text-secondary font-mono">{n.timestamp}</span>
-                      </div>
-                      <p className="font-sans font-bold text-xs text-white leading-relaxed break-words pt-0.5">
-                        {n.message}
-                      </p>
-                    </motion.div>
-                  ))
-                )}
-              </div>
-            </div>
-
-            {/* 3. Trade Logs */}
+            {/* 2. Trade Logs */}
             <div className="bg-white/5 border border-white/5 rounded-3xl p-5 flex flex-col shrink-0 max-h-[380px] overflow-hidden">
               <div className="flex items-center justify-between mb-3 shrink-0">
                 <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
@@ -5924,7 +5831,7 @@ export default function App() {
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-white/10">
                     <div>
                       <div className="text-[11px] font-bold text-sleek-text-secondary uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                        <span>현재 총 자산 금액</span>
+                        <span>현재 총 자산 평가금액</span>
                         <Calculator className="w-3.5 h-3.5 text-sleek-blue" />
                       </div>
                       <div className="text-2xl md:text-3xl font-black text-white tracking-tight">
