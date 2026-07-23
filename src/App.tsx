@@ -603,19 +603,25 @@ export default function App() {
     return Math.min(100, Math.max(0, pct));
   }, [gapBuyPrice, gapSellPrice, selectedStock?.price]);
   const totalValue = useMemo(() => {
-    // We treat 'balance' as the base currency (KRW)
-    const stockValue = stocks.reduce((acc, stock) => {
-      const qty = holdings[stock.symbol] || 0;
-      if (qty === 0) return acc;
+    // Total Asset Valuation = Cash Balance + Current Market Value of Stock Holdings
+    let stockValue = 0;
+    Object.entries(holdings).forEach(([sym, rawQty]) => {
+      const qty = Number(rawQty);
+      if (qty <= 0) return;
 
-      const isUS = /^[A-Z]/.test(stock.symbol);
-      const priceInKRW = isUS ? stock.price * exchangeRate : stock.price;
-      
-      return acc + qty * priceInKRW;
-    }, 0);
+      const st = stocks.find(s => s.symbol === sym) ||
+                 INITIAL_STOCKS_KR.find(s => s.symbol === sym) ||
+                 INITIAL_STOCKS.find(s => s.symbol === sym);
+
+      const currentPrice = st ? st.price : (avgPrices[sym] || 0);
+      const isUS = /^[A-Z]/.test(sym);
+      const priceInKRW = isUS ? currentPrice * exchangeRate : currentPrice;
+
+      stockValue += qty * priceInKRW;
+    });
 
     return Math.round(balance + stockValue);
-  }, [balance, holdings, stocks, exchangeRate]);
+  }, [balance, holdings, stocks, avgPrices, exchangeRate]);
 
   const convertedValue = displayCurrency === 'USD' ? Math.round(totalValue / exchangeRate) : Math.round(totalValue);
   const convertedBalance = displayCurrency === 'USD' ? Math.round(balance / exchangeRate) : Math.round(balance);
@@ -982,6 +988,18 @@ export default function App() {
       if (licenseUnsubscribe) licenseUnsubscribe();
     }
   }, []);
+
+  // Auto-Sync KIS Account Status once initial stocks, charts, and prices load
+  const hasAutoSyncedRef = React.useRef(false);
+  useEffect(() => {
+    if (kisConfig.isConnected && !hasAutoSyncedRef.current && stocks.length > 0) {
+      hasAutoSyncedRef.current = true;
+      const timer = setTimeout(() => {
+        handleSyncKIS();
+      }, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [kisConfig.isConnected, stocks.length]);
 
   // Toggle Market Type
   useEffect(() => {
@@ -1653,7 +1671,7 @@ export default function App() {
               if (tot_asst_amt > totalConvertedPrincipal) {
                 totalConvertedPrincipal = Math.round(tot_asst_amt);
               }
-              if (dncl_amt > 0) {
+              if (dncl_amt > 0 && totalConvertedBalance === 0) {
                 totalConvertedBalance = Math.round(dncl_amt);
               }
             }
@@ -2757,6 +2775,14 @@ export default function App() {
                     setGapTradeCount(prev => prev + 1);
                     showNotification(`${selectedStock.name} 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${executedQty}주) 매수 완료`, "success");
                     playScalpingSound('BUY');
+
+                    // Automatically submit limit sell order for this slot at target profit %
+                    if (scalpingTargetProfit > 0) {
+                      const targetSellPrice = Math.round(targetBuyPrice * (1 + scalpingTargetProfit / 100));
+                      setTimeout(() => {
+                        executeTrade('SELL', selectedStock, executedQty, `[슬롯#${currentStep} 목표익절 매도] 매수가 ₩${targetBuyPrice.toLocaleString()} 대비 +${scalpingTargetProfit}%`, targetSellPrice);
+                      }, 100);
+                    }
                   }
                 } finally {
                   buyingLockPricesRef.current = buyingLockPricesRef.current.filter(p => !(p.symbol === selectedStock.symbol && Math.abs(Math.round(p.price) - targetBuyPrice) < 0.1));
@@ -4989,16 +5015,16 @@ export default function App() {
                                   const vol = getLevelVolume(lvlPrice);
                                   const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
                                   return (
-                                    <div key={`ask-${lvlPrice}`} className="grid grid-cols-3 items-center py-0.5 px-2 rounded hover:bg-white/5 transition-all relative overflow-hidden group">
+                                    <div key={`ask-${lvlPrice}`} className="grid grid-cols-[3fr_4fr_3fr] items-center py-0.5 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group">
                                       <div className="absolute right-0 top-0 bottom-0 bg-sky-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
-                                      <span className="text-xs text-sky-400 font-bold font-sans z-10">매도 {5 - idx}단계</span>
+                                      <span className="text-[10px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis">매도 {5 - idx}단계</span>
                                       <span className={cn(
-                                        "text-right font-bold z-10 font-mono text-xs",
+                                        "text-right font-bold z-10 font-mono text-[11px] whitespace-nowrap",
                                         isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-300"
                                       )}>
                                         ₩{lvlPrice.toLocaleString()}
                                       </span>
-                                      <span className="text-right text-sky-200/50 font-mono text-[11px] z-10">{vol.toLocaleString()}주</span>
+                                      <span className="text-right text-sky-200/50 font-mono text-[10px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
                                     </div>
                                   );
                                 })}
@@ -5019,16 +5045,16 @@ export default function App() {
                                   const vol = getLevelVolume(lvlPrice);
                                   const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
                                   return (
-                                    <div key={`bid-${lvlPrice}`} className="grid grid-cols-3 items-center py-0.5 px-2 rounded hover:bg-white/5 transition-all relative overflow-hidden group">
+                                    <div key={`bid-${lvlPrice}`} className="grid grid-cols-[3fr_4fr_3fr] items-center py-0.5 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group">
                                       <div className="absolute right-0 top-0 bottom-0 bg-rose-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
-                                      <span className="text-xs text-rose-400 font-bold font-sans z-10">매수 {idx + 1}단계</span>
+                                      <span className="text-[10px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis">매수 {idx + 1}단계</span>
                                       <span className={cn(
-                                        "text-right font-bold z-10 font-mono text-xs",
+                                        "text-right font-bold z-10 font-mono text-[11px] whitespace-nowrap",
                                         isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-300"
                                       )}>
                                         ₩{lvlPrice.toLocaleString()}
                                       </span>
-                                      <span className="text-right text-rose-200/50 font-mono text-[11px] z-10">{vol.toLocaleString()}주</span>
+                                      <span className="text-right text-rose-200/50 font-mono text-[10px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
                                     </div>
                                   );
                                 })}
