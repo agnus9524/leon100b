@@ -446,7 +446,7 @@ export default function App() {
   const [gapTradingProfit, setGapTradingProfit] = useState<number>(0);
   const [gapTradeCount, setGapTradeCount] = useState<number>(0);
   const [lastTradeType, setLastTradeType] = useState<'BUY' | 'SELL' | null>(null);
-  const [gapInventory, setGapInventory] = useState<number[]>([]);
+  const [gapInventory, setGapInventory] = useState<{price: number, quantity: number}[]>([]);
   const [pendingBuyOrders, setPendingBuyOrders] = useState<PendingBuyOrder[]>([]);
   const pendingBuyOrdersRef = React.useRef<PendingBuyOrder[]>([]);
   useEffect(() => {
@@ -457,7 +457,7 @@ export default function App() {
   const [immediateEntry, setImmediateEntry] = useState<boolean>(true);
   const [lowestBidOnlyMode, setLowestBidOnlyMode] = useState<boolean>(true); // 하단 호가 진입 모드 (기본 true)
   const [scalperMessage, setScalperMessage] = useState<string>("대기 중...");
-  const gapInventoryRef = React.useRef<number[]>([]);
+  const gapInventoryRef = React.useRef<{price: number, quantity: number}[]>([]);
   useEffect(() => {
     gapInventoryRef.current = gapInventory;
   }, [gapInventory]);
@@ -635,7 +635,9 @@ export default function App() {
 
       let avgP = avgPrices[sym] || 0;
       if (avgP <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
-        avgP = Math.round(gapInventory.reduce((a, b) => a + b, 0) / gapInventory.length);
+        const totalCost = gapInventory.reduce((acc, slot) => acc + (slot.price * slot.quantity), 0);
+        const totalQty = gapInventory.reduce((acc, slot) => acc + slot.quantity, 0);
+        avgP = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
       }
       if (avgP <= 0) avgP = st.price || 0;
       const avgPriceKRW = isUS ? avgP * exchangeRate : avgP;
@@ -1677,58 +1679,65 @@ export default function App() {
         saveUserHoldings(currentUser.uid, newHoldings);
       }
 
-      // Self-Healing Slot Matching: Ensure gapInventory slots match the actual holdings on KIS
+      // Self-Healing Slot Matching: Ensure gapInventory total quantity matches the actual holdings on KIS
       if (selectedStock && isGapBotActive) {
         const actualQty = newHoldings[selectedStock.symbol] || 0;
-        const currentInvSize = gapInventoryRef.current.length;
+        const totalSlotQty = gapInventoryRef.current.reduce((acc, slot) => acc + (slot.quantity || 0), 0);
         
-        if (actualQty !== currentInvSize) {
-          console.log(`[Slot Sync] Desync detected. KIS actual holdings: ${actualQty}, local slots: ${currentInvSize}`);
+        if (Math.abs(actualQty - totalSlotQty) > 0.0001) {
+          console.log(`[Slot Sync] Desync detected. KIS actual holdings: ${actualQty}, local slots total: ${totalSlotQty}`);
           
-          if (actualQty < currentInvSize) {
+          if (actualQty < totalSlotQty) {
             // Trim the slots to match actual holdings
-            const trimmedInv = gapInventoryRef.current.slice(0, Math.floor(actualQty));
-            setGapInventory(trimmedInv);
-            console.log(`[Slot Sync] Trimmed slots to:`, trimmedInv);
+            let remaining = actualQty;
+            const newInv: {price: number, quantity: number}[] = [];
+            for (const slot of gapInventoryRef.current) {
+              if (remaining <= 0) break;
+              const take = Math.min(slot.quantity, remaining);
+              newInv.push({ ...slot, quantity: take });
+              remaining -= take;
+            }
+            setGapInventory(newInv);
+            console.log(`[Slot Sync] Trimmed slots to match ${actualQty} qty`);
           } else {
             // Expand slots by fetching today's executions
             try {
               const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
               const execs = await kisService.getDomesticOrderExecutions(todayStr, todayStr, '02', '01');
               
-              const filledPrices: number[] = [];
+              const filledSlots: {price: number, quantity: number}[] = [];
               if (execs && execs.rt_cd === '0' && execs.output1 && Array.isArray(execs.output1)) {
                 const symbolExecs = execs.output1.filter((item: any) => item.pdno === selectedStock.symbol);
                 symbolExecs.forEach((item: any) => {
                   const qty = Number(item.tot_ccld_qty || 0);
                   const price = Number(item.avg_prvs || item.ord_unpr || 0);
                   if (qty > 0 && price > 0) {
-                    for (let i = 0; i < qty; i++) {
-                      filledPrices.push(price);
-                    }
+                    filledSlots.push({ price, quantity: qty });
                   }
                 });
               }
-              
-              filledPrices.sort((a, b) => b - a);
-              const neededCount = Math.floor(actualQty - currentInvSize);
-              const newSlots = [...gapInventoryRef.current];
-              
-              for (let i = 0; i < neededCount; i++) {
-                const fillPrice = filledPrices[i] || selectedStock.price;
-                newSlots.push(fillPrice);
+
+              if (filledSlots.length > 0) {
+                // Take latest slots to match the missing quantity
+                let needed = actualQty - totalSlotQty;
+                const recoverySlots: {price: number, quantity: number}[] = [];
+                for (const fs of filledSlots.reverse()) {
+                  if (needed <= 0) break;
+                  const add = Math.min(fs.quantity, needed);
+                  recoverySlots.push({ ...fs, quantity: add });
+                  needed -= add;
+                }
+                setGapInventory(prev => [...prev, ...recoverySlots]);
+                console.log(`[Slot Sync] Recovered missing slots from execution history`);
+              } else if (actualQty > totalSlotQty) {
+                // Fallback: Add one slot with average price
+                const missing = actualQty - totalSlotQty;
+                const avgP = avgPrices[selectedStock.symbol] || selectedStock.price;
+                setGapInventory(prev => [...prev, { price: avgP, quantity: missing }]);
+                console.log(`[Slot Sync] Added fallback recovery slot for ${missing} qty`);
               }
-              
-              setGapInventory(newSlots);
-              console.log(`[Slot Sync] Expanded slots to:`, newSlots);
-            } catch (e) {
-              console.warn(`[Slot Sync] Failed to fetch filled prices, fallback to current price:`, e);
-              const neededCount = Math.floor(actualQty - currentInvSize);
-              const newSlots = [...gapInventoryRef.current];
-              for (let i = 0; i < neededCount; i++) {
-                newSlots.push(selectedStock.price);
-              }
-              setGapInventory(newSlots);
+            } catch (err) {
+              console.error("[Slot Sync] Error during expansion:", err);
             }
           }
         }
@@ -2486,13 +2495,14 @@ export default function App() {
           const meetsBuyCriteria = (isOverSold || isNearLowerBand) && (currentPrice >= sma5);
           
           const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
-          const targetBuyPrice = lowestBidOnlyMode ? (currentPrice - 5 * tickSize) : currentPrice;
+          const rawTargetBuyPrice = lowestBidOnlyMode ? (currentPrice - 5 * tickSize) : currentPrice;
+          const targetBuyPrice = Math.round(rawTargetBuyPrice / tickSize) * tickSize;
 
           const currentInventory = gapInventoryRef.current;
 
           // Check if an active slot or pending order already exists at this EXACT same price level (1-tick threshold)
-          const isSamePriceEntry = currentInventory.some(buyPrice => Math.abs(buyPrice - targetBuyPrice) < tickSize * 0.9) ||
-            pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.orderPrice - targetBuyPrice) < tickSize * 0.9);
+          const isSamePriceEntry = currentInventory.some(slot => Math.abs(Math.round(slot.price) - targetBuyPrice) < tickSize * 0.95) ||
+            pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(Math.round(p.orderPrice) - targetBuyPrice) < tickSize * 0.95);
 
           const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
           const cost = priceInKrw * tradeQuantity;
@@ -2500,25 +2510,44 @@ export default function App() {
           // Buy Trigger: Meets buy criteria (Oversold/LowerBand) OR immediate step entry mode when a distinct price level appears
           if (meetsBuyCriteria || (immediateEntry && currentInventory.length < maxSlots)) {
             if (isSamePriceEntry) {
-              setScalperMessage(`[동일가격 중복 차단] ₩${targetBuyPrice.toLocaleString()} 슬롯 보유 중 (다른 진입가격 발생 시 즉시 개별진입)`);
+              setScalperMessage(`[동일가격 중복 차단] ₩${targetBuyPrice.toLocaleString()} 슬롯 보유 중 (한 가격당 1회 진입 원칙)`);
             } else if (currentInventory.length >= maxSlots) {
               setScalperMessage(`[슬롯 가득 참] 전체 ${maxSlots}개 슬롯 보유 중 (매도 대기)`);
-            } else if (balance < cost) {
-              setScalperMessage(`[매수 차단] 예수금 부족 (필요: ₩${Math.round(cost).toLocaleString()} / 가능: ₩${Math.round(balance).toLocaleString()})`);
             } else {
               const currentStep = currentInventory.length + 1;
-              setScalperMessage(`[슬롯#${currentStep} 진입] ₩${targetBuyPrice.toLocaleString()} (${tradeQuantity}주)...`);
-              const executedQty = await executeTrade('BUY', selectedStock, tradeQuantity, `Scalper Slot #${currentStep}: ₩${targetBuyPrice.toLocaleString()} 1회 진입`, targetBuyPrice);
-              
-              if (executedQty > 0) {
-                setScalperMessage(`[매수 완료] 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${executedQty}주)`);
-                setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} ${tradeQuantity}주 진입 완료`);
-                setGapInventory(prev => [...prev, targetBuyPrice]);
-                setHighWaterMark(prev => ({ ...prev, [targetBuyPrice]: targetBuyPrice }));
-                setLastTradeType('BUY');
-                setGapTradeCount(prev => prev + 1);
-                showNotification(`${selectedStock.name} 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${tradeQuantity}주) 독립 매수 완료`, "success");
-                playScalpingSound('BUY');
+              // Martingale/Scaling Logic: Increase quantity for deeper slots to lower average price faster
+              // Progression: Step 1: 1x, Step 2: 2x, Step 3: 3x ... (or customized scaling)
+              const scaledQuantity = tradeQuantity * currentStep; 
+              const scaledCost = priceInKrw * scaledQuantity;
+
+              if (balance < scaledCost) {
+                setScalperMessage(`[매수 차단] 예수금 부족 (단계: ${currentStep}, 필요: ₩${Math.round(scaledCost).toLocaleString()})`);
+              } else {
+                setScalperMessage(`[슬롯#${currentStep} 가중진입] ₩${targetBuyPrice.toLocaleString()} (${scaledQuantity}주)...`);
+                
+                // Synchronously lock this price in pendingBuyOrdersRef to prevent concurrent tick duplicate entry
+                const newPendingOrder = { symbol: selectedStock.symbol, orderPrice: targetBuyPrice, timestamp: Date.now() };
+                pendingBuyOrdersRef.current = [...pendingBuyOrdersRef.current, newPendingOrder];
+                setPendingBuyOrders(prev => [...prev, newPendingOrder]);
+
+                try {
+                  const executedQty = await executeTrade('BUY', selectedStock, scaledQuantity, `Scalper Slot #${currentStep} (Scaled): ₩${targetBuyPrice.toLocaleString()} 진입`, targetBuyPrice);
+                  
+                  if (executedQty > 0) {
+                    setScalperMessage(`[매수 완료] 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${executedQty}주)`);
+                    setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} ${executedQty}주 가중 진입 완료`);
+                    setGapInventory(prev => [...prev, { price: targetBuyPrice, quantity: executedQty }]);
+                    setHighWaterMark(prev => ({ ...prev, [targetBuyPrice]: targetBuyPrice }));
+                    setLastTradeType('BUY');
+                    setGapTradeCount(prev => prev + 1);
+                    showNotification(`${selectedStock.name} 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${executedQty}주) 단일 가격 매수 완료`, "success");
+                    playScalpingSound('BUY');
+                  }
+                } finally {
+                  // Release from pending list; by now setGapInventory has updated gapInventoryRef
+                  pendingBuyOrdersRef.current = pendingBuyOrdersRef.current.filter(p => !(p.symbol === selectedStock.symbol && Math.abs(Math.round(p.orderPrice) - targetBuyPrice) < 0.1));
+                  setPendingBuyOrders(prev => prev.filter(p => !(p.symbol === selectedStock.symbol && Math.abs(Math.round(p.orderPrice) - targetBuyPrice) < 0.1)));
+                }
               }
             }
           } else {
@@ -2531,7 +2560,10 @@ export default function App() {
           // B. PROFIT MAX SELL Condition: Scan inventory and process each distinct slot independently
           const currentInventory2 = gapInventoryRef.current;
           if (currentInventory2.length > 0) {
-            for (const buyPrice of currentInventory2) {
+            for (const slot of currentInventory2) {
+              const buyPrice = slot.price;
+              const buyQty = slot.quantity;
+
               // Update High Water Mark for Trailing Stop Loss per slot
               if (currentPrice > (highWaterMark[buyPrice] || buyPrice)) {
                 setHighWaterMark(prev => ({ ...prev, [buyPrice]: currentPrice }));
@@ -2551,8 +2583,8 @@ export default function App() {
               const isStopLoss = profitRatio <= scalpingStopLoss / 100;
 
               if (isTrailingStop || isProfitTarget || isStopLoss) {
-                const qty = holdings[selectedStock.symbol] || 0;
-                const sellQty = Math.min(qty, tradeQuantity) || tradeQuantity;
+                const heldQty = holdings[selectedStock.symbol] || 0;
+                const sellQty = Math.min(heldQty, buyQty) || buyQty;
 
                 if (sellQty > 0 || kisConfig.isConnected) {
                   let sellReason = "";
@@ -2561,17 +2593,17 @@ export default function App() {
                   else sellReason = "리스크 관리 손절";
 
                   setScalperMessage(`[슬롯 개별 매도] ₩${buyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} (${sellReason})`);
-                  await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ₩${buyPrice.toLocaleString()}): ${sellReason}`, currentPrice);
+                  await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ₩${buyPrice.toLocaleString()}, 수량: ${sellQty}): ${sellReason}`, currentPrice);
                   
-                  // Remove this exact slot buyPrice from gapInventory
+                  // Remove this exact slot from gapInventory
                   setGapInventory(prev => {
-                    const idx = prev.indexOf(buyPrice);
+                    const idx = prev.findIndex(s => s.price === buyPrice && s.quantity === buyQty);
                     if (idx > -1) {
                       const copy = [...prev];
                       copy.splice(idx, 1);
                       return copy;
                     }
-                    return prev.filter(p => p !== buyPrice);
+                    return prev.filter(s => s.price !== buyPrice);
                   });
                   setHighWaterMark(prev => {
                     const next = { ...prev };
@@ -2583,11 +2615,11 @@ export default function App() {
                   
                   if (profitRatio > 0) {
                     setScalpingWins(prev => prev + 1);
-                    showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}) 개별 슬롯 매도 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
+                    showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}, ${sellQty}주) 개별 슬롯 매도 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
                     playScalpingSound('SELL');
                   } else {
                     setScalpingLosses(prev => prev + 1);
-                    showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}) 개별 슬롯 매도 완료 (${(profitRatio * 100).toFixed(2)}%)`, "error");
+                    showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}, ${sellQty}주) 개별 슬롯 매도 완료 (${(profitRatio * 100).toFixed(2)}%)`, "error");
                   }
 
                   const profit = (currentPrice - buyPrice) * sellQty * (marketType === 'US' ? exchangeRate : 1);
@@ -5054,14 +5086,21 @@ export default function App() {
                         현재 감시 구간 내 매수 체결 없음
                       </div>
                     ) : (
-                      gapInventory.map((buyPrice, idx) => {
+                      gapInventory.map((slot, idx) => {
+                        const buyPrice = slot.price;
+                        const buyQty = slot.quantity;
                         const profitPct = ((selectedStock.price - buyPrice) / buyPrice) * 100;
                         return (
                           <div key={idx} className="flex justify-between items-center bg-white/5 rounded-xl px-3 py-1.5 border border-white/5 text-[10px]">
-                            <div className="flex items-center gap-1.5 font-mono">
-                              <span className="w-1.5 h-1.5 rounded-full bg-sleek-blue"></span>
-                              <span className="text-sleek-text-secondary">슬롯#{idx+1}</span>
-                              <span className="text-white font-bold">₩{buyPrice.toLocaleString()}</span>
+                            <div className="flex flex-col gap-0.5 font-mono">
+                              <div className="flex items-center gap-1.5">
+                                <span className="w-1.5 h-1.5 rounded-full bg-sleek-blue"></span>
+                                <span className="text-sleek-text-secondary">슬롯#{idx+1}</span>
+                                <span className="text-white font-bold">₩{buyPrice.toLocaleString()}</span>
+                              </div>
+                              <div className="text-[8px] text-sleek-text-secondary pl-3">
+                                수량: <span className="text-white">{buyQty}주</span>
+                              </div>
                             </div>
                             <span className={cn(
                               "font-bold font-mono",
