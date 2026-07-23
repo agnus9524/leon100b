@@ -620,7 +620,7 @@ export default function App() {
       stockValue += qty * priceInKRW;
     });
 
-    return Math.round(balance + stockValue);
+    return Math.floor(balance + stockValue);
   }, [balance, holdings, stocks, avgPrices, exchangeRate]);
 
   const convertedValue = displayCurrency === 'USD' ? Math.round(totalValue / exchangeRate) : Math.round(totalValue);
@@ -667,10 +667,10 @@ export default function App() {
       if (avgP <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
         const totalCost = gapInventory.reduce((acc, slot) => acc + (slot.price * slot.quantity), 0);
         const totalQty = gapInventory.reduce((acc, slot) => acc + slot.quantity, 0);
-        avgP = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
+        avgP = totalQty > 0 ? Math.floor(totalCost / totalQty) : 0;
       }
       if (avgP <= 0) avgP = st.price || 0;
-      const avgPriceKRW = isUS ? avgP * exchangeRate : avgP;
+      const avgPriceKRW = isUS ? Math.floor(avgP * exchangeRate) : Math.floor(avgP);
 
       const invested = qty * avgPriceKRW;
       const evaluated = qty * currentPriceKRW;
@@ -4221,21 +4221,6 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                if (selectedStock) {
-                  const held = holdings[selectedStock.symbol] || 1;
-                  setManualSellPrice(selectedStock.price || 0);
-                  setManualSellQty(held > 0 ? held : 1);
-                }
-                setManualSellModalOpen(true);
-              }}
-              className="flex items-center gap-2 px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-bold text-[10px] md:text-xs bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500 hover:text-white transition-all shadow-sm"
-            >
-              <CircleDollarSign className="w-3.5 h-3.5" />
-              <span>수동 지정가 매도</span>
-            </button>
-
             <button 
               onClick={() => setIsGapBotActive(!isGapBotActive)}
               className={cn(
@@ -4462,13 +4447,29 @@ export default function App() {
             {/* Scalper Engine Status (Expanded 2 Columns) */}
             <div className="bg-sleek-card border border-sleek-blue/40 p-3.5 rounded-2xl shadow-lg relative overflow-hidden group sm:col-span-2 lg:col-span-2 flex flex-col justify-between">
               <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2">
-                  <Zap className="w-4 h-4 text-sleek-blue animate-pulse" />
-                  <span className="text-xs font-black text-sleek-text-secondary uppercase tracking-widest">스캘퍼 엔진 상세 상태</span>
-                  <span className="text-sm font-bold text-white font-mono ml-1">[{selectedStock?.name || '종목 미선택'} ({selectedStock?.symbol || '-'})]</span>
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Zap className="w-4 h-4 text-sleek-blue animate-pulse shrink-0" />
+                  <span className="text-xs font-black text-sleek-text-secondary uppercase tracking-widest">스캘퍼 엔진 상태</span>
+                  <span className="text-sm font-bold text-white font-mono shrink-0">[{selectedStock?.name || '종목 미선택'} ({selectedStock?.symbol || '-'})]</span>
+                  
+                  {/* 수동 지정가 매도 버튼 (종목 코드 옆 배치) */}
+                  <button
+                    onClick={() => {
+                      if (selectedStock) {
+                        const held = holdings[selectedStock.symbol] || 1;
+                        setManualSellPrice(selectedStock.price || 0);
+                        setManualSellQty(held > 0 ? held : 1);
+                      }
+                      setManualSellModalOpen(true);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500 hover:text-white transition-all shadow-sm shrink-0"
+                  >
+                    <CircleDollarSign className="w-3.5 h-3.5" />
+                    <span>수동 지정가 매도</span>
+                  </button>
                 </div>
                 <div className={cn(
-                  "px-2.5 py-0.5 rounded-full text-xs font-black italic tracking-wider flex items-center gap-1 border",
+                  "px-2.5 py-0.5 rounded-full text-xs font-black italic tracking-wider flex items-center gap-1 border shrink-0",
                   isGapBotActive 
                     ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 animate-pulse" 
                     : "bg-white/5 text-sleek-text-secondary border-white/10"
@@ -4891,12 +4892,12 @@ export default function App() {
                             return (
                               <>
                                 <div className="mb-2 flex items-center justify-between gap-2">
-                                  <div className="flex items-baseline gap-2.5">
-                                    <span className="text-3xl md:text-4xl font-black text-white italic tracking-tighter font-mono">
+                                  <div className="flex flex-col justify-center">
+                                    <span className="text-2xl md:text-3xl font-black text-white italic tracking-tighter font-mono leading-tight">
                                       ₩{selectedStock.price.toLocaleString()}
                                     </span>
                                     <span className={cn(
-                                      "text-sm md:text-base font-black italic font-mono",
+                                      "text-xs md:text-sm font-black italic font-mono leading-none mt-0.5",
                                       selectedStock.change >= 0 ? "text-rose-500" : "text-sky-400"
                                     )}>
                                       {selectedStock.change >= 0 ? '▲ +' : '▼ '}{selectedStock.changePercent.toFixed(2)}%
@@ -5102,8 +5103,8 @@ export default function App() {
 
                           <div className="grid grid-cols-2 gap-2.5 text-xs font-mono">
                             <div className="bg-white/5 p-2.5 rounded-xl border border-white/5">
-                              <span className="text-[11px] text-sleek-text-secondary uppercase block font-bold">가용 자산 (KRW)</span>
-                              <span className="text-base font-black text-white italic mt-0.5 block">₩{Math.round(balance).toLocaleString()}</span>
+                              <span className="text-[11px] text-sleek-text-secondary uppercase block font-bold">주문가능자산 (44431721-01)</span>
+                              <span className="text-base font-black text-white italic mt-0.5 block">₩{Math.floor(balance).toLocaleString()}</span>
                             </div>
                             <div 
                               onClick={() => setIsAssetAnalysisModalOpen(true)}
@@ -5178,7 +5179,7 @@ export default function App() {
                                     const totalQty = gapInventory.reduce((acc, slot) => {
                                       return acc + (typeof slot === 'number' ? 1 : (slot.quantity || 1));
                                     }, 0);
-                                    avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
+                                    avgPrice = totalQty > 0 ? Math.floor(totalCost / totalQty) : 0;
                                   }
                                   if (avgPrice <= 0) avgPrice = st.price || 0;
 
@@ -5196,7 +5197,7 @@ export default function App() {
                                           <span className="text-sleek-text-secondary text-[11px]">({sym})</span>
                                         </div>
                                         <div className="flex items-center gap-2 text-[11px]">
-                                          <span className="text-amber-300">평단가 ₩{Math.round(avgPrice).toLocaleString()}</span>
+                                          <span className="text-amber-300">평단가 ₩{Math.floor(avgPrice).toLocaleString()}</span>
                                           <span className={profitRatio >= 0 ? "text-rose-400" : "text-sky-400"}>
                                             {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(2)}%
                                           </span>
@@ -5963,29 +5964,29 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="bg-sleek-card border border-sleek-border rounded-3xl max-w-2xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl relative"
+              className="bg-sleek-card border border-sleek-border rounded-3xl max-w-3xl w-full max-h-[92vh] overflow-hidden flex flex-col shadow-2xl relative"
             >
               {/* Modal Header */}
-              <div className="p-5 md:p-6 border-b border-sleek-border flex items-center justify-between bg-sleek-bg/60">
+              <div className="p-5 md:p-6 border-b border-sleek-border flex items-center justify-between bg-sleek-bg/80">
                 <div className="flex items-center gap-3">
-                  <div className="p-2.5 bg-sleek-blue/15 border border-sleek-blue/30 rounded-2xl text-sleek-blue">
-                    <PieChart className="w-5 h-5" />
+                  <div className="p-3 bg-sleek-blue/15 border border-sleek-blue/30 rounded-2xl text-sleek-blue">
+                    <PieChart className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="text-base font-black text-white flex items-center gap-2">
+                    <h3 className="text-lg md:text-xl font-black text-white flex items-center gap-2">
                       총 자산 산출 & 분석 리포트
-                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 bg-sleek-blue/10 text-sleek-blue rounded-full border border-sleek-blue/20">
-                        {kisConfig.isConnected ? "실계좌 연동" : "시뮬레이션 계좌"}
+                      <span className="text-xs font-mono font-bold px-2.5 py-0.5 bg-sleek-blue/15 text-sleek-blue rounded-full border border-sleek-blue/30">
+                        {kisConfig.isConnected ? "실계좌 연동 (44431721-01)" : "시뮬레이션 계좌"}
                       </span>
                     </h3>
-                    <p className="text-xs text-sleek-text-secondary mt-0.5">
-                      가용 현금과 실시간 주식 평가금액이 산출된 세부 내역 및 공식입니다.
+                    <p className="text-xs md:text-sm text-slate-300 mt-1">
+                      주문가능자산과 실시간 주식 평가금액이 반영된 세부 내역 및 분석 리포트입니다.
                     </p>
                   </div>
                 </div>
                 <button 
                   onClick={() => setIsAssetAnalysisModalOpen(false)}
-                  className="p-2 rounded-xl bg-white/5 hover:bg-white/10 text-sleek-text-secondary hover:text-white transition-all"
+                  className="p-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white transition-all"
                 >
                   <X className="w-5 h-5" />
                 </button>
@@ -5994,51 +5995,51 @@ export default function App() {
               {/* Modal Body (Scrollable) */}
               <div className="p-5 md:p-6 overflow-y-auto space-y-6 custom-scrollbar flex-1">
                 {/* 1. Overall Total Asset Hero Card */}
-                <div className="bg-gradient-to-br from-sleek-blue/20 via-slate-900/40 to-slate-900 border border-sleek-blue/30 rounded-2xl p-5 space-y-4 relative overflow-hidden">
-                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-white/10">
+                <div className="bg-gradient-to-br from-sleek-blue/20 via-slate-900/60 to-slate-900 border border-sleek-blue/40 rounded-2xl p-5 md:p-6 space-y-4 relative overflow-hidden shadow-lg">
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-white/10">
                     <div>
-                      <div className="text-[11px] font-bold text-sleek-text-secondary uppercase tracking-wider mb-1 flex items-center gap-1.5">
+                      <div className="text-xs md:text-sm font-bold text-slate-300 uppercase tracking-wider mb-1 flex items-center gap-2">
                         <span>현재 총 자산 평가금액</span>
-                        <Calculator className="w-3.5 h-3.5 text-sleek-blue" />
+                        <Calculator className="w-4 h-4 text-sleek-blue" />
                       </div>
-                      <div className="text-2xl md:text-3xl font-black text-white tracking-tight">
+                      <div className="text-3xl md:text-4xl font-black text-white tracking-tight">
                         ₩{assetAnalysis.totalCalculatedAsset.toLocaleString()}
                       </div>
                     </div>
                     
-                    <div className="bg-white/5 border border-white/10 rounded-xl p-3 flex items-center gap-4 shrink-0">
+                    <div className="bg-white/5 border border-white/10 rounded-xl p-3.5 flex items-center gap-5 shrink-0">
                       <div>
-                        <div className="text-[10px] text-sleek-text-secondary font-bold">투자 원금</div>
-                        <div className="text-xs font-mono font-bold text-slate-300">₩{assetAnalysis.principal.toLocaleString()}</div>
+                        <div className="text-xs text-slate-400 font-bold">투자 원금</div>
+                        <div className="text-sm md:text-base font-mono font-extrabold text-white">₩{assetAnalysis.principal.toLocaleString()}</div>
                       </div>
-                      <div className="h-6 w-px bg-white/10" />
+                      <div className="h-8 w-px bg-white/10" />
                       <div>
-                        <div className="text-[10px] text-sleek-text-secondary font-bold">원금 대비 손익</div>
+                        <div className="text-xs text-slate-400 font-bold">원금 대비 손익</div>
                         <div className={cn(
-                          "text-xs font-mono font-bold flex items-center gap-0.5",
-                          assetAnalysis.totalPnL >= 0 ? "text-emerald-400" : "text-rose-400"
+                          "text-sm md:text-base font-mono font-extrabold flex items-center gap-1",
+                          assetAnalysis.totalPnL >= 0 ? "text-rose-400" : "text-sky-400"
                         )}>
-                          {assetAnalysis.totalPnL >= 0 ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
+                          {assetAnalysis.totalPnL >= 0 ? <TrendingUp className="w-4 h-4 text-rose-400" /> : <TrendingDown className="w-4 h-4 text-sky-400" />}
                           <span>{assetAnalysis.totalPnL >= 0 ? '+' : ''}₩{Math.round(assetAnalysis.totalPnL).toLocaleString()}</span>
-                          <span className="text-[10px]">({assetAnalysis.totalPnLPercent >= 0 ? '+' : ''}{assetAnalysis.totalPnLPercent.toFixed(2)}%)</span>
+                          <span className="text-xs font-bold">({assetAnalysis.totalPnLPercent >= 0 ? '+' : ''}{assetAnalysis.totalPnLPercent.toFixed(2)}%)</span>
                         </div>
                       </div>
                     </div>
                   </div>
 
                   {/* Portfolio Proportion Progress Bar */}
-                  <div className="space-y-1.5">
-                    <div className="flex justify-between text-[11px] font-bold text-sleek-text-secondary">
+                  <div className="space-y-2">
+                    <div className="flex justify-between text-xs md:text-sm font-bold text-slate-300">
                       <span>자산 구성 비중</span>
-                      <div className="flex items-center gap-3 text-[10px]">
-                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-sleek-blue inline-block" /> 현금 {assetAnalysis.cashShare.toFixed(1)}%</span>
-                        <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-emerald-400 inline-block" /> 주식 {assetAnalysis.stockShare.toFixed(1)}%</span>
+                      <div className="flex items-center gap-3 text-xs">
+                        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-sleek-blue inline-block" /> 현금 {assetAnalysis.cashShare.toFixed(1)}%</span>
+                        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" /> 주식 {assetAnalysis.stockShare.toFixed(1)}%</span>
                         {assetAnalysis.pendingReserve > 0 && (
-                          <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-amber-400 inline-block" /> 예약금 {assetAnalysis.pendingShare.toFixed(1)}%</span>
+                          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" /> 예약금 {assetAnalysis.pendingShare.toFixed(1)}%</span>
                         )}
                       </div>
                     </div>
-                    <div className="h-3 w-full bg-white/5 rounded-full overflow-hidden flex gap-0.5 p-0.5 border border-white/10">
+                    <div className="h-3.5 w-full bg-white/5 rounded-full overflow-hidden flex gap-0.5 p-0.5 border border-white/10">
                       {assetAnalysis.cashShare > 0 && (
                         <div style={{ width: `${assetAnalysis.cashShare}%` }} className="bg-sleek-blue rounded-full h-full transition-all" title={`현금: ${assetAnalysis.cashShare.toFixed(1)}%`} />
                       )}
@@ -6053,117 +6054,117 @@ export default function App() {
                 </div>
 
                 {/* 2. Three Component Cards */}
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3.5">
                   {/* Card 1: Cash */}
-                  <div className="bg-white/5 border border-white/10 rounded-2xl p-3.5 space-y-1">
-                    <div className="text-[10px] text-sleek-text-secondary font-bold flex items-center justify-between">
-                      <span className="flex items-center gap-1"><Wallet className="w-3 h-3 text-sleek-blue" /> 가용 현금 잔고</span>
-                      <span className="text-sleek-blue font-mono">{assetAnalysis.cashShare.toFixed(1)}%</span>
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-1.5">
+                    <div className="text-xs text-slate-300 font-bold flex items-center justify-between">
+                      <span className="flex items-center gap-1.5"><Wallet className="w-4 h-4 text-sleek-blue" /> 주문가능자산</span>
+                      <span className="text-sleek-blue font-mono font-bold text-xs">{assetAnalysis.cashShare.toFixed(1)}%</span>
                     </div>
-                    <div className="text-base font-black font-mono text-white">
+                    <div className="text-lg md:text-xl font-black font-mono text-white">
                       ₩{assetAnalysis.cashBalance.toLocaleString()}
                     </div>
-                    <p className="text-[10px] text-sleek-text-secondary">주식 매매에 즉시 사용 가능한 예수금</p>
+                    <p className="text-xs text-slate-400">즉시 주문에 사용 가능한 예수금</p>
                   </div>
 
                   {/* Card 2: Stock Evaluation */}
-                  <div className="bg-white/5 border border-white/10 rounded-2xl p-3.5 space-y-1">
-                    <div className="text-[10px] text-sleek-text-secondary font-bold flex items-center justify-between">
-                      <span className="flex items-center gap-1"><Briefcase className="w-3 h-3 text-emerald-400" /> 보유 주식 평가액</span>
-                      <span className="text-emerald-400 font-mono">{assetAnalysis.stockShare.toFixed(1)}%</span>
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-1.5">
+                    <div className="text-xs text-slate-300 font-bold flex items-center justify-between">
+                      <span className="flex items-center gap-1.5"><Briefcase className="w-4 h-4 text-emerald-400" /> 보유 주식 평가액</span>
+                      <span className="text-emerald-400 font-mono font-bold text-xs">{assetAnalysis.stockShare.toFixed(1)}%</span>
                     </div>
-                    <div className="text-base font-black font-mono text-white">
+                    <div className="text-lg md:text-xl font-black font-mono text-white">
                       ₩{Math.round(assetAnalysis.stockValue).toLocaleString()}
                     </div>
-                    <p className="text-[10px] text-sleek-text-secondary">현재 시장가 × 보유 주식 수의 합산</p>
+                    <p className="text-xs text-slate-400">현재 시장가 × 보유 주식 수의 합산</p>
                   </div>
 
                   {/* Card 3: Pending Order Reserve */}
-                  <div className="bg-white/5 border border-white/10 rounded-2xl p-3.5 space-y-1">
-                    <div className="text-[10px] text-sleek-text-secondary font-bold flex items-center justify-between">
-                      <span className="flex items-center gap-1"><Coins className="w-3 h-3 text-amber-400" /> 미체결 매수 예약금</span>
-                      <span className="text-amber-400 font-mono">{assetAnalysis.pendingShare.toFixed(1)}%</span>
+                  <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-1.5">
+                    <div className="text-xs text-slate-300 font-bold flex items-center justify-between">
+                      <span className="flex items-center gap-1.5"><Coins className="w-4 h-4 text-amber-400" /> 미체결 매수 예약금</span>
+                      <span className="text-amber-400 font-mono font-bold text-xs">{assetAnalysis.pendingShare.toFixed(1)}%</span>
                     </div>
-                    <div className="text-base font-black font-mono text-white">
+                    <div className="text-lg md:text-xl font-black font-mono text-white">
                       ₩{Math.round(assetAnalysis.pendingReserve).toLocaleString()}
                     </div>
-                    <p className="text-[10px] text-sleek-text-secondary">모의/지정가 매수 대기 중 잠긴 예수금</p>
+                    <p className="text-xs text-slate-400">모의/지정가 매수 대기 중 잠긴 예수금</p>
                   </div>
                 </div>
 
                 {/* 3. Valuation Formula Explanation Banner */}
-                <div className="bg-sleek-bg p-4 rounded-2xl border border-sleek-border space-y-2">
-                  <div className="text-xs font-bold text-white flex items-center gap-1.5">
+                <div className="bg-sleek-bg p-4.5 rounded-2xl border border-sleek-border space-y-2.5">
+                  <div className="text-xs md:text-sm font-bold text-white flex items-center gap-2">
                     <Info className="w-4 h-4 text-sleek-blue" />
                     <span>총 자산 평가액 산출 공식 (Calculation Logic)</span>
                   </div>
-                  <div className="bg-black/40 p-3 rounded-xl font-mono text-xs text-amber-300 font-bold border border-white/5 overflow-x-auto">
-                    총 자산 = [ 가용 자산 ] + ∑( 보유 수량 × 실시간 현재가 )
+                  <div className="bg-black/50 p-3.5 rounded-xl font-mono text-xs md:text-sm text-amber-300 font-extrabold border border-white/10 overflow-x-auto">
+                    총 자산 = [ 주문가능자산 ] + ∑( 보유 수량 × 실시간 현재가 )
                   </div>
-                  <p className="text-[11px] text-sleek-text-secondary leading-relaxed">
-                    실시간 현재가 변화에 따라 보유 주식 평가액이 실시간 반영되며, 해외 주식의 경우 현재 환율(₩{exchangeRate.toLocaleString()}/$)로 원화 변환되어 통합 계산됩니다.
+                  <p className="text-xs text-slate-300 leading-relaxed">
+                    실시간 현재가 변화에 따라 보유 주식 평가액이 실시간 반영되며, 평단가는 내림(Math.floor) 기준 및 해외 주식의 경우 현재 환율(₩{exchangeRate.toLocaleString()}/$)로 원화 변환되어 계산됩니다.
                   </p>
                 </div>
 
                 {/* 4. Individual Stock Breakdown */}
                 <div className="space-y-3">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold text-white flex items-center gap-2">
-                      <Briefcase className="w-3.5 h-3.5 text-sleek-blue" />
+                    <h4 className="text-xs md:text-sm font-bold text-white flex items-center gap-2">
+                      <Briefcase className="w-4 h-4 text-sleek-blue" />
                       보유 종목별 세부 평가 내역 ({assetAnalysis.stockList.length}개 종목)
                     </h4>
                     {assetAnalysis.stockList.length > 0 && (
-                      <span className="text-[10px] text-sleek-text-secondary font-mono">
+                      <span className="text-xs text-slate-300 font-mono font-bold">
                         총 매수가: ₩{Math.round(assetAnalysis.stockInvested).toLocaleString()}
                       </span>
                     )}
                   </div>
 
                   {assetAnalysis.stockList.length === 0 ? (
-                    <div className="bg-white/5 border border-white/5 rounded-2xl p-6 text-center text-sleek-text-secondary text-xs">
-                      현재 보유 중인 주식이 없습니다. 가용 현금(₩{Math.round(balance).toLocaleString()})이 총 자산으로 평가됩니다.
+                    <div className="bg-white/5 border border-white/5 rounded-2xl p-6 text-center text-slate-400 text-xs md:text-sm">
+                      현재 보유 중인 주식이 없습니다. 주문가능자산(₩{Math.floor(balance).toLocaleString()})이 총 자산으로 평가됩니다.
                     </div>
                   ) : (
-                    <div className="space-y-2 max-h-[220px] overflow-y-auto custom-scrollbar pr-1">
+                    <div className="space-y-2.5 max-h-[260px] overflow-y-auto custom-scrollbar pr-1">
                       {assetAnalysis.stockList.map((item) => (
                         <div 
                           key={item.symbol} 
-                          className="bg-white/5 border border-white/5 hover:border-white/10 rounded-2xl p-3.5 transition-all text-xs space-y-2"
+                          className="bg-white/5 border border-white/10 hover:border-sleek-blue/40 rounded-2xl p-4 transition-all space-y-2.5"
                         >
                           <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className="font-bold text-white text-sm">{item.name}</span>
-                              <span className="text-[10px] font-mono text-sleek-text-secondary">({item.symbol})</span>
-                              <span className="text-[9px] font-mono font-bold px-1.5 py-0.5 bg-white/10 text-slate-300 rounded-md">
-                                포트폴리오 비중 {item.portfolioShare.toFixed(1)}%
+                            <div className="flex items-center gap-2.5">
+                              <span className="font-extrabold text-white text-base md:text-lg">{item.name}</span>
+                              <span className="text-xs font-mono text-slate-400">({item.symbol})</span>
+                              <span className="text-xs font-mono font-bold px-2 py-0.5 bg-white/10 text-slate-200 rounded-md">
+                                포트폴리오 {item.portfolioShare.toFixed(1)}%
                               </span>
                             </div>
                             <div className={cn(
-                              "font-mono font-bold text-xs px-2 py-0.5 rounded-lg border",
+                              "font-mono font-black text-xs md:text-sm px-2.5 py-1 rounded-lg border",
                               item.pnlAmount >= 0 
-                                ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20" 
-                                : "text-rose-400 bg-rose-500/10 border-rose-500/20"
+                                ? "text-rose-400 bg-rose-500/10 border-rose-500/30" 
+                                : "text-sky-400 bg-sky-500/10 border-sky-500/30"
                             )}>
                               {item.pnlAmount >= 0 ? '+' : ''}{Math.round(item.pnlAmount).toLocaleString()}원 ({item.pnlPercent >= 0 ? '+' : ''}{item.pnlPercent.toFixed(2)}%)
                             </div>
                           </div>
 
-                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-[10px] pt-2 border-t border-white/5 text-sleek-text-secondary font-mono">
+                          <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs pt-2.5 border-t border-white/10 text-slate-300 font-mono">
                             <div>
                               <span>보유수량: </span>
-                              <strong className="text-white">{item.qty.toLocaleString()} 주</strong>
+                              <strong className="text-white font-bold">{item.qty.toLocaleString()} 주</strong>
                             </div>
                             <div>
                               <span>매수평단: </span>
-                              <strong className="text-amber-300">₩{Math.round(item.avgPrice).toLocaleString()}</strong>
+                              <strong className="text-amber-300 font-bold">₩{Math.floor(item.avgPrice).toLocaleString()}</strong>
                             </div>
                             <div>
                               <span>실시간현재가: </span>
-                              <strong className="text-white">₩{Math.round(item.currentPrice).toLocaleString()}</strong>
+                              <strong className="text-white font-bold">₩{Math.round(item.currentPrice).toLocaleString()}</strong>
                             </div>
                             <div>
                               <span>현재평가금: </span>
-                              <strong className="text-sleek-blue font-bold">₩{Math.round(item.evaluatedAmount).toLocaleString()}</strong>
+                              <strong className="text-sleek-blue font-black">₩{Math.round(item.evaluatedAmount).toLocaleString()}</strong>
                             </div>
                           </div>
                         </div>
@@ -6174,12 +6175,12 @@ export default function App() {
 
                 {/* 5. Summary / Insight Box */}
                 <div className="bg-sleek-blue/10 border border-sleek-blue/20 rounded-2xl p-4 flex items-start gap-3">
-                  <Sparkles className="w-4 h-4 text-sleek-blue shrink-0 mt-0.5" />
-                  <div className="text-xs space-y-1">
+                  <Sparkles className="w-5 h-5 text-sleek-blue shrink-0 mt-0.5" />
+                  <div className="text-xs md:text-sm space-y-1">
                     <div className="font-bold text-white">포트폴리오 평가 총평</div>
-                    <p className="text-sleek-text-secondary text-[11px] leading-relaxed">
+                    <p className="text-slate-300 text-xs md:text-sm leading-relaxed">
                       {assetAnalysis.cashShare > 70 
-                        ? `가용 현금 비중이 ${assetAnalysis.cashShare.toFixed(1)}%로 안정적인 현금 유동성을 확보하고 있어, 추가 매수 타점 포착 시 즉각적인 대응이 가능합니다.`
+                        ? `주문가능자산 비중이 ${assetAnalysis.cashShare.toFixed(1)}%로 안정적인 현금 유동성을 확보하고 있어, 추가 매수 타점 포착 시 즉각적인 대응이 가능합니다.`
                         : assetAnalysis.stockShare > 70
                         ? `주식 보유 비중이 ${assetAnalysis.stockShare.toFixed(1)}%로 주가 상승 시 높은 수익률을 기대할 수 있으나, 시장 변동성에 유의할 필요가 있습니다.`
                         : `현금(${assetAnalysis.cashShare.toFixed(1)}%)과 주식(${assetAnalysis.stockShare.toFixed(1)}%)의 균형 잡힌 포트폴리오로 안정적인 리스크 관리가 이루어지고 있습니다.`}
@@ -6189,10 +6190,10 @@ export default function App() {
               </div>
 
               {/* Modal Footer */}
-              <div className="p-4 border-t border-sleek-border bg-sleek-bg/60 flex justify-end">
+              <div className="p-4 md:p-5 border-t border-sleek-border bg-sleek-bg/80 flex justify-end">
                 <button
                   onClick={() => setIsAssetAnalysisModalOpen(false)}
-                  className="px-6 py-2.5 rounded-xl bg-sleek-blue hover:bg-sleek-blue/90 text-white font-bold text-xs transition-all shadow-lg shadow-sleek-blue/20"
+                  className="px-6 py-2.5 rounded-xl bg-sleek-blue hover:bg-sleek-blue/90 text-white font-bold text-xs md:text-sm transition-all shadow-lg shadow-sleek-blue/20"
                 >
                   확인 (닫기)
                 </button>
