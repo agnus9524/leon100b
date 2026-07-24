@@ -147,6 +147,7 @@ interface PendingSellOrder {
   type?: 'LIMIT_SELL' | 'TARGET_WATCH' | 'SCALPER_EXIT';
   reason?: string;
   buyPrice?: number; // Added to calculate profit upon fill
+  slotId?: string; // Track which slot this order is for
 }
 
 interface AIAnalysisResult {
@@ -328,8 +329,13 @@ const USAFlag = () => (
 );
 
 export default function App() {
-  const [marketType, setMarketType] = useState<'KR' | 'US'>('KR');
-  const [displayCurrency, setDisplayCurrency] = useState<'KRW' | 'USD'>('KRW');
+  const [marketType, setMarketType] = useState<'KR' | 'US'>(() => {
+    return (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
+  });
+  const [displayCurrency, setDisplayCurrency] = useState<'KRW' | 'USD'>(() => {
+    const lastMarket = localStorage.getItem('sleek_last_market');
+    return lastMarket === 'US' ? 'USD' : 'KRW';
+  });
   const [exchangeRate, setExchangeRate] = useState(1350);
   const [exchangeData, setExchangeData] = useState<Stock>({
     symbol: 'USD/KRW',
@@ -342,8 +348,13 @@ export default function App() {
   const [isRateLoading, setIsRateLoading] = useState(true);
   const [exchangeRateTrend, setExchangeRateTrend] = useState<'UP' | 'DOWN'>('UP');
   const [selectionMode, setSelectionMode] = useState<'RECOMMENDED' | 'MANUAL'>('RECOMMENDED');
-  const [stocks, setStocks] = useState<Stock[]>(INITIAL_STOCKS_KR);
-  const [selectedSymbol, setSelectedSymbol] = useState('073240');
+  const [stocks, setStocks] = useState<Stock[]>(() => {
+    const lastMarket = localStorage.getItem('sleek_last_market');
+    return lastMarket === 'US' ? INITIAL_STOCKS : INITIAL_STOCKS_KR;
+  });
+  const [selectedSymbol, setSelectedSymbol] = useState(() => {
+    return localStorage.getItem('sleek_last_symbol') || '073240';
+  });
   const [balance, setBalance] = useState(0); // User's money (will be synced via KIS)
   const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
   const [holdings, setHoldings] = useState<Record<string, number>>({});
@@ -358,6 +369,14 @@ export default function App() {
       console.error("Failed to persist avgPrices", e);
     }
   }, [avgPrices]);
+
+  useEffect(() => {
+    localStorage.setItem('sleek_last_market', marketType);
+  }, [marketType]);
+
+  useEffect(() => {
+    localStorage.setItem('sleek_last_symbol', selectedSymbol);
+  }, [selectedSymbol]);
   const [sellableHoldings, setSellableHoldings] = useState<Record<string, number>>({});
   const [isBotActive, setIsBotActive] = useState(false);
   const [tradeLogs, setTradeLogs] = useState<TradeLog[]>([]);
@@ -441,6 +460,7 @@ export default function App() {
   };
   const [showKisModal, setShowKisModal] = useState(false);
   const [showKisPassword, setShowKisPassword] = useState(false);
+  const [isAppInitialized, setIsAppInitialized] = useState(false);
   const [showPlanDetails, setShowPlanDetails] = useState(false);
   const [userLicenseData, setUserLicenseData] = useState<any>(null);
   const [dashboardTab, setDashboardTab] = useState<'TRADING' | 'PORTFOLIO' | 'STRATEGY'>('TRADING');
@@ -459,7 +479,7 @@ export default function App() {
   const [gapTradingProfit, setGapTradingProfit] = useState<number>(0);
   const [gapTradeCount, setGapTradeCount] = useState<number>(0);
   const [lastTradeType, setLastTradeType] = useState<'BUY' | 'SELL' | null>(null);
-  const [gapInventory, setGapInventory] = useState<{price: number, quantity: number}[]>([]);
+  const [gapInventory, setGapInventory] = useState<{id: string, price: number, quantity: number}[]>([]);
   const [pendingBuyOrders, setPendingBuyOrders] = useState<PendingBuyOrder[]>([]);
   const pendingBuyOrdersRef = React.useRef<PendingBuyOrder[]>([]);
   const [pendingSellOrders, setPendingSellOrders] = useState<PendingSellOrder[]>([]);
@@ -477,7 +497,7 @@ export default function App() {
   const [lowestBidOnlyMode, setLowestBidOnlyMode] = useState<boolean>(false); // 현재 체결가 진입 모드 (기본 false)
   const [scalperMessage, setScalperMessage] = useState<string>("대기 중...");
   const [selectedTimeframeBar, setSelectedTimeframeBar] = useState<'1m' | '3m' | '5m' | '10m'>('1m');
-  const gapInventoryRef = React.useRef<{price: number, quantity: number}[]>([]);
+  const gapInventoryRef = React.useRef<{id: string, price: number, quantity: number}[]>([]);
   useEffect(() => {
     gapInventoryRef.current = gapInventory;
   }, [gapInventory]);
@@ -506,12 +526,6 @@ export default function App() {
   const [manualSellPrice, setManualSellPrice] = useState<number>(0);
   const [manualSellQty, setManualSellQty] = useState<number>(1);
   const [isTargetWatchMode, setIsTargetWatchMode] = useState<boolean>(true);
-
-  // Direct Key Login fallback states
-  const [isDirectLoginOpen, setIsDirectLoginOpen] = useState(false);
-  const [directKeyInput, setDirectKeyInput] = useState("");
-  const [directLoginError, setDirectLoginError] = useState<string | null>(null);
-  const [isDirectLoggingIn, setIsDirectLoggingIn] = useState(false);
 
   // Notification State
   const [notifications, setNotifications] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string }[]>([]);
@@ -996,14 +1010,14 @@ export default function App() {
   // Auto-Sync KIS Account Status once initial stocks, charts, and prices load
   const hasAutoSyncedRef = React.useRef(false);
   useEffect(() => {
-    if (kisConfig.isConnected && !hasAutoSyncedRef.current && stocks.length > 0) {
+    if (kisConfig.isConnected && !hasAutoSyncedRef.current && stocks.length > 0 && isAppInitialized) {
       hasAutoSyncedRef.current = true;
       const timer = setTimeout(() => {
         handleSyncKIS();
       }, 800);
       return () => clearTimeout(timer);
     }
-  }, [kisConfig.isConnected, stocks.length]);
+  }, [kisConfig.isConnected, stocks.length, isAppInitialized]);
 
   // Toggle Market Type
   useEffect(() => {
@@ -1037,45 +1051,8 @@ export default function App() {
       } else if (error.code === 'auth/network-request-failed') {
         alert("네트워크 연결 오류가 발생했습니다.");
       } else {
-        alert(`로그인 중 오류가 발생했습니다: ${error.message}\n\n* 만약 iFrame(AI Studio 프리뷰) 환경이라면 브라우저의 '3방 쿠키 차단(Third-Party Cookie Block)' 보안 정책으로 인해 구글 소셜 로그인이 차단되었을 수 있습니다. 오른쪽 상단의 '새 창에서 열기' 버튼을 클릭해 독립된 창에서 다시 시도해 주시거나, 아래의 '인증키로 즉시 로그인' 기능을 이용해 주세요.`);
+        alert(`로그인 중 오류가 발생했습니다: ${error.message}\n\n* 만약 iFrame(AI Studio 프리뷰) 환경이라면 브라우저의 '3방 쿠키 차단(Third-Party Cookie Block)' 보안 정책으로 인해 구글 소셜 로그인이 차단되었을 수 있습니다. 오른쪽 상단의 '새 창에서 열기' 버튼을 클릭해 독립된 창에서 다시 시도해 주세요.`);
       }
-    }
-  };
-
-  const handleDirectLogin = async () => {
-    if (!directKeyInput.trim()) {
-      setDirectLoginError("인증키를 입력해주세요.");
-      return;
-    }
-    
-    setIsDirectLoggingIn(true);
-    setDirectLoginError(null);
-    
-    try {
-      // 1. Sign in anonymously first to get a firebase session
-      const userCredential = await signInAnonymously(auth);
-      
-      // 2. Perform license key login using this user session
-      const result = await loginWithKey(directKeyInput.trim());
-      
-      if (result.success) {
-        setIsSubscribed(true);
-        setIsDirectLoginOpen(false);
-        setDirectKeyInput("");
-        showNotification("인증키 간편 로그인 성공!", "success");
-      } else {
-        // Sign out of firebase auth if activation fails
-        await signOut(auth);
-        setDirectLoginError(result.message || "유효하지 않거나 이미 사용 중인 인증키입니다.");
-      }
-    } catch (error: any) {
-      console.error("Direct key login failed:", error);
-      setDirectLoginError(error.message || "인증키 로그인 도중 오류가 발생했습니다.");
-      try {
-        await signOut(auth);
-      } catch (e) {}
-    } finally {
-      setIsDirectLoggingIn(false);
     }
   };
 
@@ -1806,6 +1783,8 @@ export default function App() {
       console.error("KIS Sync Error", e);
       const msg = e.response?.data?.msg1 || e.message;
       setBotStatus(`증권사 동기화 실패: ${msg}`);
+    } finally {
+      setIsAppInitialized(true);
     }
   };
 
@@ -1813,6 +1792,7 @@ export default function App() {
 
   // Real-time Stock Price Sync Interval (Optimized dual-interval for selected and other watchlist stocks)
   useEffect(() => {
+    if (!isAppInitialized) return;
     let slowInterval: NodeJS.Timeout;
     let fastInterval: NodeJS.Timeout;
     let kisSyncInterval: NodeJS.Timeout;
@@ -1902,7 +1882,7 @@ export default function App() {
       if (fastInterval) clearInterval(fastInterval);
       if (kisSyncInterval) clearInterval(kisSyncInterval);
     };
-  }, [kisConfig.isConnected, marketType, selectedSymbol, isGapBotActive]);
+  }, [kisConfig.isConnected, marketType, selectedSymbol, isGapBotActive, isAppInitialized]);
 
   // Auto KIS initial sync on connection with delay
   const initialKisSyncTriggeredRef = React.useRef(false);
@@ -1918,6 +1898,7 @@ export default function App() {
 
   // Simulation: Update prices randomly (ONLY if NOT connected)
   useEffect(() => {
+    if (!isAppInitialized) return;
     const interval = setInterval(() => {
       // COMPLETELY DISABLE simulation if KIS is connected - use real data only
       if (kisConfig.isConnected) {
@@ -1942,7 +1923,7 @@ export default function App() {
       setTime(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
     }, 10000); // Slower updates
     return () => clearInterval(interval);
-  }, [kisConfig.isConnected, marketType]);
+  }, [kisConfig.isConnected, marketType, isAppInitialized]);
 
   // Fetch News using Gemini Search with Caching
   const fetchNews = async (symbol: string, isManual = false) => {
@@ -2419,16 +2400,25 @@ export default function App() {
         const currentPrice = currentStock.price;
         const orderPrice = order.orderPrice;
 
-        // Calculate drop ratio from orderPrice
+        // Calculate ratios from orderPrice
         const dropPercent = ((orderPrice - currentPrice) / orderPrice) * 100;
+        const risePercent = ((currentPrice - orderPrice) / orderPrice) * 100;
+        const autoCancelRiseThreshold = 0.3;
 
-        if (dropPercent >= autoCancelThreshold) {
-          // 1. CANCEL CONDITION TRIGGERED: Price dropped by setting (default 0.2%) or more
+        const isDropCancel = dropPercent >= autoCancelThreshold;
+        const isRiseCancel = risePercent >= autoCancelRiseThreshold;
+
+        if (isDropCancel || isRiseCancel) {
+          // 1. CANCEL CONDITION TRIGGERED
           updated = true;
+          
+          const cancelReason = isDropCancel 
+            ? `주문가 대비 ${dropPercent.toFixed(2)}% 하락 (기준: ${autoCancelThreshold}%)`
+            : `주문가 대비 ${risePercent.toFixed(2)}% 상승 (기준: ${autoCancelRiseThreshold}%)`;
           
           if (!order.id) {
             // Placeholder / in-flight order without ID: clean up silently without error warning
-            console.log(`[Auto-Cancel] In-flight order without ID cleared: ₩${orderPrice}`);
+            console.log(`[Auto-Cancel] In-flight order without ID cleared: ₩${orderPrice} (${cancelReason})`);
             continue;
           }
 
@@ -2438,9 +2428,9 @@ export default function App() {
             const refundAmount = priceInKrw * (order.quantity || 1);
             setBalance(prev => prev + refundAmount);
             
-            addLog(order.symbol, '매수', orderPrice, order.quantity || 1, `[모의 자동취소] 현재가(₩${currentPrice.toLocaleString()})가 주문가 대비 ${dropPercent.toFixed(2)}% 하락하여 자동 취소 (${autoCancelThreshold}% 기준)`);
-            showNotification(`${currentStock.name} 모의 매수 자동 취소 완료 (${dropPercent.toFixed(2)}% 하락)`, "info");
-            setBotStatus(`[모의 취소] ₩${orderPrice.toLocaleString()} 주문 취소 완료 (낙폭 과대)`);
+            addLog(order.symbol, '매수', orderPrice, order.quantity || 1, `[모의 자동취소] ${cancelReason}`);
+            showNotification(`${currentStock.name} 모의 매수 자동 취소 (${isDropCancel ? '낙폭 과대' : '상승 이탈'})`, "info");
+            setBotStatus(`[모의 취소] ₩${orderPrice.toLocaleString()} 주문 취소 완료`);
           } else {
             // Real KIS order cancel request!
             try {
@@ -2454,8 +2444,8 @@ export default function App() {
               );
               
               if (cancelRes && cancelRes.rt_cd === '0') {
-                addLog(order.symbol, '매수', orderPrice, order.quantity, `[KIS 자동취소] 현재가(₩${currentPrice.toLocaleString()})가 주문가 대비 ${dropPercent.toFixed(2)}% 하락하여 자동 취소 (${autoCancelThreshold}% 기준)`);
-                showNotification(`${currentStock.name} KIS 매수 주문 자동 취소 완료 (${dropPercent.toFixed(2)}% 하락)`, "info");
+                addLog(order.symbol, '매수', orderPrice, order.quantity, `[KIS 자동취소] ${cancelReason}`);
+                showNotification(`${currentStock.name} KIS 매수 자동 취소 (${isDropCancel ? '낙폭 과대' : '상승 이탈'})`, "info");
                 setBotStatus(`[KIS 취소] ₩${orderPrice.toLocaleString()} 주문 취소 완료`);
               } else {
                 const errMsg = cancelRes?.msg1 || "알 수 없는 오류";
@@ -2465,7 +2455,8 @@ export default function App() {
                 try {
                   const status = await kisService.checkOrderExecution(order.id);
                   if (status.isFullyFilled) {
-                    setGapInventory(prev => [...prev, { price: orderPrice, quantity: status.ordQty || order.quantity }]);
+                    const newSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                    setGapInventory(prev => [...prev, { id: newSlotId, price: orderPrice, quantity: status.ordQty || order.quantity }]);
                     const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + (status.ordQty || order.quantity)).toFixed(4)) };
                     setHoldings(newHoldings);
                     if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
@@ -2497,7 +2488,6 @@ export default function App() {
           
           if (order.isSimulated) {
             // Fill simulated order
-            setGapInventory(prev => [...prev, { price: orderPrice, quantity: order.quantity }]);
             const oldQty = holdings[order.symbol] || 0;
             const oldAvg = avgPrices[order.symbol] || orderPrice;
             const newQty = oldQty + order.quantity;
@@ -2512,7 +2502,8 @@ export default function App() {
             setBotStatus(`[모의 체결] ₩${orderPrice.toLocaleString()} 완료`);
             
             // Add to gapInventory and update ref
-            const newSlot = { price: orderPrice, quantity: order.quantity };
+            const newSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            const newSlot = { id: newSlotId, price: orderPrice, quantity: order.quantity };
             setGapInventory(prev => {
               const next = [...prev, newSlot];
               gapInventoryRef.current = next;
@@ -2559,8 +2550,9 @@ export default function App() {
                     quantity: remainingQty
                   });
                   // Add filled portion to inventory
+                  const partialSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
                   setGapInventory(prev => {
-                    const next = [...prev, { price: orderPrice, quantity: status.ccldQty }];
+                    const next = [...prev, { id: partialSlotId, price: orderPrice, quantity: status.ccldQty }];
                     gapInventoryRef.current = next;
                     return next;
                   });
@@ -2601,7 +2593,8 @@ export default function App() {
                   setBotStatus(`[체결 완료] ₩${orderPrice.toLocaleString()}`);
                   
                   // Add to gapInventory and update ref
-                  const newSlot = { price: orderPrice, quantity: order.quantity };
+                  const realSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                  const newSlot = { id: realSlotId, price: orderPrice, quantity: order.quantity };
                   setGapInventory(prev => {
                     const next = [...prev, newSlot];
                     gapInventoryRef.current = next;
@@ -2670,15 +2663,20 @@ export default function App() {
               }
 
               // [중요] 매도가 실제로 체결되었으므로 해당 슬롯을 비움 (gapInventory 업데이트)
-              const updatedInv = gapInventoryRef.current.filter(s => {
-                const slotPrice = typeof s === 'number' ? s : s.price;
-                // 매수가(buyPrice)가 일치하는 슬롯 하나를 제거 (여러개일 수 있으므로 filter 대신 수동 처리가 나을 수 있지만 일단 filter로 구현)
-                // 실제로는 buyPrice가 유니크하지 않을 수 있으므로 가장 오래된 것 하나만 제거하는 로직이 더 정확함
-                return slotPrice !== order.buyPrice;
-              });
-              gapInventoryRef.current = updatedInv;
-              setGapInventory(updatedInv);
-              gapInventoryRef.current = updatedInv;
+              if (order.slotId) {
+                const updatedInv = gapInventoryRef.current.filter(s => s.id !== order.slotId);
+                gapInventoryRef.current = updatedInv;
+                setGapInventory(updatedInv);
+              } else if (order.buyPrice) {
+                // slotId가 없는 경우 가격으로 하나만 제거 (하위 호환성 및 수동 주문 대응)
+                const idx = gapInventoryRef.current.findIndex(s => s.price === order.buyPrice);
+                if (idx !== -1) {
+                  const updatedInv = [...gapInventoryRef.current];
+                  updatedInv.splice(idx, 1);
+                  gapInventoryRef.current = updatedInv;
+                  setGapInventory(updatedInv);
+                }
+              }
             } else {
               showNotification(`${currentStock.name} 대기 중인 매도 주문 체결 완료 (₩${currentStock.price.toLocaleString()}, ${order.quantity}주)`, "success");
             }
@@ -2704,10 +2702,18 @@ export default function App() {
               showNotification(`${currentStock.name} KIS 매도 주문 체결 완료!`, "success");
               
               // Free up slot if paired with a buyPrice
-              if (order.buyPrice) {
-                const updatedInv = gapInventoryRef.current.filter(s => (typeof s === 'number' ? s : s.price) !== order.buyPrice);
+              if (order.slotId) {
+                const updatedInv = gapInventoryRef.current.filter(s => s.id !== order.slotId);
                 gapInventoryRef.current = updatedInv;
                 setGapInventory(updatedInv);
+              } else if (order.buyPrice) {
+                const idx = gapInventoryRef.current.findIndex(s => s.price === order.buyPrice);
+                if (idx !== -1) {
+                  const updatedInv = [...gapInventoryRef.current];
+                  updatedInv.splice(idx, 1);
+                  gapInventoryRef.current = updatedInv;
+                  setGapInventory(updatedInv);
+                }
               }
 
               playScalpingSound('SELL');
@@ -2961,9 +2967,16 @@ export default function App() {
       if (activeSlots.length > 0) {
         const slotsToProcess = [...activeSlots];
         for (const slot of slotsToProcess) {
-          const buyPrice = typeof slot === 'number' ? slot : (slot.price || 0);
-          const buyQty = typeof slot === 'number' ? tradeQuantity : (slot.quantity || tradeQuantity || 1);
+          const slotPrice = slot.price || 0;
+          const buyPrice = slotPrice;
+          const buyQty = slot.quantity || tradeQuantity || 1;
+          const slotId = slot.id;
           if (!buyPrice || buyPrice <= 0) continue;
+
+          // [핵심] 이미 매도 주문이 나간 슬롯은 중복 주문 방지
+          if (pendingSellOrdersRef.current.some(p => p.symbol === selectedStock.symbol && p.slotId === slotId)) {
+            continue;
+          }
 
           // Update High Water Mark for Trailing Stop Loss per slot
           if (currentPrice > (highWaterMark[buyPrice] || buyPrice)) {
@@ -2997,7 +3010,7 @@ export default function App() {
               else sellReason = "리스크 관리 손절";
 
               setScalperMessage(`[목표수익 즉시 매도] ₩${buyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} (${sellReason})`);
-              await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ₩${buyPrice.toLocaleString()}, 수량: ${sellQty}): ${sellReason}`, currentPrice, buyPrice);
+              await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ₩${buyPrice.toLocaleString()}, 수량: ${sellQty}): ${sellReason}`, currentPrice, buyPrice, slotId);
               
               setHighWaterMark(prev => {
                 const next = { ...prev };
@@ -3022,7 +3035,7 @@ export default function App() {
     return () => clearInterval(gapInterval);
   }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, lowestBidOnlyMode, maxSlots, allowSamePriceEntry, enableCombinedAvgProfitExit]);
 
-  const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number, buyPrice?: number): Promise<number> => {
+  const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number, buyPrice?: number, slotId?: string): Promise<number> => {
     if (action === 'HOLD' || amount <= 0) return 0;
 
     const tradePrice = customPrice !== undefined ? customPrice : stock.price;
@@ -3120,11 +3133,23 @@ export default function App() {
                        addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', filledPrice, filledQty, `[실제체결 완료] ${reason}`);
                        showNotification(`${stock.name} ${action === 'BUY' ? '매수' : '매도'} 주문이 전량 체결되었습니다. (가격: ${filledPrice}원)`, "success");
                        finalAmount = filledQty;
+                        if (action === "SELL" && slotId) {
+                            const next = gapInventoryRef.current.filter(s => s.id !== slotId);
+                            gapInventoryRef.current = next;
+                            setGapInventory(next);
+                        }
                    } else if (filledQty > 0) {
                        setBotStatus(`[일부 체결] 주문 번호(${odno})가 일부 체결되었습니다 (${filledQty}주).`);
                        addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', filledPrice, filledQty, `[일부체결] ${reason}`);
                        showNotification(`${stock.name} ${action === 'BUY' ? '매수' : '매도'} 주문이 일부 체결되었습니다 (${filledQty}주).`, "info");
                        finalAmount = filledQty;
+                        if (action === "SELL" && slotId) {
+                            const next = gapInventoryRef.current.map(s => 
+                                s.id === slotId ? { ...s, quantity: Math.max(0, s.quantity - filledQty) } : s
+                            ).filter(s => s.quantity > 0);
+                            gapInventoryRef.current = next;
+                            setGapInventory(next);
+                        }
                    } else {
                        setBotStatus(`[미체결 상태] 주문 번호(${odno})가 아직 체결되지 않았습니다.`);
                        addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[주문접수/미체결] 실시간 체결 대기 및 동기화 감시`);
@@ -3152,7 +3177,7 @@ export default function App() {
                            createdAt: Date.now(),
                            isSimulated: false,
                            type: 'LIMIT_SELL',
-                           reason
+                           reason, buyPrice: buyPrice, slotId: slotId
                          };
                          setPendingSellOrders(prev => [...prev, newPendingSell]);
                        }
@@ -3222,7 +3247,7 @@ export default function App() {
       if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
       
       // Add to gapInventory and update ref for immediate fill
-      const newSlot = { price: tradePrice, quantity: finalAmount };
+      const newSlot = { id: slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`, price: tradePrice, quantity: finalAmount };
       setGapInventory(prev => {
         const next = [...prev, newSlot];
         gapInventoryRef.current = next;
@@ -3302,7 +3327,8 @@ export default function App() {
               isSimulated: true,
               type: 'LIMIT_SELL',
               reason,
-              buyPrice: buyPrice // Save buy price to calculate profit upon actual fill
+              buyPrice: buyPrice, // Save buy price to calculate profit upon actual fill
+              slotId: slotId
             };
             setPendingSellOrders(prev => [...prev, newPendingSell]);
             addLog(stock.symbol, '매도', tradePrice, sellAmount, `[모의 매도 주문접수] ${reason}`);
@@ -3531,111 +3557,33 @@ export default function App() {
             <Bot className="w-10 h-10 text-sleek-blue" />
           </div>
 
-          {!isDirectLoginOpen ? (
-            <>
-              <h1 className="text-2xl font-black text-white mb-2 uppercase italic tracking-tighter">LEO 10B AI BOT</h1>
-              <p className="text-sleek-text-secondary text-sm mb-8 leading-relaxed">
-                레오의 100억 주식매매 프로그램에 오신 것을 환영합니다.<br/>
-                서비스 이용을 위해 로그인이 필요합니다.
+          <div className="flex flex-col items-center justify-center text-center">
+            <h1 className="text-2xl font-black text-white mb-2 uppercase italic tracking-tighter">LEO 10B AI BOT</h1>
+            <p className="text-sleek-text-secondary text-sm mb-8 leading-relaxed">
+              레오의 100억 주식매매 프로그램에 오신 것을 환영합니다.<br/>
+              서비스 이용을 위해 로그인이 필요합니다.
+            </p>
+            
+            <div className="space-y-4 w-full">
+              <button 
+                onClick={handleLogin}
+                className="w-full py-4 rounded-xl bg-white text-black font-black flex items-center justify-center gap-3 hover:scale-[1.02] transition-all cursor-pointer shadow-lg"
+              >
+                <User className="w-5 h-5" />
+                GOOGLE 계정으로 로그인하기
+              </button>
+            </div>
+
+            <div className="mt-8 bg-black/30 border border-white/5 rounded-2xl p-4 text-left space-y-1.5 w-full">
+              <h4 className="text-[10px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-1.5">
+                <Info className="w-3.5 h-3.5" /> iFrame 로그인 차단 안내
+              </h4>
+              <p className="text-[10px] text-sleek-text-secondary leading-relaxed">
+                만약 구글 로그인 버튼이 작동하지 않거나 무반응이라면, 브라우저 보안 정책(3방 쿠키 차단) 때문입니다.
+                오른쪽 상단의 <strong>'새 창에서 열기' (Open in New Tab)</strong> 버튼을 클릭해 접속해 주세요.
               </p>
-              
-              <div className="space-y-4">
-                <button 
-                  onClick={handleLogin}
-                  className="w-full py-4 rounded-xl bg-white text-black font-black flex items-center justify-center gap-3 hover:scale-[1.02] transition-all cursor-pointer shadow-lg"
-                >
-                  <User className="w-5 h-5" />
-                  GOOGLE 계정으로 로그인하기
-                </button>
-
-                <div className="relative py-2">
-                  <div className="absolute inset-0 flex items-center">
-                    <span className="w-full border-t border-white/10"></span>
-                  </div>
-                  <span className="relative bg-sleek-card px-3 text-[10px] text-sleek-text-secondary uppercase tracking-widest font-bold">OR</span>
-                </div>
-
-                <button 
-                  onClick={() => {
-                    setIsDirectLoginOpen(true);
-                    setDirectLoginError(null);
-                  }}
-                  className="w-full py-3.5 rounded-xl bg-sleek-blue/10 border border-sleek-blue/30 text-sleek-blue font-bold flex items-center justify-center gap-3 hover:bg-sleek-blue/20 transition-all cursor-pointer"
-                >
-                  <Key className="w-4 h-4" />
-                  인증키로 즉시 로그인하기
-                </button>
-              </div>
-
-              <div className="mt-8 bg-black/30 border border-white/5 rounded-2xl p-4 text-left space-y-1.5">
-                <h4 className="text-[10px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-1.5">
-                  <Info className="w-3.5 h-3.5" /> iFrame 로그인 차단 안내
-                </h4>
-                <p className="text-[10px] text-sleek-text-secondary leading-relaxed">
-                  만약 구글 로그인 버튼이 작동하지 않거나 무반응이라면, 브라우저 보안 정책(3방 쿠키 차단) 때문입니다.
-                  오른쪽 상단의 <strong>'새 창에서 열기' (Open in New Tab)</strong> 버튼을 클릭해 접속하시거나, <strong>'인증키로 즉시 로그인'</strong>을 사용해주세요.
-                </p>
-              </div>
-            </>
-          ) : (
-            <>
-              <h1 className="text-xl font-black text-white mb-2 uppercase italic tracking-tighter flex items-center justify-center gap-2">
-                <Key className="w-5 h-5 text-sleek-blue" /> 인증키 간편 로그인
-              </h1>
-              <p className="text-sleek-text-secondary text-[11px] mb-6 leading-relaxed">
-                발급받은 16자리 인증키(라이선스 키)를 입력하여 소셜 연동 없이 간편하게 로그인할 수 있습니다.
-              </p>
-
-              <div className="space-y-4 text-left">
-                <div>
-                  <label className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest block mb-2">
-                    라이선스 인증키 입력
-                  </label>
-                  <input
-                    type="text"
-                    value={directKeyInput}
-                    onChange={(e) => setDirectKeyInput(e.target.value.toUpperCase())}
-                    placeholder="XXXX-XXXX-XXXX-XXXX"
-                    className="w-full bg-black/40 border border-sleek-border rounded-xl p-4 text-sm font-bold tracking-widest focus:border-sleek-blue outline-none transition-all text-center uppercase"
-                  />
-                </div>
-
-                {directLoginError && (
-                  <div className="p-3 bg-sleek-red/10 border border-sleek-red/30 rounded-xl text-[10px] text-sleek-red font-bold leading-relaxed">
-                    {directLoginError}
-                  </div>
-                )}
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    onClick={() => setIsDirectLoginOpen(false)}
-                    className="flex-1 py-3 rounded-xl bg-white/5 border border-white/10 text-sleek-text-secondary font-bold text-xs hover:bg-white/10 transition-all cursor-pointer"
-                    disabled={isDirectLoggingIn}
-                  >
-                    돌아가기
-                  </button>
-                  <button
-                    onClick={handleDirectLogin}
-                    disabled={isDirectLoggingIn}
-                    className="flex-1 py-3 rounded-xl bg-sleek-blue text-white font-black text-xs hover:scale-[1.02] transition-all cursor-pointer flex items-center justify-center gap-2"
-                  >
-                    {isDirectLoggingIn ? (
-                      <>
-                        <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        인증 중...
-                      </>
-                    ) : (
-                      "로그인하기"
-                    )}
-                  </button>
-                </div>
-              </div>
-
-              <p className="mt-6 text-[9px] text-sleek-text-secondary italic">
-                * 키 분실 시 관리자에게 복구를 문의해주세요.
-              </p>
-            </>
-          )}
+            </div>
+          </div>
         </motion.div>
       </div>
     );
@@ -3652,7 +3600,7 @@ export default function App() {
           >
             <motion.div 
               initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
-              className="bg-sleek-card border border-sleek-blue/30 rounded-3xl p-8 w-full max-w-md shadow-2xl"
+              className="bg-sleek-card border border-sleek-blue/30 rounded-3xl p-8 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl custom-scrollbar"
             >
               <h2 className="text-xl font-black text-white mb-2 flex items-center gap-2">
                 <CircleDollarSign className="text-sleek-blue" />
@@ -3870,7 +3818,7 @@ export default function App() {
           >
             <motion.div 
               initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
-              className="bg-sleek-card border border-sleek-blue/30 rounded-3xl p-8 w-full max-w-md shadow-2xl"
+              className="bg-sleek-card border border-sleek-blue/30 rounded-3xl p-8 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl custom-scrollbar"
             >
               <div className="flex items-center gap-3 mb-6">
                 <div className="w-10 h-10 bg-sleek-blue/20 rounded-xl flex items-center justify-center">
@@ -3925,7 +3873,7 @@ export default function App() {
           >
             <motion.div 
               initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
-              className="bg-sleek-card border border-sleek-blue/30 rounded-3xl p-8 w-full max-w-md shadow-2xl relative overflow-hidden"
+              className="bg-sleek-card border border-sleek-blue/30 rounded-3xl p-8 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl relative custom-scrollbar"
             >
               <div className="absolute top-0 right-0 w-32 h-32 bg-sleek-blue/5 rounded-full -mr-16 -mt-16 blur-2xl"></div>
               
@@ -4012,7 +3960,7 @@ export default function App() {
           >
             <motion.div 
               initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
-              className="bg-sleek-card border border-white/10 rounded-3xl p-8 w-full max-w-sm shadow-2xl text-center"
+              className="bg-sleek-card border border-white/10 rounded-3xl p-8 w-full max-w-sm max-h-[90vh] overflow-y-auto shadow-2xl text-center custom-scrollbar"
             >
               <div className="w-16 h-16 bg-sleek-red/20 rounded-full flex items-center justify-center mx-auto mb-6">
                 <ShieldCheck className="w-8 h-8 text-sleek-red" />
@@ -4274,6 +4222,71 @@ export default function App() {
             >
               다른 계정으로 로그인
             </button>
+          </motion.div>
+        </div>
+      ) : !isAppInitialized ? (
+        <div className="flex-1 flex items-center justify-center p-6 bg-sleek-bg relative overflow-hidden">
+          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-sleek-blue/10 blur-[120px] rounded-full animate-pulse"></div>
+          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-sleek-green/10 blur-[120px] rounded-full animate-pulse delay-700"></div>
+
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.9, y: 20 }} 
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="bg-sleek-card border border-sleek-blue/20 rounded-[2.5rem] p-12 w-full max-w-xl shadow-2xl text-center relative z-10"
+          >
+            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-transparent via-sleek-blue to-transparent opacity-50"></div>
+            
+            <div className="w-24 h-24 bg-sleek-blue/10 rounded-3xl flex items-center justify-center mx-auto mb-8 relative">
+              <div className="absolute inset-0 bg-sleek-blue/5 rounded-3xl animate-ping opacity-20"></div>
+              <Bot className="w-12 h-12 text-sleek-blue drop-shadow-[0_0_10px_rgba(30,144,255,0.5)]" />
+            </div>
+            
+            <h1 className="text-4xl font-black text-white mb-4 tracking-tighter uppercase italic leading-none">
+              Welcome to <span className="text-sleek-blue">LEO BOT</span>
+            </h1>
+            
+            <p className="text-sleek-text-secondary text-base mb-10 leading-relaxed max-w-md mx-auto">
+              {kisConfig.isConnected 
+                ? "계좌 연동이 성공적으로 설정되어 있습니다. 아래 '정보 업데이트' 버튼을 눌러 최신 잔고와 시세를 동기화하고 트레이딩을 시작하세요."
+                : "처음 오셨군요! 우측 상단 '설정(톱니바퀴)' 아이콘을 클릭하여 한국투자증권(KIS) API 키를 먼저 등록해주세요. 설정이 완료되면 아래 버튼으로 엔진을 기동할 수 있습니다."}
+            </p>
+
+            <div className="space-y-4">
+              <button 
+                onClick={() => {
+                  if (kisConfig.isConnected) {
+                    handleSyncKIS();
+                  }
+                  setIsAppInitialized(true);
+                }}
+                className="w-full py-5 bg-sleek-blue text-white rounded-2xl font-black text-lg shadow-[0_10px_30px_-10px_rgba(30,144,255,0.5)] hover:scale-[1.03] active:scale-95 transition-all flex items-center justify-center gap-3 group"
+              >
+                <Zap className="w-6 h-6 fill-white group-hover:animate-bounce" />
+                정보 업데이트 및 시스템 가동
+              </button>
+
+              <button 
+                onClick={() => setShowKisModal(true)}
+                className="w-full py-4 bg-white/5 border border-white/10 text-sleek-text-secondary rounded-2xl font-bold text-sm hover:bg-white/10 hover:text-white transition-all flex items-center justify-center gap-2"
+              >
+                <Settings className="w-4 h-4" /> {kisConfig.isConnected ? "KIS 연동 설정 변경" : "KIS 연동 설정하기"}
+              </button>
+            </div>
+
+            <div className="mt-12 pt-8 border-t border-white/5 grid grid-cols-3 gap-4">
+              <div className="text-center">
+                <div className="text-[10px] text-sleek-text-secondary uppercase tracking-widest mb-1">Status</div>
+                <div className="text-xs font-bold text-amber-400">READY</div>
+              </div>
+              <div className="text-center border-x border-white/5">
+                <div className="text-[10px] text-sleek-text-secondary uppercase tracking-widest mb-1">Network</div>
+                <div className="text-xs font-bold text-emerald-400">STABLE</div>
+              </div>
+              <div className="text-center">
+                <div className="text-[10px] text-sleek-text-secondary uppercase tracking-widest mb-1">Version</div>
+                <div className="text-xs font-bold text-white/50">10B.PRO</div>
+              </div>
+            </div>
           </motion.div>
         </div>
       ) : (
@@ -5860,7 +5873,7 @@ export default function App() {
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="bg-sleek-card border border-sleek-border rounded-3xl p-6 md:p-8 max-w-lg w-full shadow-2xl space-y-6 relative overflow-hidden"
+              className="bg-sleek-card border border-sleek-border rounded-3xl p-6 md:p-8 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl space-y-6 relative custom-scrollbar"
             >
               <div className="flex items-center justify-between border-b border-white/10 pb-4">
                 <div className="flex items-center gap-3">
