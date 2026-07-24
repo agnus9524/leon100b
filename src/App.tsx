@@ -146,6 +146,7 @@ interface PendingSellOrder {
   isSimulated: boolean;
   type?: 'LIMIT_SELL' | 'TARGET_WATCH' | 'SCALPER_EXIT';
   reason?: string;
+  buyPrice?: number; // Added to calculate profit upon fill
 }
 
 interface AIAnalysisResult {
@@ -2147,7 +2148,7 @@ export default function App() {
               pattern: decision.analysis.detectedPattern
             } : s));
 
-            executeTrade(decision.action, stockToAnalyze, decision.amount, decision.reason);
+            executeTrade(decision.action, stockToAnalyze, decision.amount, decision.reason, undefined, decision.action === 'SELL' ? avgPrices[stockToAnalyze.symbol] : undefined);
             const actionStr = actionMap[decision.action as keyof typeof actionMap] || decision.action;
             setBotStatus(`${stockToAnalyze.symbol} 전략 수립 완료: ${actionStr}`);
             
@@ -2324,7 +2325,8 @@ export default function App() {
           currentStock, 
           totalQty, 
           `[통합평단가 목표익절] 평단가 ₩${newAvg.toLocaleString()} 대비 +${scalpingTargetProfit}% 자동 주문`, 
-          targetSellPrice
+          targetSellPrice,
+          newAvg
         );
       }, 300);
     } else {
@@ -2336,7 +2338,8 @@ export default function App() {
           currentStock, 
           qty, 
           `[개별익절 자동주문] 매수가 ₩${buyPrice.toLocaleString()} 대비 +${scalpingTargetProfit}%`, 
-          targetSellPrice
+          targetSellPrice,
+          buyPrice
         );
       }, 300);
     }
@@ -2507,6 +2510,15 @@ export default function App() {
             addLog(order.symbol, '매수', orderPrice, order.quantity, `[모의 체결] 주문가 ₩${orderPrice.toLocaleString()} 체결 완료 (현재가: ₩${currentPrice.toLocaleString()})`);
             showNotification(`${currentStock.name} 모의 매수 주문 체결 완료!`, "success");
             setBotStatus(`[모의 체결] ₩${orderPrice.toLocaleString()} 완료`);
+            
+            // Add to gapInventory and update ref
+            const newSlot = { price: orderPrice, quantity: order.quantity };
+            setGapInventory(prev => {
+              const next = [...prev, newSlot];
+              gapInventoryRef.current = next;
+              return next;
+            });
+
             setLastTradeType('BUY');
             setGapTradeCount(prev => prev + 1);
             playScalpingSound('BUY');
@@ -2547,7 +2559,11 @@ export default function App() {
                     quantity: remainingQty
                   });
                   // Add filled portion to inventory
-                  setGapInventory(prev => [...prev, { price: orderPrice, quantity: status.ccldQty }]);
+                  setGapInventory(prev => {
+                    const next = [...prev, { price: orderPrice, quantity: status.ccldQty }];
+                    gapInventoryRef.current = next;
+                    return next;
+                  });
                   const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + status.ccldQty).toFixed(4)) };
                   setHoldings(newHoldings);
                   if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
@@ -2583,6 +2599,15 @@ export default function App() {
                   addLog(order.symbol, '매수', orderPrice, order.quantity, `[실제체결] 체결 완료`);
                   showNotification(`${currentStock.name} KIS 매수 체결 완료!`, "success");
                   setBotStatus(`[체결 완료] ₩${orderPrice.toLocaleString()}`);
+                  
+                  // Add to gapInventory and update ref
+                  const newSlot = { price: orderPrice, quantity: order.quantity };
+                  setGapInventory(prev => {
+                    const next = [...prev, newSlot];
+                    gapInventoryRef.current = next;
+                    return next;
+                  });
+                  
                   setLastTradeType('BUY');
                   setGapTradeCount(prev => prev + 1);
                   playScalpingSound('BUY');
@@ -2630,6 +2655,34 @@ export default function App() {
             const priceInKrw = marketType === 'US' ? currentStock.price * exchangeRate : currentStock.price;
             setBalance(prev => prev + priceInKrw * order.quantity);
 
+            // Update profit stats if buyPrice is available
+            if (order.buyPrice) {
+              const profit = (currentStock.price - order.buyPrice) * order.quantity * (marketType === 'US' ? exchangeRate : 1);
+              setGapTradingProfit(prev => prev + profit);
+              if (profit > 0) setScalpingWins(prev => prev + 1);
+              else if (profit < 0) setScalpingLosses(prev => prev + 1);
+              
+              const profitRatio = (currentStock.price - order.buyPrice) / order.buyPrice;
+              if (profit > 0) {
+                showNotification(`${currentStock.name} 목표수익 매도 체결 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
+              } else {
+                showNotification(`${currentStock.name} 리스크 관리 매도 체결 완료 (${(profitRatio * 100).toFixed(2)}%)`, "info");
+              }
+
+              // [중요] 매도가 실제로 체결되었으므로 해당 슬롯을 비움 (gapInventory 업데이트)
+              const updatedInv = gapInventoryRef.current.filter(s => {
+                const slotPrice = typeof s === 'number' ? s : s.price;
+                // 매수가(buyPrice)가 일치하는 슬롯 하나를 제거 (여러개일 수 있으므로 filter 대신 수동 처리가 나을 수 있지만 일단 filter로 구현)
+                // 실제로는 buyPrice가 유니크하지 않을 수 있으므로 가장 오래된 것 하나만 제거하는 로직이 더 정확함
+                return slotPrice !== order.buyPrice;
+              });
+              gapInventoryRef.current = updatedInv;
+              setGapInventory(updatedInv);
+              gapInventoryRef.current = updatedInv;
+            } else {
+              showNotification(`${currentStock.name} 대기 중인 매도 주문 체결 완료 (₩${currentStock.price.toLocaleString()}, ${order.quantity}주)`, "success");
+            }
+
             // Update holdings
             const heldQty = holdings[order.symbol] || 0;
             const newHoldings = { ...holdings, [order.symbol]: Number(Math.max(0, heldQty - order.quantity).toFixed(4)) };
@@ -2637,7 +2690,6 @@ export default function App() {
             if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
 
             addLog(order.symbol, '매도', currentStock.price, order.quantity, `[모의 지정가 매도 체결] 목표가 ₩${order.orderPrice.toLocaleString()} 도달`);
-            showNotification(`${currentStock.name} 대기 중인 매도 주문 체결 완료 (₩${currentStock.price.toLocaleString()}, ${order.quantity}주)`, "success");
             playScalpingSound('SELL');
           } else {
             nextPending.push(order);
@@ -2650,6 +2702,14 @@ export default function App() {
               updated = true;
               addLog(order.symbol, '매도', status.price || order.orderPrice, status.ordQty || order.quantity, `[KIS 지정가 매도 체결] 전량 체결 완료`);
               showNotification(`${currentStock.name} KIS 매도 주문 체결 완료!`, "success");
+              
+              // Free up slot if paired with a buyPrice
+              if (order.buyPrice) {
+                const updatedInv = gapInventoryRef.current.filter(s => (typeof s === 'number' ? s : s.price) !== order.buyPrice);
+                gapInventoryRef.current = updatedInv;
+                setGapInventory(updatedInv);
+              }
+
               playScalpingSound('SELL');
               setTimeout(() => handleSyncKIS(), 500);
             } else if (status.ccldQty > 0) {
@@ -2739,7 +2799,7 @@ export default function App() {
 
           if (sellQty > 0 || (kisConfig.isConnected && kisConfig.isRealOrderEnabled)) {
             showNotification(`[지정가 매도 체결] ${currentStock.name} 현재가(₩${currentStock.price.toLocaleString()})가 목표가(₩${watch.targetPrice.toLocaleString()})에 도달하여 수동 매도가 실행되었습니다!`, "success");
-            await executeTrade('SELL', currentStock, sellQty, `[수동 지정가 감시] 목표가 ₩${watch.targetPrice.toLocaleString()} 도달 체결`, currentStock.price);
+            await executeTrade('SELL', currentStock, sellQty, `[수동 지정가 감시] 목표가 ₩${watch.targetPrice.toLocaleString()} 도달 체결`, currentStock.price, avgPrices[watch.symbol]);
             
             setManualSellWatches(prev => prev.filter(w => w.id !== watch.id));
             playScalpingSound('SELL');
@@ -2754,7 +2814,8 @@ export default function App() {
   // 2. High-speed automatic trading decisions (Profit Maximizer Engine)
   useEffect(() => {
     if (!isGapBotActive || !selectedStock) {
-      setGapInventory([]); // Reset grid inventory when stopped
+      setGapInventory([]); 
+      gapInventoryRef.current = [];
       setScalperMessage("대기 중...");
       cancelAllPendingOrders();
       return;
@@ -2807,15 +2868,16 @@ export default function App() {
           const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
 
           // Buy Trigger: Meets buy criteria (Oversold/LowerBand) OR immediate step entry mode when a distinct price level appears
-          if (meetsBuyCriteria || (immediateEntry && currentInventory.length < maxSlots)) {
+          if (meetsBuyCriteria || (immediateEntry && (currentInventory.length + pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length) < maxSlots)) {
+            const totalOccupied = currentInventory.length + pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length;
             if (isSamePriceBlocked) {
               setScalperMessage(`[동일가격 중복 차단] ₩${targetBuyPrice.toLocaleString()} 슬롯 보유 중`);
             } else if (isLockActive) {
               setScalperMessage(`[동시 체결 처리 중] ₩${targetBuyPrice.toLocaleString()} 대기...`);
-            } else if (currentInventory.length >= maxSlots) {
-              setScalperMessage(`[슬롯 가득 참] 전체 ${maxSlots}개 슬롯 보유 중 (매도 대기)`);
+            } else if (totalOccupied >= maxSlots) {
+              setScalperMessage(`[슬롯 가득 참] 전체 ${maxSlots}개 슬롯 보유/진입 대기 중 (매도 대기)`);
             } else {
-              const currentStep = currentInventory.length + 1;
+              const currentStep = totalOccupied + 1;
               const scaledQuantity = tradeQuantity * currentStep; 
               const scaledCost = priceInKrw * scaledQuantity;
 
@@ -2877,18 +2939,18 @@ export default function App() {
         const overallProfitRatio = (currentPrice - weightedAvgPrice) / weightedAvgPrice;
         if (overallProfitRatio >= (scalpingTargetProfit / 100) && overallProfitRatio > 0) {
           setScalperMessage(`[통합 평단가 일괄 익절] ₩${Math.round(weightedAvgPrice).toLocaleString()} -> ₩${currentPrice.toLocaleString()} (+${(overallProfitRatio * 100).toFixed(2)}%)`);
-          await executeTrade('SELL', selectedStock, totalHeldQty, `통합 평단가 일괄 익절 (+${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice);
+          await executeTrade('SELL', selectedStock, totalHeldQty, `통합 평단가 일괄 익절 (+${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice, weightedAvgPrice);
           
           gapInventoryRef.current = [];
           setGapInventory([]);
           setHighWaterMark({});
           setLastTradeType('SELL');
           setGapTradeCount(prev => prev + 1);
-          setScalpingWins(prev => prev + 1);
-          showNotification(`${selectedStock.name} 전체 수량 (${totalHeldQty}주) 통합 평단가 일괄 익절 완료 (+${(overallProfitRatio * 100).toFixed(2)}%)`, "success");
+          
+          // [중요] 수익 및 승패 통계는 executeTrade 또는 pendingSellOrders 모니터링에서 실제 체결 시점에 처리됨
+          // (사용자 요청: 실제 매도 체결 시점에만 수익 반영)
+          
           playScalpingSound('SELL');
-          const profit = (currentPrice - weightedAvgPrice) * totalHeldQty * (marketType === 'US' ? exchangeRate : 1);
-          setGapTradingProfit(prev => prev + profit);
           lastPrice = currentPrice;
           return; // Liquidated entire position instantly!
         }
@@ -2935,13 +2997,8 @@ export default function App() {
               else sellReason = "리스크 관리 손절";
 
               setScalperMessage(`[목표수익 즉시 매도] ₩${buyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} (${sellReason})`);
-              await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ₩${buyPrice.toLocaleString()}, 수량: ${sellQty}): ${sellReason}`, currentPrice);
+              await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ₩${buyPrice.toLocaleString()}, 수량: ${sellQty}): ${sellReason}`, currentPrice, buyPrice);
               
-              // Remove this exact slot synchronously from ref and state
-              const updatedRef = gapInventoryRef.current.filter(s => (typeof s === 'number' ? s : s.price) !== buyPrice);
-              gapInventoryRef.current = updatedRef;
-              setGapInventory(updatedRef);
-
               setHighWaterMark(prev => {
                 const next = { ...prev };
                 delete next[buyPrice];
@@ -2950,17 +3007,9 @@ export default function App() {
               setLastTradeType('SELL');
               setGapTradeCount(prev => prev + 1);
               
-              if (profitRatio > 0) {
-                setScalpingWins(prev => prev + 1);
-                showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}, ${sellQty}주) 목표수익 매도 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
-                playScalpingSound('SELL');
-              } else {
-                setScalpingLosses(prev => prev + 1);
-                showNotification(`${selectedStock.name} (매수가 ₩${buyPrice.toLocaleString()}, ${sellQty}주) 손절 매도 완료 (${(profitRatio * 100).toFixed(2)}%)`, "error");
-              }
-
-              const profit = (currentPrice - buyPrice) * sellQty * (marketType === 'US' ? exchangeRate : 1);
-              setGapTradingProfit(prev => prev + profit);
+              // [중요] 슬롯 제거(gapInventory 업데이트)는 executeTrade 또는 pendingSellOrders 모니터링에서 실제 체결 시점에 처리됨
+              // (사용자 요청: 실제 매도 체결 시점에만 슬롯 비우기)
+              
               // Continue loop without break to clear all eligible profitable slots in parallel!
             }
           }
@@ -2973,7 +3022,7 @@ export default function App() {
     return () => clearInterval(gapInterval);
   }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, lowestBidOnlyMode, maxSlots, allowSamePriceEntry, enableCombinedAvgProfitExit]);
 
-  const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number): Promise<number> => {
+  const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number, buyPrice?: number): Promise<number> => {
     if (action === 'HOLD' || amount <= 0) return 0;
 
     const tradePrice = customPrice !== undefined ? customPrice : stock.price;
@@ -3171,6 +3220,15 @@ export default function App() {
       setHoldings(newHoldings);
       setAvgPrices(prev => ({ ...prev, [stock.symbol]: newAvg }));
       if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
+      
+      // Add to gapInventory and update ref for immediate fill
+      const newSlot = { price: tradePrice, quantity: finalAmount };
+      setGapInventory(prev => {
+        const next = [...prev, newSlot];
+        gapInventoryRef.current = next;
+        return next;
+      });
+
       if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
           addLog(stock.symbol, '매수', tradePrice, finalAmount, reason);
       }
@@ -3231,12 +3289,41 @@ export default function App() {
             handleSyncKIS();
           }, 1000);
         } else {
-          // 가상 거래인 경우에만 로컬 상태 업데이트 진행
+          // 가상 거래인 경우
+          if (customPrice !== undefined) {
+            // [중요] 지정가 매도 주문인 경우 즉시 반영하지 않고 대기 주문으로 등록 (수익/잔고는 실제 체결 시 반영)
+            const simOrderId = `SIM-SELL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            const newPendingSell: PendingSellOrder = {
+              id: simOrderId,
+              symbol: stock.symbol,
+              orderPrice: tradePrice,
+              quantity: sellAmount,
+              createdAt: Date.now(),
+              isSimulated: true,
+              type: 'LIMIT_SELL',
+              reason,
+              buyPrice: buyPrice // Save buy price to calculate profit upon actual fill
+            };
+            setPendingSellOrders(prev => [...prev, newPendingSell]);
+            addLog(stock.symbol, '매도', tradePrice, sellAmount, `[모의 매도 주문접수] ${reason}`);
+            showNotification(`${stock.name} 모의 매도 주문 접수 완료 (체결 대기 중...)`, "info");
+            return 0;
+          }
+
+          // 시장가 혹은 즉시 체결되는 가상 매도인 경우
           setBalance(prev => prev + priceInKrw * sellAmount);
           const newHoldings = { ...holdings, [stock.symbol]: Number(Math.max(0, currentHoldings - sellAmount).toFixed(4)) };
           setHoldings(newHoldings);
           if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
           addLog(stock.symbol, '매도', tradePrice, sellAmount, reason);
+
+          // Update profit stats for immediate simulated fills
+          if (buyPrice) {
+            const profit = (tradePrice - buyPrice) * sellAmount * (marketType === 'US' ? exchangeRate : 1);
+            setGapTradingProfit(prev => prev + profit);
+            if (profit > 0) setScalpingWins(prev => prev + 1);
+            else if (profit < 0) setScalpingLosses(prev => prev + 1);
+          }
         }
         return sellAmount;
       }
@@ -3278,7 +3365,7 @@ export default function App() {
 
     if (currentPrice >= manualSellPrice || !isTargetWatchMode) {
       showNotification(`${selectedStock.name} ₩${manualSellPrice.toLocaleString()} 지정가 매도 진행 중...`, "info");
-      const executed = await executeTrade('SELL', selectedStock, manualSellQty, `[수동 지정가 매도] 희망가 ₩${manualSellPrice.toLocaleString()} 실행`, manualSellPrice);
+      const executed = await executeTrade('SELL', selectedStock, manualSellQty, `[수동 지정가 매도] 희망가 ₩${manualSellPrice.toLocaleString()} 실행`, manualSellPrice, avgPrices[selectedStock.symbol]);
       if (executed > 0) {
         showNotification(`${selectedStock.name} ₩${manualSellPrice.toLocaleString()} 지정가 매도 완료 (${executed}주)`, "success");
         playScalpingSound('SELL');
@@ -3304,7 +3391,8 @@ export default function App() {
         createdAt: Date.now(),
         isSimulated: !kisConfig.isConnected || !kisConfig.isRealOrderEnabled,
         type: 'TARGET_WATCH',
-        reason: '수동 지정가 매도 예약'
+        reason: '수동 지정가 매도 예약',
+        buyPrice: avgPrices[selectedStock.symbol] // Pass avgPrice as buyPrice for manual limit watch
       };
       setPendingSellOrders(prev => [...prev, newPendingSell]);
 
@@ -3339,7 +3427,7 @@ export default function App() {
           const amount = Number(((effectiveBalance * 0.05) / priceInKrw).toFixed(4));
           if (amount <= 0) throw new Error("주문 수량이 부족합니다 (잔액 확인 필요).");
           
-          await executeTrade(sig.action, stock, amount, `[BullGPT 시그널] ${sig.pattern}`);
+          await executeTrade(sig.action, stock, amount, `[BullGPT 시그널] ${sig.pattern}`, undefined, sig.action === 'SELL' ? avgPrices[stock.symbol] : undefined);
           setConfirmState(prev => ({ ...prev, show: false }));
         } catch (err: any) {
           console.error("Trade execution error:", err);
