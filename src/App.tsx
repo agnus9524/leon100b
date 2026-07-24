@@ -474,6 +474,7 @@ export default function App() {
   const [gapBuyPrice, setGapBuyPrice] = useState<number>(0);
   const [gapSellPrice, setGapSellPrice] = useState<number>(0);
   const [tradeQuantity, setTradeQuantity] = useState<number>(1);
+  const [scalperMode, setScalperMode] = useState<'NORMAL' | 'TURBO'>('NORMAL');
   const [isGapBotActive, setIsGapBotActive] = useState<boolean>(false);
   const [kisBuyableQty, setKisBuyableQty] = useState<number | null>(null);
   const [gapTradingProfit, setGapTradingProfit] = useState<number>(0);
@@ -510,8 +511,11 @@ export default function App() {
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
   const [maxSlots, setMaxSlots] = useState<number>(5);
-  const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(true); // Allow same price entries for averaging down/accumulating
-  const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(true); // Enable instant full position liquidation on weighted avg profit
+  const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(false); 
+  const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(true); 
+  const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
+  const [minGapBetweenSlots, setMinGapBetweenSlots] = useState<number>(0.3); // 0.3% gap
+  const [useFixedQuantity, setUseFixedQuantity] = useState<boolean>(true); 
 
   // Manual Limit Sell States
   const [manualSellWatches, setManualSellWatches] = useState<{
@@ -2856,35 +2860,45 @@ export default function App() {
       // A. PROFIT MAX BUY Condition: Only check buys inside min ~ max range
       if (currentPrice >= minPrice && currentPrice <= maxPrice) {
         if (lastPrice > 0) {
-          const meetsBuyCriteria = (isOverSold || isNearLowerBand) && (currentPrice >= sma5);
+          // Smart Logic: stricter criteria when in smart mode
+          const meetsBuyCriteria = isSmartScalperMode 
+            ? (rsi < 30 || isNearLowerBand) && currentPrice >= sma5 // Oversold + Reversal
+            : (isOverSold || isNearLowerBand) && (currentPrice >= sma5);
           
           const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
           const rawTargetBuyPrice = lowestBidOnlyMode ? (currentPrice - 5 * tickSize) : currentPrice;
           const targetBuyPrice = Math.round(rawTargetBuyPrice / tickSize) * tickSize;
 
           const currentInventory = gapInventoryRef.current;
+          
+          // Check for minimum gap between slots to prevent buying too fast during a crash
+          const lastSlot = currentInventory.length > 0 ? currentInventory[currentInventory.length - 1] : null;
+          const isGapSatisfied = !isSmartScalperMode || !lastSlot || 
+            (currentPrice <= lastSlot.price * (1 - (minGapBetweenSlots / 100)));
 
-          // Check if an active slot or pending order already exists at this EXACT same price level (only if allowSamePriceEntry is disabled)
+          // Check if an active slot or pending order already exists at this EXACT same price level
           const isSamePriceBlocked = !allowSamePriceEntry && (
-            currentInventory.some(slot => Math.abs(Math.round(typeof slot === 'number' ? slot : slot.price) - targetBuyPrice) < tickSize * 0.95) ||
+            currentInventory.some(slot => Math.abs(Math.round(slot.price) - targetBuyPrice) < tickSize * 0.95) ||
             pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(Math.round(p.orderPrice) - targetBuyPrice) < tickSize * 0.95)
           );
+          
           const isLockActive = buyingLockPricesRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(Math.round(p.price) - targetBuyPrice) < tickSize * 0.95);
 
           const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
 
-          // Buy Trigger: Meets buy criteria (Oversold/LowerBand) OR immediate step entry mode when a distinct price level appears
-          if (meetsBuyCriteria || (immediateEntry && (currentInventory.length + pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length) < maxSlots)) {
+          // Buy Trigger: Check gap and criteria
+          if (isGapSatisfied && (meetsBuyCriteria || (immediateEntry && (currentInventory.length + pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length) < maxSlots))) {
             const totalOccupied = currentInventory.length + pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length;
             if (isSamePriceBlocked) {
-              setScalperMessage(`[동일가격 중복 차단] ₩${targetBuyPrice.toLocaleString()} 슬롯 보유 중`);
+              setScalperMessage(`[중복 차단] ₩${targetBuyPrice.toLocaleString()} 보유 중`);
             } else if (isLockActive) {
-              setScalperMessage(`[동시 체결 처리 중] ₩${targetBuyPrice.toLocaleString()} 대기...`);
+              setScalperMessage(`[처리 중] ₩${targetBuyPrice.toLocaleString()} 대기...`);
             } else if (totalOccupied >= maxSlots) {
-              setScalperMessage(`[슬롯 가득 참] 전체 ${maxSlots}개 슬롯 보유/진입 대기 중 (매도 대기)`);
+              setScalperMessage(`[슬롯 가득 참] ${maxSlots}/${maxSlots} (매도 대기)`);
             } else {
               const currentStep = totalOccupied + 1;
-              const scaledQuantity = tradeQuantity * currentStep; 
+              // Martingale only if NOT in smart mode or useFixedQuantity is false
+              const scaledQuantity = (isSmartScalperMode || useFixedQuantity) ? tradeQuantity : tradeQuantity * currentStep; 
               const scaledCost = priceInKrw * scaledQuantity;
 
               if (balance < scaledCost) {
@@ -2999,7 +3013,10 @@ export default function App() {
           // 3. Fixed Stop Loss: Absolute bottom line
           const isStopLoss = profitRatio <= scalpingStopLoss / 100;
 
-          if (isTrailingStop || isProfitTarget || isStopLoss) {
+          // Smart Logic: even more aggressive selling if target is hit or RSI is very high
+          const isSmartExit = isSmartScalperMode && (rsi > 70 || profitRatio >= (scalpingTargetProfit / 100) * 1.2);
+
+          if (isTrailingStop || isProfitTarget || isStopLoss || isSmartExit) {
             const heldQty = holdings[selectedStock.symbol] || 0;
             const sellQty = Math.min(heldQty > 0 ? heldQty : buyQty, buyQty) || buyQty;
 
@@ -3342,6 +3359,13 @@ export default function App() {
           setHoldings(newHoldings);
           if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
           addLog(stock.symbol, '매도', tradePrice, sellAmount, reason);
+
+          // Clear slot if provided
+          if (slotId) {
+            const next = gapInventoryRef.current.filter(s => s.id !== slotId);
+            gapInventoryRef.current = next;
+            setGapInventory(next);
+          }
 
           // Update profit stats for immediate simulated fills
           if (buyPrice) {
@@ -4805,7 +4829,64 @@ export default function App() {
                   </button>
                 </div>
 
-                {/* 4. Entry Mode & Auto Cancel Drop Grid */}
+                {/* 4. Smart Scalper Configuration (NEW) */}
+                <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-2xl p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-black text-sleek-blue uppercase tracking-widest flex items-center gap-2">
+                      <Zap className="w-3.5 h-3.5" /> Smart Scalper Mode
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setIsSmartScalperMode(!isSmartScalperMode)}
+                      className={cn(
+                        "px-3 py-1 rounded-full text-[10px] font-black transition-all border",
+                        isSmartScalperMode
+                          ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue"
+                          : "bg-white/5 border-white/10 text-sleek-text-secondary opacity-60"
+                      )}
+                    >
+                      {isSmartScalperMode ? "SMART ACTIVE" : "SMART OFF"}
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div className="bg-black/30 p-2 rounded-xl border border-white/5">
+                      <label className="text-[10px] font-black text-sleek-text-secondary uppercase block mb-1">추가 매수 간격 (Gap %)</label>
+                      <div className="flex items-center gap-2">
+                        <input 
+                          type="number" 
+                          step="0.1"
+                          min="0.1"
+                          max="5"
+                          value={minGapBetweenSlots}
+                          onChange={(e) => setMinGapBetweenSlots(Math.max(0.1, Number(e.target.value)))}
+                          className="w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-xs font-mono font-bold text-white outline-none"
+                        />
+                        <span className="text-[10px] font-bold text-sleek-text-secondary">%</span>
+                      </div>
+                    </div>
+                    <div className="bg-black/30 p-2 rounded-xl border border-white/5 flex flex-col justify-between">
+                      <label className="text-[10px] font-black text-sleek-text-secondary uppercase block mb-1">진입 수량 방식</label>
+                      <button
+                        type="button"
+                        onClick={() => setUseFixedQuantity(!useFixedQuantity)}
+                        className={cn(
+                          "w-full py-1 rounded text-[10px] font-black border transition-all",
+                          useFixedQuantity
+                            ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
+                            : "bg-indigo-500/10 border-indigo-500/30 text-indigo-400"
+                        )}
+                      >
+                        {useFixedQuantity ? "고정 수량" : "가중(마틴게일)"}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-sleek-text-secondary italic leading-tight">
+                    * 스마트 모드: 추세 확인(SMA5 상향) 후 진입하며 설정된 Gap 하락 시에만 추가 매수하여 리스크를 관리합니다.
+                  </p>
+                </div>
+
+                {/* 5. Entry Mode & Auto Cancel Drop Grid */}
                 <div className="grid grid-cols-2 gap-2">
                   <div className="bg-white/5 p-2 rounded-xl border border-white/5 flex flex-col justify-between">
                     <span className="text-xs font-bold text-white flex items-center gap-1 mb-1">
