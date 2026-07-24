@@ -2299,6 +2299,49 @@ export default function App() {
     showNotification(`${order.symbol} 대기 중인 매도 주문이 취소되었습니다.`, "info");
   };
 
+  const triggerAutoSell = useCallback(async (stockSymbol: string, buyPrice: number, qty: number, forcedNewAvg?: number, forcedNewTotalQty?: number) => {
+    if (scalpingTargetProfit <= 0) return;
+
+    const currentStock = stocksRef.current.find(s => s.symbol === stockSymbol);
+    if (!currentStock) return;
+
+    if (enableCombinedAvgProfitExit) {
+      // 통합평단가 익절 모드: 전체 통합 수량 및 평단가 산출 후 매도 주문 자동 갱신
+      // forcedNewAvg/forcedNewTotalQty 가 있으면 그것을 사용 (상태 업데이트 전 호출 대비)
+      const totalQty = forcedNewTotalQty !== undefined ? forcedNewTotalQty : (holdings[stockSymbol] || 0);
+      const newAvg = forcedNewAvg !== undefined ? forcedNewAvg : (avgPrices[stockSymbol] || buyPrice);
+      
+      if (totalQty <= 0) return;
+      
+      const targetSellPrice = Math.round(newAvg * (1 + scalpingTargetProfit / 100));
+
+      // 기존 해당 종목 대기 매도 주문이 있으면 취소 후 갱신
+      setPendingSellOrders(prev => prev.filter(o => o.symbol !== stockSymbol));
+
+      setTimeout(() => {
+        executeTrade(
+          'SELL', 
+          currentStock, 
+          totalQty, 
+          `[통합평단가 목표익절] 평단가 ₩${newAvg.toLocaleString()} 대비 +${scalpingTargetProfit}% 자동 주문`, 
+          targetSellPrice
+        );
+      }, 300);
+    } else {
+      // 개별 슬롯 익절 모드: 각 슬롯별 매수가 기준 개별 매도 주문 등록
+      const targetSellPrice = Math.round(buyPrice * (1 + scalpingTargetProfit / 100));
+      setTimeout(() => {
+        executeTrade(
+          'SELL', 
+          currentStock, 
+          qty, 
+          `[개별익절 자동주문] 매수가 ₩${buyPrice.toLocaleString()} 대비 +${scalpingTargetProfit}%`, 
+          targetSellPrice
+        );
+      }, 300);
+    }
+  }, [scalpingTargetProfit, enableCombinedAvgProfitExit, holdings, avgPrices]);
+
   const cancelAllPendingOrders = useCallback(async () => {
     const buyOrdersToCancel = pendingBuyOrdersRef.current;
     const sellOrdersToCancel = pendingSellOrdersRef.current;
@@ -2467,14 +2510,23 @@ export default function App() {
             setLastTradeType('BUY');
             setGapTradeCount(prev => prev + 1);
             playScalpingSound('BUY');
+
+            // Trigger Auto-Sell
+            triggerAutoSell(order.symbol, orderPrice, order.quantity, newAvg, newQty);
           } else {
             // Real KIS order: check if KIS actually filled it!
             try {
               const status = await kisService.checkOrderExecution(order.id);
               if (status.isFullyFilled) {
                 setGapInventory(prev => [...prev, { price: orderPrice, quantity: status.ordQty || order.quantity }]);
-                const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + (status.ordQty || order.quantity)).toFixed(4)) };
+                const oldQty = holdings[order.symbol] || 0;
+                const oldAvg = avgPrices[order.symbol] || orderPrice;
+                const newQty = oldQty + (status.ordQty || order.quantity);
+                const newAvg = newQty > 0 ? Math.round(((oldQty * oldAvg) + ((status.ordQty || order.quantity) * orderPrice)) / newQty) : orderPrice;
+                
+                const newHoldings = { ...holdings, [order.symbol]: Number(newQty.toFixed(4)) };
                 setHoldings(newHoldings);
+                setAvgPrices(prev => ({ ...prev, [order.symbol]: newAvg }));
                 if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
                 
                 addLog(order.symbol, '매수', orderPrice, order.quantity, `[실제체결] 주문가 ₩${orderPrice.toLocaleString()} 전량 체결 완료`);
@@ -2483,6 +2535,9 @@ export default function App() {
                 setLastTradeType('BUY');
                 setGapTradeCount(prev => prev + 1);
                 playScalpingSound('BUY');
+
+                // Trigger Auto-Sell
+                triggerAutoSell(order.symbol, orderPrice, order.quantity, newAvg, newQty);
               } else if (status.ccldQty > 0) {
                 // Partially filled, keep in pending with remaining quantity!
                 const remainingQty = order.quantity - status.ccldQty;
@@ -2515,10 +2570,15 @@ export default function App() {
                const status = await kisService.checkOrderExecution(order.id);
                if (status.isFullyFilled) {
                   updated = true;
-                  setGapInventory(prev => [...prev, { price: orderPrice, quantity: status.ordQty || order.quantity }]);
-                  const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + (status.ordQty || order.quantity)).toFixed(4)) };
-                  setHoldings(newHoldings);
-                  if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
+                   const oldQty = holdings[order.symbol] || 0;
+                   const oldAvg = avgPrices[order.symbol] || orderPrice;
+                   const newQty = oldQty + (status.ordQty || order.quantity);
+                   const newAvg = newQty > 0 ? Math.round(((oldQty * oldAvg) + ((status.ordQty || order.quantity) * orderPrice)) / newQty) : orderPrice;
+                   
+                   const newHoldings = { ...holdings, [order.symbol]: Number(newQty.toFixed(4)) };
+                   setHoldings(newHoldings);
+                   setAvgPrices(prev => ({ ...prev, [order.symbol]: newAvg }));
+                   if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
                   
                   addLog(order.symbol, '매수', orderPrice, order.quantity, `[실제체결] 체결 완료`);
                   showNotification(`${currentStock.name} KIS 매수 체결 완료!`, "success");
@@ -2526,6 +2586,9 @@ export default function App() {
                   setLastTradeType('BUY');
                   setGapTradeCount(prev => prev + 1);
                   playScalpingSound('BUY');
+
+                  // Trigger Auto-Sell
+                  triggerAutoSell(order.symbol, orderPrice, order.quantity, newAvg, newQty);
                   continue;
                }
              } catch (e) {
@@ -2542,7 +2605,7 @@ export default function App() {
     };
 
     checkOrders();
-  }, [pendingBuyOrders, stocks, autoCancelThreshold, marketType, exchangeRate, holdings, currentUser, playScalpingSound]);
+  }, [pendingBuyOrders, stocks, autoCancelThreshold, marketType, exchangeRate, holdings, currentUser, playScalpingSound, triggerAutoSell]);
 
   // Monitor Pending Sell Orders for Price Changes, Fills, and Market Target Hits
   useEffect(() => {
@@ -2779,42 +2842,8 @@ export default function App() {
                     showNotification(`${selectedStock.name} 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${executedQty}주) 매수 완료`, "success");
                     playScalpingSound('BUY');
 
-                    // Automatically submit/update limit sell order based on enableCombinedAvgProfitExit toggle
-                    if (scalpingTargetProfit > 0) {
-                      if (enableCombinedAvgProfitExit) {
-                        // 통합평단가 익절 모드: 전체 통합 수량 및 평단가 산출 후 매도 주문 자동 갱신
-                        const prevQty = holdings[selectedStock.symbol] || 0;
-                        const prevAvg = avgPrices[selectedStock.symbol] || targetBuyPrice;
-                        const totalQty = prevQty + executedQty;
-                        const newAvg = totalQty > 0 ? Math.round(((prevQty * prevAvg) + (executedQty * targetBuyPrice)) / totalQty) : targetBuyPrice;
-                        const targetSellPrice = Math.round(newAvg * (1 + scalpingTargetProfit / 100));
-
-                        // 기존 해당 종목 대기 매도 주문이 있으면 취소 후 갱신
-                        setPendingSellOrders(prev => prev.filter(o => o.symbol !== selectedStock.symbol));
-
-                        setTimeout(() => {
-                          executeTrade(
-                            'SELL', 
-                            selectedStock, 
-                            totalQty, 
-                            `[통합평단가 목표익절] 평단가 ₩${newAvg.toLocaleString()} 대비 +${scalpingTargetProfit}% 갱신 주문`, 
-                            targetSellPrice
-                          );
-                        }, 100);
-                      } else {
-                        // 개별 슬롯 익절 모드: 각 슬롯별 매수가 기준 개별 매도 주문 등록
-                        const targetSellPrice = Math.round(targetBuyPrice * (1 + scalpingTargetProfit / 100));
-                        setTimeout(() => {
-                          executeTrade(
-                            'SELL', 
-                            selectedStock, 
-                            executedQty, 
-                            `[슬롯#${currentStep} 개별익절] 매수가 ₩${targetBuyPrice.toLocaleString()} 대비 +${scalpingTargetProfit}%`, 
-                            targetSellPrice
-                          );
-                        }, 100);
-                      }
-                    }
+                    // triggerAutoSell is now handled inside executeTrade or pendingBuyOrders monitor
+                    // to ensure it happens on ACTUAL execution (especially for pending/simulated orders)
                   }
                 } finally {
                   buyingLockPricesRef.current = buyingLockPricesRef.current.filter(p => !(p.symbol === selectedStock.symbol && Math.abs(Math.round(p.price) - targetBuyPrice) < 0.1));
@@ -3145,6 +3174,9 @@ export default function App() {
       if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
           addLog(stock.symbol, '매수', tradePrice, finalAmount, reason);
       }
+
+      // Trigger Auto-Sell for immediate simulated or real fills that reached this point
+      triggerAutoSell(stock.symbol, tradePrice, finalAmount, newAvg, newQty);
 
       // KIS API 연결 상태이고 실제 주문 전송이 활성화된 경우 실제 계좌 잔고를 비동기로 동기화
       if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
