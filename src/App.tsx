@@ -4744,26 +4744,15 @@ export default function App() {
                       <span className="text-xs font-bold text-white font-mono">{tradeQuantity}주</span>
                     </div>
                     <div className="flex items-center gap-1">
-                      <button 
-                        type="button"
-                        onClick={() => setTradeQuantity(prev => Math.max(1, prev - 1))}
-                        className="w-6 h-6 rounded bg-white/5 flex items-center justify-center hover:bg-white/10 text-white font-bold text-sm"
-                      >
-                        -
-                      </button>
-                      <input 
-                        type="number" 
+                      <select 
                         value={tradeQuantity}
-                        onChange={(e) => setTradeQuantity(Math.max(1, Number(e.target.value)))}
-                        className="flex-1 bg-black/40 border border-sleek-border rounded p-1 text-center text-sm font-bold outline-none text-white font-mono"
-                      />
-                      <button 
-                        type="button"
-                        onClick={() => setTradeQuantity(prev => prev + 1)}
-                        className="w-6 h-6 rounded bg-white/5 flex items-center justify-center hover:bg-white/10 text-white font-bold text-sm"
+                        onChange={(e) => setTradeQuantity(Number(e.target.value))}
+                        className="flex-1 bg-black/40 border border-sleek-border rounded p-1 text-center text-sm font-bold outline-none text-white font-mono appearance-none"
                       >
-                        +
-                      </button>
+                        {Array.from({ length: 100 }, (_, i) => i + 1).map(val => (
+                          <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
 
@@ -4773,23 +4762,24 @@ export default function App() {
                       <span className="text-xs font-bold text-emerald-400 font-mono">+{scalpingTargetProfit}% / {scalpingStopLoss}%</span>
                     </div>
                     <div className="grid grid-cols-2 gap-1 mt-1">
-                      <input 
-                        type="number" 
-                        step="0.05"
+                      <select 
                         value={scalpingTargetProfit}
-                        onChange={(e) => setScalpingTargetProfit(Math.max(0.01, Number(e.target.value)))}
-                        className="bg-black/40 border border-emerald-500/40 rounded p-1 text-xs font-mono outline-none text-emerald-400 text-center font-bold"
-                        placeholder="익절%"
-                      />
-                      <input 
-                        type="number" 
-                        step="0.05"
-                        max="-0.01"
+                        onChange={(e) => setScalpingTargetProfit(Number(e.target.value))}
+                        className="bg-black/40 border border-emerald-500/40 rounded p-1 text-xs font-mono outline-none text-emerald-400 text-center font-bold appearance-none"
+                      >
+                        {Array.from({ length: 50 }, (_, i) => Math.round((i + 1) * 0.1 * 10) / 10).map(val => (
+                          <option key={val} value={val} className="bg-sleek-bg text-emerald-400">+{val}%</option>
+                        ))}
+                      </select>
+                      <select 
                         value={scalpingStopLoss}
-                        onChange={(e) => setScalpingStopLoss(Math.min(-0.01, Number(e.target.value)))}
-                        className="bg-black/40 border border-rose-500/40 rounded p-1 text-xs font-mono outline-none text-rose-400 text-center font-bold"
-                        placeholder="손절%"
-                      />
+                        onChange={(e) => setScalpingStopLoss(Number(e.target.value))}
+                        className="bg-black/40 border border-rose-500/40 rounded p-1 text-xs font-mono outline-none text-rose-400 text-center font-bold appearance-none"
+                      >
+                        {Array.from({ length: 50 }, (_, i) => Math.round(-(i + 1) * 0.1 * 10) / 10).map(val => (
+                          <option key={val} value={val} className="bg-sleek-bg text-rose-400">{val}%</option>
+                        ))}
+                      </select>
                     </div>
                   </div>
                 </div>
