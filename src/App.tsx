@@ -4662,7 +4662,7 @@ export default function App() {
           {/* Terminal Core */}
           <div className="grid grid-cols-1 xl:grid-cols-12 gap-3">
             {/* Left: AI Scalping Config Panel (Compact Grid View without Scroll) */}
-            <div className="bg-sleek-card border border-sleek-border p-4 rounded-3xl shadow-xl space-y-2.5 xl:col-span-5">
+            <div id="ai-scalping-config-panel" className="bg-sleek-card border border-sleek-border p-4 rounded-3xl shadow-xl space-y-2.5 xl:col-span-5 scroll-mt-20">
               <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
                 <div className="flex flex-col">
                   <h2 className="text-base font-black text-white italic uppercase tracking-tighter">AI SCALPING CONFIG</h2>
@@ -5389,16 +5389,35 @@ export default function App() {
 
                                   const evalValue = (st.price || 0) * qty;
                                   const profitRatio = avgPrice > 0 ? (((st.price || 0) - avgPrice) / avgPrice) * 100 : 0;
+                                  const isSelected = selectedSymbol === sym;
 
                                   return (
                                     <div 
                                       key={sym}
-                                      className="p-2 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between text-xs font-mono shrink-0"
+                                      onClick={() => {
+                                        setSelectedSymbol(sym);
+                                        const configEl = document.getElementById('ai-scalping-config-panel');
+                                        if (configEl) {
+                                          configEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                        }
+                                      }}
+                                      className={cn(
+                                        "p-2 rounded-xl border flex items-center justify-between text-xs font-mono shrink-0 cursor-pointer transition-all group",
+                                        isSelected
+                                          ? "bg-sleek-blue/20 border-sleek-blue text-white ring-1 ring-sleek-blue/50 shadow-md"
+                                          : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-sleek-blue/30 text-slate-200"
+                                      )}
+                                      title="클릭하여 AI 스캘퍼 설정 및 차트 종목 변경"
                                     >
                                       <div className="flex flex-col gap-0.5">
                                         <div className="flex items-center gap-1.5">
                                           <span className="font-bold text-white text-sm">{st.name}</span>
                                           <span className="text-sleek-text-secondary text-[11px]">({sym})</span>
+                                          {isSelected && (
+                                            <span className="text-[9px] bg-sleek-blue text-black font-black px-1.5 py-0.2 rounded uppercase">
+                                              선택됨
+                                            </span>
+                                          )}
                                         </div>
                                         <div className="flex items-center gap-2 text-[11px]">
                                           <span className="text-amber-300">평단가 ₩{Math.floor(avgPrice).toLocaleString()}</span>
@@ -5414,7 +5433,8 @@ export default function App() {
                                           <div className="text-[11px] text-sleek-text-secondary">₩{Math.round(evalValue).toLocaleString()}</div>
                                         </div>
                                         <button
-                                          onClick={() => {
+                                          onClick={(e) => {
+                                            e.stopPropagation();
                                             setSelectedSymbol(sym);
                                             setManualSellPrice(st.price || 0);
                                             setManualSellQty(qty);
@@ -6330,11 +6350,25 @@ export default function App() {
                     </div>
                   ) : (
                     <div className="space-y-2.5 max-h-[260px] overflow-y-auto custom-scrollbar pr-1">
-                      {assetAnalysis.stockList.map((item) => (
-                        <div 
-                          key={item.symbol} 
-                          className="bg-white/5 border border-white/10 hover:border-sleek-blue/40 rounded-2xl p-4 transition-all space-y-2.5"
-                        >
+                      {assetAnalysis.stockList.map((item) => {
+                        const isSelected = selectedSymbol === item.symbol;
+                        return (
+                          <div 
+                            key={item.symbol} 
+                            onClick={() => {
+                              setSelectedSymbol(item.symbol);
+                              const configEl = document.getElementById('ai-scalping-config-panel');
+                              if (configEl) {
+                                configEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                              }
+                            }}
+                            className={cn(
+                              "border rounded-2xl p-4 transition-all space-y-2.5 cursor-pointer",
+                              isSelected 
+                                ? "bg-sleek-blue/15 border-sleek-blue shadow-lg ring-1 ring-sleek-blue/40" 
+                                : "bg-white/5 border-white/10 hover:border-sleek-blue/40"
+                            )}
+                          >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2.5">
                               <span className="font-extrabold text-white text-base md:text-lg">{item.name}</span>
@@ -6372,7 +6406,8 @@ export default function App() {
                             </div>
                           </div>
                         </div>
-                      ))}
+                      );
+                    })}
                     </div>
                   )}
                 </div>
