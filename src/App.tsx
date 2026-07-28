@@ -4581,15 +4581,16 @@ export default function App() {
         {/* Center: Gap Trading Terminal */}
         <section className="bg-sleek-bg overflow-y-auto custom-scrollbar p-3 md:p-4 space-y-3">
           {/* Header Stats (Compact 1-row view) */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="bg-sleek-card border border-sleek-border p-3.5 rounded-2xl shadow-lg relative overflow-hidden group flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-0.5">
-                  <Target className="w-4 h-4 text-sleek-blue" />
-                  <span className="text-xs font-black text-sleek-text-secondary uppercase tracking-widest">실시간 스캘핑 총 수익</span>
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3">
+            {/* 1. Real-time Scalping Total Profit (Narrowed) */}
+            <div className="bg-sleek-card border border-sleek-border p-3 rounded-2xl shadow-lg relative overflow-hidden group flex items-center justify-between sm:col-span-6 lg:col-span-2">
+              <div className="w-full">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <Target className="w-3.5 h-3.5 text-sleek-blue shrink-0" />
+                  <span className="text-[11px] font-black text-sleek-text-secondary uppercase tracking-wider truncate">스캘핑 총 수익</span>
                 </div>
                 <div className={cn(
-                  "text-2xl font-black italic tracking-tighter font-mono",
+                  "text-xl xl:text-2xl font-black italic tracking-tighter font-mono truncate",
                   gapTradingProfit >= 0 ? "text-sleek-green" : "text-sleek-red"
                 )}>
                   ₩{gapTradingProfit.toLocaleString()}
@@ -4597,24 +4598,25 @@ export default function App() {
               </div>
             </div>
 
-            <div className="bg-sleek-card border border-sleek-border p-3.5 rounded-2xl shadow-lg relative overflow-hidden group flex items-center justify-between">
-              <div>
-                <div className="flex items-center gap-2 mb-0.5">
-                  <Activity className="w-4 h-4 text-sleek-purple" />
-                  <span className="text-xs font-black text-sleek-text-secondary uppercase tracking-widest">오늘 체결 횟수</span>
+            {/* 2. Today's Trade Count (Narrowed) */}
+            <div className="bg-sleek-card border border-sleek-border p-3 rounded-2xl shadow-lg relative overflow-hidden group flex items-center justify-between sm:col-span-6 lg:col-span-2">
+              <div className="w-full">
+                <div className="flex items-center gap-1.5 mb-0.5">
+                  <Activity className="w-3.5 h-3.5 text-sleek-purple shrink-0" />
+                  <span className="text-[11px] font-black text-sleek-text-secondary uppercase tracking-wider truncate">오늘 체결 횟수</span>
                 </div>
-                <div className="text-2xl font-black text-white italic tracking-tighter font-mono">
+                <div className="text-xl xl:text-2xl font-black text-white italic tracking-tighter font-mono truncate">
                   {gapTradeCount} <span className="text-xs font-normal text-sleek-text-secondary opacity-50 not-italic">TRADES</span>
                 </div>
               </div>
             </div>
 
-            {/* Scalper Engine Status (Expanded 2 Columns) */}
-            <div className="bg-sleek-card border border-sleek-blue/40 p-3.5 rounded-2xl shadow-lg relative overflow-hidden group sm:col-span-2 lg:col-span-2 flex flex-col justify-between">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2 flex-wrap">
+            {/* 3. Scalper Engine Status (Widened to 8 Columns out of 12) */}
+            <div className="bg-sleek-card border border-sleek-blue/40 p-3.5 rounded-2xl shadow-lg relative overflow-hidden group sm:col-span-12 lg:col-span-8 flex flex-col justify-between">
+              <div className="flex items-center justify-between mb-1 gap-2">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
                   <Zap className="w-4 h-4 text-sleek-blue animate-pulse shrink-0" />
-                  <span className="text-xs font-black text-sleek-text-secondary uppercase tracking-widest">스캘퍼 엔진 상태</span>
+                  <span className="text-xs font-black text-sleek-text-secondary uppercase tracking-widest shrink-0">스캘퍼 엔진 상태</span>
                   <span className="text-sm font-bold text-white font-mono shrink-0">[{selectedStock?.name || '종목 미선택'} ({selectedStock?.symbol || '-'})]</span>
                   
                   {/* 수동 지정가 매도 버튼 (종목 코드 옆 배치) */}
@@ -4644,10 +4646,12 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-2 pt-1 border-t border-white/5 font-mono text-xs">
-                <div>
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 border-t border-white/5 font-mono text-xs">
+                <div className="col-span-2 sm:col-span-2">
                   <span className="text-[10px] text-sleek-text-secondary uppercase block">상태 메시지</span>
-                  <span className="font-bold text-sleek-blue truncate block">{scalperMessage || "대기 중..."}</span>
+                  <span className="font-bold text-sleek-blue block whitespace-nowrap overflow-hidden text-ellipsis" title={scalperMessage || "대기 중..."}>
+                    {scalperMessage || "대기 중..."}
+                  </span>
                 </div>
                 <div>
                   <span className="text-[10px] text-sleek-text-secondary uppercase block">활성 슬롯</span>
