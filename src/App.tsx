@@ -748,25 +748,40 @@ export default function App() {
     };
   }, [balance, holdings, stocks, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, principal, pnl, pnlPercent]);
 
-  // Scalper Engine Optimal Top 5 Stocks
-  const scalperTop5Stocks = useMemo(() => {
+  // Stable symbol ordering for TOP 3 Scalper Optimal Stocks:
+  // Held stocks come FIRST, followed by highest suitability stocks.
+  // Order is preserved once loaded / when marketType or holdings change, preventing live price ticks from shuffling.
+  const heldSymbolsKey = useMemo(() => {
+    return Object.entries(holdings)
+      .filter(([_, qty]) => Number(qty) > 0)
+      .map(([sym]) => sym)
+      .sort()
+      .join(',');
+  }, [holdings]);
+
+  const stableTop3Symbols = useMemo(() => {
     const candidateMap = new Map<string, Stock>();
-    
-    // Add current stocks
-    stocks.forEach(s => candidateMap.set(s.symbol, s));
-    
-    // Add default market stocks if not present
     const defaults = marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS;
-    defaults.forEach(s => {
-      if (!candidateMap.has(s.symbol)) {
-        candidateMap.set(s.symbol, s);
+    
+    // Add default market stocks
+    defaults.forEach(s => candidateMap.set(s.symbol, s));
+    
+    // Add current stocks matching marketType
+    stocks.forEach(s => {
+      const isUS = /^[A-Z]/.test(s.symbol);
+      if ((marketType === 'US' && isUS) || (marketType === 'KR' && !isUS)) {
+        if (!candidateMap.has(s.symbol)) {
+          candidateMap.set(s.symbol, s);
+        }
       }
     });
 
     const candidates = Array.from(candidateMap.values());
 
-    return candidates.map((stock) => {
-      // Calculate price oscillation amplitude (%) from history
+    const scoredCandidates = candidates.map((stock) => {
+      const qty = holdings[stock.symbol] || 0;
+      const isHeld = Number(qty) > 0;
+
       let oscillation = 1.8;
       if (stock.history && stock.history.length > 1) {
         const prices = stock.history.map(h => h.price).filter(p => p > 0);
@@ -777,7 +792,6 @@ export default function App() {
         }
       }
 
-      // Dynamic Scalper Fitness Score Calculation focused on Rising Momentum (상승 조짐)
       const isRising = stock.changePercent > 0;
       const risingScore = isRising ? Math.min(40, stock.changePercent * 8 + 15) : -25;
 
@@ -792,30 +806,92 @@ export default function App() {
       let liquidityScore = Math.min(25, Math.log10(rawVol + 10) * 6);
       let volScore = Math.min(20, oscillation * 5);
 
-      // Deterministic seed for stock stability per symbol
       const charSum = stock.symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
       const seed = (charSum % 8);
 
       const rawTotal = 35 + risingScore + liquidityScore + volScore + seed;
       const scalpScore = Math.min(99, Math.max(70, Math.round(rawTotal)));
 
-      // Primary reason tag highlighting rising signals
+      return {
+        symbol: stock.symbol,
+        isHeld,
+        scalpScore
+      };
+    });
+
+    // Priority: Held stocks FIRST (b.isHeld - a.isHeld), then highest scalpScore
+    scoredCandidates.sort((a, b) => {
+      if (a.isHeld !== b.isHeld) {
+        return a.isHeld ? -1 : 1;
+      }
+      return b.scalpScore - a.scalpScore;
+    });
+
+    return scoredCandidates.slice(0, 3).map(c => c.symbol);
+  }, [marketType, heldSymbolsKey]);
+
+  // Scalper Engine Optimal Top 3 Stocks mapping live stock data
+  const scalperTop5Stocks = useMemo(() => {
+    return stableTop3Symbols.map((sym) => {
+      const stock = stocks.find(s => s.symbol === sym) ||
+                    INITIAL_STOCKS_KR.find(s => s.symbol === sym) ||
+                    INITIAL_STOCKS.find(s => s.symbol === sym) ||
+                    { name: sym, symbol: sym, price: 0, changePercent: 0, volume: '0', history: [] };
+
+      const qty = holdings[sym] || 0;
+      const isHeld = Number(qty) > 0;
+
+      let oscillation = 1.8;
+      if (stock.history && stock.history.length > 1) {
+        const prices = stock.history.map(h => h.price).filter(p => p > 0);
+        if (prices.length > 0) {
+          const minP = Math.min(...prices);
+          const maxP = Math.max(...prices);
+          oscillation = ((maxP - minP) / (minP || 1)) * 100;
+        }
+      }
+
+      const isRising = stock.changePercent > 0;
+      const risingScore = isRising ? Math.min(40, stock.changePercent * 8 + 15) : -25;
+
+      let rawVol = 100;
+      if (typeof stock.volume === 'string') {
+        if (stock.volume.endsWith('M')) rawVol = parseFloat(stock.volume) * 1000;
+        else if (stock.volume.endsWith('K')) rawVol = parseFloat(stock.volume);
+        else rawVol = parseFloat(stock.volume) || 100;
+      } else if (typeof stock.volume === 'number') {
+        rawVol = stock.volume;
+      }
+      let liquidityScore = Math.min(25, Math.log10(rawVol + 10) * 6);
+      let volScore = Math.min(20, oscillation * 5);
+
+      const charSum = stock.symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+      const seed = (charSum % 8);
+
+      const rawTotal = 35 + risingScore + liquidityScore + volScore + seed;
+      const scalpScore = Math.min(99, Math.max(70, Math.round(rawTotal)));
+
       let reasonTag = "🚀 상승 수급 포착";
-      if (stock.changePercent > 3.0) reasonTag = `🔥 당일 급등 모멘텀 (+${stock.changePercent.toFixed(1)}%)`;
+      if (isHeld) reasonTag = `💼 보유 종목 (스캘핑 모니터링)`;
+      else if (stock.changePercent > 3.0) reasonTag = `🔥 당일 급등 모멘텀 (+${stock.changePercent.toFixed(1)}%)`;
       else if (stock.changePercent > 0) reasonTag = `📈 상승 돌파 시그널 (+${stock.changePercent.toFixed(1)}%)`;
       else if (oscillation > 2.0) reasonTag = `⚡ 호가 반등 진동 (${oscillation.toFixed(1)}%)`;
       else reasonTag = `💧 거래량 유동성 우수`;
 
+      const resolvedStockName = (stock.name && stock.name !== sym) 
+        ? stock.name 
+        : (INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym);
+
       return {
         ...stock,
+        name: resolvedStockName,
+        isHeld,
         scalpScore,
         oscillation,
         reasonTag
       };
-    })
-    .sort((a, b) => b.scalpScore - a.scalpScore)
-    .slice(0, 3);
-  }, [stocks, marketType]);
+    });
+  }, [stableTop3Symbols, stocks, holdings]);
 
   // Real-time Exchange Rate Fetcher & Simulator
   const fetchRealExchangeRate = React.useCallback(async () => {
