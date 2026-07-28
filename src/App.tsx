@@ -679,6 +679,10 @@ export default function App() {
                  INITIAL_STOCKS.find(s => s.symbol === sym) ||
                  { name: sym, symbol: sym, price: 0 };
 
+      const resolvedStockName = (st.name && st.name !== sym)
+        ? st.name
+        : (INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym);
+
       const isUS = /^[A-Z]/.test(sym);
       const currentPriceKRW = isUS ? (st.price || 0) * exchangeRate : (st.price || 0);
 
@@ -701,7 +705,7 @@ export default function App() {
 
       stockList.push({
         symbol: sym,
-        name: st.name || sym,
+        name: resolvedStockName,
         qty,
         avgPrice: avgPriceKRW,
         currentPrice: currentPriceKRW,
@@ -1678,10 +1682,13 @@ export default function App() {
         const addedStocks: Stock[] = await Promise.all(missingSymbols.map(async (sym) => {
           try {
             const p = await kisService.getPrice(sym);
+            const resolvedName = (p && p.name && p.name !== sym) 
+              ? p.name 
+              : (newStockNames[sym] || INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym);
             if (p) {
               return {
                 symbol: sym,
-                name: p.name || sym,
+                name: resolvedName,
                 price: p.current,
                 change: p.change,
                 changePercent: p.changePercent,
@@ -1692,9 +1699,10 @@ export default function App() {
             }
             throw new Error("No price data");
           } catch (e) {
+            const resolvedName = newStockNames[sym] || INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym;
             return {
               symbol: sym,
-              name: sym,
+              name: resolvedName,
               price: 0,
               change: 0,
               changePercent: 0,
@@ -5372,6 +5380,10 @@ export default function App() {
                                              INITIAL_STOCKS_KR.find(s => s.symbol === sym) || 
                                              INITIAL_STOCKS.find(s => s.symbol === sym) || 
                                              { name: sym, symbol: sym, price: 0, changePercent: 0 };
+
+                                  const stockDisplayName = (st.name && st.name !== sym) 
+                                    ? st.name 
+                                    : (INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym);
                                   
                                   let avgPrice = avgPrices[sym] || 0;
                                   if (avgPrice <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
@@ -5411,8 +5423,10 @@ export default function App() {
                                     >
                                       <div className="flex flex-col gap-0.5">
                                         <div className="flex items-center gap-1.5">
-                                          <span className="font-bold text-white text-sm">{st.name}</span>
-                                          <span className="text-sleek-text-secondary text-[11px]">({sym})</span>
+                                          <span className="font-bold text-white text-sm">{stockDisplayName !== sym ? stockDisplayName : sym}</span>
+                                          {stockDisplayName !== sym && (
+                                            <span className="text-sleek-text-secondary text-[11px]">({sym})</span>
+                                          )}
                                           {isSelected && (
                                             <span className="text-[9px] bg-sleek-blue text-black font-black px-1.5 py-0.2 rounded uppercase">
                                               선택됨
