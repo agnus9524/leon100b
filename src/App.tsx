@@ -206,11 +206,41 @@ const INITIAL_STOCKS: Stock[] = [
   {
     symbol: 'SOUN',
     name: 'SoundHound AI',
-    price: 2.78,
-    change: 0.16,
-    changePercent: 6.11,
-    volume: '22.5M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2.10 + (i / 40) * 0.68 + Math.random() * 0.05 })),
+    price: 5.78,
+    change: 0.32,
+    changePercent: 5.86,
+    volume: '24.5M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 4.50 + (i / 40) * 1.28 + Math.random() * 0.08 })),
+    isAI: true
+  },
+  {
+    symbol: 'SOFI',
+    name: 'SoFi Technologies',
+    price: 7.25,
+    change: 0.35,
+    changePercent: 5.07,
+    volume: '38.2M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 5.80 + (i / 40) * 1.45 + Math.random() * 0.09 })),
+    isAI: true
+  },
+  {
+    symbol: 'BBAI',
+    name: 'BigBear.ai',
+    price: 2.35,
+    change: 0.12,
+    changePercent: 5.38,
+    volume: '18.9M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1.80 + (i / 40) * 0.55 + Math.random() * 0.05 })),
+    isAI: true
+  },
+  {
+    symbol: 'IONQ',
+    name: 'IonQ Inc.',
+    price: 8.90,
+    change: 0.48,
+    changePercent: 5.70,
+    volume: '21.4M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 6.90 + (i / 40) * 2.00 + Math.random() * 0.12 })),
     isAI: true
   }
 ];
@@ -281,6 +311,56 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 3.70,
     volume: '15.6M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1400 + Math.round((i / 40) * 280) + Math.floor(Math.random() * 20) })),
+    isAI: true
+  },
+  {
+    symbol: '088350',
+    name: '한화생명',
+    price: 3120,
+    change: 120,
+    changePercent: 4.00,
+    volume: '22.4M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2600 + Math.round((i / 40) * 520) + Math.floor(Math.random() * 30) })),
+    isAI: true
+  },
+  {
+    symbol: '011930',
+    name: '신성이엔지',
+    price: 2180,
+    change: 85,
+    changePercent: 4.06,
+    volume: '16.5M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1820 + Math.round((i / 40) * 360) + Math.floor(Math.random() * 25) })),
+    isAI: true
+  },
+  {
+    symbol: '017040',
+    name: '광명전기',
+    price: 2450,
+    change: 105,
+    changePercent: 4.48,
+    volume: '14.2M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2000 + Math.round((i / 40) * 450) + Math.floor(Math.random() * 25) })),
+    isAI: true
+  },
+  {
+    symbol: '003520',
+    name: '영진약품',
+    price: 3450,
+    change: 140,
+    changePercent: 4.23,
+    volume: '12.8M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2900 + Math.round((i / 40) * 550) + Math.floor(Math.random() * 35) })),
+    isAI: true
+  },
+  {
+    symbol: '005360',
+    name: '모나미',
+    price: 2950,
+    change: 110,
+    changePercent: 3.87,
+    volume: '10.5M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2500 + Math.round((i / 40) * 450) + Math.floor(Math.random() * 30) })),
     isAI: true
   },
   {
@@ -813,7 +893,7 @@ export default function App() {
   }, [balance, holdings, stocks, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, principal, pnl, pnlPercent]);
 
   // Stable symbol ordering for TOP 5 Scalper Optimal Stocks:
-  // Priority: 3,000 KRW ($3) or less + 1-Year Upward Trend + High Volume
+  // Priority: 10,000 KRW ($10) or less + 1-Year Upward Trend + High Volume + Dynamic Rising Momentum
   const heldSymbolsKey = useMemo(() => {
     return Object.entries(holdings)
       .filter(([_, qty]) => Number(qty) > 0)
@@ -843,7 +923,7 @@ export default function App() {
       const name = (stock.name || INITIAL_STOCKS_KR.find(s => s.symbol === stock.symbol)?.name || stock.symbol).trim().toLowerCase();
       return !name.startsWith('kodex');
     });
-    const maxPrice = marketType === 'KR' ? 3000 : 3.0;
+    const maxPrice = marketType === 'KR' ? 10000 : 10.0;
 
     const scoredCandidates = candidates.map((stock) => {
       const qty = holdings[stock.symbol] || 0;
@@ -871,9 +951,9 @@ export default function App() {
         rawVol = stock.volume;
       }
 
-      // Liquidity & momentum scoring
+      // Liquidity & dynamic daily momentum scoring
       let liquidityScore = Math.min(35, Math.log10(rawVol + 10) * 9);
-      let risingScore = isRisingTrend ? Math.min(40, stock.changePercent * 8 + 15) : -30;
+      let risingScore = isRisingTrend ? Math.min(45, stock.changePercent * 10 + 20) : -30;
       let volScore = Math.min(20, oscillation * 5);
 
       const charSum = stock.symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
@@ -882,8 +962,8 @@ export default function App() {
       const scalpScore = Math.min(99, Math.max(70, Math.round(30 + risingScore + liquidityScore + volScore + seed)));
 
       // Priority Tiers:
-      // Tier 0: Price <= 3,000원 ($3) AND 1-Year Upward Trend (Highest Priority)
-      // Tier 1: Price <= 3,000원 ($3) only
+      // Tier 0: Price <= 10,000원 ($10) AND 1-Year Upward Trend & Real-time Rising Momentum (Highest Priority)
+      // Tier 1: Price <= 10,000원 ($10) only
       // Tier 2: Others (Fallback)
       let tier = 2;
       if (isPriceUnderLimit && isRisingTrend) {
@@ -916,11 +996,11 @@ export default function App() {
     });
 
     return scoredCandidates.slice(0, 5).map(c => c.symbol);
-  }, [marketType, heldSymbolsKey, top3RefreshNonce]);
+  }, [marketType, heldSymbolsKey, top3RefreshNonce, stocks]);
 
   // Scalper Engine Optimal Top 5 Stocks mapping live stock data
   const scalperTop5Stocks = useMemo(() => {
-    const maxPrice = marketType === 'KR' ? 3000 : 3.0;
+    const maxPrice = marketType === 'KR' ? 10000 : 10.0;
 
     return stableTop5Symbols.map((sym) => {
       const stock = stocks.find(s => s.symbol === sym) ||
@@ -943,7 +1023,7 @@ export default function App() {
         }
       }
 
-      const risingScore = isRising ? Math.min(40, stock.changePercent * 8 + 15) : -25;
+      const risingScore = isRising ? Math.min(45, stock.changePercent * 10 + 20) : -25;
 
       let rawVol = 100;
       if (typeof stock.volume === 'string') {
@@ -962,11 +1042,11 @@ export default function App() {
       const rawTotal = 35 + risingScore + liquidityScore + volScore + seed;
       const scalpScore = Math.min(99, Math.max(70, Math.round(rawTotal)));
 
-      let reasonTag = "🚀 1년 우상향 · 거래량 우수";
+      let reasonTag = "🚀 1년 우상향 · 실시간 상승기류";
       if (isHeld) {
-        reasonTag = `💼 보유 종목 (${marketType === 'KR' ? '3,000원 이하' : '$3 이하'})`;
+        reasonTag = `💼 보유 종목 (${marketType === 'KR' ? '10,000원 이하' : '$10 이하'})`;
       } else if (isUnderLimit && isRising) {
-        reasonTag = `⚡ ${marketType === 'KR' ? '3,000원 이하' : '$3 이하'} · 1년 우상향 · 거래량 우수 (+${stock.changePercent.toFixed(1)}%)`;
+        reasonTag = `⚡ ${marketType === 'KR' ? '10,000원 이하' : '$10 이하'} · 1년 우상향 · 실시간 상승기류 (+${stock.changePercent.toFixed(1)}%)`;
       } else if (stock.changePercent > 0) {
         reasonTag = `📈 1년 우상향 추세 (+${stock.changePercent.toFixed(1)}%)`;
       } else {
@@ -4652,7 +4732,7 @@ export default function App() {
                       </span>
                     </h2>
                     <div className="text-[9px] font-semibold text-amber-400/90 tracking-tight mt-0.5">
-                      {marketType === 'KR' ? '3,000원 이하 · 1년 우상향 · 거래량 우수 추천 5선' : '$3 이하 · 1년 우상향 · 거래량 우수 추천 5선'}
+                      {marketType === 'KR' ? '10,000원 이하 · 1년 우상향 · 실시간 상승기류 포착 5선' : '$10 이하 · 1년 우상향 · 실시간 상승기류 포착 5선'}
                     </div>
                   </div>
                 </div>
