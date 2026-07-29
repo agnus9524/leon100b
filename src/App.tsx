@@ -36,6 +36,7 @@ import {
   Plus,
   Copy,
   Check,
+  CheckCircle2,
   Info,
   Globe,
   Landmark,
@@ -134,6 +135,7 @@ interface PendingBuyOrder {
   quantity: number;
   createdAt: number;
   isSimulated: boolean;
+  slotId?: string; // Track which slot this order is for
 }
 
 interface PendingSellOrder {
@@ -231,6 +233,46 @@ interface NewsItem {
 }
 
 const INITIAL_STOCKS_KR: Stock[] = [
+  {
+    symbol: '252670',
+    name: 'KODEX 200선물인버스2X',
+    price: 2150,
+    change: 50,
+    changePercent: 2.38,
+    volume: '28.5M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2100 + Math.random() * 80 })),
+    isAI: true
+  },
+  {
+    symbol: '251340',
+    name: 'KODEX 코스닥150선물인버스',
+    price: 2840,
+    change: 85,
+    changePercent: 3.09,
+    volume: '18.2M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2750 + Math.random() * 120 })),
+    isAI: true
+  },
+  {
+    symbol: '025820',
+    name: '이구산업',
+    price: 2950,
+    change: 120,
+    changePercent: 4.24,
+    volume: '12.4M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2800 + Math.random() * 200 })),
+    isAI: true
+  },
+  {
+    symbol: '001520',
+    name: '동양',
+    price: 1120,
+    change: 35,
+    changePercent: 3.23,
+    volume: '8.7M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1080 + Math.random() * 60 })),
+    isAI: true
+  },
   {
     symbol: '073240',
     name: '금호타이어',
@@ -494,7 +536,7 @@ export default function App() {
   }, [pendingSellOrders]);
 
   const [autoCancelThreshold, setAutoCancelThreshold] = useState<number>(0.2); // 0.2%
-  const [immediateEntry, setImmediateEntry] = useState<boolean>(true);
+  const [immediateEntry, setImmediateEntry] = useState<boolean>(false);
   const [lowestBidOnlyMode, setLowestBidOnlyMode] = useState<boolean>(false); // 현재 체결가 진입 모드 (기본 false)
   const [scalperMessage, setScalperMessage] = useState<string>("대기 중...");
   const [selectedTimeframeBar, setSelectedTimeframeBar] = useState<'1m' | '3m' | '5m' | '10m'>('1m');
@@ -504,32 +546,34 @@ export default function App() {
   }, [gapInventory]);
 
   // Automated Scalping Configuration States
-  const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.2); // Scalping net target profit (0.2% default excluding fees)
-  const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-1.0); // -1.0% stop loss
+  const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.1); // Scalping net target profit (0.1% default)
+  const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-0.5); // -0.5% stop loss
   const [scalpingSpeed, setScalpingSpeed] = useState<number>(500); // 500ms (0.5s) fast scalping speed
   const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(true);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
-  const [maxSlots, setMaxSlots] = useState<number>(5);
+  const [maxSlots, setMaxSlots] = useState<number>(3);
   const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(false); 
-  const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(true); 
+  const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
   const [minGapBetweenSlots, setMinGapBetweenSlots] = useState<number>(0.3); // 0.3% gap
   const [useFixedQuantity, setUseFixedQuantity] = useState<boolean>(true); 
+  const [top3RefreshNonce, setTop3RefreshNonce] = useState<number>(0);
+  const [isRefreshingTop3, setIsRefreshingTop3] = useState<boolean>(false);
+
+  // Helper for tick-aware target sell price calculation to guarantee positive profit above tick size
+  const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number) => {
+    if (basePrice <= 0) return 0;
+    const tickSize = basePrice >= 500000 ? 1000 : basePrice >= 100000 ? 500 : basePrice >= 50000 ? 100 : basePrice >= 10000 ? 50 : basePrice >= 5000 ? 10 : 5;
+    const rawTarget = basePrice * (1 + targetProfitPct / 100);
+    const rounded = Math.round(rawTarget / tickSize) * tickSize;
+    return rounded > basePrice ? rounded : basePrice + tickSize;
+  }, []); 
 
   // Manual Limit Sell States
-  const [manualSellWatches, setManualSellWatches] = useState<{
-    id: string;
-    symbol: string;
-    stockName: string;
-    targetPrice: number;
-    quantity: number;
-    createdAt: number;
-  }[]>([]);
   const [manualSellModalOpen, setManualSellModalOpen] = useState<boolean>(false);
   const [manualSellPrice, setManualSellPrice] = useState<number>(0);
   const [manualSellQty, setManualSellQty] = useState<number>(1);
-  const [isTargetWatchMode, setIsTargetWatchMode] = useState<boolean>(true);
 
   // Notification State
   const [notifications, setNotifications] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string }[]>([]);
@@ -588,6 +632,16 @@ export default function App() {
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 5000);
   };
+
+  const handleRefreshScalperTop3 = useCallback(() => {
+    setIsRefreshingTop3(true);
+    setTop3RefreshNonce(prev => prev + 1);
+    
+    setTimeout(() => {
+      setIsRefreshingTop3(false);
+      showNotification("[스캘퍼 최적 종목 갱신] 스캘핑 최적 종목 분석 및 랭킹이 새로고침 되었습니다.", "success");
+    }, 600);
+  }, [showNotification]);
 
   // Confirmation Modal State
   const [confirmState, setConfirmState] = useState<{
@@ -748,7 +802,7 @@ export default function App() {
     };
   }, [balance, holdings, stocks, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, principal, pnl, pnlPercent]);
 
-  // Stable symbol ordering for TOP 3 Scalper Optimal Stocks:
+  // Stable symbol ordering for TOP 10 Scalper Optimal Stocks:
   // Held stocks come FIRST, followed by highest suitability stocks.
   // Order is preserved once loaded / when marketType or holdings change, preventing live price ticks from shuffling.
   const heldSymbolsKey = useMemo(() => {
@@ -759,7 +813,7 @@ export default function App() {
       .join(',');
   }, [holdings]);
 
-  const stableTop3Symbols = useMemo(() => {
+  const stableTop10Symbols = useMemo(() => {
     const candidateMap = new Map<string, Stock>();
     const defaults = marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS;
     
@@ -776,11 +830,18 @@ export default function App() {
       }
     });
 
-    const candidates = Array.from(candidateMap.values());
+    const candidates = Array.from(candidateMap.values()).filter(stock => {
+      const name = (stock.name || INITIAL_STOCKS_KR.find(s => s.symbol === stock.symbol)?.name || stock.symbol).trim().toLowerCase();
+      return !name.startsWith('kodex');
+    });
+    const maxPrice = marketType === 'KR' ? 3000 : 3.0;
 
     const scoredCandidates = candidates.map((stock) => {
       const qty = holdings[stock.symbol] || 0;
       const isHeld = Number(qty) > 0;
+
+      const isPriceUnderLimit = stock.price > 0 && stock.price <= maxPrice;
+      const isRisingTrend = stock.changePercent > 0;
 
       let oscillation = 1.8;
       if (stock.history && stock.history.length > 1) {
@@ -791,9 +852,6 @@ export default function App() {
           oscillation = ((maxP - minP) / (minP || 1)) * 100;
         }
       }
-
-      const isRising = stock.changePercent > 0;
-      const risingScore = isRising ? Math.min(40, stock.changePercent * 8 + 15) : -25;
 
       let rawVol = 100;
       if (typeof stock.volume === 'string') {
@@ -803,36 +861,59 @@ export default function App() {
       } else if (typeof stock.volume === 'number') {
         rawVol = stock.volume;
       }
-      let liquidityScore = Math.min(25, Math.log10(rawVol + 10) * 6);
+
+      // Liquidity & momentum scoring
+      let liquidityScore = Math.min(35, Math.log10(rawVol + 10) * 9);
+      let risingScore = isRisingTrend ? Math.min(40, stock.changePercent * 8 + 15) : -30;
       let volScore = Math.min(20, oscillation * 5);
 
       const charSum = stock.symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-      const seed = (charSum % 8);
+      const seed = ((charSum + top3RefreshNonce * 7) % 13);
 
-      const rawTotal = 35 + risingScore + liquidityScore + volScore + seed;
-      const scalpScore = Math.min(99, Math.max(70, Math.round(rawTotal)));
+      const scalpScore = Math.min(99, Math.max(70, Math.round(30 + risingScore + liquidityScore + volScore + seed)));
+
+      // Priority Tiers:
+      // Tier 0: Price <= 3,000원 ($3) AND Rising Trend (Highest Priority)
+      // Tier 1: Price <= 3,000원 ($3) only
+      // Tier 2: Others (Fallback)
+      let tier = 2;
+      if (isPriceUnderLimit && isRisingTrend) {
+        tier = 0;
+      } else if (isPriceUnderLimit) {
+        tier = 1;
+      }
 
       return {
         symbol: stock.symbol,
         isHeld,
+        tier,
+        rawVol,
         scalpScore
       };
     });
 
-    // Priority: Held stocks FIRST (b.isHeld - a.isHeld), then highest scalpScore
+    // Priority order:
+    // 1. Lower tier first (Tier 0 > Tier 1 > Tier 2)
+    // 2. Held stocks first
+    // 3. Highest scalpScore (driven by volume and momentum)
     scoredCandidates.sort((a, b) => {
+      if (a.tier !== b.tier) {
+        return a.tier - b.tier;
+      }
       if (a.isHeld !== b.isHeld) {
         return a.isHeld ? -1 : 1;
       }
       return b.scalpScore - a.scalpScore;
     });
 
-    return scoredCandidates.slice(0, 3).map(c => c.symbol);
-  }, [marketType, heldSymbolsKey]);
+    return scoredCandidates.slice(0, 10).map(c => c.symbol);
+  }, [marketType, heldSymbolsKey, top3RefreshNonce]);
 
-  // Scalper Engine Optimal Top 3 Stocks mapping live stock data
-  const scalperTop5Stocks = useMemo(() => {
-    return stableTop3Symbols.map((sym) => {
+  // Scalper Engine Optimal Top 10 Stocks mapping live stock data
+  const scalperTop10Stocks = useMemo(() => {
+    const maxPrice = marketType === 'KR' ? 3000 : 3.0;
+
+    return stableTop10Symbols.map((sym) => {
       const stock = stocks.find(s => s.symbol === sym) ||
                     INITIAL_STOCKS_KR.find(s => s.symbol === sym) ||
                     INITIAL_STOCKS.find(s => s.symbol === sym) ||
@@ -840,6 +921,8 @@ export default function App() {
 
       const qty = holdings[sym] || 0;
       const isHeld = Number(qty) > 0;
+      const isUnderLimit = stock.price > 0 && stock.price <= maxPrice;
+      const isRising = stock.changePercent > 0;
 
       let oscillation = 1.8;
       if (stock.history && stock.history.length > 1) {
@@ -851,7 +934,6 @@ export default function App() {
         }
       }
 
-      const isRising = stock.changePercent > 0;
       const risingScore = isRising ? Math.min(40, stock.changePercent * 8 + 15) : -25;
 
       let rawVol = 100;
@@ -872,11 +954,19 @@ export default function App() {
       const scalpScore = Math.min(99, Math.max(70, Math.round(rawTotal)));
 
       let reasonTag = "🚀 상승 수급 포착";
-      if (isHeld) reasonTag = `💼 보유 종목 (스캘핑 모니터링)`;
-      else if (stock.changePercent > 3.0) reasonTag = `🔥 당일 급등 모멘텀 (+${stock.changePercent.toFixed(1)}%)`;
-      else if (stock.changePercent > 0) reasonTag = `📈 상승 돌파 시그널 (+${stock.changePercent.toFixed(1)}%)`;
-      else if (oscillation > 2.0) reasonTag = `⚡ 호가 반등 진동 (${oscillation.toFixed(1)}%)`;
-      else reasonTag = `💧 거래량 유동성 우수`;
+      if (isHeld) {
+        reasonTag = `💼 보유 종목 (스캘핑 모니터링)`;
+      } else if (isUnderLimit && isRising) {
+        reasonTag = `⚡ ${marketType === 'KR' ? '3,000원 이하' : '$3 이하'} · 거래량 우수 · 상승기류 (+${stock.changePercent.toFixed(1)}%)`;
+      } else if (stock.changePercent > 3.0) {
+        reasonTag = `🔥 당일 급등 모멘텀 (+${stock.changePercent.toFixed(1)}%)`;
+      } else if (stock.changePercent > 0) {
+        reasonTag = `📈 상승 돌파 시그널 (+${stock.changePercent.toFixed(1)}%)`;
+      } else if (oscillation > 2.0) {
+        reasonTag = `⚡ 호가 반등 진동 (${oscillation.toFixed(1)}%)`;
+      } else {
+        reasonTag = `💧 거래량 유동성 우수`;
+      }
 
       const resolvedStockName = (stock.name && stock.name !== sym) 
         ? stock.name 
@@ -891,7 +981,7 @@ export default function App() {
         reasonTag
       };
     });
-  }, [stableTop3Symbols, stocks, holdings]);
+  }, [stableTop10Symbols, stocks, holdings, marketType]);
 
   // Real-time Exchange Rate Fetcher & Simulator
   const fetchRealExchangeRate = React.useCallback(async () => {
@@ -2365,11 +2455,10 @@ export default function App() {
     }
 
     setPendingSellOrders(prev => prev.filter(o => o.id !== orderId));
-    setManualSellWatches(prev => prev.filter(w => w.id !== orderId));
     showNotification(`${order.symbol} 대기 중인 매도 주문이 취소되었습니다.`, "info");
   };
 
-  const triggerAutoSell = useCallback(async (stockSymbol: string, buyPrice: number, qty: number, forcedNewAvg?: number, forcedNewTotalQty?: number) => {
+  const triggerAutoSell = useCallback(async (stockSymbol: string, buyPrice: number, qty: number, forcedNewAvg?: number, forcedNewTotalQty?: number, slotId?: string) => {
     if (scalpingTargetProfit <= 0) return;
 
     const currentStock = stocksRef.current.find(s => s.symbol === stockSymbol);
@@ -2383,7 +2472,7 @@ export default function App() {
       
       if (totalQty <= 0) return;
       
-      const targetSellPrice = Math.round(newAvg * (1 + scalpingTargetProfit / 100));
+      const targetSellPrice = calculateTargetSellPrice(newAvg, scalpingTargetProfit);
 
       // 기존 해당 종목 대기 매도 주문이 있으면 취소 후 갱신
       setPendingSellOrders(prev => prev.filter(o => o.symbol !== stockSymbol));
@@ -2400,15 +2489,16 @@ export default function App() {
       }, 300);
     } else {
       // 개별 슬롯 익절 모드: 각 슬롯별 매수가 기준 개별 매도 주문 등록
-      const targetSellPrice = Math.round(buyPrice * (1 + scalpingTargetProfit / 100));
+      const targetSellPrice = calculateTargetSellPrice(buyPrice, scalpingTargetProfit);
       setTimeout(() => {
         executeTrade(
           'SELL', 
           currentStock, 
           qty, 
-          `[개별익절 자동주문] 매수가 ₩${buyPrice.toLocaleString()} 대비 +${scalpingTargetProfit}%`, 
+          `[슬롯 독립익절 주문] 매수가 ₩${buyPrice.toLocaleString()} 대비 +${scalpingTargetProfit}% (목표가: ₩${targetSellPrice.toLocaleString()})`, 
           targetSellPrice,
-          buyPrice
+          buyPrice,
+          slotId
         );
       }, 300);
     }
@@ -2464,7 +2554,6 @@ export default function App() {
 
     setPendingBuyOrders([]);
     setPendingSellOrders([]);
-    setManualSellWatches([]);
     showNotification("모든 대기 (매수/매도) 주문이 취소되었습니다.", "info");
   }, [exchangeRate, marketType]);
 
@@ -2590,7 +2679,7 @@ export default function App() {
             setBotStatus(`[모의 체결] ₩${orderPrice.toLocaleString()} 완료`);
             
             // Add to gapInventory and update ref
-            const newSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            const newSlotId = order.slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
             const newSlot = { id: newSlotId, price: orderPrice, quantity: order.quantity };
             setGapInventory(prev => {
               const next = [...prev, newSlot];
@@ -2603,13 +2692,18 @@ export default function App() {
             playScalpingSound('BUY');
 
             // Trigger Auto-Sell
-            triggerAutoSell(order.symbol, orderPrice, order.quantity, newAvg, newQty);
+            triggerAutoSell(order.symbol, orderPrice, order.quantity, newAvg, newQty, newSlotId);
           } else {
             // Real KIS order: check if KIS actually filled it!
             try {
               const status = await kisService.checkOrderExecution(order.id);
               if (status.isFullyFilled) {
-                setGapInventory(prev => [...prev, { price: orderPrice, quantity: status.ordQty || order.quantity }]);
+                const kisSlotId = order.slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                setGapInventory(prev => {
+                  const next = [...prev, { id: kisSlotId, price: orderPrice, quantity: status.ordQty || order.quantity }];
+                  gapInventoryRef.current = next;
+                  return next;
+                });
                 const oldQty = holdings[order.symbol] || 0;
                 const oldAvg = avgPrices[order.symbol] || orderPrice;
                 const newQty = oldQty + (status.ordQty || order.quantity);
@@ -2628,7 +2722,7 @@ export default function App() {
                 playScalpingSound('BUY');
 
                 // Trigger Auto-Sell
-                triggerAutoSell(order.symbol, orderPrice, order.quantity, newAvg, newQty);
+                triggerAutoSell(order.symbol, orderPrice, order.quantity, newAvg, newQty, kisSlotId);
               } else if (status.ccldQty > 0) {
                 // Partially filled, keep in pending with remaining quantity!
                 const remainingQty = order.quantity - status.ccldQty;
@@ -2638,7 +2732,7 @@ export default function App() {
                     quantity: remainingQty
                   });
                   // Add filled portion to inventory
-                  const partialSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                  const partialSlotId = order.slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
                   setGapInventory(prev => {
                     const next = [...prev, { id: partialSlotId, price: orderPrice, quantity: status.ccldQty }];
                     gapInventoryRef.current = next;
@@ -2681,7 +2775,7 @@ export default function App() {
                   setBotStatus(`[체결 완료] ₩${orderPrice.toLocaleString()}`);
                   
                   // Add to gapInventory and update ref
-                  const realSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                  const realSlotId = order.slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
                   const newSlot = { id: realSlotId, price: orderPrice, quantity: order.quantity };
                   setGapInventory(prev => {
                     const next = [...prev, newSlot];
@@ -2694,7 +2788,7 @@ export default function App() {
                   playScalpingSound('BUY');
 
                   // Trigger Auto-Sell
-                  triggerAutoSell(order.symbol, orderPrice, order.quantity, newAvg, newQty);
+                  triggerAutoSell(order.symbol, orderPrice, order.quantity, newAvg, newQty, realSlotId);
                   continue;
                }
              } catch (e) {
@@ -2730,8 +2824,11 @@ export default function App() {
         }
 
         if (order.isSimulated) {
-          // Simulated Mode: Check if market price reached or exceeded target sell price
-          if (currentStock.price >= order.orderPrice) {
+          // Simulated Mode: Check if market price reached/exceeded target sell price OR reached target profit percentage
+          const profitRatio = order.buyPrice && order.buyPrice > 0 ? (currentStock.price - order.buyPrice) / order.buyPrice : 0;
+          const isTargetProfitHit = order.buyPrice && order.buyPrice > 0 && profitRatio >= (scalpingTargetProfit / 100) - 0.00001;
+
+          if (currentStock.price >= order.orderPrice || isTargetProfitHit) {
             updated = true;
             const priceInKrw = marketType === 'US' ? currentStock.price * exchangeRate : currentStock.price;
             setBalance(prev => prev + priceInKrw * order.quantity);
@@ -2878,33 +2975,6 @@ export default function App() {
   // Trailing Stop Loss State to track the peak price after each buy
   const [highWaterMark, setHighWaterMark] = useState<{ [price: number]: number }>({});
 
-  // Background Watcher for Manual Target Sell Orders (수동 지정가 매도 감시)
-  useEffect(() => {
-    if (manualSellWatches.length === 0) return;
-
-    const watchInterval = setInterval(() => {
-      manualSellWatches.forEach(async (watch) => {
-        const currentStock = stocksRef.current.find(s => s.symbol === watch.symbol);
-        if (!currentStock) return;
-
-        if (currentStock.price >= watch.targetPrice) {
-          const heldQty = holdings[watch.symbol] || 0;
-          const sellQty = Math.min(watch.quantity, heldQty > 0 ? heldQty : watch.quantity);
-
-          if (sellQty > 0 || (kisConfig.isConnected && kisConfig.isRealOrderEnabled)) {
-            showNotification(`[지정가 매도 체결] ${currentStock.name} 현재가(₩${currentStock.price.toLocaleString()})가 목표가(₩${watch.targetPrice.toLocaleString()})에 도달하여 수동 매도가 실행되었습니다!`, "success");
-            await executeTrade('SELL', currentStock, sellQty, `[수동 지정가 감시] 목표가 ₩${watch.targetPrice.toLocaleString()} 도달 체결`, currentStock.price, avgPrices[watch.symbol]);
-            
-            setManualSellWatches(prev => prev.filter(w => w.id !== watch.id));
-            playScalpingSound('SELL');
-          }
-        }
-      });
-    }, 1000);
-
-    return () => clearInterval(watchInterval);
-  }, [manualSellWatches, holdings, kisConfig.isConnected, kisConfig.isRealOrderEnabled]);
-
   // 2. High-speed automatic trading decisions (Profit Maximizer Engine)
   useEffect(() => {
     if (!isGapBotActive || !selectedStock) {
@@ -2955,10 +3025,17 @@ export default function App() {
 
           const currentInventory = gapInventoryRef.current;
           
-          // Check for minimum gap between slots to prevent buying too fast during a crash
+          // Check for minimum gap between slots to prevent buying too fast during a crash or buying when in profit
           const lastSlot = currentInventory.length > 0 ? currentInventory[currentInventory.length - 1] : null;
-          const isGapSatisfied = !isSmartScalperMode || !lastSlot || 
-            (currentPrice <= lastSlot.price * (1 - (minGapBetweenSlots / 100)));
+          let currentWeightedAvg = avgPrices[selectedStock.symbol] || 0;
+          if (currentWeightedAvg <= 0 && currentInventory.length > 0) {
+            const totalCost = currentInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
+            const totalQty = currentInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
+            currentWeightedAvg = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
+          }
+          const isPositionInProfit = currentWeightedAvg > 0 && currentPrice >= currentWeightedAvg;
+          
+          const isGapSatisfied = !isPositionInProfit && (!lastSlot || (currentPrice <= lastSlot.price * (1 - (minGapBetweenSlots / 100))));
 
           // Check if an active slot or pending order already exists at this EXACT same price level
           const isSamePriceBlocked = !allowSamePriceEntry && (
@@ -2994,22 +3071,17 @@ export default function App() {
                 buyingLockPricesRef.current.push(lockEntry);
 
                 try {
-                  const executedQty = await executeTrade('BUY', selectedStock, scaledQuantity, `Scalper Slot #${currentStep} (Scaled): ₩${targetBuyPrice.toLocaleString()} 진입`, targetBuyPrice);
+                  const currentSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                  const executedQty = await executeTrade('BUY', selectedStock, scaledQuantity, `Scalper Slot #${currentStep} (Scaled): ₩${targetBuyPrice.toLocaleString()} 진입`, targetBuyPrice, undefined, currentSlotId);
                   
                   if (executedQty > 0) {
                     setScalperMessage(`[매수 완료] 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${executedQty}주)`);
                     setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} ${executedQty}주 가중 진입 완료`);
-                    const newSlotList = [...gapInventoryRef.current, { price: targetBuyPrice, quantity: executedQty }];
-                    gapInventoryRef.current = newSlotList;
-                    setGapInventory(newSlotList);
                     setHighWaterMark(prev => ({ ...prev, [targetBuyPrice]: targetBuyPrice }));
                     setLastTradeType('BUY');
                     setGapTradeCount(prev => prev + 1);
                     showNotification(`${selectedStock.name} 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${executedQty}주) 매수 완료`, "success");
                     playScalpingSound('BUY');
-
-                    // triggerAutoSell is now handled inside executeTrade or pendingBuyOrders monitor
-                    // to ensure it happens on ACTUAL execution (especially for pending/simulated orders)
                   }
                 } finally {
                   buyingLockPricesRef.current = buyingLockPricesRef.current.filter(p => !(p.symbol === selectedStock.symbol && Math.abs(Math.round(p.price) - targetBuyPrice) < 0.1));
@@ -3071,8 +3143,39 @@ export default function App() {
           const slotId = slot.id;
           if (!buyPrice || buyPrice <= 0) continue;
 
-          // [핵심] 이미 매도 주문이 나간 슬롯은 중복 주문 방지
-          if (pendingSellOrdersRef.current.some(p => p.symbol === selectedStock.symbol && p.slotId === slotId)) {
+          const profitRatio = (currentPrice - buyPrice) / buyPrice;
+
+          // [핵심] 이미 매도 주문이 나간 슬롯인 경우: 목표 수익률 도달 시 즉시 체결 및 슬롯 비우기
+          const existingPending = pendingSellOrdersRef.current.find(p => p.symbol === selectedStock.symbol && p.slotId === slotId);
+          if (existingPending) {
+            if (existingPending.isSimulated && profitRatio >= (scalpingTargetProfit / 100) - 0.00001) {
+              const priceInKrw = marketType === 'US' ? currentPrice * exchangeRate : currentPrice;
+              setBalance(prev => prev + priceInKrw * buyQty);
+
+              const profit = (currentPrice - buyPrice) * buyQty * (marketType === 'US' ? exchangeRate : 1);
+              setGapTradingProfit(prev => prev + profit);
+              if (profit > 0) setScalpingWins(prev => prev + 1);
+              else if (profit < 0) setScalpingLosses(prev => prev + 1);
+
+              showNotification(`${selectedStock.name} 목표수익 즉시 체결 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
+
+              // Clear slot
+              const updatedInv = gapInventoryRef.current.filter(s => s.id !== slotId);
+              gapInventoryRef.current = updatedInv;
+              setGapInventory(updatedInv);
+
+              // Remove pending sell order
+              setPendingSellOrders(prev => prev.filter(p => p.id !== existingPending.id));
+
+              // Update holdings
+              const heldQty = holdings[selectedStock.symbol] || 0;
+              const newHoldings = { ...holdings, [selectedStock.symbol]: Number(Math.max(0, heldQty - buyQty).toFixed(4)) };
+              setHoldings(newHoldings);
+              if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
+
+              addLog(selectedStock.symbol, '매도', currentPrice, buyQty, `[목표수익 즉시 체결] ₩${buyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} (+${(profitRatio * 100).toFixed(2)}%)`);
+              playScalpingSound('SELL');
+            }
             continue;
           }
 
@@ -3081,12 +3184,11 @@ export default function App() {
             setHighWaterMark(prev => ({ ...prev, [buyPrice]: currentPrice }));
           }
 
-          const profitRatio = (currentPrice - buyPrice) / buyPrice;
           const currentHigh = highWaterMark[buyPrice] || buyPrice;
           const dropFromPeak = (currentHigh - currentPrice) / currentHigh;
 
-          // 1. Ultra-Scalping Micro Trailing Stop: lock in profit when dropping 0.03% from peak after reaching micro threshold
-          const microThreshold = Math.max(0.0005, (scalpingTargetProfit / 100) * 0.5);
+          // 1. Ultra-Scalping Micro Trailing Stop: lock in profit when dropping 0.03% from peak after reaching target threshold
+          const microThreshold = Math.max(0.001, scalpingTargetProfit / 100);
           const isMicroTrailingStop = profitRatio >= microThreshold && dropFromPeak >= 0.0003;
           const isStandardTrailing = profitRatio > 0.002 && dropFromPeak > 0.004;
           const isTrailingStop = isMicroTrailingStop || isStandardTrailing;
@@ -3258,6 +3360,7 @@ export default function App() {
                        // Register as Pending Order for execution check
                        const orgNo = res.output?.KRX_FWDG_ORD_ORGNO || res.output?.krx_fwdg_ord_orgno || "";
                        if (action === 'BUY') {
+                         const createdSlotId = slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
                          const newPending: PendingBuyOrder = {
                            id: odno,
                            orgNo,
@@ -3265,7 +3368,8 @@ export default function App() {
                            orderPrice: tradePrice,
                            quantity: finalAmount,
                            createdAt: Date.now(),
-                           isSimulated: false
+                           isSimulated: false,
+                           slotId: createdSlotId
                          };
                          setPendingBuyOrders(prev => [...prev, newPending]);
                        } else {
@@ -3315,6 +3419,8 @@ export default function App() {
         return 0;
       }
 
+      const createdSlotId = slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
       if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
         // Simulated Mode: Place as pending buy order instead of instant fill!
         const simOrderId = `SIM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -3327,7 +3433,8 @@ export default function App() {
           orderPrice: tradePrice,
           quantity: finalAmount,
           createdAt: Date.now(),
-          isSimulated: true
+          isSimulated: true,
+          slotId: createdSlotId
         };
         
         setPendingBuyOrders(prev => [...prev, newPending]);
@@ -3348,7 +3455,7 @@ export default function App() {
       if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
       
       // Add to gapInventory and update ref for immediate fill
-      const newSlot = { id: slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`, price: tradePrice, quantity: finalAmount };
+      const newSlot = { id: createdSlotId, price: tradePrice, quantity: finalAmount };
       setGapInventory(prev => {
         const next = [...prev, newSlot];
         gapInventoryRef.current = next;
@@ -3360,7 +3467,7 @@ export default function App() {
       }
 
       // Trigger Auto-Sell for immediate simulated or real fills that reached this point
-      triggerAutoSell(stock.symbol, tradePrice, finalAmount, newAvg, newQty);
+      triggerAutoSell(stock.symbol, tradePrice, finalAmount, newAvg, newQty, createdSlotId);
 
       // KIS API 연결 상태이고 실제 주문 전송이 활성화된 경우 실제 계좌 잔고를 비동기로 동기화
       if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
@@ -3497,42 +3604,11 @@ export default function App() {
 
     const currentPrice = selectedStock.price;
 
-    if (currentPrice >= manualSellPrice || !isTargetWatchMode) {
-      showNotification(`${selectedStock.name} ₩${manualSellPrice.toLocaleString()} 지정가 매도 진행 중...`, "info");
-      const executed = await executeTrade('SELL', selectedStock, manualSellQty, `[수동 지정가 매도] 희망가 ₩${manualSellPrice.toLocaleString()} 실행`, manualSellPrice, avgPrices[selectedStock.symbol]);
-      if (executed > 0) {
-        showNotification(`${selectedStock.name} ₩${manualSellPrice.toLocaleString()} 지정가 매도 완료 (${executed}주)`, "success");
-        playScalpingSound('SELL');
-        setManualSellModalOpen(false);
-      }
-    } else {
-      const watchId = `WATCH-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-      const newWatch = {
-        id: watchId,
-        symbol: selectedStock.symbol,
-        stockName: selectedStock.name,
-        targetPrice: manualSellPrice,
-        quantity: manualSellQty,
-        createdAt: Date.now()
-      };
-      setManualSellWatches(prev => [...prev, newWatch]);
-
-      const newPendingSell: PendingSellOrder = {
-        id: watchId,
-        symbol: selectedStock.symbol,
-        orderPrice: manualSellPrice,
-        quantity: manualSellQty,
-        createdAt: Date.now(),
-        isSimulated: !kisConfig.isConnected || !kisConfig.isRealOrderEnabled,
-        type: 'TARGET_WATCH',
-        reason: '수동 지정가 매도 예약',
-        buyPrice: avgPrices[selectedStock.symbol] // Pass avgPrice as buyPrice for manual limit watch
-      };
-      setPendingSellOrders(prev => [...prev, newPendingSell]);
-
-      showNotification(`[지정가 매도 예약 등록] ${selectedStock.name} 목표가 ₩${manualSellPrice.toLocaleString()} 도달 시 자동 매도됩니다.`, "success");
-      setManualSellModalOpen(false);
-    }
+    showNotification(`${selectedStock.name} ₩${manualSellPrice.toLocaleString()} 지정가 매도 주문 전송 중...`, "info");
+    await executeTrade('SELL', selectedStock, manualSellQty, `[수동 지정가 매도] 희망가 ₩${manualSellPrice.toLocaleString()}`, manualSellPrice, avgPrices[selectedStock.symbol]);
+    showNotification(`${selectedStock.name} ₩${manualSellPrice.toLocaleString()} 지정가 매도 주문이 접수되었습니다.`, "success");
+    playScalpingSound('SELL');
+    setManualSellModalOpen(false);
   };
 
   const handleExecuteXtxSignal = (sig: MarketSignal) => {
@@ -4555,7 +4631,7 @@ export default function App() {
               </div>
             )}
 
-            {/* 스캘퍼 엔진 최적 종목 TOP 3 Ranking Widget */}
+            {/* 스캘퍼 엔진 최적 종목 TOP 10 Ranking Widget */}
             <div className="space-y-3 pt-4 border-t border-white/10">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
@@ -4564,21 +4640,36 @@ export default function App() {
                   </div>
                   <div>
                     <h2 className="text-[11px] font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                      스캘퍼 최적 종목 TOP 3
+                      스캘퍼 최적 종목 TOP 10
                       <span className="relative flex h-2 w-2">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
                       </span>
                     </h2>
+                    <div className="text-[9px] font-semibold text-amber-400/90 tracking-tight mt-0.5">
+                      {marketType === 'KR' ? '3,000원 이하 · 거래량 우수 · 상승기류' : '$3 이하 · 거래량 우수 · 상승기류'}
+                    </div>
                   </div>
                 </div>
-                <span className="text-[9px] font-mono text-amber-300 font-bold px-2 py-0.5 bg-amber-500/10 rounded-full border border-amber-500/20">
-                  {marketType === 'KR' ? '국내' : '미국'}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handleRefreshScalperTop3}
+                    disabled={isRefreshingTop3}
+                    className="flex items-center gap-1 text-[10px] font-bold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 active:scale-95 px-2 py-0.5 rounded-lg border border-amber-500/30 transition-all cursor-pointer disabled:opacity-50"
+                    title="스캘퍼 최적 종목 갱신"
+                  >
+                    <RefreshCw className={cn("w-3 h-3 text-amber-400", isRefreshingTop3 && "animate-spin")} />
+                    <span>갱신</span>
+                  </button>
+                  <span className="text-[9px] font-mono text-amber-300 font-bold px-2 py-0.5 bg-amber-500/10 rounded-full border border-amber-500/20">
+                    {marketType === 'KR' ? '국내' : '미국'}
+                  </span>
+                </div>
               </div>
 
-              <div className="space-y-2">
-                {scalperTop5Stocks.map((st, idx) => {
+              <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1 custom-scrollbar">
+                {scalperTop10Stocks.map((st, idx) => {
                   const isSelected = selectedSymbol === st.symbol;
                   const isUS = /^[A-Z]/.test(st.symbol);
                   const pricePrefix = isUS ? '$' : '₩';
@@ -4722,26 +4813,12 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 pt-1 border-t border-white/5 font-mono text-xs">
-                <div className="col-span-2 sm:col-span-2">
-                  <span className="text-[10px] text-sleek-text-secondary uppercase block">상태 메시지</span>
-                  <span className="font-bold text-sleek-blue block whitespace-nowrap overflow-hidden text-ellipsis" title={scalperMessage || "대기 중..."}>
+              <div className="pt-2 border-t border-white/10 text-xs font-mono">
+                <div className="flex flex-col sm:flex-row sm:items-baseline gap-1.5">
+                  <span className="text-[11px] font-black text-sleek-text-secondary uppercase shrink-0">상태 메시지:</span>
+                  <span className="font-bold text-sleek-blue text-xs leading-relaxed break-words">
                     {scalperMessage || "대기 중..."}
                   </span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-sleek-text-secondary uppercase block">활성 슬롯</span>
-                  <span className="font-bold text-white block">{gapInventory.length} / {maxSlots} 개</span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-sleek-text-secondary uppercase block">목표 가격 구간</span>
-                  <span className="font-bold text-emerald-400 block truncate">
-                    ₩{gapBuyPrice.toLocaleString()} ~ ₩{gapSellPrice.toLocaleString()}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[10px] text-sleek-text-secondary uppercase block">실행 속도</span>
-                  <span className="font-bold text-amber-400 block">{scalpingSpeed}ms</span>
                 </div>
               </div>
             </div>
@@ -4930,18 +5007,15 @@ export default function App() {
                   <div className="grid grid-cols-2 gap-2">
                     <div className="bg-black/30 p-2 rounded-xl border border-white/5">
                       <label className="text-[10px] font-black text-sleek-text-secondary uppercase block mb-1">추가 매수 간격 (Gap %)</label>
-                      <div className="flex items-center gap-2">
-                        <input 
-                          type="number" 
-                          step="0.1"
-                          min="0.1"
-                          max="5"
-                          value={minGapBetweenSlots}
-                          onChange={(e) => setMinGapBetweenSlots(Math.max(0.1, Number(e.target.value)))}
-                          className="w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-xs font-mono font-bold text-white outline-none"
-                        />
-                        <span className="text-[10px] font-bold text-sleek-text-secondary">%</span>
-                      </div>
+                      <select 
+                        value={minGapBetweenSlots}
+                        onChange={(e) => setMinGapBetweenSlots(Number(e.target.value))}
+                        className="w-full bg-black/40 border border-white/10 rounded px-2 py-1 text-xs font-mono font-bold text-white outline-none cursor-pointer appearance-none"
+                      >
+                        {[0.1, 0.2, 0.3, 0.4, 0.5, 0.8, 1.0, 1.5, 2.0, 3.0, 5.0].map(gap => (
+                          <option key={gap} value={gap} className="bg-sleek-bg text-white">{gap}%</option>
+                        ))}
+                      </select>
                     </div>
                     <div className="bg-black/30 p-2 rounded-xl border border-white/5 flex flex-col justify-between">
                       <label className="text-[10px] font-black text-sleek-text-secondary uppercase block mb-1">진입 수량 방식</label>
@@ -5311,53 +5385,53 @@ export default function App() {
                               </div>
                               
                               {/* Ask Levels (매도 5~1단계) */}
-                              <div className="space-y-0.5">
+                              <div className="space-y-1">
                                 {askLevels.map((lvlPrice, idx) => {
                                   const vol = getLevelVolume(lvlPrice);
                                   const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
                                   return (
-                                    <div key={`ask-${lvlPrice}`} className="grid grid-cols-[3.2fr_3.8fr_3fr] items-center py-0.5 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group">
+                                    <div key={`ask-level-${idx}`} className="flex items-center justify-between h-7 px-2 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
                                       <div className="absolute right-0 top-0 bottom-0 bg-sky-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
-                                      <span className="text-[10px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis">매도 {5 - idx}단계</span>
+                                      <span className="w-16 shrink-0 text-[10px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {5 - idx}단계</span>
                                       <span className={cn(
-                                        "text-right font-bold z-10 font-mono text-[11px] whitespace-nowrap",
+                                        "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[11px] whitespace-nowrap px-2",
                                         isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-300"
                                       )}>
                                         ₩{lvlPrice.toLocaleString()}
                                       </span>
-                                      <span className="text-right text-sky-200/50 font-mono text-[10px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
+                                      <span className="w-16 shrink-0 text-right text-sky-200/60 font-mono tabular-nums text-[10px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
                                     </div>
                                   );
                                 })}
                               </div>
 
                               {/* Spread Line */}
-                              <div className="my-1.5 py-1 px-2 bg-white/5 border-y border-white/10 flex items-center justify-between rounded-lg">
-                                <span className="text-[10px] font-black text-sleek-text-secondary uppercase">현재 체결가</span>
-                                <span className={cn("font-black text-sm font-mono animate-pulse", selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400")}>
+                              <div className="my-2 h-9 min-h-[36px] px-2.5 bg-white/5 border-y border-white/10 flex items-center justify-between rounded-lg font-mono tabular-nums">
+                                <span className="text-[10px] font-black text-sleek-text-secondary uppercase shrink-0">현재 체결가</span>
+                                <span className={cn("font-black text-sm font-mono tabular-nums animate-pulse", selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400")}>
                                   ₩{currentPrice.toLocaleString()}
                                 </span>
-                                <span className={cn("text-[10px] font-mono font-bold", selectedStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
+                                <span className={cn("text-[10px] font-mono tabular-nums font-bold shrink-0", selectedStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
                                   {selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%
                                 </span>
                               </div>
 
                               {/* Bid Levels (매수 1~5단계) */}
-                              <div className="space-y-0.5">
+                              <div className="space-y-1">
                                 {bidLevels.map((lvlPrice, idx) => {
                                   const vol = getLevelVolume(lvlPrice);
                                   const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
                                   return (
-                                    <div key={`bid-${lvlPrice}`} className="grid grid-cols-[3.2fr_3.8fr_3fr] items-center py-0.5 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group">
+                                    <div key={`bid-level-${idx}`} className="flex items-center justify-between h-7 px-2 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
                                       <div className="absolute right-0 top-0 bottom-0 bg-rose-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
-                                      <span className="text-[10px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap overflow-hidden text-ellipsis">매수 {idx + 1}단계</span>
+                                      <span className="w-16 shrink-0 text-[10px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}단계</span>
                                       <span className={cn(
-                                        "text-right font-bold z-10 font-mono text-[11px] whitespace-nowrap",
+                                        "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[11px] whitespace-nowrap px-2",
                                         isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-300"
                                       )}>
                                         ₩{lvlPrice.toLocaleString()}
                                       </span>
-                                      <span className="text-right text-rose-200/50 font-mono text-[10px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
+                                      <span className="w-16 shrink-0 text-right text-rose-200/60 font-mono tabular-nums text-[10px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
                                     </div>
                                   );
                                 })}
@@ -5567,7 +5641,291 @@ export default function App() {
         {/* Right Aside: Real-time Status Window & Trade Logs */}
         <aside className="w-[340px] border-l border-white/5 bg-black/30 flex flex-col p-6 gap-6 overflow-hidden hidden xl:flex">
             
-            {/* 1. Real-time Gap Monitor Gauge */}
+            {/* 1. Trade Logs / Active Slot Monitor (Top Right) */}
+            <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col shrink-0 max-h-[520px] overflow-hidden shadow-2xl">
+              <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
+                <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-sleek-blue" /> Trade Logs (실시간 체결 현황)
+                </h3>
+                <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">
+                  {enableCombinedAvgProfitExit 
+                    ? (gapInventory.length > 0 ? "통합 (1/1)" : "통합 (대기)") 
+                    : `체결 (${gapInventory.length} / ${maxSlots})`
+                  }
+                </span>
+              </div>
+              
+              <div className="overflow-y-auto space-y-2.5 pr-1 custom-scrollbar max-h-[450px]">
+                {enableCombinedAvgProfitExit ? (
+                  /* Combined Average Profit Exit Mode (통합평단가 익절) */
+                  gapInventory.length === 0 ? (
+                    <div className="bg-black/20 border border-dashed border-white/10 rounded-2xl p-6 flex flex-col items-center justify-center text-center gap-2">
+                      <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-sleek-text-secondary">
+                        <Layers className="w-5 h-5 opacity-40" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-white block">[통합] 대기 중</span>
+                        <span className="text-[11px] text-sleek-text-secondary mt-1 block">
+                          매수가 체결되면 수량 및 통합 평단가가 자동 업데이트됩니다
+                        </span>
+                      </div>
+                    </div>
+                  ) : (() => {
+                    const totalCost = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
+                    const totalQty = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
+                    const avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
+                    const avgProfitPct = avgPrice > 0 ? ((selectedStock.price - avgPrice) / avgPrice) * 100 : 0;
+                    const targetSellPrice = calculateTargetSellPrice(avgPrice, scalpingTargetProfit);
+
+                    return (
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.98 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-gradient-to-r from-sleek-blue/20 via-indigo-950/40 to-slate-900/80 border border-sleek-blue/40 rounded-2xl p-4 space-y-3 shadow-xl"
+                      >
+                        <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse"></span>
+                            <span className="text-sm font-black text-white">{selectedStock.name}</span>
+                            <span className="text-xs font-mono text-sleek-text-secondary">({selectedStock.symbol})</span>
+                          </div>
+                          <span className="bg-sleek-blue/20 text-sleek-blue border border-sleek-blue/30 px-2 py-0.5 rounded text-[10px] font-bold">
+                            통합 (보유 중)
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-black/40 p-2.5 rounded-xl border border-white/5">
+                          <div>
+                            <span className="text-[10px] text-sleek-text-secondary block uppercase">체결 매수 수량</span>
+                            <span className="text-base font-black text-amber-300">{totalQty}주</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-sleek-text-secondary block uppercase">통합 매수 평단가</span>
+                            <span className="text-sm font-bold text-white">₩{avgPrice.toLocaleString()}</span>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                          <div>
+                            <span className="text-[10px] text-sleek-text-secondary block">목표 매도가 (+{scalpingTargetProfit}%)</span>
+                            <span className="text-sm font-bold text-rose-400">₩{targetSellPrice.toLocaleString()}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-sleek-text-secondary block">평단 대비 손익률</span>
+                            <span className={cn("text-sm font-black", avgProfitPct >= 0 ? "text-rose-400" : "text-sky-400")}>
+                              {avgProfitPct >= 0 ? "+" : ""}{avgProfitPct.toFixed(2)}%
+                            </span>
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })()
+                ) : (
+                  /* Individual Slot Mode (개별 모드) */
+                  (() => {
+                    const stockPendingBuys = pendingBuyOrders.filter(p => p.symbol === selectedStock?.symbol);
+
+                    return Array.from({ length: maxSlots }).map((_, slotIdx) => {
+                      const slotNum = slotIdx + 1;
+                      const filledSlot = gapInventory[slotIdx];
+                      const pendingBuy = stockPendingBuys[slotIdx];
+
+                      // 1. Filled Inventory Slot
+                      if (filledSlot) {
+                        const buyPrice = typeof filledSlot === 'number' ? filledSlot : (filledSlot.price || 0);
+                        const buyQty = typeof filledSlot === 'number' ? tradeQuantity : (filledSlot.quantity || 1);
+                        const profitPct = buyPrice > 0 ? ((selectedStock.price - buyPrice) / buyPrice) * 100 : 0;
+                        const targetSellPrice = calculateTargetSellPrice(buyPrice, scalpingTargetProfit);
+
+                        // Check duplicate buy price count
+                        const samePriceCount = gapInventory.filter(s => (typeof s === 'number' ? s : s.price) === buyPrice).length;
+                        const samePriceTotalQty = gapInventory
+                          .filter(s => (typeof s === 'number' ? s : s.price) === buyPrice)
+                          .reduce((acc, s) => acc + (typeof s === 'number' ? tradeQuantity : s.quantity), 0);
+
+                        return (
+                          <motion.div 
+                            key={`filled-slot-${slotIdx}`}
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="bg-emerald-950/20 border border-emerald-500/40 rounded-2xl p-4 min-h-[110px] flex flex-col justify-between space-y-2 text-xs font-mono shadow-md transition-all"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse"></span>
+                                <span className="font-extrabold text-white text-sm">#{slotNum}</span>
+                                <span className="text-[10px] font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30">
+                                  {buyPrice.toLocaleString()}원 매수 체결 완료
+                                </span>
+                              </div>
+                              <span className={cn("font-extrabold text-xs tabular-nums", profitPct >= 0 ? "text-rose-400" : "text-sky-400")}>
+                                {profitPct >= 0 ? "+" : ""}{profitPct.toFixed(2)}%
+                              </span>
+                            </div>
+
+                            {/* Duplicate Price Badge if same price */}
+                            {samePriceCount > 1 && (
+                              <div className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded flex items-center gap-1 font-sans">
+                                <Layers className="w-3 h-3 text-amber-400" />
+                                <span>동일 매수가 중복 체결: {samePriceCount}건 (총 {samePriceTotalQty}주 보유)</span>
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-2 bg-black/40 p-2.5 rounded-xl border border-white/5 text-[11px] tabular-nums">
+                              <div>
+                                <span className="text-sleek-text-secondary text-[10px] block">체결 매수가 ({buyQty}주)</span>
+                                <span className="text-emerald-400 font-extrabold">₩{buyPrice.toLocaleString()}</span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-sleek-text-secondary text-[10px] block">목표 매도가 (+{scalpingTargetProfit}%)</span>
+                                <span className="text-rose-400 font-extrabold">₩{targetSellPrice.toLocaleString()}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 text-[10px] text-emerald-400/90 pt-1.5 border-t border-emerald-500/10">
+                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                              <span>지정가 매도 주문 접수 완료 (+{scalpingTargetProfit}%)</span>
+                            </div>
+                          </motion.div>
+                        );
+                      }
+
+                      // 2. Pending Buy Order Slot
+                      if (pendingBuy) {
+                        const orderPrice = pendingBuy.orderPrice;
+                        const orderQty = pendingBuy.quantity;
+                        const targetSellPrice = calculateTargetSellPrice(orderPrice, scalpingTargetProfit);
+
+                        // Same price count for pending orders
+                        const samePricePendingCount = stockPendingBuys.filter(p => p.orderPrice === orderPrice).length;
+
+                        return (
+                          <motion.div 
+                            key={`pending-slot-${slotIdx}`}
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="bg-amber-950/20 border border-amber-500/40 rounded-2xl p-4 min-h-[110px] flex flex-col justify-between space-y-2 text-xs font-mono shadow-md transition-all"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
+                                <span className="font-extrabold text-white text-sm">#{slotNum}</span>
+                                <span className="text-[10px] font-bold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30">
+                                  {orderPrice.toLocaleString()}원 매수 대기 중
+                                </span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => cancelPendingBuyOrder(pendingBuy.id)}
+                                className="text-[10px] font-bold text-amber-400 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/40 px-2 py-0.5 rounded transition-all"
+                              >
+                                취소
+                              </button>
+                            </div>
+
+                            {/* Same price pending indicator */}
+                            {samePricePendingCount > 1 && (
+                              <div className="text-[10px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded flex items-center gap-1 font-sans">
+                                <Layers className="w-3 h-3 text-amber-400" />
+                                <span>동일 매수가 중복 대기 ({samePricePendingCount}건 중복)</span>
+                              </div>
+                            )}
+
+                            <div className="grid grid-cols-2 gap-2 bg-black/40 p-2.5 rounded-xl border border-white/5 text-[11px] tabular-nums">
+                              <div>
+                                <span className="text-sleek-text-secondary text-[10px] block">매수 대기 가격 ({orderQty}주)</span>
+                                <span className="text-amber-300 font-extrabold">₩{orderPrice.toLocaleString()}</span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-sleek-text-secondary text-[10px] block">체결 후 목표가 (+{scalpingTargetProfit}%)</span>
+                                <span className="text-rose-400/80 font-bold">₩{targetSellPrice.toLocaleString()}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex justify-between items-center text-[10px] text-amber-400/80 pt-1.5 border-t border-amber-500/10">
+                              <span>⚡ 매수 체결 즉시 +{scalpingTargetProfit}% 지정가 매도 주문 등록</span>
+                            </div>
+                          </motion.div>
+                        );
+                      }
+
+                      // 3. Planned Grid Step (When Bot is Active)
+                      if (isGapBotActive && selectedStock) {
+                        const minGap = minGapBetweenSlots || 0.5;
+                        const targetStepPrice = Math.round(selectedStock.price * (1 - (minGap / 100) * slotNum));
+                        const targetSellPrice = calculateTargetSellPrice(targetStepPrice, scalpingTargetProfit);
+
+                        return (
+                          <div 
+                            key={`plan-slot-${slotIdx}`}
+                            className="bg-black/30 border border-dashed border-sleek-blue/30 rounded-2xl p-4 min-h-[110px] flex flex-col justify-between space-y-2 text-xs font-mono transition-all"
+                          >
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2.5 h-2.5 rounded-full bg-sleek-blue animate-pulse"></span>
+                                <span className="font-extrabold text-white text-sm">#{slotNum}</span>
+                                <span className="text-[10px] font-bold text-sleek-blue bg-sleek-blue/10 px-2 py-0.5 rounded border border-sleek-blue/20">
+                                  {targetStepPrice.toLocaleString()}원 매수 주문 대기
+                                </span>
+                              </div>
+                              <span className="text-[10px] text-rose-400 font-bold tabular-nums">
+                                목표: ₩{targetSellPrice.toLocaleString()}
+                              </span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2 bg-black/40 p-2.5 rounded-xl border border-white/5 text-[11px] tabular-nums">
+                              <div>
+                                <span className="text-sleek-text-secondary text-[10px] block">진입 예상가</span>
+                                <span className="text-sleek-blue font-bold">₩{targetStepPrice.toLocaleString()}</span>
+                              </div>
+                              <div className="text-right">
+                                <span className="text-sleek-text-secondary text-[10px] block">익절 목표가 (+{scalpingTargetProfit}%)</span>
+                                <span className="text-rose-400 font-bold">₩{targetSellPrice.toLocaleString()}</span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 text-[10px] text-sleek-text-secondary pt-1.5 border-t border-white/5 font-mono">
+                              <span>⚡ 하락 조건 충족 시 자동 매수 주문 생성</span>
+                            </div>
+                          </div>
+                        );
+                      }
+
+                      // 4. Empty Slot (매수 대기 중)
+                      return (
+                        <div 
+                          key={`empty-slot-${slotIdx}`}
+                          className="bg-black/20 border border-dashed border-white/10 hover:border-white/20 rounded-2xl p-4 min-h-[110px] flex flex-col justify-between space-y-2 text-xs transition-all"
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="w-2.5 h-2.5 rounded-full bg-white/20"></span>
+                              <span className="font-extrabold text-white text-sm">#{slotNum}</span>
+                              <span className="text-[11px] font-semibold text-sleek-text-secondary">(매수 대기 중)</span>
+                            </div>
+                            <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 font-mono font-bold">
+                              신규진입 가능
+                            </span>
+                          </div>
+
+                          <div className="bg-black/30 p-2 rounded-xl border border-white/5 flex items-center justify-center text-center">
+                            <span className="text-[11px] text-sleek-text-secondary font-mono">
+                              매수 조건 탐색 및 진입 대기 중...
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-1 text-[10px] text-white/30 pt-1.5 border-t border-white/5 font-mono">
+                            <span>슬롯 상태: 대기 중</span>
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()
+                )}
+              </div>
+            </div>
+
+            {/* 2. Real-time Gap Monitor Gauge */}
             {isGapBotActive && selectedStock && gapBuyPrice > 0 && gapSellPrice > 0 && (
               <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-3xl p-5 space-y-4 shrink-0">
                 <div className="flex items-center justify-between">
@@ -5602,415 +5960,167 @@ export default function App() {
                     <span className="text-sm font-black text-white italic font-mono">{rangePercentage.toFixed(1)}%</span>
                   </div>
                 </div>
-
-                {/* Grid Inventory */}
-                <div className="space-y-2 pt-2 border-t border-white/5">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-sleek-text-secondary uppercase font-black flex items-center gap-1.5">
-                      <Layers className="w-3.5 h-3.5 text-sleek-blue" />
-                      {enableCombinedAvgProfitExit ? "통합 평단가 익절 슬롯" : "개별 매수/매도 슬롯 현황"}
-                    </span>
-                    <span className="text-xs font-bold text-white bg-white/10 px-2 py-0.5 rounded-full font-mono">
-                      {enableCombinedAvgProfitExit ? (gapInventory.length > 0 ? "1 / 1 통합슬롯" : "0 슬롯") : `${gapInventory.length} / ${maxSlots} 슬롯`}
-                    </span>
-                  </div>
-
-                  {enableCombinedAvgProfitExit ? (
-                    /* 통합평단가 익절 옵션 ON: 단일 통합 슬롯 표기 */
-                    gapInventory.length === 0 ? (
-                      <div className="text-xs text-sleek-text-secondary opacity-40 italic py-3 text-center bg-white/5 rounded-2xl border border-white/5">
-                        통합 매수 체결 내역 없음 (대기 중)
-                      </div>
-                    ) : (() => {
-                      const totalCost = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
-                      const totalQty = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
-                      const avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
-                      const avgProfitPct = avgPrice > 0 ? ((selectedStock.price - avgPrice) / avgPrice) * 100 : 0;
-                      const targetSellPrice = Math.round(avgPrice * (1 + scalpingTargetProfit / 100));
-
-                      return (
-                        <div className="p-3 bg-gradient-to-r from-sleek-blue/20 via-indigo-500/10 to-emerald-500/10 border border-sleek-blue/30 rounded-2xl space-y-2 text-xs font-mono shadow-lg">
-                          <div className="flex justify-between items-center border-b border-white/10 pb-1.5">
-                            <span className="text-sleek-blue font-bold flex items-center gap-1">
-                              <span className="w-2 h-2 rounded-full bg-sleek-blue animate-pulse"></span>
-                              [통합 평단가 슬롯]
-                            </span>
-                            <span className="bg-sleek-blue/20 text-sleek-blue px-2 py-0.5 rounded text-[10px] font-bold">
-                              익절 목표 +{scalpingTargetProfit}%
-                            </span>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-2 pt-0.5">
-                            <div>
-                              <span className="text-sleek-text-secondary block text-[10px] uppercase">통합 매수 평단가</span>
-                              <span className="text-white font-bold text-sm">₩{avgPrice.toLocaleString()}</span>
-                              <span className="text-[10px] text-amber-300 ml-1">({totalQty}주)</span>
-                            </div>
-                            <div className="text-right">
-                              <span className="text-sleek-text-secondary block text-[10px] uppercase">목표 익절 매도가</span>
-                              <span className="text-rose-400 font-black text-sm">₩{targetSellPrice.toLocaleString()}</span>
-                            </div>
-                          </div>
-
-                          <div className="flex justify-between items-center pt-1.5 border-t border-white/10 text-[11px]">
-                            <span className="text-sleek-text-secondary">현재가 대비 수익률</span>
-                            <span className={cn("font-bold text-sm", avgProfitPct >= 0 ? "text-rose-400" : "text-sky-400")}>
-                              {avgProfitPct >= 0 ? "+" : ""}{avgProfitPct.toFixed(2)}%
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })()
-                  ) : (
-                    /* 통합평단가 익절 옵션 OFF: 각 슬롯별 매수/매도 한 쌍 개별 표기 */
-                    <div className="space-y-1.5 max-h-[160px] overflow-y-auto pr-1 scrollbar-thin">
-                      {gapInventory.length === 0 ? (
-                        <div className="text-xs text-sleek-text-secondary opacity-40 italic py-3 text-center bg-white/5 rounded-2xl border border-white/5">
-                          개별 슬롯 매수 체결 내역 없음
-                        </div>
-                      ) : (
-                        gapInventory.map((slot, idx) => {
-                          const buyPrice = typeof slot === 'number' ? slot : (slot.price || 0);
-                          const buyQty = typeof slot === 'number' ? tradeQuantity : (slot.quantity || 1);
-                          const profitPct = buyPrice > 0 ? ((selectedStock.price - buyPrice) / buyPrice) * 100 : 0;
-                          const targetSellPrice = Math.round(buyPrice * (1 + scalpingTargetProfit / 100));
-
-                          return (
-                            <div key={idx} className="bg-white/5 rounded-2xl p-2.5 border border-white/10 space-y-1.5 text-xs font-mono">
-                              <div className="flex justify-between items-center">
-                                <div className="flex items-center gap-1.5">
-                                  <span className="w-2 h-2 rounded-full bg-emerald-400"></span>
-                                  <span className="text-white font-bold">슬롯 #{idx + 1}</span>
-                                  <span className="text-[10px] text-sleek-text-secondary">({buyQty}주)</span>
-                                </div>
-                                <span className={cn("font-bold", profitPct >= 0 ? "text-rose-400" : "text-sky-400")}>
-                                  {profitPct >= 0 ? "+" : ""}{profitPct.toFixed(2)}%
-                                </span>
-                              </div>
-
-                              <div className="grid grid-cols-2 gap-1 text-[11px] bg-black/30 p-1.5 rounded-xl border border-white/5">
-                                <div>
-                                  <span className="text-sleek-text-secondary text-[10px] block">매수가</span>
-                                  <span className="text-emerald-400 font-bold">₩{buyPrice.toLocaleString()}</span>
-                                </div>
-                                <div className="text-right">
-                                  <span className="text-sleek-text-secondary text-[10px] block">목표 매도가 (+{scalpingTargetProfit}%)</span>
-                                  <span className="text-rose-400 font-bold">₩{targetSellPrice.toLocaleString()}</span>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* Pending Buy Orders */}
-                <div className="space-y-2 pt-2 border-t border-white/5">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-sleek-text-secondary uppercase font-black flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-amber-400 animate-pulse" /> 대기 중인 매수 주문 (Pending)
-                    </span>
-                    <span className="text-xs font-bold text-white bg-amber-500/10 text-amber-400 px-2 rounded-full">{pendingBuyOrders.length}</span>
-                  </div>
-
-                  <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 scrollbar-thin">
-                    {pendingBuyOrders.length === 0 ? (
-                      <div className="text-xs text-sleek-text-secondary opacity-40 italic py-2 text-center">
-                        대기 중인 지정가 매수 주문 없음
-                      </div>
-                    ) : (
-                      pendingBuyOrders.map((order, idx) => {
-                        const currentStock = stocks.find(s => s.symbol === order.symbol) || selectedStock;
-                        const dropPercent = ((order.orderPrice - currentStock.price) / order.orderPrice) * 100;
-                        const cancelProgress = Math.min(100, Math.max(0, (dropPercent / autoCancelThreshold) * 100));
-
-                        return (
-                          <div key={order.id || idx} className="flex flex-col bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1.5 text-xs">
-                            <div className="flex justify-between items-center">
-                              <div className="flex items-center gap-1.5 font-mono">
-                                <span className={cn(
-                                  "w-1.5 h-1.5 rounded-full",
-                                  order.isSimulated ? "bg-amber-400" : "bg-emerald-400 animate-pulse"
-                                )}></span>
-                                <span className="text-white font-bold">{currentStock.name} ({order.symbol})</span>
-                                <span className="text-[10px] font-bold text-sleek-text-secondary uppercase px-1 py-0.2 bg-white/5 rounded">
-                                  {order.isSimulated ? "모의" : "KIS실전"}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-sleek-text-secondary font-mono">수량: {order.quantity}주</span>
-                                <button
-                                  type="button"
-                                  onClick={() => cancelPendingBuyOrder(order.id)}
-                                  className="text-[10px] font-bold text-amber-400 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/40 px-1.5 py-0.5 rounded transition-all ml-1"
-                                >
-                                  취소
-                                </button>
-                              </div>
-                            </div>
-                            
-                            <div className="flex justify-between items-center font-mono">
-                              <span className="text-sleek-text-secondary">주문 단가: <strong className="text-white">₩{order.orderPrice.toLocaleString()}</strong></span>
-                              <span className="text-sleek-text-secondary">현재가: <strong className="text-white">₩{currentStock.price.toLocaleString()}</strong></span>
-                            </div>
-
-                            {/* Drop & Auto-Cancel Threshold gauge */}
-                            <div className="space-y-1 pt-1 border-t border-white/5">
-                              <div className="flex justify-between items-center text-[10px] font-mono">
-                                <span className="text-sleek-text-secondary">하락 추이 / 자동 취소 기준</span>
-                                <span className={cn(
-                                  "font-bold",
-                                  dropPercent >= 0 ? "text-down" : "text-up"
-                                )}>
-                                  {dropPercent.toFixed(2)}% / {autoCancelThreshold}%
-                                </span>
-                              </div>
-                              <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden relative">
-                                <div 
-                                  className={cn(
-                                    "h-full rounded-full transition-all duration-300",
-                                    cancelProgress >= 80 ? "bg-rose-500" : "bg-amber-500"
-                                  )}
-                                  style={{ width: `${cancelProgress}%` }}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-
-                {/* Pending Sell Orders */}
-                <div className="space-y-2 pt-2 border-t border-white/5">
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-sleek-text-secondary uppercase font-black flex items-center gap-1">
-                      <Clock className="w-3.5 h-3.5 text-rose-400 animate-pulse" /> 대기 중인 매도 주문 (Pending Sell)
-                    </span>
-                    <span className="text-xs font-bold text-white bg-rose-500/10 text-rose-400 px-2 rounded-full">{pendingSellOrders.length}</span>
-                  </div>
-
-                  <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 scrollbar-thin">
-                    {pendingSellOrders.length === 0 ? (
-                      <div className="text-xs text-sleek-text-secondary opacity-40 italic py-2 text-center">
-                        대기 중인 지정가 매도 주문 없음
-                      </div>
-                    ) : (
-                      pendingSellOrders.map((order, idx) => {
-                        const currentStock = stocks.find(s => s.symbol === order.symbol) || selectedStock;
-                        const targetDiffPercent = ((order.orderPrice - currentStock.price) / currentStock.price) * 100;
-                        const fillProgress = currentStock.price >= order.orderPrice ? 100 : Math.min(100, Math.max(0, (currentStock.price / order.orderPrice) * 100));
-
-                        return (
-                          <div key={order.id || idx} className="flex flex-col bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1.5 text-xs">
-                            <div className="flex justify-between items-center">
-                              <div className="flex items-center gap-1.5 font-mono">
-                                <span className={cn(
-                                  "w-1.5 h-1.5 rounded-full",
-                                  order.isSimulated ? "bg-rose-400" : "bg-emerald-400 animate-pulse"
-                                )}></span>
-                                <span className="text-white font-bold">{currentStock.name} ({order.symbol})</span>
-                                <span className="text-[10px] font-bold text-rose-300 uppercase px-1 py-0.2 bg-rose-500/10 rounded">
-                                  {order.isSimulated ? "모의" : "KIS실전"}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1">
-                                <span className="text-sleek-text-secondary font-mono">수량: {order.quantity}주</span>
-                                <button
-                                  type="button"
-                                  onClick={() => cancelPendingSellOrder(order.id)}
-                                  className="text-[10px] font-bold text-rose-400 hover:text-rose-200 bg-rose-500/20 hover:bg-rose-500/40 px-1.5 py-0.5 rounded transition-all ml-1"
-                                >
-                                  취소
-                                </button>
-                              </div>
-                            </div>
-                            
-                            <div className="flex justify-between items-center font-mono">
-                              <span className="text-sleek-text-secondary">매도 지정가: <strong className="text-rose-400">₩{order.orderPrice.toLocaleString()}</strong></span>
-                              <span className="text-sleek-text-secondary">현재가: <strong className="text-white">₩{currentStock.price.toLocaleString()}</strong></span>
-                            </div>
-
-                            {/* Target Distance & Fill gauge */}
-                            <div className="space-y-1 pt-1 border-t border-white/5">
-                              <div className="flex justify-between items-center text-[10px] font-mono">
-                                <span className="text-sleek-text-secondary">목표 달성 괴리율</span>
-                                <span className={cn(
-                                  "font-bold",
-                                  targetDiffPercent <= 0 ? "text-rose-400 animate-pulse" : "text-amber-400"
-                                )}>
-                                  {targetDiffPercent <= 0 ? "체결 임박 (0%)" : `+${targetDiffPercent.toFixed(2)}% 잔여`}
-                                </span>
-                              </div>
-                              <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden relative">
-                                <div 
-                                  className={cn(
-                                    "h-full rounded-full transition-all duration-300",
-                                    fillProgress >= 99 ? "bg-emerald-400" : "bg-rose-500"
-                                  )}
-                                  style={{ width: `${fillProgress}%` }}
-                                />
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })
-                    )}
-                  </div>
-                </div>
-
               </div>
             )}
 
-            {/* 2. Trade Logs / Active Slot Monitor */}
-            <div className="bg-white/5 border border-white/5 rounded-3xl p-5 flex flex-col shrink-0 max-h-[460px] overflow-hidden">
-              <div className="flex items-center justify-between mb-3 shrink-0">
-                <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-sleek-blue" /> Trade Logs (실시간 슬롯 체결 현황)
-                </h3>
-                <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">
-                  {enableCombinedAvgProfitExit 
-                    ? (gapInventory.length > 0 ? "통합 슬롯 (1/1)" : "통합 슬롯 (빈 슬롯)") 
-                    : `체결 슬롯 (${gapInventory.length} / ${maxSlots})`
-                  }
-                </span>
-              </div>
-              
-              <div className="overflow-y-auto space-y-2.5 pr-1 custom-scrollbar max-h-[390px]">
-                {enableCombinedAvgProfitExit ? (
-                  /* Combined Average Profit Exit Mode (통합평단가 익절) */
-                  gapInventory.length === 0 ? (
-                    <div className="bg-black/20 border border-dashed border-white/10 rounded-2xl p-6 flex flex-col items-center justify-center text-center gap-2">
-                      <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-sleek-text-secondary">
-                        <Layers className="w-5 h-5 opacity-40" />
-                      </div>
-                      <div>
-                        <span className="text-xs font-bold text-white block">[통합 슬롯] 빈 슬롯 (매수 대기 중)</span>
-                        <span className="text-[11px] text-sleek-text-secondary mt-1 block">
-                          매수가 체결되면 수량 및 통합 평단가가 자동 업데이트됩니다
-                        </span>
-                      </div>
+            {/* 3. Pending Orders (Buy & Sell) */}
+            <div className="space-y-4 shrink-0 bg-white/5 border border-white/5 rounded-3xl p-5">
+              {/* Pending Buy Orders */}
+              <div className="space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-sleek-text-secondary uppercase font-black flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-amber-400 animate-pulse" /> 대기 중인 매수 주문 ({pendingBuyOrders.length})
+                  </span>
+                </div>
+
+                <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 scrollbar-thin">
+                  {pendingBuyOrders.length === 0 ? (
+                    <div className="text-xs text-sleek-text-secondary opacity-40 italic py-2 text-center">
+                      대기 중인 지정가 매수 주문 없음
                     </div>
-                  ) : (() => {
-                    const totalCost = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
-                    const totalQty = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
-                    const avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
-                    const avgProfitPct = avgPrice > 0 ? ((selectedStock.price - avgPrice) / avgPrice) * 100 : 0;
-                    const targetSellPrice = Math.round(avgPrice * (1 + scalpingTargetProfit / 100));
+                  ) : (
+                    pendingBuyOrders.map((order, idx) => {
+                      const currentStock = stocks.find(s => s.symbol === order.symbol) || selectedStock;
+                      const dropPercent = ((order.orderPrice - currentStock.price) / order.orderPrice) * 100;
+                      const cancelProgress = Math.min(100, Math.max(0, (dropPercent / autoCancelThreshold) * 100));
 
-                    return (
-                      <motion.div 
-                        initial={{ opacity: 0, scale: 0.98 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        className="bg-gradient-to-r from-sleek-blue/20 via-indigo-950/40 to-slate-900/80 border border-sleek-blue/40 rounded-2xl p-4 space-y-3 shadow-xl"
-                      >
-                        <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse"></span>
-                            <span className="text-sm font-black text-white">{selectedStock.name}</span>
-                            <span className="text-xs font-mono text-sleek-text-secondary">({selectedStock.symbol})</span>
-                          </div>
-                          <span className="bg-sleek-blue/20 text-sleek-blue border border-sleek-blue/30 px-2 py-0.5 rounded text-[10px] font-bold">
-                            통합 슬롯 (보유 중)
-                          </span>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-black/40 p-2.5 rounded-xl border border-white/5">
-                          <div>
-                            <span className="text-[10px] text-sleek-text-secondary block uppercase">체결 매수 수량</span>
-                            <span className="text-base font-black text-amber-300">{totalQty}주</span>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-[10px] text-sleek-text-secondary block uppercase">통합 매수 평단가</span>
-                            <span className="text-sm font-bold text-white">₩{avgPrice.toLocaleString()}</span>
-                          </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                          <div>
-                            <span className="text-[10px] text-sleek-text-secondary block">목표 매도가 (+{scalpingTargetProfit}%)</span>
-                            <span className="text-sm font-bold text-rose-400">₩{targetSellPrice.toLocaleString()}</span>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-[10px] text-sleek-text-secondary block">평단 대비 손익률</span>
-                            <span className={cn("text-sm font-black", avgProfitPct >= 0 ? "text-rose-400" : "text-sky-400")}>
-                              {avgProfitPct >= 0 ? "+" : ""}{avgProfitPct.toFixed(2)}%
-                            </span>
-                          </div>
-                        </div>
-                      </motion.div>
-                    );
-                  })()
-                ) : (
-                  /* Individual Slot Mode (개별 슬롯) */
-                  Array.from({ length: maxSlots }).map((_, slotIdx) => {
-                    const slot = gapInventory[slotIdx];
-                    if (!slot) {
-                      // Empty Slot (빈 슬롯)
                       return (
-                        <div 
-                          key={`empty-slot-${slotIdx}`}
-                          className="bg-black/20 border border-dashed border-white/10 hover:border-white/20 rounded-2xl p-3 flex items-center justify-between text-xs transition-all"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-white/20"></span>
-                            <span className="font-bold text-sleek-text-secondary">슬롯 #{slotIdx + 1}</span>
-                            <span className="text-[11px] text-sleek-text-secondary opacity-60 ml-1">빈 슬롯 (매수 대기 중)</span>
+                        <div key={order.id || idx} className="flex flex-col bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1.5 text-xs">
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-1.5 font-mono">
+                              <span className={cn(
+                                "w-1.5 h-1.5 rounded-full",
+                                order.isSimulated ? "bg-amber-400" : "bg-emerald-400 animate-pulse"
+                              )}></span>
+                              <span className="text-white font-bold">{currentStock.name} ({order.symbol})</span>
+                              <span className="text-[10px] font-bold text-sleek-text-secondary uppercase px-1 py-0.2 bg-white/5 rounded">
+                                {order.isSimulated ? "모의" : "KIS실전"}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-sleek-text-secondary font-mono">수량: {order.quantity}주</span>
+                              <button
+                                type="button"
+                                onClick={() => cancelPendingBuyOrder(order.id)}
+                                className="text-[10px] font-bold text-amber-400 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/40 px-1.5 py-0.5 rounded transition-all ml-1"
+                              >
+                                취소
+                              </button>
+                            </div>
                           </div>
-                          <span className="text-[10px] text-emerald-400/70 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 font-mono">
-                            신규진입 가능
-                          </span>
+                          
+                          <div className="flex justify-between items-center font-mono">
+                            <span className="text-sleek-text-secondary">주문 단가: <strong className="text-white">₩{order.orderPrice.toLocaleString()}</strong></span>
+                            <span className="text-sleek-text-secondary">현재가: <strong className="text-white">₩{currentStock.price.toLocaleString()}</strong></span>
+                          </div>
+
+                          {/* Drop & Auto-Cancel Threshold gauge */}
+                          <div className="space-y-1 pt-1 border-t border-white/5">
+                            <div className="flex justify-between items-center text-[10px] font-mono">
+                              <span className="text-sleek-text-secondary">하락 추이 / 자동 취소 기준</span>
+                              <span className={cn(
+                                "font-bold",
+                                dropPercent >= 0 ? "text-down" : "text-up"
+                              )}>
+                                {dropPercent.toFixed(2)}% / {autoCancelThreshold}%
+                              </span>
+                            </div>
+                            <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden relative">
+                              <div 
+                                className={cn(
+                                  "h-full rounded-full transition-all duration-300",
+                                  cancelProgress >= 80 ? "bg-rose-500" : "bg-amber-500"
+                                )}
+                                style={{ width: `${cancelProgress}%` }}
+                              />
+                            </div>
+                          </div>
                         </div>
                       );
-                    }
+                    })
+                  )}
+                </div>
+              </div>
 
-                    // Active Slot (체결 및 매수 수량 반영된 슬롯)
-                    const buyPrice = typeof slot === 'number' ? slot : (slot.price || 0);
-                    const buyQty = typeof slot === 'number' ? tradeQuantity : (slot.quantity || 1);
-                    const profitPct = buyPrice > 0 ? ((selectedStock.price - buyPrice) / buyPrice) * 100 : 0;
-                    const targetSellPrice = Math.round(buyPrice * (1 + scalpingTargetProfit / 100));
+              {/* Pending Sell Orders */}
+              <div className="space-y-2 pt-2 border-t border-white/5">
+                <div className="flex justify-between items-center">
+                  <span className="text-xs text-sleek-text-secondary uppercase font-black flex items-center gap-1">
+                    <Clock className="w-3.5 h-3.5 text-rose-400 animate-pulse" /> 대기 중인 매도 주문 ({pendingSellOrders.length})
+                  </span>
+                </div>
 
-                    return (
-                      <motion.div 
-                        key={`active-slot-${slotIdx}`}
-                        initial={{ opacity: 0, y: 10 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        className="bg-black/40 border border-emerald-500/30 rounded-2xl p-3 space-y-2 text-xs font-mono shadow-md"
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse"></span>
-                            <span className="font-extrabold text-white">슬롯 #{slotIdx + 1}</span>
-                            <span className="text-[11px] text-amber-300 font-bold bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
-                              {buyQty}주 보유
-                            </span>
+                <div className="space-y-1.5 max-h-[140px] overflow-y-auto pr-1 scrollbar-thin">
+                  {pendingSellOrders.length === 0 ? (
+                    <div className="text-xs text-sleek-text-secondary opacity-40 italic py-2 text-center">
+                      대기 중인 지정가 매도 주문 없음
+                    </div>
+                  ) : (
+                    pendingSellOrders.map((order, idx) => {
+                      const currentStock = stocks.find(s => s.symbol === order.symbol) || selectedStock;
+                      const targetDiffPercent = ((order.orderPrice - currentStock.price) / currentStock.price) * 100;
+                      const fillProgress = currentStock.price >= order.orderPrice ? 100 : Math.min(100, Math.max(0, (currentStock.price / order.orderPrice) * 100));
+
+                      return (
+                        <div key={order.id || idx} className="flex flex-col bg-white/5 rounded-xl p-2.5 border border-white/5 space-y-1.5 text-xs">
+                          <div className="flex justify-between items-center">
+                            <div className="flex items-center gap-1.5 font-mono">
+                              <span className={cn(
+                                "w-1.5 h-1.5 rounded-full",
+                                order.isSimulated ? "bg-rose-400" : "bg-emerald-400 animate-pulse"
+                              )}></span>
+                              <span className="text-white font-bold">{currentStock.name} ({order.symbol})</span>
+                              <span className="text-[10px] font-bold text-rose-300 uppercase px-1 py-0.2 bg-rose-500/10 rounded">
+                                {order.isSimulated ? "모의" : "KIS실전"}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <span className="text-sleek-text-secondary font-mono">수량: {order.quantity}주</span>
+                              <button
+                                type="button"
+                                onClick={() => cancelPendingSellOrder(order.id)}
+                                className="text-[10px] font-bold text-rose-400 hover:text-rose-200 bg-rose-500/20 hover:bg-rose-500/40 px-1.5 py-0.5 rounded transition-all ml-1"
+                              >
+                                취소
+                              </button>
+                            </div>
                           </div>
-                          <span className={cn("font-extrabold text-xs", profitPct >= 0 ? "text-rose-400" : "text-sky-400")}>
-                            {profitPct >= 0 ? "+" : ""}{profitPct.toFixed(2)}%
-                          </span>
+                          
+                          <div className="flex justify-between items-center font-mono">
+                            <span className="text-sleek-text-secondary">매도 지정가: <strong className="text-rose-400">₩{order.orderPrice.toLocaleString()}</strong></span>
+                            <span className="text-sleek-text-secondary">현재가: <strong className="text-white">₩{currentStock.price.toLocaleString()}</strong></span>
+                          </div>
+
+                          {/* Target Distance & Fill gauge */}
+                          <div className="space-y-1 pt-1 border-t border-white/5">
+                            <div className="flex justify-between items-center text-[10px] font-mono">
+                              <span className="text-sleek-text-secondary">목표 달성 괴리율</span>
+                              <span className={cn(
+                                "font-bold",
+                                targetDiffPercent <= 0 ? "text-rose-400 animate-pulse" : "text-amber-400"
+                              )}>
+                                {targetDiffPercent <= 0 ? "체결 임박 (0%)" : `+${targetDiffPercent.toFixed(2)}% 잔여`}
+                              </span>
+                            </div>
+                            <div className="w-full bg-white/5 h-1 rounded-full overflow-hidden relative">
+                              <div 
+                                className={cn(
+                                  "h-full rounded-full transition-all duration-300",
+                                  fillProgress >= 99 ? "bg-emerald-400" : "bg-rose-500"
+                                )}
+                                style={{ width: `${fillProgress}%` }}
+                              />
+                            </div>
+                          </div>
                         </div>
-
-                        <div className="grid grid-cols-2 gap-2 bg-white/5 p-2 rounded-xl border border-white/5 text-[11px]">
-                          <div>
-                            <span className="text-sleek-text-secondary text-[10px] block">체결 매수가</span>
-                            <span className="text-emerald-400 font-bold">₩{buyPrice.toLocaleString()}</span>
-                          </div>
-                          <div className="text-right">
-                            <span className="text-sleek-text-secondary text-[10px] block">목표 매도가 (+{scalpingTargetProfit}%)</span>
-                            <span className="text-rose-400 font-bold">₩{targetSellPrice.toLocaleString()}</span>
-                          </div>
-                        </div>
-                      </motion.div>
-                    );
-                  })
-                )}
+                      );
+                    })
+                  )}
+                </div>
               </div>
             </div>
 
-            {/* 3. System Diagnostics */}
+            {/* 4. System Diagnostics */}
             <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-3xl p-5 space-y-4 shrink-0">
               <h3 className="text-xs font-black text-sleek-blue uppercase tracking-widest flex items-center gap-2">
                 <Bot className="w-3.5 h-3.5" /> System Diagnostics
@@ -6197,26 +6307,6 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Sell Order Mode Toggle */}
-                <div className="bg-sleek-bg p-3 rounded-2xl border border-sleek-border flex items-center justify-between">
-                  <div>
-                    <div className="text-xs font-bold text-white">목표가 도달 시 자동 감시 매도</div>
-                    <div className="text-[10px] text-sleek-text-secondary">희망 가격에 도달할 때까지 실시간 감시 후 체결시킵니다.</div>
-                  </div>
-                  <button
-                    onClick={() => setIsTargetWatchMode(!isTargetWatchMode)}
-                    className={cn(
-                      "w-12 h-6 rounded-full transition-colors relative p-1 shadow-inner",
-                      isTargetWatchMode ? "bg-rose-500" : "bg-white/20"
-                    )}
-                  >
-                    <div className={cn(
-                      "w-4 h-4 rounded-full bg-white transition-transform shadow-md",
-                      isTargetWatchMode ? "translate-x-6" : "translate-x-0"
-                    )} />
-                  </button>
-                </div>
-
                 {/* Expected Revenue Summary */}
                 {manualSellPrice > 0 && manualSellQty > 0 && (
                   <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 flex justify-between items-center">
@@ -6241,34 +6331,9 @@ export default function App() {
                   className="flex-1 py-3 rounded-2xl bg-rose-500 hover:bg-rose-600 text-white font-black text-xs transition-all shadow-lg shadow-rose-500/25 flex items-center justify-center gap-2"
                 >
                   <CircleDollarSign className="w-4 h-4" />
-                  {isTargetWatchMode ? "목표가 감시 매도 예약 등록" : "즉시 지정가 수동 매도 실행"}
+                  지정가 수동 매도 주문 전송
                 </button>
               </div>
-
-              {/* Active Watches Section inside Modal */}
-              {manualSellWatches.length > 0 && (
-                <div className="pt-4 border-t border-white/10 space-y-2">
-                  <div className="text-xs font-bold text-sleek-text-secondary flex items-center justify-between">
-                    <span>현재 활성 지정가 매도 예약 ({manualSellWatches.length}건)</span>
-                  </div>
-                  <div className="space-y-1.5 max-h-[120px] overflow-y-auto custom-scrollbar">
-                    {manualSellWatches.map((w) => (
-                      <div key={w.id} className="p-2.5 rounded-xl bg-white/5 border border-white/5 flex items-center justify-between text-xs">
-                        <div>
-                          <span className="font-bold text-white">{w.stockName}</span>
-                          <span className="text-[10px] text-sleek-text-secondary ml-2">목표: ₩{w.targetPrice.toLocaleString()} ({w.quantity}주)</span>
-                        </div>
-                        <button
-                          onClick={() => setManualSellWatches(prev => prev.filter(item => item.id !== w.id))}
-                          className="text-[10px] text-rose-400 hover:text-rose-300 font-bold px-2 py-1 bg-rose-500/10 rounded-lg hover:bg-rose-500/20 transition-all"
-                        >
-                          취소
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
             </motion.div>
           </div>
         )}
