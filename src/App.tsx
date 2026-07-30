@@ -1016,9 +1016,10 @@ export default function App() {
     });
 
     return scoredCandidates.slice(0, 5).map(c => c.symbol);
-  }, [marketType, heldSymbolsKey, top3RefreshNonce, stocks]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [marketType, top3RefreshNonce]);
 
-  // Scalper Engine Optimal Top 5 Stocks mapping live stock data
+  // Scalper Engine Optimal Top 5 Stocks mapping live stock snapshot
   const scalperTop5Stocks = useMemo(() => {
     const maxPrice = marketType === 'KR' ? 10000 : 10.0;
 
@@ -1086,7 +1087,8 @@ export default function App() {
         reasonTag
       };
     });
-  }, [stableTop5Symbols, stocks, holdings, marketType]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stableTop5Symbols, top3RefreshNonce, marketType]);
 
   // Real-time Exchange Rate Fetcher & Simulator
   const fetchRealExchangeRate = React.useCallback(async () => {
