@@ -627,7 +627,8 @@ export default function App() {
 
   const [autoCancelThreshold, setAutoCancelThreshold] = useState<number>(0.2); // 0.2%
   const [immediateEntry, setImmediateEntry] = useState<boolean>(false);
-  const [lowestBidOnlyMode, setLowestBidOnlyMode] = useState<boolean>(true); // 매수 4단계 기본 옵션 (기본 true)
+  const [entryPriceMode, setEntryPriceMode] = useState<'CURRENT' | 'BID2' | 'BID4'>('BID2'); // 매수 2단계 기본 (최적 체결+안정성)
+  const lowestBidOnlyMode = entryPriceMode === 'BID4'; // Backward compatibility ref
   const [scalperMessage, setScalperMessage] = useState<string>("대기 중...");
   const [selectedTimeframeBar, setSelectedTimeframeBar] = useState<'1m' | '3m' | '5m' | '10m'>('1m');
   const gapInventoryRef = React.useRef<{id: string, price: number, quantity: number}[]>([]);
@@ -3181,7 +3182,11 @@ export default function App() {
             : (isOverSold || isNearLowerBand) && (currentPrice >= sma5);
           
           const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
-          const rawTargetBuyPrice = lowestBidOnlyMode ? (currentPrice - 4 * tickSize) : currentPrice;
+          const rawTargetBuyPrice = entryPriceMode === 'BID4' 
+            ? (currentPrice - 4 * tickSize) 
+            : entryPriceMode === 'BID2' 
+            ? (currentPrice - 2 * tickSize) 
+            : currentPrice;
           const targetBuyPrice = Math.round(rawTargetBuyPrice / tickSize) * tickSize;
 
           const currentInventory = gapInventoryRef.current;
@@ -3397,7 +3402,7 @@ export default function App() {
     }, scalpingSpeed);
 
     return () => clearInterval(gapInterval);
-  }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, lowestBidOnlyMode, maxSlots, allowSamePriceEntry, enableCombinedAvgProfitExit]);
+  }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, entryPriceMode, lowestBidOnlyMode, maxSlots, allowSamePriceEntry, enableCombinedAvgProfitExit]);
 
   const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number, buyPrice?: number, slotId?: string): Promise<number> => {
     if (action === 'HOLD' || amount <= 0) return 0;
@@ -5157,24 +5162,37 @@ export default function App() {
                   <span className="text-[10px] font-bold text-white flex items-center gap-1 mb-1">
                     <TrendingDown className="w-3 h-3 text-amber-400" /> 진입 호가 방식
                   </span>
-                  <div className="grid grid-cols-2 gap-1">
+                  <div className="grid grid-cols-3 gap-1">
                     <button
                       type="button"
-                      onClick={() => setLowestBidOnlyMode(true)}
+                      onClick={() => setEntryPriceMode('BID2')}
                       className={cn(
-                        "py-1 rounded text-[10px] font-bold border text-center transition-all",
-                        lowestBidOnlyMode ? "bg-amber-500/20 border-amber-500/40 text-amber-300" : "bg-black/20 border-white/5 text-gray-400"
+                        "py-1 rounded text-[10px] font-bold border text-center transition-all cursor-pointer",
+                        entryPriceMode === 'BID2' ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" : "bg-black/20 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
+                      title="현재가 대비 -2호가 적정 눌림목 진입 (체결률+안정성 최적)"
+                    >
+                      매수2단계★
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEntryPriceMode('BID4')}
+                      className={cn(
+                        "py-1 rounded text-[10px] font-bold border text-center transition-all cursor-pointer",
+                        entryPriceMode === 'BID4' ? "bg-amber-500/20 border-amber-500/40 text-amber-300" : "bg-black/20 border-white/5 text-gray-400 hover:text-gray-200"
+                      )}
+                      title="현재가 대비 -4호가 깊은 눌림목 진입"
                     >
                       매수4단계
                     </button>
                     <button
                       type="button"
-                      onClick={() => setLowestBidOnlyMode(false)}
+                      onClick={() => setEntryPriceMode('CURRENT')}
                       className={cn(
-                        "py-1 rounded text-[10px] font-bold border text-center transition-all",
-                        !lowestBidOnlyMode ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue" : "bg-black/20 border-white/5 text-gray-400"
+                        "py-1 rounded text-[10px] font-bold border text-center transition-all cursor-pointer",
+                        entryPriceMode === 'CURRENT' ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue" : "bg-black/20 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
+                      title="현재 시장 체결가 즉시 지정가 진입"
                     >
                       현재 체결가
                     </button>
