@@ -3179,7 +3179,7 @@ export default function App() {
             : (isOverSold || isNearLowerBand) && (currentPrice >= sma5);
           
           const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
-          const rawTargetBuyPrice = lowestBidOnlyMode ? (currentPrice - 5 * tickSize) : currentPrice;
+          const rawTargetBuyPrice = lowestBidOnlyMode ? (currentPrice - 4 * tickSize) : currentPrice;
           const targetBuyPrice = Math.round(rawTargetBuyPrice / tickSize) * tickSize;
 
           const currentInventory = gapInventoryRef.current;
@@ -4998,212 +4998,8 @@ export default function App() {
             </div>
           </div>
 
-          {/* 2. PROFIT MAXIMIZER ENGINE (Chart + Live Order Book) */}
-          <div className="bg-sleek-card border border-sleek-border p-4 rounded-3xl shadow-2xl space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-white/5">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-sleek-card border border-sleek-border rounded-xl flex items-center justify-center shadow-md">
-                  <Activity className="w-4 h-4 text-sleek-blue animate-pulse" />
-                </div>
-                <div>
-                  <h3 className="text-sm font-black text-white uppercase italic tracking-tighter">PROFIT MAXIMIZER ENGINE</h3>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-sleek-green animate-pulse"></div>
-                    <span className="text-[11px] font-bold text-sleek-text-secondary uppercase">Real-time Trading Stage</span>
-                  </div>
-                </div>
-              </div>
-              <div className="text-right flex items-center gap-4 text-xs font-mono">
-                <div>
-                  <span className="text-[11px] text-sleek-text-secondary uppercase block font-black">RSI (14)</span>
-                  <span className={cn(
-                    "font-black italic text-sm",
-                    calculateRSI(selectedStock?.history?.map(h => h.price) || []) < 30 ? "text-sleek-red" : 
-                    calculateRSI(selectedStock?.history?.map(h => h.price) || []) > 70 ? "text-sleek-green" : "text-sleek-blue"
-                  )}>
-                    {Math.round(calculateRSI(selectedStock?.history?.map(h => h.price) || []))}
-                  </span>
-                </div>
-                <div>
-                  <span className="text-[11px] text-sleek-text-secondary uppercase block font-black">감시 구간 폭</span>
-                  <span className="font-black text-sleek-blue italic text-sm">
-                    ₩{gapBuyPrice && gapSellPrice ? (gapSellPrice - gapBuyPrice).toLocaleString() : '0'}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {selectedStock ? (
-              (() => {
-                return (
-                  <div className="flex flex-col min-w-0">
-                    {/* Real-time Stock Price Bar Chart */}
-                    <div className="flex-1 flex flex-col min-w-0">
-                      {(() => {
-                        const groupSize = selectedTimeframeBar === '1m' ? 2 : selectedTimeframeBar === '3m' ? 4 : selectedTimeframeBar === '5m' ? 6 : 10;
-                        const historyItems = selectedStock.history || [];
-                        const candleData = [];
-
-                        for (let i = 0; i < historyItems.length; i += groupSize) {
-                          const group = historyItems.slice(i, i + groupSize);
-                          const open = group[0]?.price || selectedStock.price;
-                          const isLastGroup = i + groupSize >= historyItems.length;
-                          const close = isLastGroup ? selectedStock.price : (group[group.length - 1]?.price || selectedStock.price);
-                          const prices = group.map(g => g.price);
-                          if (isLastGroup) prices.push(selectedStock.price);
-                          const high = Math.max(...prices);
-                          const low = Math.min(...prices);
-                          const isUp = close >= open;
-
-                          candleData.push({
-                            time: group[0]?.time || '00:00',
-                            open,
-                            high,
-                            low,
-                            close,
-                            price: close,
-                            isUp,
-                            isLive: isLastGroup
-                          });
-                        }
-
-                        return (
-                          <>
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                              <div className="flex items-center gap-3">
-                                <span className="text-2xl md:text-3xl font-black text-white italic tracking-tighter font-mono leading-tight">
-                                  ₩{selectedStock.price.toLocaleString()}
-                                </span>
-                                <span className={cn(
-                                  "text-xs md:text-sm font-black italic font-mono leading-none",
-                                  selectedStock.change >= 0 ? "text-rose-500" : "text-sky-400"
-                                )}>
-                                  {selectedStock.change >= 0 ? '▲ +' : '▼ '}{selectedStock.changePercent.toFixed(2)}%
-                                </span>
-                              </div>
-
-                              {/* Timeframe Bar Controls */}
-                              <div className="flex items-center gap-1 bg-black/40 border border-white/5 p-1 rounded-xl shrink-0">
-                                {(['1m', '3m', '5m', '10m'] as const).map(tf => (
-                                  <button
-                                    key={tf}
-                                    type="button"
-                                    onClick={() => setSelectedTimeframeBar(tf)}
-                                    className={cn(
-                                      "px-2 py-0.5 rounded-lg text-xs font-bold transition-all font-mono",
-                                      selectedTimeframeBar === tf
-                                        ? "bg-sleek-blue text-white shadow-sm"
-                                        : "text-sleek-text-secondary hover:bg-white/5 hover:text-white"
-                                    )}
-                                  >
-                                    {tf === '1m' ? '1분' : tf === '3m' ? '3분' : tf === '5m' ? '5분' : '10분'}
-                                  </button>
-                                ))}
-                              </div>
-                            </div>
-
-                            {/* Chart Container - Compact Height */}
-                            <div className="bg-sleek-card/30 rounded-2xl border border-sleek-border p-2.5 relative shadow-inner h-[200px] min-h-[200px]">
-                              <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={candleData}>
-                                  <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.05} />
-                                  <XAxis 
-                                    dataKey="time" 
-                                    axisLine={false} 
-                                    tickLine={false} 
-                                    tick={{ fontSize: 11, fill: '#6B7280' }}
-                                  />
-                                  <YAxis 
-                                    domain={['auto', 'auto']} 
-                                    axisLine={false} 
-                                    tickLine={false} 
-                                    tick={{ fontSize: 11, fill: '#6B7280' }}
-                                    orientation="right"
-                                  />
-                                  <Tooltip 
-                                    content={({ active, payload }) => {
-                                      if (active && payload && payload.length) {
-                                        const data = payload[0].payload;
-                                        return (
-                                          <div className="bg-[#1A1D23] border border-[#2D3139] p-2.5 rounded-xl shadow-2xl space-y-1 text-xs font-mono">
-                                            <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-1">
-                                              <span className="text-sleek-text-secondary font-bold">{data.time}</span>
-                                              <span className={cn("font-bold px-1 py-0.2 rounded text-[11px]", data.isUp ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400")}>
-                                                {data.isUp ? "양봉 (상승)" : "음봉 (하락)"}
-                                              </span>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs pt-0.5">
-                                              <div>시가: <strong className="text-white">₩{data.open.toLocaleString()}</strong></div>
-                                              <div>고가: <strong className="text-rose-400">₩{data.high.toLocaleString()}</strong></div>
-                                              <div>저가: <strong className="text-sky-400">₩{data.low.toLocaleString()}</strong></div>
-                                              <div>종가: <strong className={data.close >= data.open ? "text-rose-400" : "text-sky-400"}>₩{data.close.toLocaleString()}</strong></div>
-                                            </div>
-                                          </div>
-                                        );
-                                      }
-                                      return null;
-                                    }}
-                                  />
-                                  <Bar 
-                                    dataKey="close" 
-                                    radius={[3, 3, 0, 0]}
-                                    animationDuration={200}
-                                  >
-                                    {candleData.map((candle, idx) => (
-                                      <Cell 
-                                        key={`candle-${idx}`} 
-                                        fill={candle.isUp ? '#EF4444' : '#3B82F6'} 
-                                        stroke={candle.isLive ? (candle.isUp ? '#F87171' : '#60A5FA') : 'none'}
-                                        strokeWidth={candle.isLive ? 2 : 0}
-                                      />
-                                    ))}
-                                  </Bar>
-                                  
-                                  {gapBuyPrice > 0 && (
-                                    <ReferenceLine 
-                                      y={gapBuyPrice} 
-                                      stroke="#EF4444" 
-                                      strokeDasharray="4 4" 
-                                      strokeWidth={1.5}
-                                    >
-                                      <Label value="BUY" position="left" fill="#EF4444" fontSize={11} fontWeight="bold" />
-                                    </ReferenceLine>
-                                  )}
-                                  {gapSellPrice > 0 && (
-                                    <ReferenceLine 
-                                      y={gapSellPrice} 
-                                      stroke="#3B82F6" 
-                                      strokeDasharray="4 4" 
-                                      strokeWidth={1.5}
-                                    >
-                                      <Label value="SELL" position="left" fill="#3B82F6" fontSize={11} fontWeight="bold" />
-                                    </ReferenceLine>
-                                  )}
-                                </BarChart>
-                              </ResponsiveContainer>
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                );
-              })()
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-sleek-card/20 rounded-3xl border border-dashed border-sleek-border">
-                <div className="p-4 bg-sleek-blue/10 rounded-full mb-3">
-                  <Search className="w-8 h-8 text-sleek-blue animate-pulse" />
-                </div>
-                <h4 className="text-base font-black text-white italic mb-1 uppercase tracking-tighter">No Stock Selected</h4>
-                <p className="text-xs text-sleek-text-secondary max-w-xs">
-                  왼쪽 사이드바에서 트레이딩을 진행할 종목을 먼저 선택해 주세요.
-                </p>
-              </div>
-            )}
-          </div>
-
-          {/* 3. AI SCALPING CONFIG (Full Width Horizontal Config Card) */}
-          <div id="ai-scalping-config-panel" className="bg-sleek-card border border-sleek-border p-4 rounded-3xl shadow-xl space-y-3">
+          {/* 2. AI SCALPING CONFIG (Moved Up for Instant Parameter Access) */}
+          <div id="ai-scalping-config-panel" className="bg-sleek-card border border-sleek-border p-3.5 sm:p-4 rounded-3xl shadow-xl space-y-3">
             <div className="flex items-center justify-between pb-2 border-b border-white/5">
               <div className="flex flex-col">
                 <h2 className="text-base font-black text-white italic uppercase tracking-tighter">AI SCALPING CONFIG</h2>
@@ -5355,7 +5151,7 @@ export default function App() {
                         lowestBidOnlyMode ? "bg-amber-500/20 border-amber-500/40 text-amber-300" : "bg-black/20 border-white/5 text-gray-400"
                       )}
                     >
-                      최저 매수호가
+                      매수4단계
                     </button>
                     <button
                       type="button"
@@ -5463,7 +5259,7 @@ export default function App() {
                     setIsGapBotActive(!isGapBotActive);
                   }}
                   className={cn(
-                    "w-full h-full min-h-[100px] py-4 px-3 rounded-2xl font-black text-base italic tracking-tighter uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-2 border",
+                    "w-full h-full min-h-[90px] sm:min-h-[100px] py-3.5 px-3 rounded-2xl font-black text-base italic tracking-tighter uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-1.5 border",
                     isGapBotActive 
                       ? "bg-gradient-to-br from-rose-600 to-red-800 text-white border-rose-500/50 shadow-rose-900/40 hover:scale-[1.02]" 
                       : "bg-gradient-to-br from-sleek-blue to-indigo-700 text-white border-sleek-blue/50 shadow-sleek-blue/40 hover:scale-[1.02]"
@@ -5471,18 +5267,308 @@ export default function App() {
                 >
                   {isGapBotActive ? (
                     <>
-                      <Square className="w-6 h-6 fill-current animate-pulse" />
+                      <Square className="w-5 h-5 fill-current animate-pulse" />
                       <span>SCALPER STOP</span>
                     </>
                   ) : (
                     <>
-                      <Play className="w-6 h-6 fill-current" />
+                      <Play className="w-5 h-5 fill-current" />
                       <span className="text-center leading-tight">START AI<br />SCALPER</span>
                     </>
                   )}
                 </button>
               </div>
             </div>
+          </div>
+
+          {/* 3. PROFIT MAXIMIZER ENGINE (Chart + Compact 4-Level Order Book) */}
+          <div className="bg-sleek-card border border-sleek-border p-3.5 sm:p-4 rounded-3xl shadow-2xl space-y-3">
+            <div className="flex items-center justify-between pb-2 border-b border-white/5">
+              <div className="flex items-center gap-3">
+                <div className="w-8 h-8 bg-sleek-card border border-sleek-border rounded-xl flex items-center justify-center shadow-md">
+                  <Activity className="w-4 h-4 text-sleek-blue animate-pulse" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-black text-white uppercase italic tracking-tighter">PROFIT MAXIMIZER ENGINE</h3>
+                  <div className="flex items-center gap-1.5">
+                    <div className="w-1.5 h-1.5 rounded-full bg-sleek-green animate-pulse"></div>
+                    <span className="text-[11px] font-bold text-sleek-text-secondary uppercase">Real-time Trading Stage</span>
+                  </div>
+                </div>
+              </div>
+              <div className="text-right flex items-center gap-4 text-xs font-mono">
+                <div>
+                  <span className="text-[11px] text-sleek-text-secondary uppercase block font-black">RSI (14)</span>
+                  <span className={cn(
+                    "font-black italic text-sm",
+                    calculateRSI(selectedStock?.history?.map(h => h.price) || []) < 30 ? "text-sleek-red" : 
+                    calculateRSI(selectedStock?.history?.map(h => h.price) || []) > 70 ? "text-sleek-green" : "text-sleek-blue"
+                  )}>
+                    {Math.round(calculateRSI(selectedStock?.history?.map(h => h.price) || []))}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-[11px] text-sleek-text-secondary uppercase block font-black">감시 구간 폭</span>
+                  <span className="font-black text-sleek-blue italic text-sm">
+                    ₩{gapBuyPrice && gapSellPrice ? (gapSellPrice - gapBuyPrice).toLocaleString() : '0'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {selectedStock ? (
+              (() => {
+                const currentPrice = selectedStock.price;
+                const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
+                const askLevels = Array.from({ length: 4 }, (_, i) => currentPrice + (4 - i) * tickSize);
+                const bidLevels = Array.from({ length: 4 }, (_, i) => currentPrice - (i + 1) * tickSize);
+                const getLevelVolume = (priceLevel: number) => {
+                  const base = Math.abs((priceLevel * 17) % 850) + 120;
+                  const wiggle = Math.floor(Math.sin((Date.now() / 2500) + priceLevel) * 45) + 45;
+                  return base + wiggle;
+                };
+
+                return (
+                  <div className="flex flex-col lg:flex-row gap-4 items-stretch">
+                    {/* Left Side: Real-time Stock Price Bar Chart */}
+                    <div className="flex-1 flex flex-col min-w-0">
+                      {(() => {
+                        const groupSize = selectedTimeframeBar === '1m' ? 2 : selectedTimeframeBar === '3m' ? 4 : selectedTimeframeBar === '5m' ? 6 : 10;
+                        const historyItems = selectedStock.history || [];
+                        const candleData = [];
+
+                        for (let i = 0; i < historyItems.length; i += groupSize) {
+                          const group = historyItems.slice(i, i + groupSize);
+                          const open = group[0]?.price || selectedStock.price;
+                          const isLastGroup = i + groupSize >= historyItems.length;
+                          const close = isLastGroup ? selectedStock.price : (group[group.length - 1]?.price || selectedStock.price);
+                          const prices = group.map(g => g.price);
+                          if (isLastGroup) prices.push(selectedStock.price);
+                          const high = Math.max(...prices);
+                          const low = Math.min(...prices);
+                          const isUp = close >= open;
+
+                          candleData.push({
+                            time: group[0]?.time || '00:00',
+                            open,
+                            high,
+                            low,
+                            close,
+                            price: close,
+                            isUp,
+                            isLive: isLastGroup
+                          });
+                        }
+
+                        return (
+                          <>
+                            <div className="mb-2 flex items-center justify-between gap-2">
+                              <div className="flex flex-col justify-center">
+                                <span className="text-2xl md:text-3xl font-black text-white italic tracking-tighter font-mono leading-tight">
+                                  ₩{selectedStock.price.toLocaleString()}
+                                </span>
+                                <span className={cn(
+                                  "text-xs md:text-sm font-black italic font-mono leading-none mt-0.5",
+                                  selectedStock.change >= 0 ? "text-rose-500" : "text-sky-400"
+                                )}>
+                                  {selectedStock.change >= 0 ? '▲ +' : '▼ '}{selectedStock.changePercent.toFixed(2)}%
+                                </span>
+                              </div>
+
+                              {/* Timeframe Bar Controls */}
+                              <div className="flex items-center gap-1 bg-black/40 border border-white/5 p-1 rounded-xl shrink-0">
+                                {(['1m', '3m', '5m', '10m'] as const).map(tf => (
+                                  <button
+                                    key={tf}
+                                    type="button"
+                                    onClick={() => setSelectedTimeframeBar(tf)}
+                                    className={cn(
+                                      "px-2 py-0.5 rounded-lg text-xs font-bold transition-all font-mono",
+                                      selectedTimeframeBar === tf
+                                        ? "bg-sleek-blue text-white shadow-sm"
+                                        : "text-sleek-text-secondary hover:bg-white/5 hover:text-white"
+                                    )}
+                                  >
+                                    {tf === '1m' ? '1분' : tf === '3m' ? '3분' : tf === '5m' ? '5분' : '10분'}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+
+                            {/* Chart Container */}
+                            <div className="bg-sleek-card/30 rounded-2xl border border-sleek-border p-2.5 relative shadow-inner h-[240px] min-h-[240px]">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <BarChart data={candleData}>
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.05} />
+                                  <XAxis 
+                                    dataKey="time" 
+                                    axisLine={false} 
+                                    tickLine={false} 
+                                    tick={{ fontSize: 11, fill: '#6B7280' }}
+                                  />
+                                  <YAxis 
+                                    domain={['auto', 'auto']} 
+                                    axisLine={false} 
+                                    tickLine={false} 
+                                    tick={{ fontSize: 11, fill: '#6B7280' }}
+                                    orientation="right"
+                                  />
+                                  <Tooltip 
+                                    content={({ active, payload }) => {
+                                      if (active && payload && payload.length) {
+                                        const data = payload[0].payload;
+                                        return (
+                                          <div className="bg-[#1A1D23] border border-[#2D3139] p-2.5 rounded-xl shadow-2xl space-y-1 text-xs font-mono">
+                                            <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-1">
+                                              <span className="text-sleek-text-secondary font-bold">{data.time}</span>
+                                              <span className={cn("font-bold px-1 py-0.2 rounded text-[11px]", data.isUp ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400")}>
+                                                {data.isUp ? "양봉 (상승)" : "음봉 (하락)"}
+                                              </span>
+                                            </div>
+                                            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs pt-0.5">
+                                              <div>시가: <strong className="text-white">₩{data.open.toLocaleString()}</strong></div>
+                                              <div>고가: <strong className="text-rose-400">₩{data.high.toLocaleString()}</strong></div>
+                                              <div>저가: <strong className="text-sky-400">₩{data.low.toLocaleString()}</strong></div>
+                                              <div>종가: <strong className={data.close >= data.open ? "text-rose-400" : "text-sky-400"}>₩{data.close.toLocaleString()}</strong></div>
+                                            </div>
+                                          </div>
+                                        );
+                                      }
+                                      return null;
+                                    }}
+                                  />
+                                  <Bar 
+                                    dataKey="close" 
+                                    radius={[3, 3, 0, 0]}
+                                    animationDuration={200}
+                                  >
+                                    {candleData.map((candle, idx) => (
+                                      <Cell 
+                                        key={`candle-${idx}`} 
+                                        fill={candle.isUp ? '#EF4444' : '#3B82F6'} 
+                                        stroke={candle.isLive ? (candle.isUp ? '#F87171' : '#60A5FA') : 'none'}
+                                        strokeWidth={candle.isLive ? 2 : 0}
+                                      />
+                                    ))}
+                                  </Bar>
+                                  
+                                  {gapBuyPrice > 0 && (
+                                    <ReferenceLine 
+                                      y={gapBuyPrice} 
+                                      stroke="#EF4444" 
+                                      strokeDasharray="4 4" 
+                                      strokeWidth={1.5}
+                                    >
+                                      <Label value="BUY" position="left" fill="#EF4444" fontSize={11} fontWeight="bold" />
+                                    </ReferenceLine>
+                                  )}
+                                  {gapSellPrice > 0 && (
+                                    <ReferenceLine 
+                                      y={gapSellPrice} 
+                                      stroke="#3B82F6" 
+                                      strokeDasharray="4 4" 
+                                      strokeWidth={1.5}
+                                    >
+                                      <Label value="SELL" position="left" fill="#3B82F6" fontSize={11} fontWeight="bold" />
+                                    </ReferenceLine>
+                                  )}
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                    {/* Right Side: Live Order Book Section (Compact 4 Ask & 4 Bid Levels) */}
+                    <div className="w-full lg:w-[280px] shrink-0 flex flex-col">
+                      <div className="bg-black/40 rounded-2xl border border-sleek-border p-2.5 flex flex-col justify-between h-[240px] min-h-[240px]">
+                        <div>
+                          <div className="text-center font-black text-sleek-text-secondary uppercase text-[11px] tracking-widest pb-1 border-b border-white/5 mb-1">
+                            실시간 잔량 호가창 (4단계)
+                          </div>
+                          
+                          {/* Ask Levels (매도 4~1단계) */}
+                          <div className="space-y-0.5">
+                            {askLevels.map((lvlPrice, idx) => {
+                              const vol = getLevelVolume(lvlPrice);
+                              const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
+                              return (
+                                <div key={`ask-level-${idx}`} className="flex items-center justify-between h-5.5 px-2 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
+                                  <div className="absolute right-0 top-0 bottom-0 bg-sky-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
+                                  <span className="w-16 shrink-0 text-[10px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}단계</span>
+                                  <span className={cn(
+                                    "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[11px] whitespace-nowrap px-1.5",
+                                    isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-300"
+                                  )}>
+                                    ₩{lvlPrice.toLocaleString()}
+                                  </span>
+                                  <span className="w-14 shrink-0 text-right text-sky-200/60 font-mono tabular-nums text-[10px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Spread Line */}
+                          <div className="my-1 h-7 px-2 bg-white/5 border-y border-white/10 flex items-center justify-between rounded-lg font-mono tabular-nums">
+                            <span className="text-[10px] font-black text-sleek-text-secondary uppercase shrink-0">현재 체결가</span>
+                            <span className={cn("font-black text-xs font-mono tabular-nums animate-pulse", selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400")}>
+                              ₩{currentPrice.toLocaleString()}
+                            </span>
+                            <span className={cn("text-[10px] font-mono tabular-nums font-bold shrink-0", selectedStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
+                              {selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%
+                            </span>
+                          </div>
+
+                          {/* Bid Levels (매수 1~4단계) */}
+                          <div className="space-y-0.5">
+                            {bidLevels.map((lvlPrice, idx) => {
+                              const vol = getLevelVolume(lvlPrice);
+                              const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
+                              return (
+                                <div key={`bid-level-${idx}`} className="flex items-center justify-between h-5.5 px-2 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
+                                  <div className="absolute right-0 top-0 bottom-0 bg-rose-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
+                                  <span className="w-16 shrink-0 text-[10px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}단계</span>
+                                  <span className={cn(
+                                    "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[11px] whitespace-nowrap px-1.5",
+                                    isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-300"
+                                  )}>
+                                    ₩{lvlPrice.toLocaleString()}
+                                  </span>
+                                  <span className="w-14 shrink-0 text-right text-rose-200/60 font-mono tabular-nums text-[10px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Order Book Pressure Gauge */}
+                        <div className="pt-1 border-t border-white/5 space-y-0.5">
+                          <div className="flex justify-between text-[9px] text-sleek-text-secondary font-bold font-sans">
+                            <span className="text-sky-400">매도잔량 47.8%</span>
+                            <span className="text-rose-400">매수잔량 52.2%</span>
+                          </div>
+                          <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex">
+                            <div className="h-full bg-sky-400" style={{ width: '47.8%' }} />
+                            <div className="h-full bg-rose-400" style={{ width: '52.2%' }} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()
+            ) : (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-sleek-card/20 rounded-3xl border border-dashed border-sleek-border">
+                <div className="p-4 bg-sleek-blue/10 rounded-full mb-3">
+                  <Search className="w-8 h-8 text-sleek-blue animate-pulse" />
+                </div>
+                <h4 className="text-base font-black text-white italic mb-1 uppercase tracking-tighter">No Stock Selected</h4>
+                <p className="text-xs text-sleek-text-secondary max-w-xs">
+                  왼쪽 사이드바에서 트레이딩을 진행할 종목을 먼저 선택해 주세요.
+                </p>
+              </div>
+            )}
           </div>
 
           {/* 4. ACCOUNT & HOLDINGS SUMMARY BAR (Full Width Bottom Bar) */}
