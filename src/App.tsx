@@ -3197,7 +3197,7 @@ export default function App() {
           const isGapSatisfied = !isPositionInProfit && (!lastSlot || (currentPrice <= lastSlot.price * (1 - (minGapBetweenSlots / 100))));
 
           // Check if an active slot or pending order already exists at this EXACT same price level
-          const isSamePriceBlocked = !allowSamePriceEntry && (
+          const isSamePriceBlocked = (
             currentInventory.some(slot => Math.abs(Math.round(slot.price) - targetBuyPrice) < tickSize * 0.95) ||
             pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(Math.round(p.orderPrice) - targetBuyPrice) < tickSize * 0.95)
           );
@@ -3585,6 +3585,19 @@ export default function App() {
       const createdSlotId = slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
       if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
+        // Prevent duplicate buy order at same pending price level
+        const tickSize = tradePrice >= 500000 ? 1000 : tradePrice >= 100000 ? 500 : tradePrice >= 50000 ? 100 : tradePrice >= 10000 ? 50 : tradePrice >= 5000 ? 10 : 5;
+        const isDuplicateAtPrice = pendingBuyOrdersRef.current.some(
+          p => p.symbol === stock.symbol && Math.abs(p.orderPrice - tradePrice) < tickSize * 0.95
+        ) || gapInventoryRef.current.some(
+          s => Math.abs(s.price - tradePrice) < tickSize * 0.95
+        );
+
+        if (isDuplicateAtPrice) {
+          setScalperMessage(`[동일가 매수 중복 차단] ₩${tradePrice.toLocaleString()} 대기 중`);
+          return 0;
+        }
+
         // Simulated Mode: Place as pending buy order instead of instant fill!
         const simOrderId = `SIM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         
@@ -5396,7 +5409,7 @@ export default function App() {
                             </div>
 
                             {/* Chart Container */}
-                            <div className="bg-sleek-card/30 rounded-2xl border border-sleek-border p-2.5 relative shadow-inner h-[240px] min-h-[240px]">
+                            <div className="bg-sleek-card/30 rounded-2xl border border-sleek-border p-2 relative shadow-inner h-[180px] min-h-[180px]">
                               <ResponsiveContainer width="100%" height="100%">
                                 <BarChart data={candleData}>
                                   <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.05} />
@@ -5482,9 +5495,9 @@ export default function App() {
 
                     {/* Right Side: Live Order Book Section (Compact 4 Ask & 4 Bid Levels) */}
                     <div className="w-full lg:w-[280px] shrink-0 flex flex-col">
-                      <div className="bg-black/40 rounded-2xl border border-sleek-border p-2.5 flex flex-col justify-between h-[240px] min-h-[240px]">
+                      <div className="bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between h-[180px] min-h-[180px]">
                         <div>
-                          <div className="text-center font-black text-sleek-text-secondary uppercase text-[11px] tracking-widest pb-1 border-b border-white/5 mb-1">
+                          <div className="text-center font-black text-sleek-text-secondary uppercase text-[10px] tracking-widest pb-0.5 border-b border-white/5 mb-0.5">
                             실시간 잔량 호가창 (4단계)
                           </div>
                           
@@ -5494,28 +5507,28 @@ export default function App() {
                               const vol = getLevelVolume(lvlPrice);
                               const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
                               return (
-                                <div key={`ask-level-${idx}`} className="flex items-center justify-between h-5.5 px-2 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
+                                <div key={`ask-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
                                   <div className="absolute right-0 top-0 bottom-0 bg-sky-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
-                                  <span className="w-16 shrink-0 text-[10px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}단계</span>
+                                  <span className="w-14 shrink-0 text-[9px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}단계</span>
                                   <span className={cn(
-                                    "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[11px] whitespace-nowrap px-1.5",
+                                    "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
                                     isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-300"
                                   )}>
                                     ₩{lvlPrice.toLocaleString()}
                                   </span>
-                                  <span className="w-14 shrink-0 text-right text-sky-200/60 font-mono tabular-nums text-[10px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
+                                  <span className="w-12 shrink-0 text-right text-sky-200/60 font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
                                 </div>
                               );
                             })}
                           </div>
 
                           {/* Spread Line */}
-                          <div className="my-1 h-7 px-2 bg-white/5 border-y border-white/10 flex items-center justify-between rounded-lg font-mono tabular-nums">
-                            <span className="text-[10px] font-black text-sleek-text-secondary uppercase shrink-0">현재 체결가</span>
-                            <span className={cn("font-black text-xs font-mono tabular-nums animate-pulse", selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400")}>
+                          <div className="my-0.5 h-5 px-1.5 bg-white/5 border-y border-white/10 flex items-center justify-between rounded font-mono tabular-nums">
+                            <span className="text-[9px] font-black text-sleek-text-secondary uppercase shrink-0">현재 체결가</span>
+                            <span className={cn("font-black text-[11px] font-mono tabular-nums animate-pulse", selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400")}>
                               ₩{currentPrice.toLocaleString()}
                             </span>
-                            <span className={cn("text-[10px] font-mono tabular-nums font-bold shrink-0", selectedStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
+                            <span className={cn("text-[9px] font-mono tabular-nums font-bold shrink-0", selectedStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
                               {selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%
                             </span>
                           </div>
@@ -5526,16 +5539,16 @@ export default function App() {
                               const vol = getLevelVolume(lvlPrice);
                               const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
                               return (
-                                <div key={`bid-level-${idx}`} className="flex items-center justify-between h-5.5 px-2 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
+                                <div key={`bid-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
                                   <div className="absolute right-0 top-0 bottom-0 bg-rose-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
-                                  <span className="w-16 shrink-0 text-[10px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}단계</span>
+                                  <span className="w-14 shrink-0 text-[9px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}단계</span>
                                   <span className={cn(
-                                    "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[11px] whitespace-nowrap px-1.5",
+                                    "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
                                     isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-300"
                                   )}>
                                     ₩{lvlPrice.toLocaleString()}
                                   </span>
-                                  <span className="w-14 shrink-0 text-right text-rose-200/60 font-mono tabular-nums text-[10px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
+                                  <span className="w-12 shrink-0 text-right text-rose-200/60 font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
                                 </div>
                               );
                             })}
@@ -5860,12 +5873,12 @@ export default function App() {
 
                             <div className="grid grid-cols-2 gap-2 bg-black/40 p-2.5 rounded-xl border border-white/5 text-[11px] tabular-nums">
                               <div>
-                                <span className="text-sleek-text-secondary text-[10px] block">체결 매수가 ({buyQty}주)</span>
-                                <span className="text-emerald-400 font-extrabold">₩{buyPrice.toLocaleString()}</span>
+                                <span className="text-sleek-text-secondary text-[10px] block font-bold">슬롯 정보 ({buyQty}주)</span>
+                                <span className="text-emerald-400 font-extrabold text-xs">매수진입가: ₩{buyPrice.toLocaleString()}</span>
                               </div>
                               <div className="text-right">
-                                <span className="text-sleek-text-secondary text-[10px] block">목표 매도가 (+{scalpingTargetProfit}%)</span>
-                                <span className="text-rose-400 font-extrabold">₩{targetSellPrice.toLocaleString()}</span>
+                                <span className="text-sleek-text-secondary text-[10px] block font-bold">목표 익절 (+{scalpingTargetProfit}%)</span>
+                                <span className="text-rose-400 font-extrabold text-xs">매도예상가: ₩{targetSellPrice.toLocaleString()}</span>
                               </div>
                             </div>
 
