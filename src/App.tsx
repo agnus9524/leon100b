@@ -3019,6 +3019,60 @@ export default function App() {
     checkSellOrders();
   }, [pendingSellOrders, stocks, marketType, exchangeRate, holdings, currentUser, playScalpingSound]);
 
+  // Auto-Sell Order Enforcer for Held Stocks (e.g. 동양 1주): Ensures all held stocks automatically register a target profit limit sell order
+  useEffect(() => {
+    if (scalpingTargetProfit <= 0) return;
+
+    Object.entries(holdings).forEach(([symbol, qtyVal]) => {
+      const numQty = Number(qtyVal) || 0;
+      if (numQty > 0) {
+        const stockObj = stocksRef.current.find(s => s.symbol === symbol) || stocks.find(s => s.symbol === symbol) || INITIAL_STOCKS_KR.find(s => s.symbol === symbol);
+        if (!stockObj) return;
+
+        const currentPendingSellQty = pendingSellOrdersRef.current
+          .filter(o => o.symbol === symbol)
+          .reduce((acc, o) => acc + o.quantity, 0);
+
+        if (currentPendingSellQty < numQty) {
+          const missingQty = numQty - currentPendingSellQty;
+          const avgP = avgPrices[symbol] || stockObj.price;
+          if (avgP <= 0) return;
+
+          const targetSellPrice = calculateTargetSellPrice(avgP, scalpingTargetProfit);
+
+          const autoOrderId = `AUTO-SELL-${symbol}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+          const newPendingSell: PendingSellOrder = {
+            id: autoOrderId,
+            symbol: symbol,
+            orderPrice: targetSellPrice,
+            quantity: missingQty,
+            createdAt: Date.now(),
+            isSimulated: !kisConfig.isConnected || !kisConfig.isRealOrderEnabled,
+            type: 'LIMIT_SELL',
+            reason: `[체결 즉시 자동 매도] 보유 주식 (${missingQty}주) +${scalpingTargetProfit}% 익절 지정가 매도 주문`,
+            buyPrice: avgP
+          };
+
+          setPendingSellOrders(prev => {
+            const currentQtyInPrev = prev.filter(o => o.symbol === symbol).reduce((a, b) => a + b.quantity, 0);
+            if (currentQtyInPrev >= numQty) return prev;
+            return [...prev, newPendingSell];
+          });
+
+          // Ensure slot inventory has the slot representation so it shows up in TRADE LOGS
+          if (gapInventoryRef.current.length === 0) {
+            const autoSlot = { id: `SLOT-HELD-${symbol}`, price: avgP, quantity: missingQty };
+            gapInventoryRef.current = [autoSlot];
+            setGapInventory([autoSlot]);
+          }
+
+          addLog(symbol, '매도', targetSellPrice, missingQty, `[자동 매도 주문 접수] 평단가 ₩${avgP.toLocaleString()} 대비 +${scalpingTargetProfit}% (목표가: ₩${targetSellPrice.toLocaleString()})`);
+          showNotification(`${stockObj.name} 보유 ${missingQty}주 매도 주문이 +${scalpingTargetProfit}% 목표가(₩${targetSellPrice.toLocaleString()})에 자동 등록되었습니다.`, "success");
+        }
+      }
+    });
+  }, [holdings, avgPrices, scalpingTargetProfit, kisConfig.isConnected, kisConfig.isRealOrderEnabled, stocks]);
+
   // Technical Indicators Utility Functions
   const calculateSMA = (data: number[], period: number) => {
     if (data.length < period) return data.length > 0 ? data[data.length - 1] : 0;
