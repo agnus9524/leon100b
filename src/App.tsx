@@ -627,7 +627,7 @@ export default function App() {
 
   const [autoCancelThreshold, setAutoCancelThreshold] = useState<number>(0.2); // 0.2%
   const [immediateEntry, setImmediateEntry] = useState<boolean>(false);
-  const [lowestBidOnlyMode, setLowestBidOnlyMode] = useState<boolean>(false); // 현재 체결가 진입 모드 (기본 false)
+  const [lowestBidOnlyMode, setLowestBidOnlyMode] = useState<boolean>(true); // 매수 4단계 기본 옵션 (기본 true)
   const [scalperMessage, setScalperMessage] = useState<string>("대기 중...");
   const [selectedTimeframeBar, setSelectedTimeframeBar] = useState<'1m' | '3m' | '5m' | '10m'>('1m');
   const gapInventoryRef = React.useRef<{id: string, price: number, quantity: number}[]>([]);
