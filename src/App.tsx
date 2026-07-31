@@ -2282,6 +2282,13 @@ export default function App() {
             const realPrice = priceData.current;
             setStocks(prev => prev.map(s => {
               if (s.symbol !== selectedSymbol) return s;
+              const newHistory = [...s.history];
+              if (newHistory.length > 0) {
+                newHistory[newHistory.length - 1] = {
+                  ...newHistory[newHistory.length - 1],
+                  price: realPrice
+                };
+              }
               return {
                 ...s,
                 price: realPrice,
@@ -2290,10 +2297,7 @@ export default function App() {
                 volume: priceData.volume,
                 isRealTime: true,
                 lastUpdated: new Date().toLocaleTimeString(),
-                history: [...s.history.slice(1), { 
-                  time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }), 
-                  price: realPrice 
-                }]
+                history: newHistory
               };
             }));
           }
@@ -2645,16 +2649,19 @@ export default function App() {
           const changePercent = drift + randomShock;
           const newPrice = Math.max(100, Math.round(currentPrice * (1 + changePercent)));
 
-          const newHistory = [...stock.history.slice(1), { 
-            time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' }), 
-            price: newPrice 
-          }];
+          const newHistory = [...stock.history];
+          if (newHistory.length > 0) {
+            newHistory[newHistory.length - 1] = {
+              ...newHistory[newHistory.length - 1],
+              price: newPrice
+            };
+          }
 
           return {
             ...stock,
             price: newPrice,
-            change: newPrice - stock.history[0].price,
-            changePercent: ((newPrice - stock.history[0].price) / stock.history[0].price * 100),
+            change: newPrice - (stock.history[0]?.price || newPrice),
+            changePercent: stock.history[0]?.price ? ((newPrice - stock.history[0].price) / stock.history[0].price * 100) : 0,
             history: newHistory
           };
         }
@@ -5585,14 +5592,20 @@ export default function App() {
                 };
 
                 // Prepare Chart Candle & Moving Averages (5, 20, 60, 120) Data
-                const groupSize = selectedTimeframeBar === '1m' ? 2 : selectedTimeframeBar === '3m' ? 4 : selectedTimeframeBar === '5m' ? 6 : 10;
+                const groupSize = selectedTimeframeBar === '1m' ? 1 : selectedTimeframeBar === '3m' ? 2 : selectedTimeframeBar === '5m' ? 3 : 4;
                 const historyItems = selectedStock.history || [];
                 const candleData = [];
 
-                for (let i = 0; i < historyItems.length; i += groupSize) {
-                  const group = historyItems.slice(i, i + groupSize);
+                // Group from the END of historyItems backwards to anchor current time on the far right
+                const groups: typeof historyItems[] = [];
+                for (let i = historyItems.length; i > 0; i -= groupSize) {
+                  const start = Math.max(0, i - groupSize);
+                  groups.unshift(historyItems.slice(start, i));
+                }
+
+                groups.forEach((group, gIdx) => {
+                  const isLastGroup = gIdx === groups.length - 1;
                   const open = group[0]?.price || selectedStock.price;
-                  const isLastGroup = i + groupSize >= historyItems.length;
                   const close = isLastGroup ? selectedStock.price : (group[group.length - 1]?.price || selectedStock.price);
                   const prices = group.map(g => g.price);
                   if (isLastGroup) prices.push(selectedStock.price);
@@ -5601,8 +5614,10 @@ export default function App() {
                   const isUp = close >= open;
                   const volume = group.reduce((acc, g) => acc + (g.volume || Math.floor((g.price * 3) % 250) + 20), 0);
 
+                  const displayTime = isLastGroup ? '현재' : (group[0]?.time || `${gIdx + 1}`);
+
                   candleData.push({
-                    time: group[0]?.time || '00:00',
+                    time: displayTime,
                     open,
                     high,
                     low,
@@ -5612,7 +5627,7 @@ export default function App() {
                     isLive: isLastGroup,
                     volume
                   });
-                }
+                });
 
                 // Calculate SMA Moving Averages
                 const closes = candleData.map(c => c.close);
@@ -5733,10 +5748,10 @@ export default function App() {
                                 />
 
                                 {/* Candle Bars */}
-                                <Bar dataKey="close" radius={[2, 2, 0, 0]} animationDuration={150}>
+                                <Bar dataKey="close" radius={[2, 2, 0, 0]} isAnimationActive={false} animationDuration={0}>
                                   {candleData.map((candle, idx) => (
                                     <Cell 
-                                      key={`candle-${idx}`} 
+                                      key={`candle-${candle.time}-${idx}`} 
                                       fill={candle.isUp ? '#EF4444' : '#3B82F6'} 
                                       stroke={candle.isLive ? (candle.isUp ? '#F87171' : '#60A5FA') : 'none'}
                                       strokeWidth={candle.isLive ? 1.5 : 0}
@@ -5820,12 +5835,12 @@ export default function App() {
                           <div className="h-12 w-full bg-slate-950/50 rounded-lg p-0.5 relative">
                             <ResponsiveContainer width="100%" height="100%">
                               <ComposedChart data={candleData} margin={{ top: 2, right: 35, left: 0, bottom: 0 }}>
-                                <Bar dataKey="volume" radius={[1, 1, 0, 0]}>
+                                <Bar dataKey="volume" radius={[1, 1, 0, 0]} isAnimationActive={false} animationDuration={0}>
                                   {candleData.map((c, idx) => (
-                                    <Cell key={`vol-${idx}`} fill={c.isUp ? '#EF4444' : '#3B82F6'} opacity={0.8} />
+                                    <Cell key={`vol-${c.time}-${idx}`} fill={c.isUp ? '#EF4444' : '#3B82F6'} opacity={0.8} />
                                   ))}
                                 </Bar>
-                                <Line type="monotone" dataKey="volMa20" stroke="#10B981" strokeWidth={1} dot={false} />
+                                <Line type="monotone" dataKey="volMa20" stroke="#10B981" strokeWidth={1} dot={false} isAnimationActive={false} animationDuration={0} />
                               </ComposedChart>
                             </ResponsiveContainer>
                           </div>
