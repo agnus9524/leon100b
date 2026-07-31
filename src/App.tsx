@@ -74,7 +74,10 @@ import {
   AreaChart,
   Area,
   ReferenceLine,
-  Label
+  ReferenceDot,
+  Label,
+  ComposedChart,
+  Line
 } from 'recharts';
 import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
@@ -5329,20 +5332,20 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <div className="text-right flex items-center gap-4 text-xs font-mono">
-                <div>
-                  <span className="text-[11px] text-sleek-text-secondary uppercase block font-black">RSI (14)</span>
+              <div className="text-right flex items-center gap-3 text-xs font-mono">
+                <div className="flex items-center gap-2 bg-black/40 px-2.5 py-1 rounded-xl border border-white/5 shadow-inner">
+                  <span className="text-[11px] text-sleek-text-secondary uppercase font-black">RSI (14)</span>
                   <span className={cn(
-                    "font-black italic text-sm",
+                    "font-black italic text-xs font-mono",
                     calculateRSI(selectedStock?.history?.map(h => h.price) || []) < 30 ? "text-sleek-red" : 
                     calculateRSI(selectedStock?.history?.map(h => h.price) || []) > 70 ? "text-sleek-green" : "text-sleek-blue"
                   )}>
                     {Math.round(calculateRSI(selectedStock?.history?.map(h => h.price) || []))}
                   </span>
                 </div>
-                <div>
-                  <span className="text-[11px] text-sleek-text-secondary uppercase block font-black">감시 구간 폭</span>
-                  <span className="font-black text-sleek-blue italic text-sm">
+                <div className="flex items-center gap-2 bg-black/40 px-2.5 py-1 rounded-xl border border-white/5 shadow-inner">
+                  <span className="text-[11px] text-sleek-text-secondary uppercase font-black">감시 구간 폭</span>
+                  <span className="font-black text-sleek-blue italic text-xs font-mono">
                     ₩{gapBuyPrice && gapSellPrice ? (gapSellPrice - gapBuyPrice).toLocaleString() : '0'}
                   </span>
                 </div>
@@ -5361,230 +5364,470 @@ export default function App() {
                   return base + wiggle;
                 };
 
+                // Prepare Chart Candle & Moving Averages (5, 20, 60, 120) Data
+                const groupSize = selectedTimeframeBar === '1m' ? 2 : selectedTimeframeBar === '3m' ? 4 : selectedTimeframeBar === '5m' ? 6 : 10;
+                const historyItems = selectedStock.history || [];
+                const candleData = [];
+
+                for (let i = 0; i < historyItems.length; i += groupSize) {
+                  const group = historyItems.slice(i, i + groupSize);
+                  const open = group[0]?.price || selectedStock.price;
+                  const isLastGroup = i + groupSize >= historyItems.length;
+                  const close = isLastGroup ? selectedStock.price : (group[group.length - 1]?.price || selectedStock.price);
+                  const prices = group.map(g => g.price);
+                  if (isLastGroup) prices.push(selectedStock.price);
+                  const high = Math.max(...prices);
+                  const low = Math.min(...prices);
+                  const isUp = close >= open;
+                  const volume = group.reduce((acc, g) => acc + (g.volume || Math.floor((g.price * 3) % 250) + 20), 0);
+
+                  candleData.push({
+                    time: group[0]?.time || '00:00',
+                    open,
+                    high,
+                    low,
+                    close,
+                    price: close,
+                    isUp,
+                    isLive: isLastGroup,
+                    volume
+                  });
+                }
+
+                // Calculate SMA Moving Averages
+                const closes = candleData.map(c => c.close);
+                const volumes = candleData.map(c => c.volume);
+
+                candleData.forEach((item, idx) => {
+                  const getSma = (arr: number[], period: number) => {
+                    const slice = arr.slice(Math.max(0, idx - period + 1), idx + 1);
+                    return slice.reduce((a, b) => a + b, 0) / (slice.length || 1);
+                  };
+                  item.ma5 = Math.round(getSma(closes, 5));
+                  item.ma20 = Math.round(getSma(closes, 20));
+                  item.ma60 = Math.round(getSma(closes, 60));
+                  item.ma120 = Math.round(getSma(closes, 120));
+                  item.volMa20 = Math.round(getSma(volumes, 20));
+                });
+
+                // Find peak (high) and trough (low) for annotations
+                let highCandle = candleData[0] || { high: currentPrice, time: '00:00' };
+                let lowCandle = candleData[0] || { low: currentPrice, time: '00:00' };
+                candleData.forEach(c => {
+                  if (c.high > highCandle.high) highCandle = c;
+                  if (c.low < lowCandle.low) lowCandle = c;
+                });
+
                 return (
-                  <div className="flex flex-col lg:flex-row gap-4 items-stretch">
-                    {/* Left Side: Real-time Stock Price Bar Chart */}
-                    <div className="flex-1 flex flex-col min-w-0">
-                      {(() => {
-                        const groupSize = selectedTimeframeBar === '1m' ? 2 : selectedTimeframeBar === '3m' ? 4 : selectedTimeframeBar === '5m' ? 6 : 10;
-                        const historyItems = selectedStock.history || [];
-                        const candleData = [];
-
-                        for (let i = 0; i < historyItems.length; i += groupSize) {
-                          const group = historyItems.slice(i, i + groupSize);
-                          const open = group[0]?.price || selectedStock.price;
-                          const isLastGroup = i + groupSize >= historyItems.length;
-                          const close = isLastGroup ? selectedStock.price : (group[group.length - 1]?.price || selectedStock.price);
-                          const prices = group.map(g => g.price);
-                          if (isLastGroup) prices.push(selectedStock.price);
-                          const high = Math.max(...prices);
-                          const low = Math.min(...prices);
-                          const isUp = close >= open;
-
-                          candleData.push({
-                            time: group[0]?.time || '00:00',
-                            open,
-                            high,
-                            low,
-                            close,
-                            price: close,
-                            isUp,
-                            isLive: isLastGroup
-                          });
-                        }
-
-                        return (
-                          <>
-                            <div className="mb-2 flex items-center justify-between gap-2">
-                              <div className="flex flex-col justify-center">
-                                <span className="text-2xl md:text-3xl font-black text-white italic tracking-tighter font-mono leading-tight">
-                                  ₩{selectedStock.price.toLocaleString()}
-                                </span>
-                                <span className={cn(
-                                  "text-xs md:text-sm font-black italic font-mono leading-none mt-0.5",
-                                  selectedStock.change >= 0 ? "text-rose-500" : "text-sky-400"
-                                )}>
-                                  {selectedStock.change >= 0 ? '▲ +' : '▼ '}{selectedStock.changePercent.toFixed(2)}%
-                                </span>
-                              </div>
-
-                              {/* Timeframe Bar Controls */}
-                              <div className="flex items-center gap-1 bg-black/40 border border-white/5 p-1 rounded-xl shrink-0">
-                                {(['1m', '3m', '5m', '10m'] as const).map(tf => (
-                                  <button
-                                    key={tf}
-                                    type="button"
-                                    onClick={() => setSelectedTimeframeBar(tf)}
-                                    className={cn(
-                                      "px-2 py-0.5 rounded-lg text-xs font-bold transition-all font-mono",
-                                      selectedTimeframeBar === tf
-                                        ? "bg-sleek-blue text-white shadow-sm"
-                                        : "text-sleek-text-secondary hover:bg-white/5 hover:text-white"
-                                    )}
-                                  >
-                                    {tf === '1m' ? '1분' : tf === '3m' ? '3분' : tf === '5m' ? '5분' : '10분'}
-                                  </button>
-                                ))}
-                              </div>
+                  <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 items-stretch">
+                    {/* 1. Chart Graph (Width reduced to half: xl:col-span-6) */}
+                    <div className="xl:col-span-6 flex flex-col min-w-0 bg-black/40 rounded-2xl border border-sleek-border p-3 justify-between space-y-2">
+                      <div>
+                        {/* Header: Price & Moving Averages Legend */}
+                        <div className="mb-2 flex items-center justify-between gap-2 flex-wrap pb-1.5 border-b border-white/5">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xl md:text-2xl font-black text-white italic tracking-tighter font-mono">
+                                ₩{selectedStock.price.toLocaleString()}
+                              </span>
+                              <span className={cn(
+                                "text-xs font-black italic font-mono px-1.5 py-0.5 rounded",
+                                selectedStock.change >= 0 ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400"
+                              )}>
+                                {selectedStock.change >= 0 ? '▲ +' : '▼ '}{selectedStock.changePercent.toFixed(2)}%
+                              </span>
                             </div>
-
-                            {/* Chart Container */}
-                            <div className="bg-sleek-card/30 rounded-2xl border border-sleek-border p-2 relative shadow-inner h-[180px] min-h-[180px]">
-                              <ResponsiveContainer width="100%" height="100%">
-                                <BarChart data={candleData}>
-                                  <CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.05} />
-                                  <XAxis 
-                                    dataKey="time" 
-                                    axisLine={false} 
-                                    tickLine={false} 
-                                    tick={{ fontSize: 11, fill: '#6B7280' }}
-                                  />
-                                  <YAxis 
-                                    domain={['auto', 'auto']} 
-                                    axisLine={false} 
-                                    tickLine={false} 
-                                    tick={{ fontSize: 11, fill: '#6B7280' }}
-                                    orientation="right"
-                                  />
-                                  <Tooltip 
-                                    content={({ active, payload }) => {
-                                      if (active && payload && payload.length) {
-                                        const data = payload[0].payload;
-                                        return (
-                                          <div className="bg-[#1A1D23] border border-[#2D3139] p-2.5 rounded-xl shadow-2xl space-y-1 text-xs font-mono">
-                                            <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-1">
-                                              <span className="text-sleek-text-secondary font-bold">{data.time}</span>
-                                              <span className={cn("font-bold px-1 py-0.2 rounded text-[11px]", data.isUp ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400")}>
-                                                {data.isUp ? "양봉 (상승)" : "음봉 (하락)"}
-                                              </span>
-                                            </div>
-                                            <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs pt-0.5">
-                                              <div>시가: <strong className="text-white">₩{data.open.toLocaleString()}</strong></div>
-                                              <div>고가: <strong className="text-rose-400">₩{data.high.toLocaleString()}</strong></div>
-                                              <div>저가: <strong className="text-sky-400">₩{data.low.toLocaleString()}</strong></div>
-                                              <div>종가: <strong className={data.close >= data.open ? "text-rose-400" : "text-sky-400"}>₩{data.close.toLocaleString()}</strong></div>
-                                            </div>
-                                          </div>
-                                        );
-                                      }
-                                      return null;
-                                    }}
-                                  />
-                                  <Bar 
-                                    dataKey="close" 
-                                    radius={[3, 3, 0, 0]}
-                                    animationDuration={200}
-                                  >
-                                    {candleData.map((candle, idx) => (
-                                      <Cell 
-                                        key={`candle-${idx}`} 
-                                        fill={candle.isUp ? '#EF4444' : '#3B82F6'} 
-                                        stroke={candle.isLive ? (candle.isUp ? '#F87171' : '#60A5FA') : 'none'}
-                                        strokeWidth={candle.isLive ? 2 : 0}
-                                      />
-                                    ))}
-                                  </Bar>
-                                  
-                                  {gapBuyPrice > 0 && (
-                                    <ReferenceLine 
-                                      y={gapBuyPrice} 
-                                      stroke="#EF4444" 
-                                      strokeDasharray="4 4" 
-                                      strokeWidth={1.5}
-                                    >
-                                      <Label value="BUY" position="left" fill="#EF4444" fontSize={11} fontWeight="bold" />
-                                    </ReferenceLine>
-                                  )}
-                                  {gapSellPrice > 0 && (
-                                    <ReferenceLine 
-                                      y={gapSellPrice} 
-                                      stroke="#3B82F6" 
-                                      strokeDasharray="4 4" 
-                                      strokeWidth={1.5}
-                                    >
-                                      <Label value="SELL" position="left" fill="#3B82F6" fontSize={11} fontWeight="bold" />
-                                    </ReferenceLine>
-                                  )}
-                                </BarChart>
-                              </ResponsiveContainer>
+                            
+                            {/* Moving Average Line Legend matching attached photo */}
+                            <div className="flex items-center gap-2 text-[11px] font-mono mt-0.5">
+                              <span className="text-gray-400 font-bold">이동평균선</span>
+                              <span className="text-[#10B981] font-black">5</span>
+                              <span className="text-[#EF4444] font-black">20</span>
+                              <span className="text-[#F59E0B] font-black">60</span>
+                              <span className="text-[#8B5CF6] font-black">120</span>
                             </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-
-                    {/* Right Side: Live Order Book Section (Compact 4 Ask & 4 Bid Levels) */}
-                    <div className="w-full lg:w-[280px] shrink-0 flex flex-col">
-                      <div className="bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between h-[180px] min-h-[180px]">
-                        <div>
-                          <div className="text-center font-black text-sleek-text-secondary uppercase text-[10px] tracking-widest pb-0.5 border-b border-white/5 mb-0.5">
-                            실시간 잔량 호가창 (4단계)
-                          </div>
-                          
-                          {/* Ask Levels (매도 4~1단계) */}
-                          <div className="space-y-0.5">
-                            {askLevels.map((lvlPrice, idx) => {
-                              const vol = getLevelVolume(lvlPrice);
-                              const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
-                              return (
-                                <div key={`ask-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
-                                  <div className="absolute right-0 top-0 bottom-0 bg-sky-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
-                                  <span className="w-14 shrink-0 text-[9px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}단계</span>
-                                  <span className={cn(
-                                    "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
-                                    isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-300"
-                                  )}>
-                                    ₩{lvlPrice.toLocaleString()}
-                                  </span>
-                                  <span className="w-12 shrink-0 text-right text-sky-200/60 font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
-                                </div>
-                              );
-                            })}
                           </div>
 
-                          {/* Spread Line */}
-                          <div className="my-0.5 h-5 px-1.5 bg-white/5 border-y border-white/10 flex items-center justify-between rounded font-mono tabular-nums">
-                            <span className="text-[9px] font-black text-sleek-text-secondary uppercase shrink-0">현재 체결가</span>
-                            <span className={cn("font-black text-[11px] font-mono tabular-nums animate-pulse", selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400")}>
-                              ₩{currentPrice.toLocaleString()}
-                            </span>
-                            <span className={cn("text-[9px] font-mono tabular-nums font-bold shrink-0", selectedStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
-                              {selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%
-                            </span>
-                          </div>
-
-                          {/* Bid Levels (매수 1~4단계) */}
-                          <div className="space-y-0.5">
-                            {bidLevels.map((lvlPrice, idx) => {
-                              const vol = getLevelVolume(lvlPrice);
-                              const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
-                              return (
-                                <div key={`bid-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
-                                  <div className="absolute right-0 top-0 bottom-0 bg-rose-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
-                                  <span className="w-14 shrink-0 text-[9px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}단계</span>
-                                  <span className={cn(
-                                    "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
-                                    isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-300"
-                                  )}>
-                                    ₩{lvlPrice.toLocaleString()}
-                                  </span>
-                                  <span className="w-12 shrink-0 text-right text-rose-200/60 font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
-                                </div>
-                              );
-                            })}
+                          {/* Timeframe Controls */}
+                          <div className="flex items-center gap-1 bg-black/60 border border-white/5 p-1 rounded-xl shrink-0">
+                            {(['1m', '3m', '5m', '10m'] as const).map(tf => (
+                              <button
+                                key={tf}
+                                type="button"
+                                onClick={() => setSelectedTimeframeBar(tf)}
+                                className={cn(
+                                  "px-2 py-0.5 rounded-lg text-xs font-bold transition-all font-mono",
+                                  selectedTimeframeBar === tf
+                                    ? "bg-sleek-blue text-white shadow-sm"
+                                    : "text-sleek-text-secondary hover:bg-white/5 hover:text-white"
+                                )}
+                              >
+                                {tf === '1m' ? '1분' : tf === '3m' ? '3분' : tf === '5m' ? '5분' : '10분'}
+                              </button>
+                            ))}
                           </div>
                         </div>
 
-                        {/* Order Book Pressure Gauge */}
-                        <div className="pt-1 border-t border-white/5 space-y-0.5">
-                          <div className="flex justify-between text-[9px] text-sleek-text-secondary font-bold font-sans">
-                            <span className="text-sky-400">매도잔량 47.8%</span>
-                            <span className="text-rose-400">매수잔량 52.2%</span>
+                        {/* Main Candlestick + MA Lines Chart */}
+                        <div className="bg-slate-950/80 rounded-xl border border-white/5 p-1.5 relative shadow-inner w-full" style={{ height: 175 }}>
+                          {candleData && candleData.length > 0 ? (
+                            <ResponsiveContainer width="100%" height="100%">
+                              <ComposedChart data={candleData} margin={{ top: 15, right: 45, left: 0, bottom: 0 }}>
+                                <CartesianGrid strokeDasharray="2 2" vertical={true} opacity={0.06} stroke="#FFFFFF" />
+                                <XAxis 
+                                  dataKey="time" 
+                                  axisLine={false} 
+                                  tickLine={false} 
+                                  tick={{ fontSize: 10, fill: '#6B7280' }}
+                                />
+                                <YAxis 
+                                  domain={['auto', 'auto']} 
+                                  axisLine={false} 
+                                  tickLine={false} 
+                                  tick={{ fontSize: 10, fill: '#6B7280' }}
+                                  orientation="right"
+                                />
+                                <Tooltip 
+                                  content={({ active, payload }) => {
+                                    if (active && payload && payload.length) {
+                                      const data = payload[0].payload;
+                                      return (
+                                        <div className="bg-[#1A1D23] border border-[#2D3139] p-2 rounded-xl shadow-2xl space-y-1 text-xs font-mono">
+                                          <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-1">
+                                            <span className="text-sleek-text-secondary font-bold">{data.time}</span>
+                                            <span className={cn("font-bold px-1 py-0.2 rounded text-[10px]", data.isUp ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400")}>
+                                              {data.isUp ? "양봉" : "음봉"}
+                                            </span>
+                                          </div>
+                                          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px]">
+                                            <div>시가: <strong className="text-white">₩{data.open.toLocaleString()}</strong></div>
+                                            <div>고가: <strong className="text-rose-400">₩{data.high.toLocaleString()}</strong></div>
+                                            <div>저가: <strong className="text-sky-400">₩{data.low.toLocaleString()}</strong></div>
+                                            <div>종가: <strong className={data.close >= data.open ? "text-rose-400" : "text-sky-400"}>₩{data.close.toLocaleString()}</strong></div>
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+                                    return null;
+                                  }}
+                                />
+
+                                {/* Candle Bars */}
+                                <Bar dataKey="close" radius={[2, 2, 0, 0]} animationDuration={150}>
+                                  {candleData.map((candle, idx) => (
+                                    <Cell 
+                                      key={`candle-${idx}`} 
+                                      fill={candle.isUp ? '#EF4444' : '#3B82F6'} 
+                                      stroke={candle.isLive ? (candle.isUp ? '#F87171' : '#60A5FA') : 'none'}
+                                      strokeWidth={candle.isLive ? 1.5 : 0}
+                                    />
+                                  ))}
+                                </Bar>
+
+                                {/* Moving Average Lines (5, 20, 60, 120) */}
+                                <Line type="monotone" dataKey="ma5" stroke="#10B981" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                                <Line type="monotone" dataKey="ma20" stroke="#EF4444" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                                <Line type="monotone" dataKey="ma60" stroke="#F59E0B" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                                <Line type="monotone" dataKey="ma120" stroke="#8B5CF6" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+
+                                {/* High Point Marker with Down Arrow */}
+                                {highCandle && (
+                                  <ReferenceDot 
+                                    x={highCandle.time} 
+                                    y={highCandle.high} 
+                                    r={3} 
+                                    fill="#EF4444" 
+                                    stroke="#FFFFFF" 
+                                    strokeWidth={1}
+                                  >
+                                    <Label 
+                                      value={`${highCandle.high.toLocaleString()}원 (${(((highCandle.high - selectedStock.price)/selectedStock.price)*100).toFixed(1)}%) ↓`} 
+                                      position="top" 
+                                      fill="#EF4444" 
+                                      fontSize={9} 
+                                      fontWeight="bold" 
+                                    />
+                                  </ReferenceDot>
+                                )}
+
+                                {/* Low Point Marker with Up Arrow */}
+                                {lowCandle && (
+                                  <ReferenceDot 
+                                    x={lowCandle.time} 
+                                    y={lowCandle.low} 
+                                    r={3} 
+                                    fill="#3B82F6" 
+                                    stroke="#FFFFFF" 
+                                    strokeWidth={1}
+                                  >
+                                    <Label 
+                                      value={`${lowCandle.low.toLocaleString()}원 (${(((lowCandle.low - selectedStock.price)/selectedStock.price)*100).toFixed(1)}%) ↑`} 
+                                      position="bottom" 
+                                      fill="#3B82F6" 
+                                      fontSize={9} 
+                                      fontWeight="bold" 
+                                    />
+                                  </ReferenceDot>
+                                )}
+
+                                {/* Buy & Sell Boundary Lines */}
+                                {gapBuyPrice > 0 && (
+                                  <ReferenceLine y={gapBuyPrice} stroke="#EF4444" strokeDasharray="3 3" strokeWidth={1}>
+                                    <Label value="BUY" position="left" fill="#EF4444" fontSize={10} fontWeight="bold" />
+                                  </ReferenceLine>
+                                )}
+                                {gapSellPrice > 0 && (
+                                  <ReferenceLine y={gapSellPrice} stroke="#3B82F6" strokeDasharray="3 3" strokeWidth={1}>
+                                    <Label value="SELL" position="left" fill="#3B82F6" fontSize={10} fontWeight="bold" />
+                                  </ReferenceLine>
+                                )}
+                              </ComposedChart>
+                            </ResponsiveContainer>
+                          ) : null}
+
+                          {/* Solid Red Current Price Badge on Right Axis */}
+                          <div className="absolute right-0 top-1/2 -translate-y-1/2 bg-rose-600 text-white font-mono font-bold text-[10px] px-1.5 py-0.5 rounded-l shadow-lg border-l border-white/20 animate-pulse">
+                            {selectedStock.price.toLocaleString()} <span className="text-[8px] opacity-80">00:18</span>
                           </div>
-                          <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex">
-                            <div className="h-full bg-sky-400" style={{ width: '47.8%' }} />
-                            <div className="h-full bg-rose-400" style={{ width: '52.2%' }} />
+                        </div>
+
+                        {/* Sub-Pane: Trading Volume (거래량 (20)) */}
+                        <div className="mt-2 pt-1 border-t border-white/5">
+                          <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono mb-0.5">
+                            <span className="font-bold">거래량 (20)</span>
+                            <span className="text-emerald-400 font-bold">1.48K / 1.00K</span>
                           </div>
+                          <div className="h-12 w-full bg-slate-950/50 rounded-lg p-0.5 relative">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <ComposedChart data={candleData} margin={{ top: 2, right: 35, left: 0, bottom: 0 }}>
+                                <Bar dataKey="volume" radius={[1, 1, 0, 0]}>
+                                  {candleData.map((c, idx) => (
+                                    <Cell key={`vol-${idx}`} fill={c.isUp ? '#EF4444' : '#3B82F6'} opacity={0.8} />
+                                  ))}
+                                </Bar>
+                                <Line type="monotone" dataKey="volMa20" stroke="#10B981" strokeWidth={1} dot={false} />
+                              </ComposedChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Bottom Timeframe Toolbar */}
+                      <div className="pt-1.5 border-t border-white/5 flex items-center justify-between text-[11px] text-gray-400 font-mono">
+                        <div className="flex items-center gap-1">
+                          <span className="px-2 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] flex items-center gap-1">1분 ▼</span>
+                          <span className="px-2 py-0.5 rounded hover:bg-white/5 text-[10px] cursor-pointer">일</span>
+                          <span className="px-2 py-0.5 rounded hover:bg-white/5 text-[10px] cursor-pointer">주</span>
+                          <span className="px-2 py-0.5 rounded hover:bg-white/5 text-[10px] cursor-pointer">월</span>
+                          <span className="px-2 py-0.5 rounded hover:bg-white/5 text-[10px] cursor-pointer">년</span>
+                        </div>
+                        <div className="flex items-center gap-1 text-rose-400 font-bold text-xs">
+                          <span>📊</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 2. Real-time Order Book (Attached directly to right of chart: xl:col-span-3) */}
+                    <div className="xl:col-span-3 flex flex-col min-w-0 bg-black/40 rounded-2xl border border-sleek-border p-2.5 justify-between">
+                      <div>
+                        <div className="text-center font-black text-sleek-text-secondary uppercase text-[10px] tracking-widest pb-1 border-b border-white/5 mb-1">
+                          실시간 잔량 호가창 (4단계)
+                        </div>
+                        
+                        {/* Ask Levels (매도 4~1단계) */}
+                        <div className="space-y-0.5">
+                          {askLevels.map((lvlPrice, idx) => {
+                            const vol = getLevelVolume(lvlPrice);
+                            const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
+                            return (
+                              <div key={`ask-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
+                                <div className="absolute right-0 top-0 bottom-0 bg-sky-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
+                                <span className="w-12 shrink-0 text-[9px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}단계</span>
+                                <span className={cn(
+                                  "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
+                                  isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-300"
+                                )}>
+                                  ₩{lvlPrice.toLocaleString()}
+                                </span>
+                                <span className="w-10 shrink-0 text-right text-sky-200/60 font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+
+                        {/* Spread Line */}
+                        <div className="my-1 h-5 px-1.5 bg-white/5 border-y border-white/10 flex items-center justify-between rounded font-mono tabular-nums">
+                          <span className="text-[9px] font-black text-sleek-text-secondary uppercase shrink-0">현재 체결가</span>
+                          <span className={cn("font-black text-[11px] font-mono tabular-nums animate-pulse", selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400")}>
+                            ₩{currentPrice.toLocaleString()}
+                          </span>
+                          <span className={cn("text-[9px] font-mono tabular-nums font-bold shrink-0", selectedStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
+                            {selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%
+                          </span>
+                        </div>
+
+                        {/* Bid Levels (매수 1~4단계) */}
+                        <div className="space-y-0.5">
+                          {bidLevels.map((lvlPrice, idx) => {
+                            const vol = getLevelVolume(lvlPrice);
+                            const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
+                            return (
+                              <div key={`bid-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
+                                <div className="absolute right-0 top-0 bottom-0 bg-rose-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
+                                <span className="w-12 shrink-0 text-[9px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}단계</span>
+                                <span className={cn(
+                                  "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
+                                  isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-300"
+                                )}>
+                                  ₩{lvlPrice.toLocaleString()}
+                                </span>
+                                <span className="w-10 shrink-0 text-right text-rose-200/60 font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Order Book Pressure Gauge */}
+                      <div className="pt-1.5 border-t border-white/5 space-y-0.5">
+                        <div className="flex justify-between text-[9px] text-sleek-text-secondary font-bold font-sans">
+                          <span className="text-sky-400">매도잔량 47.8%</span>
+                          <span className="text-rose-400">매수잔량 52.2%</span>
+                        </div>
+                        <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex">
+                          <div className="h-full bg-sky-400" style={{ width: '47.8%' }} />
+                          <div className="h-full bg-rose-400" style={{ width: '52.2%' }} />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 3. Right Stack: Interval Monitor (Top) & Holdings Status (Bottom) (xl:col-span-3) */}
+                    <div className="xl:col-span-3 flex flex-col gap-2.5 min-w-0">
+                      {/* Top Window: 실시간 구간 모니터 */}
+                      <div className="bg-black/40 border border-sleek-blue/30 rounded-2xl p-3 flex flex-col justify-between space-y-2 flex-1">
+                        <div className="flex items-center justify-between pb-1 border-b border-white/5">
+                          <h4 className="text-xs font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1.5">
+                            <TrendingUp className="w-3.5 h-3.5 animate-bounce" /> 실시간 구간 모니터
+                          </h4>
+                          <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                            MONITORING
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5 font-mono text-xs">
+                          <div className="flex justify-between text-[11px] text-sleek-text-secondary">
+                            <span>하한 ₩{gapBuyPrice > 0 ? gapBuyPrice.toLocaleString() : '미설정'}</span>
+                            <span>상한 ₩{gapSellPrice > 0 ? gapSellPrice.toLocaleString() : '미설정'}</span>
+                          </div>
+
+                          {/* Range Progress Bar */}
+                          <div className="relative w-full h-2.5 bg-white/5 rounded-full overflow-hidden border border-white/5">
+                            <motion.div 
+                              className="absolute top-0 bottom-0 bg-gradient-to-r from-sleek-blue to-emerald-400 rounded-full"
+                              style={{ width: `${rangePercentage}%` }}
+                              transition={{ type: "spring", stiffness: 80 }}
+                            />
+                            <div 
+                              className="absolute w-1 h-2.5 bg-white shadow-[0_0_8px_white] top-0 transition-all duration-300"
+                              style={{ left: `calc(${rangePercentage}% - 2px)` }}
+                            />
+                          </div>
+
+                          <div className="flex justify-between items-center pt-0.5">
+                            <span className="text-[10px] text-sleek-text-secondary uppercase">현재가 위치</span>
+                            <span className="text-xs font-black text-white italic font-mono">{rangePercentage.toFixed(1)}%</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Bottom Window: 보유 주식 현황 */}
+                      <div className="bg-black/40 border border-white/10 rounded-2xl p-3 flex flex-col justify-between space-y-2 flex-1">
+                        <div className="flex items-center justify-between pb-1 border-b border-white/5">
+                          <div className="flex items-center gap-1.5">
+                            <Briefcase className="w-3.5 h-3.5 text-amber-400" />
+                            <h4 className="text-xs font-black text-white uppercase tracking-wider">보유 주식 현황</h4>
+                          </div>
+                          <span className="text-[9px] font-mono text-amber-300 font-bold px-1.5 py-0.5 bg-amber-500/10 rounded-full border border-amber-500/20">
+                            {Object.entries(holdings).filter(([_, qty]) => Number(qty) > 0).length}종목
+                          </span>
+                        </div>
+
+                        <div className="space-y-1 max-h-[140px] overflow-y-auto custom-scrollbar pr-0.5">
+                          {Object.entries(holdings).filter(([_, qty]) => Number(qty) > 0).length === 0 ? (
+                            <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center flex items-center justify-center">
+                              <p className="text-[11px] text-sleek-text-secondary">보유 중인 주식이 없습니다.</p>
+                            </div>
+                          ) : (
+                            Object.entries(holdings)
+                              .filter(([_, qty]) => Number(qty) > 0)
+                              .map(([sym, rawQty]) => {
+                                const qty = Number(rawQty);
+                                const st = stocks.find(s => s.symbol === sym) || 
+                                           INITIAL_STOCKS_KR.find(s => s.symbol === sym) || 
+                                           INITIAL_STOCKS.find(s => s.symbol === sym) || 
+                                           { name: sym, symbol: sym, price: 0, changePercent: 0 };
+
+                                const stockDisplayName = (st.name && st.name !== sym) 
+                                  ? st.name 
+                                  : (INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym);
+                                
+                                let avgPrice = avgPrices[sym] || 0;
+                                if (avgPrice <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
+                                  const totalCost = gapInventory.reduce((acc, slot) => {
+                                    const p = typeof slot === 'number' ? slot : (slot.price || 0);
+                                    const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
+                                    return acc + (p * q);
+                                  }, 0);
+                                  const totalQty = gapInventory.reduce((acc, slot) => {
+                                    return acc + (typeof slot === 'number' ? 1 : (slot.quantity || 1));
+                                  }, 0);
+                                  avgPrice = totalQty > 0 ? Math.floor(totalCost / totalQty) : 0;
+                                }
+                                if (avgPrice <= 0) avgPrice = st.price || 0;
+
+                                const profitRatio = avgPrice > 0 ? (((st.price || 0) - avgPrice) / avgPrice) * 100 : 0;
+                                const isSelected = selectedSymbol === sym;
+
+                                return (
+                                  <div 
+                                    key={sym}
+                                    onClick={() => setSelectedSymbol(sym)}
+                                    className={cn(
+                                      "p-1.5 rounded-xl border flex items-center justify-between text-[11px] font-mono cursor-pointer transition-all group",
+                                      isSelected
+                                        ? "bg-sleek-blue/20 border-sleek-blue text-white shadow-sm"
+                                        : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-sleek-blue/30 text-slate-200"
+                                    )}
+                                  >
+                                    <div className="flex flex-col">
+                                      <div className="flex items-center gap-1">
+                                        <span className="font-bold text-white">{stockDisplayName}</span>
+                                        <span className={cn("font-bold text-[10px]", profitRatio >= 0 ? "text-rose-400" : "text-sky-400")}>
+                                          {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(1)}%
+                                        </span>
+                                      </div>
+                                      <span className="text-amber-300 text-[9.5px]">평단 ₩{Math.floor(avgPrice).toLocaleString()}</span>
+                                    </div>
+
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-white font-bold">{qty}주</span>
+                                      <button
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setSelectedSymbol(sym);
+                                          setManualSellPrice(st.price || 0);
+                                          setManualSellQty(qty);
+                                          setManualSellModalOpen(true);
+                                        }}
+                                        className="px-1.5 py-0.5 bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/30 rounded text-[9px] font-bold transition-all"
+                                      >
+                                        매도
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })
+                          )}
                         </div>
                       </div>
                     </div>
@@ -5604,155 +5847,54 @@ export default function App() {
             )}
           </div>
 
-          {/* 4. ACCOUNT & HOLDINGS SUMMARY BAR (Full Width Bottom Bar) */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-            {/* Account Financials (7 Columns) */}
-            <div className="bg-black/30 border border-white/10 rounded-2xl p-3.5 lg:col-span-7 flex flex-col justify-between space-y-2">
-              <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
-                <div className="flex items-center gap-1.5">
-                  <CircleDollarSign className="w-4 h-4 text-sleek-blue" />
-                  <h4 className="text-xs font-black text-white uppercase tracking-wider">실시간 계좌 현황</h4>
-                </div>
-                <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                  ACCOUNT LIVE
-                </span>
+          {/* 4. ACCOUNT FINANCIALS BAR (Full Width Bottom Bar) */}
+          <div className="bg-black/30 border border-white/10 rounded-2xl p-3.5 flex flex-col justify-between space-y-2">
+            <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
+              <div className="flex items-center gap-1.5">
+                <CircleDollarSign className="w-4 h-4 text-sleek-blue" />
+                <h4 className="text-xs font-black text-white uppercase tracking-wider">실시간 계좌 현황</h4>
               </div>
-
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
-                <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                  <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">주문가능자산 (44431721-01)</span>
-                  <span className="text-sm font-black text-white italic mt-0.5 block truncate">₩{Math.floor(balance).toLocaleString()}</span>
-                </div>
-                
-                <div 
-                  onClick={() => setIsAssetAnalysisModalOpen(true)}
-                  className="bg-white/5 hover:bg-white/10 p-2 rounded-xl border border-white/10 hover:border-sleek-blue/50 transition-all cursor-pointer group"
-                  title="클릭 시 총 자산 세부 산출 내역 팝업 보기"
-                >
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] text-sleek-text-secondary uppercase font-bold flex items-center gap-1 group-hover:text-sleek-blue transition-colors truncate">
-                      총 자산 <Calculator className="w-3 h-3 text-sleek-blue shrink-0" />
-                    </span>
-                  </div>
-                  <div className="flex items-baseline justify-between mt-0.5">
-                    <span className="text-sm font-black text-sleek-blue italic truncate">₩{totalValue.toLocaleString()}</span>
-                    <span className={cn("text-[10px] font-bold shrink-0 ml-1", pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
-                      {pnl >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
-                    </span>
-                  </div>
-                </div>
-
-                <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                  <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">스캘핑 총 수익</span>
-                  <span className={cn("text-sm font-black italic mt-0.5 block truncate", gapTradingProfit >= 0 ? "text-rose-400" : "text-sky-400")}>
-                    ₩{gapTradingProfit.toLocaleString()}
-                  </span>
-                </div>
-
-                <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                  <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">오늘 체결 횟수</span>
-                  <span className="text-sm font-black text-white italic mt-0.5 block truncate">
-                    {gapTradeCount} <span className="text-[10px] font-normal text-sleek-text-secondary opacity-60">TRADES</span>
-                  </span>
-                </div>
-              </div>
+              <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                ACCOUNT LIVE
+              </span>
             </div>
 
-            {/* Holdings Summary (5 Columns) */}
-            <div className="bg-black/30 border border-white/10 rounded-2xl p-3.5 lg:col-span-5 flex flex-col justify-between space-y-2">
-              <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
-                <div className="flex items-center gap-1.5">
-                  <Briefcase className="w-4 h-4 text-amber-400" />
-                  <h4 className="text-xs font-black text-white uppercase tracking-wider">보유 주식 현황</h4>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
+              <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">주문가능자산 (44431721-01)</span>
+                <span className="text-sm font-black text-white italic mt-0.5 block truncate">₩{Math.floor(balance).toLocaleString()}</span>
+              </div>
+              
+              <div 
+                onClick={() => setIsAssetAnalysisModalOpen(true)}
+                className="bg-white/5 hover:bg-white/10 p-2 rounded-xl border border-white/10 hover:border-sleek-blue/50 transition-all cursor-pointer group"
+                title="클릭 시 총 자산 세부 산출 내역 팝업 보기"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] text-sleek-text-secondary uppercase font-bold flex items-center gap-1 group-hover:text-sleek-blue transition-colors truncate">
+                    총 자산 <Calculator className="w-3 h-3 text-sleek-blue shrink-0" />
+                  </span>
                 </div>
-                <span className="text-[10px] font-mono text-amber-300 font-bold px-2 py-0.5 bg-amber-500/10 rounded-full border border-amber-500/20">
-                  {Object.entries(holdings).filter(([_, qty]) => Number(qty) > 0).length}종목 보유
+                <div className="flex items-baseline justify-between mt-0.5">
+                  <span className="text-sm font-black text-sleek-blue italic truncate">₩{totalValue.toLocaleString()}</span>
+                  <span className={cn("text-[10px] font-bold shrink-0 ml-1", pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
+                    {pnl >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
+                  </span>
+                </div>
+              </div>
+
+              <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">스캘핑 총 수익</span>
+                <span className={cn("text-sm font-black italic mt-0.5 block truncate", gapTradingProfit >= 0 ? "text-rose-400" : "text-sky-400")}>
+                  ₩{gapTradingProfit.toLocaleString()}
                 </span>
               </div>
 
-              <div className="space-y-1.5 max-h-[85px] overflow-y-auto custom-scrollbar pr-1">
-                {Object.entries(holdings).filter(([_, qty]) => Number(qty) > 0).length === 0 ? (
-                  <div className="bg-white/5 border border-white/5 rounded-xl p-2.5 text-center flex items-center justify-center">
-                    <p className="text-xs text-sleek-text-secondary">현재 보유 중인 주식이 없습니다.</p>
-                  </div>
-                ) : (
-                  Object.entries(holdings)
-                    .filter(([_, qty]) => Number(qty) > 0)
-                    .map(([sym, rawQty]) => {
-                      const qty = Number(rawQty);
-                      const st = stocks.find(s => s.symbol === sym) || 
-                                 INITIAL_STOCKS_KR.find(s => s.symbol === sym) || 
-                                 INITIAL_STOCKS.find(s => s.symbol === sym) || 
-                                 { name: sym, symbol: sym, price: 0, changePercent: 0 };
-
-                      const stockDisplayName = (st.name && st.name !== sym) 
-                        ? st.name 
-                        : (INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym);
-                      
-                      let avgPrice = avgPrices[sym] || 0;
-                      if (avgPrice <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
-                        const totalCost = gapInventory.reduce((acc, slot) => {
-                          const p = typeof slot === 'number' ? slot : (slot.price || 0);
-                          const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
-                          return acc + (p * q);
-                        }, 0);
-                        const totalQty = gapInventory.reduce((acc, slot) => {
-                          return acc + (typeof slot === 'number' ? 1 : (slot.quantity || 1));
-                        }, 0);
-                        avgPrice = totalQty > 0 ? Math.floor(totalCost / totalQty) : 0;
-                      }
-                      if (avgPrice <= 0) avgPrice = st.price || 0;
-
-                      const evalValue = (st.price || 0) * qty;
-                      const profitRatio = avgPrice > 0 ? (((st.price || 0) - avgPrice) / avgPrice) * 100 : 0;
-                      const isSelected = selectedSymbol === sym;
-
-                      return (
-                        <div 
-                          key={sym}
-                          onClick={() => {
-                            setSelectedSymbol(sym);
-                            const configEl = document.getElementById('ai-scalping-config-panel');
-                            if (configEl) {
-                              configEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                            }
-                          }}
-                          className={cn(
-                            "p-2 rounded-xl border flex items-center justify-between text-xs font-mono cursor-pointer transition-all group",
-                            isSelected
-                              ? "bg-sleek-blue/20 border-sleek-blue text-white shadow-md"
-                              : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-sleek-blue/30 text-slate-200"
-                          )}
-                          title="클릭하여 AI 스캘퍼 설정 및 차트 종목 변경"
-                        >
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold text-white text-xs">{stockDisplayName}</span>
-                            <span className="text-sleek-text-secondary text-[10px]">({sym})</span>
-                            <span className="text-amber-300 text-[11px] font-mono">평단 ₩{Math.floor(avgPrice).toLocaleString()}</span>
-                            <span className={cn("text-[11px] font-bold", profitRatio >= 0 ? "text-rose-400" : "text-sky-400")}>
-                              {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(2)}%
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <span className="text-white font-bold">{qty}주</span>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setSelectedSymbol(sym);
-                                setManualSellPrice(st.price || 0);
-                                setManualSellQty(qty);
-                                setManualSellModalOpen(true);
-                              }}
-                              className="px-2 py-0.5 bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/30 rounded text-[10px] font-bold transition-all"
-                            >
-                              수동매도
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })
-                )}
+              <div className="bg-white/5 p-2 rounded-xl border border-white/5">
+                <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">오늘 체결 횟수</span>
+                <span className="text-sm font-black text-white italic mt-0.5 block truncate">
+                  {gapTradeCount} <span className="text-[10px] font-normal text-sleek-text-secondary opacity-60">TRADES</span>
+                </span>
               </div>
             </div>
           </div>

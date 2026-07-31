@@ -713,17 +713,28 @@ class KISService {
     return res.data;
   }
 
+  private lastRequestTime = 0;
+  private minRequestInterval = 300; // Minimum 300ms interval between API calls to prevent Rate Limit (초당 거래건수 초과) and 500 errors
+
   public async getDomesticPrice(symbol: string, marketCode: string = 'J') {
     if (!this.config) throw new Error("KIS Config not initialized");
     const token = await this.getAccessToken();
     const endpoint = '/uapi/domestic-stock/v1/quotations/inquire-price';
     
-    // TR-IDs to try: FHKST01010100 (Real), SHKST01010100 (Virtual Stock)
-    const trIds = ['FHKST01010100', 'SHKST01010100'];
-    
+    // Official KIS TR-ID for domestic price inquiry (FHKST01010100 is valid for both Real and Virtual accounts)
+    const trId = 'FHKST01010100';
+    const maxRetries = 5;
     let lastError = null;
 
-    for (const trId of trIds) {
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      // Throttle minimum interval between consecutive API requests
+      const now = Date.now();
+      const timeSinceLast = now - this.lastRequestTime;
+      if (timeSinceLast < this.minRequestInterval) {
+        await new Promise(resolve => setTimeout(resolve, this.minRequestInterval - timeSinceLast));
+      }
+      this.lastRequestTime = Date.now();
+
       const headers = {
         'content-type': 'application/json',
         'authorization': `Bearer ${token}`,
@@ -745,11 +756,38 @@ class KISService {
           return res.data.output;
         }
         
-        // If not zero code, it might be a TR-ID mismatch or other error
-        lastError = res.data.msg1 || res.data.message || 'Unknown Error';
-        console.warn(`[KIS Service] Domestic Price Trial (${trId}) failed for ${symbol}: ${lastError}`);
+        // If not zero code, check if it's a rate limit error or temporary 500 error
+        lastError = res.data.msg1 || res.data.message || res.data.msg_cd || 'Unknown Error';
+        
+        const isRateLimitOrServerError = 
+          typeof lastError === 'string' && (
+            lastError.includes('초당') || 
+            lastError.includes('초과') || 
+            lastError.includes('500') || 
+            lastError.includes('대기') ||
+            lastError.includes('오류') ||
+            res.data.msg_cd === 'EGW00201' || 
+            res.data.msg_cd === 'KIS_PROXY_NOTICE'
+          );
+
+        if (isRateLimitOrServerError && attempt < maxRetries) {
+          const backoff = attempt * 600; // 600ms, 1200ms, 1800ms, 2400ms...
+          console.warn(`[KIS Retry] ${symbol} (시도 ${attempt}/${maxRetries}): ${lastError}. ${backoff}ms 대기 후 자동 재시도...`);
+          await new Promise(resolve => setTimeout(resolve, backoff));
+          continue;
+        }
+
+        console.warn(`[KIS Service] Domestic Price (${trId}) failed for ${symbol}: ${lastError}`);
+        break; // Non-retryable error, break attempt loop
       } catch (error: any) {
-        lastError = error.message;
+        lastError = error.response?.data?.msg1 || error.message;
+        const status = error.response?.status;
+        if ((status === 500 || status === 429 || (typeof lastError === 'string' && (lastError.includes('초당') || lastError.includes('초과') || lastError.includes('500') || lastError.includes('status code 500')))) && attempt < maxRetries) {
+          const backoff = attempt * 600;
+          console.warn(`[KIS HTTP ${status || 'Error'} Retry] ${symbol} (시도 ${attempt}/${maxRetries}): ${lastError}. ${backoff}ms 대기 후 자동 재시도...`);
+          await new Promise(resolve => setTimeout(resolve, backoff));
+          continue;
+        }
       }
     }
     

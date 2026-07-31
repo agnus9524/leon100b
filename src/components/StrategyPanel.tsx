@@ -190,39 +190,45 @@ export const StrategyPanel: React.FC = () => {
                 </div>
               </div>
 
-              <div className="flex-1 h-[300px] min-h-[300px] relative">
-                <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={backtestResult.chartData}>
-                    <defs>
-                      <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#22C55E" stopOpacity={0.3}/>
-                        <stop offset="95%" stopColor="#22C55E" stopOpacity={0}/>
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
-                    <XAxis 
-                      dataKey="date" 
-                      hide
-                    />
-                    <YAxis 
-                      hide
-                      domain={['auto', 'auto']}
-                    />
-                    <Tooltip 
-                      contentStyle={{ backgroundColor: '#111', border: '1px solid #333', borderRadius: '12px' }}
-                      itemStyle={{ color: '#fff', fontSize: '10px' }}
-                      labelStyle={{ display: 'none' }}
-                    />
-                    <Area 
-                      type="monotone" 
-                      dataKey="value" 
-                      stroke="#22C55E" 
-                      strokeWidth={3}
-                      fillOpacity={1} 
-                      fill="url(#colorValue)" 
-                    />
-                  </AreaChart>
-                </ResponsiveContainer>
+              <div className="flex-1 w-full min-w-0 min-h-0 relative" style={{ width: '100%', height: 300, minWidth: 0, minHeight: 0 }}>
+                {backtestResult?.chartData && backtestResult.chartData.length > 0 ? (
+                  <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={0}>
+                    <AreaChart data={backtestResult.chartData}>
+                      <defs>
+                        <linearGradient id="colorValue" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="#22C55E" stopOpacity={0.3}/>
+                          <stop offset="95%" stopColor="#22C55E" stopOpacity={0}/>
+                        </linearGradient>
+                      </defs>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#ffffff05" vertical={false} />
+                      <XAxis 
+                        dataKey="date" 
+                        hide
+                      />
+                      <YAxis 
+                        hide
+                        domain={['auto', 'auto']}
+                      />
+                      <Tooltip 
+                        contentStyle={{ backgroundColor: '#111', border: '1px solid #333', borderRadius: '12px' }}
+                        itemStyle={{ color: '#fff', fontSize: '10px' }}
+                        labelStyle={{ display: 'none' }}
+                      />
+                      <Area 
+                        type="monotone" 
+                        dataKey="value" 
+                        stroke="#22C55E" 
+                        strokeWidth={3}
+                        fillOpacity={1} 
+                        fill="url(#colorValue)" 
+                      />
+                    </AreaChart>
+                  </ResponsiveContainer>
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center text-xs text-sleek-text-secondary">
+                    백테스트 차트 데이터 없음
+                  </div>
+                )}
               </div>
 
               <div className="p-4 bg-sleek-blue/10 border border-sleek-blue/20 rounded-2xl flex items-center gap-3">
