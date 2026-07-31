@@ -6222,205 +6222,187 @@ export default function App() {
                     );
                   })()
                 ) : (
-                  /* Individual Slot Mode (개별 모드) */
+                  /* Individual Slot Mode (개별 모드 - 매수진입/체결 및 매도싸인만 표시) */
                   (() => {
-                    const stockPendingBuys = pendingBuyOrders.filter(p => p.symbol === selectedStock?.symbol);
+                    const currentStock = selectedStock;
+                    const stockPendingBuys = pendingBuyOrders.filter(p => p.symbol === currentStock?.symbol);
 
-                    return Array.from({ length: maxSlots }).map((_, slotIdx) => {
+                    // Collect active slots (Filled Inventory & Pending Buy Orders)
+                    const activeSlots: React.ReactNode[] = [];
+
+                    // 1. Filled Inventory Slots (매수체결 완료 - 매도감시 중)
+                    gapInventory.forEach((filledSlot, slotIdx) => {
+                      if (!filledSlot) return;
                       const slotNum = slotIdx + 1;
-                      const filledSlot = gapInventory[slotIdx];
-                      const pendingBuy = stockPendingBuys[slotIdx];
+                      const buyPrice = typeof filledSlot === 'number' ? filledSlot : (filledSlot.price || 0);
+                      const buyQty = typeof filledSlot === 'number' ? tradeQuantity : (filledSlot.quantity || 1);
+                      const profitPct = buyPrice > 0 ? ((currentStock.price - buyPrice) / buyPrice) * 100 : 0;
+                      const targetSellPrice = calculateTargetSellPrice(buyPrice, scalpingTargetProfit, currentStock?.price);
 
-                      // 1. Filled Inventory Slot (매수체결 - 매도중)
-                      if (filledSlot) {
-                        const buyPrice = typeof filledSlot === 'number' ? filledSlot : (filledSlot.price || 0);
-                        const buyQty = typeof filledSlot === 'number' ? tradeQuantity : (filledSlot.quantity || 1);
-                        const profitPct = buyPrice > 0 ? ((selectedStock.price - buyPrice) / buyPrice) * 100 : 0;
-                        const targetSellPrice = calculateTargetSellPrice(buyPrice, scalpingTargetProfit, selectedStock?.price);
+                      const samePriceCount = gapInventory.filter(s => (typeof s === 'number' ? s : s.price) === buyPrice).length;
+                      const samePriceTotalQty = gapInventory
+                        .filter(s => (typeof s === 'number' ? s : s.price) === buyPrice)
+                        .reduce((acc, s) => acc + (typeof s === 'number' ? tradeQuantity : s.quantity), 0);
 
-                        // Check duplicate buy price count
-                        const samePriceCount = gapInventory.filter(s => (typeof s === 'number' ? s : s.price) === buyPrice).length;
-                        const samePriceTotalQty = gapInventory
-                          .filter(s => (typeof s === 'number' ? s : s.price) === buyPrice)
-                          .reduce((acc, s) => acc + (typeof s === 'number' ? tradeQuantity : s.quantity), 0);
-
-                        return (
-                          <motion.div 
-                            key={`filled-slot-${slotIdx}`}
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="bg-emerald-950/30 border border-emerald-500/50 rounded-2xl p-4.5 min-h-[135px] flex flex-col justify-between space-y-3 text-xs font-mono shadow-lg transition-all"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse"></span>
-                                <span className="font-extrabold text-white text-sm">#{slotNum}</span>
-                                <span className="text-[11px] font-bold text-emerald-300 bg-emerald-500/20 px-2 py-0.5 rounded border border-emerald-500/30">
-                                  [매수체결 - 매도중]
-                                </span>
-                              </div>
-                              <span className={cn("font-extrabold text-xs tabular-nums px-2 py-0.5 rounded bg-black/40 border border-white/5", profitPct >= 0 ? "text-rose-400 border-rose-500/30" : "text-sky-400 border-sky-500/30")}>
-                                {profitPct >= 0 ? "+" : ""}{profitPct.toFixed(2)}%
-                              </span>
-                            </div>
-
-                            {/* Duplicate Price Badge if same price */}
-                            {samePriceCount > 1 && (
-                              <div className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded flex items-center gap-1 font-sans">
-                                <Layers className="w-3 h-3 text-amber-400" />
-                                <span>동일 매수가 중복 체결: {samePriceCount}건 (총 {samePriceTotalQty}주)</span>
-                              </div>
-                            )}
-
-                            <div className="grid grid-cols-2 gap-2 bg-black/50 p-3 rounded-xl border border-white/5 text-[11px] tabular-nums">
-                              <div>
-                                <span className="text-sleek-text-secondary text-[10px] block font-bold">슬롯 정보 ({buyQty}주)</span>
-                                <span className="text-emerald-400 font-extrabold text-xs block mt-0.5">매수진입가: ₩{buyPrice.toLocaleString()}</span>
-                              </div>
-                              <div className="text-right">
-                                <span className="text-sleek-text-secondary text-[10px] block font-bold">목표 익절 (+{scalpingTargetProfit}%)</span>
-                                <span className="text-rose-400 font-extrabold text-xs block mt-0.5">매도예상가: ₩{targetSellPrice.toLocaleString()}</span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-1.5 text-[10px] text-emerald-300 pt-2 border-t border-emerald-500/20 font-bold">
-                              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                              <span>⚡ 실시간 매도 감시 중 (도달 시 매도 체결 ➔ 슬롯 즉시 리셋)</span>
-                            </div>
-                          </motion.div>
-                        );
-                      }
-
-                      // 2. Pending Buy Order Slot (매수 중)
-                      if (pendingBuy) {
-                        const orderPrice = pendingBuy.orderPrice;
-                        const orderQty = pendingBuy.quantity;
-                        const targetSellPrice = calculateTargetSellPrice(orderPrice, scalpingTargetProfit, selectedStock?.price);
-
-                        // Same price count for pending orders
-                        const samePricePendingCount = stockPendingBuys.filter(p => p.orderPrice === orderPrice).length;
-
-                        return (
-                          <motion.div 
-                            key={`pending-slot-${slotIdx}`}
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            className="bg-amber-950/30 border border-amber-500/50 rounded-2xl p-4.5 min-h-[135px] flex flex-col justify-between space-y-3 text-xs font-mono shadow-lg transition-all"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
-                                <span className="font-extrabold text-white text-sm">#{slotNum}</span>
-                                <span className="text-[11px] font-bold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/30">
-                                  [매수 중]
-                                </span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => cancelPendingBuyOrder(pendingBuy.id)}
-                                className="text-[10px] font-bold text-amber-400 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/40 px-2 py-0.5 rounded transition-all"
-                              >
-                                주문 취소
-                              </button>
-                            </div>
-
-                            {/* Same price pending indicator */}
-                            {samePricePendingCount > 1 && (
-                              <div className="text-[10px] text-amber-300/90 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded flex items-center gap-1 font-sans">
-                                <Layers className="w-3 h-3 text-amber-400" />
-                                <span>동일 매수가 중복 대기 ({samePricePendingCount}건)</span>
-                              </div>
-                            )}
-
-                            <div className="grid grid-cols-2 gap-2 bg-black/50 p-3 rounded-xl border border-white/5 text-[11px] tabular-nums">
-                              <div>
-                                <span className="text-sleek-text-secondary text-[10px] block font-bold">매수 주문가 ({orderQty}주)</span>
-                                <span className="text-amber-300 font-extrabold text-xs block mt-0.5">매수진입가: ₩{orderPrice.toLocaleString()}</span>
-                              </div>
-                              <div className="text-right">
-                                <span className="text-sleek-text-secondary text-[10px] block font-bold">체결 후 목표 (+{scalpingTargetProfit}%)</span>
-                                <span className="text-rose-400/90 font-extrabold text-xs block mt-0.5">매도예상가: ₩{targetSellPrice.toLocaleString()}</span>
-                              </div>
-                            </div>
-
-                            <div className="flex justify-between items-center text-[10px] text-amber-300/90 pt-2 border-t border-amber-500/20 font-bold">
-                              <span>⏳ 지정가 매수 체결 대기 중 (체결 즉시 매도 주문 전환)</span>
-                            </div>
-                          </motion.div>
-                        );
-                      }
-
-                      // 3. Planned Grid Step (When Bot is Active)
-                      if (isGapBotActive && selectedStock) {
-                        const minGap = minGapBetweenSlots || 0.3;
-                        const targetStepPrice = Math.round(selectedStock.price * (1 - (minGap / 100) * slotNum));
-                        const targetSellPrice = calculateTargetSellPrice(targetStepPrice, scalpingTargetProfit, selectedStock?.price);
-
-                        return (
-                          <div 
-                            key={`plan-slot-${slotIdx}`}
-                            className="bg-black/30 border border-dashed border-sleek-blue/30 rounded-2xl p-4.5 min-h-[135px] flex flex-col justify-between space-y-3 text-xs font-mono transition-all"
-                          >
-                            <div className="flex items-center justify-between">
-                              <div className="flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-full bg-sleek-blue animate-pulse"></span>
-                                <span className="font-extrabold text-white text-sm">#{slotNum}</span>
-                                <span className="text-[10px] font-bold text-sleek-blue bg-sleek-blue/10 px-2 py-0.5 rounded border border-sleek-blue/20">
-                                  [진입 대기]
-                                </span>
-                              </div>
-                              <span className="text-[10px] text-rose-400 font-bold tabular-nums">
-                                익절: ₩{targetSellPrice.toLocaleString()}
-                              </span>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-2 bg-black/40 p-2.5 rounded-xl border border-white/5 text-[11px] tabular-nums">
-                              <div>
-                                <span className="text-sleek-text-secondary text-[10px] block">진입 예상가</span>
-                                <span className="text-sleek-blue font-bold">₩{targetStepPrice.toLocaleString()}</span>
-                              </div>
-                              <div className="text-right">
-                                <span className="text-sleek-text-secondary text-[10px] block">익절 목표가 (+{scalpingTargetProfit}%)</span>
-                                <span className="text-rose-400 font-bold">₩{targetSellPrice.toLocaleString()}</span>
-                              </div>
-                            </div>
-
-                            <div className="flex items-center gap-1 text-[10px] text-sleek-text-secondary pt-1.5 border-t border-white/5 font-mono">
-                              <span>⚡ 하락 조건 충족 시 자동 매수 주문 진입</span>
-                            </div>
-                          </div>
-                        );
-                      }
-
-                      // 4. Empty Slot (대기 슬롯 - 매수 준비 완료)
-                      return (
-                        <div 
-                          key={`empty-slot-${slotIdx}`}
-                          className="bg-black/20 border border-dashed border-white/10 hover:border-white/20 rounded-2xl p-4.5 min-h-[135px] flex flex-col justify-between space-y-3 text-xs transition-all"
+                      activeSlots.push(
+                        <motion.div 
+                          key={`filled-slot-${slotIdx}`}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-emerald-950/30 border border-emerald-500/50 rounded-2xl p-4 min-h-[130px] flex flex-col justify-between space-y-2 text-xs font-mono shadow-lg transition-all"
                         >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-2">
-                              <span className="w-2.5 h-2.5 rounded-full bg-white/20"></span>
-                              <span className="font-extrabold text-white text-sm">#{slotNum}</span>
-                              <span className="text-[11px] font-semibold text-sleek-text-secondary">(매수 대기 중)</span>
+                          <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2">
+                            <div className="flex items-center gap-2 truncate">
+                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse shrink-0"></span>
+                              <span className="font-extrabold text-white text-sm truncate">{currentStock.name}</span>
+                              <span className="text-[10px] font-bold text-emerald-300 bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/30 shrink-0">
+                                매수체결 #{slotNum}
+                              </span>
                             </div>
-                            <span className="text-[10px] text-emerald-400/80 bg-emerald-500/10 px-2 py-0.5 rounded border border-emerald-500/20 font-mono font-bold">
-                              신규진입 가능
+                            <span className={cn("font-extrabold text-xs tabular-nums px-2 py-0.5 rounded bg-black/40 border border-white/5 shrink-0", profitPct >= 0 ? "text-rose-400 border-rose-500/30" : "text-sky-400 border-sky-500/30")}>
+                              {profitPct >= 0 ? "+" : ""}{profitPct.toFixed(2)}%
                             </span>
                           </div>
 
-                          <div className="bg-black/30 p-2.5 rounded-xl border border-white/5 flex items-center justify-center text-center">
-                            <span className="text-[11px] text-sleek-text-secondary font-mono">
-                              [슬롯 리셋 완료] 매수 조건 탐색 및 진입 대기 중...
-                            </span>
+                          {samePriceCount > 1 && (
+                            <div className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded flex items-center gap-1 font-sans">
+                              <Layers className="w-3 h-3 text-amber-400" />
+                              <span>동일 매수가 중복 체결: {samePriceCount}건 (총 {samePriceTotalQty}주)</span>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 gap-2 bg-black/50 p-2.5 rounded-xl border border-white/5 text-[11px] tabular-nums">
+                            <div>
+                              <span className="text-sleek-text-secondary text-[10px] block font-bold">진입가 ({buyQty}주)</span>
+                              <span className="text-emerald-400 font-extrabold text-xs block mt-0.5">₩{buyPrice.toLocaleString()}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-sleek-text-secondary text-[10px] block font-bold">목표가 (+{scalpingTargetProfit}%)</span>
+                              <span className="text-rose-400 font-extrabold text-xs block mt-0.5">₩{targetSellPrice.toLocaleString()}</span>
+                            </div>
                           </div>
 
-                          <div className="flex items-center gap-1 text-[10px] text-white/40 pt-1.5 border-t border-white/5 font-mono">
-                            <span>매수 조건 충족 시 실시간 체결 진행 (매도 완료 시 슬롯 자동 리셋)</span>
+                          <div className="flex items-center gap-1.5 text-[10px] text-emerald-300 pt-1 border-t border-emerald-500/20 font-bold">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span>⚡ 매도 싸인 감시 중 (목표가 도달 시 자동 매도)</span>
                           </div>
-                        </div>
+                        </motion.div>
                       );
                     });
+
+                    // 2. Pending Buy Order Slots (매수 진입 시도 중)
+                    stockPendingBuys.forEach((pendingBuy, pIdx) => {
+                      const orderPrice = pendingBuy.orderPrice;
+                      const orderQty = pendingBuy.quantity;
+                      const targetSellPrice = calculateTargetSellPrice(orderPrice, scalpingTargetProfit, currentStock?.price);
+
+                      activeSlots.push(
+                        <motion.div 
+                          key={`pending-slot-${pendingBuy.id || pIdx}`}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-amber-950/30 border border-amber-500/50 rounded-2xl p-4 min-h-[130px] flex flex-col justify-between space-y-2 text-xs font-mono shadow-lg transition-all"
+                        >
+                          <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
+                            <div className="flex items-center gap-2 truncate">
+                              <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
+                              <span className="font-extrabold text-white text-sm truncate">{currentStock.name}</span>
+                              <span className="text-[10px] font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/30 shrink-0">
+                                매수진입 시도 중
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => cancelPendingBuyOrder(pendingBuy.id)}
+                              className="text-[10px] font-bold text-amber-400 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/40 px-2 py-0.5 rounded transition-all shrink-0"
+                            >
+                              취소
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 bg-black/50 p-2.5 rounded-xl border border-white/5 text-[11px] tabular-nums">
+                            <div>
+                              <span className="text-sleek-text-secondary text-[10px] block font-bold">진입 예상가 ({orderQty}주)</span>
+                              <span className="text-amber-300 font-extrabold text-xs block mt-0.5">₩{orderPrice.toLocaleString()}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-sleek-text-secondary text-[10px] block font-bold">목표가 (+{scalpingTargetProfit}%)</span>
+                              <span className="text-rose-400/90 font-extrabold text-xs block mt-0.5">₩{targetSellPrice.toLocaleString()}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-between items-center text-[10px] text-amber-300/90 pt-1 border-t border-amber-500/20 font-bold">
+                            <span>⏳ 매수 주문 체결 대기 중 (체결 즉시 매도 전환)</span>
+                          </div>
+                        </motion.div>
+                      );
+                    });
+
+                    // 3. Render active slots or empty clean view + trade logs list
+                    if (activeSlots.length > 0) {
+                      return activeSlots;
+                    }
+
+                    // Filter logs for selected stock or all recent trades
+                    const filteredLogs = tradeLogs.filter(log => log.symbol === currentStock.symbol);
+                    const logsToShow = filteredLogs.length > 0 ? filteredLogs : tradeLogs;
+
+                    return (
+                      <div className="space-y-3">
+                        <div className="bg-black/20 border border-dashed border-white/10 rounded-2xl p-4 text-center space-y-1">
+                          <div className="flex items-center justify-center gap-1.5 text-xs text-white font-bold">
+                            <Activity className="w-3.5 h-3.5 text-sleek-blue" />
+                            <span>현재 매수/매도 대기 중</span>
+                          </div>
+                          <p className="text-[11px] text-sleek-text-secondary font-mono">
+                            매수진입 및 매도싸인 발생 시 진입 예상가와 목표가가 여기에 즉시 표시됩니다.
+                          </p>
+                        </div>
+
+                        {/* Recent Trade / Order Signal History */}
+                        {logsToShow.length > 0 && (
+                          <div className="space-y-2 pt-1">
+                            <span className="text-[10px] font-bold text-sleek-text-secondary uppercase tracking-wider block px-1">
+                              최근 체결 및 주문 현황 ({logsToShow.length}건)
+                            </span>
+                            {logsToShow.slice(0, 8).map((log, lIdx) => {
+                              const logStock = stocks.find(s => s.symbol === log.symbol) || 
+                                               INITIAL_STOCKS_KR.find(s => s.symbol === log.symbol) || 
+                                               INITIAL_STOCKS.find(s => s.symbol === log.symbol) || currentStock;
+                              const isBuy = log.type === 'BUY' || log.type === '매수';
+                              const targetPrice = isBuy && log.price > 0 ? calculateTargetSellPrice(log.price, scalpingTargetProfit, logStock.price) : 0;
+
+                              return (
+                                <div key={`log-${lIdx}`} className="bg-black/40 border border-white/5 hover:border-white/10 rounded-xl p-3 text-xs font-mono space-y-1.5 transition-all">
+                                  <div className="flex items-center justify-between text-[11px]">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={cn("px-1.5 py-0.2 rounded text-[9px] font-black", isBuy ? "bg-rose-500/20 text-rose-400 border border-rose-500/30" : "bg-sky-500/20 text-sky-400 border border-sky-500/30")}>
+                                        {isBuy ? "매수진입" : "매도싸인"}
+                                      </span>
+                                      <span className="font-bold text-white">{logStock.name}</span>
+                                    </div>
+                                    <span className="text-[10px] text-gray-500">{log.time}</span>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-1 bg-black/30 p-1.5 rounded text-[10px]">
+                                    <div>
+                                      <span className="text-gray-400 block">{isBuy ? "진입가" : "체결가"}</span>
+                                      <span className="font-bold text-white">₩{log.price.toLocaleString()}</span>
+                                    </div>
+                                    <div className="text-right">
+                                      <span className="text-gray-400 block">{isBuy ? `목표가 (+${scalpingTargetProfit}%)` : "사유"}</span>
+                                      <span className={cn("font-bold", isBuy ? "text-rose-400" : "text-emerald-400")}>
+                                        {isBuy && targetPrice > 0 ? `₩${targetPrice.toLocaleString()}` : log.reason}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    );
                   })()
                 )}
               </div>
