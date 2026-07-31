@@ -3300,10 +3300,7 @@ export default function App() {
   // 2. High-speed automatic trading decisions (Profit Maximizer Engine)
   useEffect(() => {
     if (!isGapBotActive || !selectedStock) {
-      setGapInventory([]); 
-      gapInventoryRef.current = [];
-      setScalperMessage("대기 중...");
-      cancelAllPendingOrders();
+      if (!isGapBotActive) setScalperMessage("대기 중...");
       return;
     }
 
@@ -6343,24 +6340,24 @@ export default function App() {
                       return activeSlots;
                     }
 
-                    // Filter logs for selected stock or all recent trades
+                    // Filter logs strictly for current selected stock (zero cross-contamination)
                     const filteredLogs = tradeLogs.filter(log => log.symbol === currentStock.symbol);
-                    const logsToShow = filteredLogs.length > 0 ? filteredLogs : tradeLogs;
+                    const logsToShow = filteredLogs;
 
                     return (
                       <div className="space-y-3">
                         <div className="bg-black/20 border border-dashed border-white/10 rounded-2xl p-4 text-center space-y-1">
                           <div className="flex items-center justify-center gap-1.5 text-xs text-white font-bold">
                             <Activity className="w-3.5 h-3.5 text-sleek-blue" />
-                            <span>현재 매수/매도 대기 중</span>
+                            <span>[{currentStock.name}] 매수/매도 대기 중</span>
                           </div>
                           <p className="text-[11px] text-sleek-text-secondary font-mono">
                             매수진입 및 매도싸인 발생 시 진입 예상가와 목표가가 여기에 즉시 표시됩니다.
                           </p>
                         </div>
 
-                        {/* Recent Trade / Order Signal History */}
-                        {logsToShow.length > 0 && (
+                        {/* Recent Trade / Order Signal History for current stock only */}
+                        {logsToShow.length > 0 ? (
                           <div className="space-y-2 pt-1">
                             <span className="text-[10px] font-bold text-sleek-text-secondary uppercase tracking-wider block px-1">
                               최근 체결 및 주문 현황 ({logsToShow.length}건)
@@ -6399,6 +6396,10 @@ export default function App() {
                                 </div>
                               );
                             })}
+                          </div>
+                        ) : (
+                          <div className="text-[10px] text-gray-500 text-center py-2 font-mono">
+                            {currentStock.name} 종목의 최근 체결/주문 기록이 없습니다.
                           </div>
                         )}
                       </div>
