@@ -1479,7 +1479,9 @@ export default function App() {
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
       console.error("Login error:", error);
-      if (error.code === 'auth/popup-blocked') {
+      if (error.code === 'auth/popup-closed-by-user' || error.code === 'auth/cancelled-popup-request') {
+        showNotification("로그인 창이 닫혔습니다.", "info");
+      } else if (error.code === 'auth/popup-blocked') {
         alert("팝업이 차단되었습니다. 브라우저 주소창의 팝업 차단 설정을 해제해주세요.");
       } else if (error.code === 'auth/network-request-failed') {
         alert("네트워크 연결 오류가 발생했습니다.");
@@ -5508,43 +5510,45 @@ export default function App() {
             </div>
 
             {/* Multi-Tab Bar for Independent Scalper Bot Trading */}
-            <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar pb-2 pt-1 border-b border-white/10">
-              <div className="flex items-center gap-1.5 min-w-0">
-                {scalperTabs.map(tab => {
-                  const isSelected = tab.id === activeTabId;
-                  const tabStock = stocks.find(s => s.symbol === tab.symbol) || 
-                                   INITIAL_STOCKS_KR.find(s => s.symbol === tab.symbol) || 
-                                   INITIAL_STOCKS.find(s => s.symbol === tab.symbol);
-                  const tabName = tab.name || tabStock?.name || tab.symbol;
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pb-2 pt-1 border-b border-white/10">
+              {scalperTabs.map(tab => {
+                const isSelected = tab.id === activeTabId;
+                const tabStock = stocks.find(s => s.symbol === tab.symbol) || 
+                                 INITIAL_STOCKS_KR.find(s => s.symbol === tab.symbol) || 
+                                 INITIAL_STOCKS.find(s => s.symbol === tab.symbol);
+                const tabName = tab.name || tabStock?.name || tab.symbol;
 
-                  return (
-                    <div
-                      key={tab.id}
-                      onClick={() => handleSwitchTab(tab.id)}
-                      className={cn(
-                        "px-3 py-1.5 rounded-xl border flex items-center gap-2 cursor-pointer transition-all shrink-0 text-xs font-mono select-none group",
-                        isSelected
-                          ? "bg-sleek-blue/20 border-sleek-blue text-white shadow-md font-bold"
-                          : "bg-black/40 border-white/5 hover:bg-white/5 text-gray-400 hover:text-white"
-                      )}
-                    >
-                      {/* Running Indicator Dot */}
+                return (
+                  <div
+                    key={tab.id}
+                    onClick={() => handleSwitchTab(tab.id)}
+                    className={cn(
+                      "px-2.5 py-1.5 rounded-xl border flex items-center justify-between gap-1.5 cursor-pointer transition-all w-full min-w-0 text-xs font-mono select-none group min-h-[34px]",
+                      isSelected
+                        ? "bg-sleek-blue/20 border-sleek-blue text-white shadow-md font-bold"
+                        : "bg-black/40 border-white/5 hover:bg-white/5 text-gray-400 hover:text-white"
+                    )}
+                  >
+                    {/* Left: Running Dot & Name */}
+                    <div className="flex items-center gap-1.5 min-w-0 truncate">
                       <span className={cn(
                         "w-2 h-2 rounded-full shrink-0",
                         tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]" : "bg-gray-500"
                       )} />
+                      <span className="font-bold text-white text-xs truncate">{tabName}</span>
+                    </div>
 
-                      <span className="font-bold text-white text-xs">{tabName}</span>
-
+                    {/* Right: Price & Indicators & Close */}
+                    <div className="flex items-center gap-1 shrink-0 ml-auto">
                       {tabStock && (
-                        <span className={cn("text-[10px] font-mono", tabStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
+                        <span className={cn("text-[10px] font-mono hidden md:inline-block", tabStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
                           ₩{tabStock.price.toLocaleString()}
                         </span>
                       )}
 
                       {tab.isBotActive && (
-                        <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-1.5 py-0.2 rounded-full border border-emerald-500/30">
-                          RUNNING
+                        <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/30 shrink-0">
+                          ON
                         </span>
                       )}
 
@@ -5552,16 +5556,16 @@ export default function App() {
                         <button
                           type="button"
                           onClick={(e) => closeScalperTab(tab.id, e)}
-                          className="opacity-60 hover:opacity-100 hover:bg-rose-500/30 text-gray-400 hover:text-rose-300 rounded-full p-0.5 transition-all ml-1"
+                          className="opacity-60 hover:opacity-100 hover:bg-rose-500/30 text-gray-400 hover:text-rose-300 rounded-full p-0.5 transition-all ml-0.5 shrink-0"
                           title="탭 닫기"
                         >
                           <X className="w-3 h-3" />
                         </button>
                       )}
                     </div>
-                  );
-                })}
-              </div>
+                  </div>
+                );
+              })}
 
               <button
                 type="button"
@@ -5571,7 +5575,7 @@ export default function App() {
                     openOrSwitchScalperTab(available.symbol, available.name);
                   }
                 }}
-                className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white text-xs font-bold font-mono flex items-center gap-1 transition-all shrink-0 ml-auto"
+                className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-sleek-blue/50 text-gray-300 hover:text-white text-xs font-bold font-mono flex items-center justify-center gap-1 transition-all w-full min-h-[34px]"
                 title="새 스캘퍼 종목 탭 추가"
               >
                 <Plus className="w-3.5 h-3.5 text-sleek-blue" />
