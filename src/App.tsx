@@ -132,6 +132,7 @@ export interface ScalperTab {
   scalperMessage: string;
   entryPriceMode: 'CURRENT' | 'BID2' | 'BID4';
   autoCancelThreshold: number;
+  tradeLogs?: TradeLog[];
 }
 
 interface Stock {
@@ -657,7 +658,8 @@ export default function App() {
       lastTradeType: null,
       scalperMessage: "대기 중...",
       entryPriceMode: 'BID2',
-      autoCancelThreshold: 0.2
+      autoCancelThreshold: 0.2,
+      tradeLogs: []
     }];
   });
 
@@ -684,6 +686,7 @@ export default function App() {
     setScalperMessage(targetTab.scalperMessage || "대기 중...");
     setEntryPriceMode(targetTab.entryPriceMode || 'BID2');
     setAutoCancelThreshold(targetTab.autoCancelThreshold || 0.2);
+    setTradeLogs(targetTab.tradeLogs || []);
   };
 
   const openOrSwitchScalperTab = (symbol: string, customName?: string) => {
@@ -714,7 +717,8 @@ export default function App() {
       lastTradeType: null,
       scalperMessage: "대기 중...",
       entryPriceMode: 'BID2',
-      autoCancelThreshold: 0.2
+      autoCancelThreshold: 0.2,
+      tradeLogs: []
     };
 
     setScalperTabs(prev => [...prev, newTab]);
@@ -728,6 +732,7 @@ export default function App() {
     setGapTradeCount(0);
     setLastTradeType(null);
     setScalperMessage("대기 중...");
+    setTradeLogs([]);
   };
 
   const closeScalperTab = (tabId: string, e: React.MouseEvent) => {
@@ -798,10 +803,11 @@ export default function App() {
         lastTradeType,
         scalperMessage,
         entryPriceMode,
-        autoCancelThreshold
+        autoCancelThreshold,
+        tradeLogs
       };
     }));
-  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, activeTabId]);
+  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, tradeLogs, activeTabId]);
 
   // Helper for tick-aware target sell price calculation to guarantee positive profit above tick size
   const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number, currentMarketPrice?: number) => {
@@ -3914,10 +3920,21 @@ export default function App() {
   };
 
   const addLog = (symbol: string, type: 'BUY' | 'SELL' | '매수' | '매도', price: number, amount: number, reason: string) => {
-    setTradeLogs(prev => [{
+    const newLog: TradeLog = {
       time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
       symbol, type, price, amount, reason
-    }, ...prev].slice(0, 50));
+    };
+    setTradeLogs(prev => [newLog, ...prev].slice(0, 50));
+    setScalperTabs(prev => prev.map(tab => {
+      if (tab.symbol === symbol || tab.id === symbol || (symbol === 'SYSTEM' && tab.id === activeTabId)) {
+        const existing = tab.tradeLogs || [];
+        return {
+          ...tab,
+          tradeLogs: [newLog, ...existing].slice(0, 50)
+        };
+      }
+      return tab;
+    }));
   };
 
   const handleExecuteManualSell = async () => {
