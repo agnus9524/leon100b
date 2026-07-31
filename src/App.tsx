@@ -116,6 +116,24 @@ function cn(...inputs: ClassValue[]) {
 
 // --- Types & Mock Data ---
 
+export interface ScalperTab {
+  id: string; // symbol e.g., '073240' or '001520'
+  symbol: string;
+  name: string;
+  isBotActive: boolean;
+  gapBuyPrice: number;
+  gapSellPrice: number;
+  tradeQuantity: number;
+  maxSlots: number;
+  gapInventory: { id: string; price: number; quantity: number }[];
+  gapTradingProfit: number;
+  gapTradeCount: number;
+  lastTradeType: 'BUY' | 'SELL' | null;
+  scalperMessage: string;
+  entryPriceMode: 'CURRENT' | 'BID2' | 'BID4';
+  autoCancelThreshold: number;
+}
+
 interface Stock {
   symbol: string;
   name: string;
@@ -616,6 +634,115 @@ export default function App() {
   const [gapTradeCount, setGapTradeCount] = useState<number>(0);
   const [lastTradeType, setLastTradeType] = useState<'BUY' | 'SELL' | null>(null);
   const [gapInventory, setGapInventory] = useState<{id: string, price: number, quantity: number}[]>([]);
+
+  // Multi-Tab Scalper Trading State
+  const [scalperTabs, setScalperTabs] = useState<ScalperTab[]>(() => {
+    const initSymbol = localStorage.getItem('sleek_last_symbol') || '073240';
+    const initStock = INITIAL_STOCKS_KR.find(s => s.symbol === initSymbol) || INITIAL_STOCKS.find(s => s.symbol === initSymbol) || INITIAL_STOCKS_KR[0];
+    const price = initStock?.price || 1000;
+    const tickSize = price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5;
+
+    return [{
+      id: initStock.symbol,
+      symbol: initStock.symbol,
+      name: initStock.name || initStock.symbol,
+      isBotActive: false,
+      gapBuyPrice: Math.max(10, price - tickSize * 2),
+      gapSellPrice: price + tickSize * 2,
+      tradeQuantity: 1,
+      maxSlots: 3,
+      gapInventory: [],
+      gapTradingProfit: 0,
+      gapTradeCount: 0,
+      lastTradeType: null,
+      scalperMessage: "대기 중...",
+      entryPriceMode: 'BID2',
+      autoCancelThreshold: 0.2
+    }];
+  });
+
+  const [activeTabId, setActiveTabId] = useState<string>(() => scalperTabs[0]?.id || '073240');
+  const scalperTabsRef = React.useRef<ScalperTab[]>(scalperTabs);
+  useEffect(() => {
+    scalperTabsRef.current = scalperTabs;
+  }, [scalperTabs]);
+
+  const handleSwitchTab = (tabId: string) => {
+    const targetTab = scalperTabsRef.current.find(t => t.id === tabId);
+    if (!targetTab) return;
+    setActiveTabId(tabId);
+    setSelectedSymbol(targetTab.symbol);
+    setIsGapBotActive(targetTab.isBotActive);
+    setGapBuyPrice(targetTab.gapBuyPrice);
+    setGapSellPrice(targetTab.gapSellPrice);
+    setTradeQuantity(targetTab.tradeQuantity);
+    setMaxSlots(targetTab.maxSlots);
+    setGapInventory(targetTab.gapInventory || []);
+    setGapTradingProfit(targetTab.gapTradingProfit || 0);
+    setGapTradeCount(targetTab.gapTradeCount || 0);
+    setLastTradeType(targetTab.lastTradeType || null);
+    setScalperMessage(targetTab.scalperMessage || "대기 중...");
+    setEntryPriceMode(targetTab.entryPriceMode || 'BID2');
+    setAutoCancelThreshold(targetTab.autoCancelThreshold || 0.2);
+  };
+
+  const openOrSwitchScalperTab = (symbol: string, customName?: string) => {
+    const existing = scalperTabsRef.current.find(t => t.symbol === symbol || t.id === symbol);
+    if (existing) {
+      handleSwitchTab(existing.id);
+      return;
+    }
+    const stock = stocksRef.current.find(s => s.symbol === symbol) ||
+                  INITIAL_STOCKS_KR.find(s => s.symbol === symbol) ||
+                  INITIAL_STOCKS.find(s => s.symbol === symbol);
+    const name = customName || stock?.name || symbol;
+    const price = stock?.price || 1000;
+    const tickSize = price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5;
+
+    const newTab: ScalperTab = {
+      id: symbol,
+      symbol,
+      name,
+      isBotActive: false,
+      gapBuyPrice: Math.max(10, price - tickSize * 2),
+      gapSellPrice: price + tickSize * 2,
+      tradeQuantity: 1,
+      maxSlots: 3,
+      gapInventory: [],
+      gapTradingProfit: 0,
+      gapTradeCount: 0,
+      lastTradeType: null,
+      scalperMessage: "대기 중...",
+      entryPriceMode: 'BID2',
+      autoCancelThreshold: 0.2
+    };
+
+    setScalperTabs(prev => [...prev, newTab]);
+    setActiveTabId(symbol);
+    setSelectedSymbol(symbol);
+    setIsGapBotActive(false);
+    setGapBuyPrice(newTab.gapBuyPrice);
+    setGapSellPrice(newTab.gapSellPrice);
+    setGapInventory([]);
+    setGapTradingProfit(0);
+    setGapTradeCount(0);
+    setLastTradeType(null);
+    setScalperMessage("대기 중...");
+  };
+
+  const closeScalperTab = (tabId: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (scalperTabs.length <= 1) return;
+
+    const remaining = scalperTabs.filter(t => t.id !== tabId);
+    setScalperTabs(remaining);
+
+    if (activeTabId === tabId) {
+      const nextTab = remaining[remaining.length - 1];
+      handleSwitchTab(nextTab.id);
+    }
+  };
+
   const [pendingBuyOrders, setPendingBuyOrders] = useState<PendingBuyOrder[]>([]);
   const pendingBuyOrdersRef = React.useRef<PendingBuyOrder[]>([]);
   const [pendingSellOrders, setPendingSellOrders] = useState<PendingSellOrder[]>([]);
@@ -654,6 +781,27 @@ export default function App() {
   const [useFixedQuantity, setUseFixedQuantity] = useState<boolean>(true); 
   const [top3RefreshNonce, setTop3RefreshNonce] = useState<number>(0);
   const [isRefreshingTop3, setIsRefreshingTop3] = useState<boolean>(false);
+
+  useEffect(() => {
+    setScalperTabs(prev => prev.map(tab => {
+      if (tab.id !== activeTabId) return tab;
+      return {
+        ...tab,
+        isBotActive: isGapBotActive,
+        gapBuyPrice,
+        gapSellPrice,
+        tradeQuantity,
+        maxSlots,
+        gapInventory,
+        gapTradingProfit,
+        gapTradeCount,
+        lastTradeType,
+        scalperMessage,
+        entryPriceMode,
+        autoCancelThreshold
+      };
+    }));
+  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, activeTabId]);
 
   // Helper for tick-aware target sell price calculation to guarantee positive profit above tick size
   const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number, currentMarketPrice?: number) => {
@@ -1457,18 +1605,18 @@ export default function App() {
     
     if (recommendedStock) {
       if (stocks.some(s => s.symbol === recommendedStock.symbol)) {
-        setSelectedSymbol(recommendedStock.symbol);
+        openOrSwitchScalperTab(recommendedStock.symbol, recommendedStock.name);
         return;
       }
       setStocks(prev => [{ ...recommendedStock, isAI: true }, ...prev]);
-      setSelectedSymbol(recommendedStock.symbol);
+      openOrSwitchScalperTab(recommendedStock.symbol, recommendedStock.name);
       setAiRecommendations(prev => prev.filter(r => r.symbol !== recommendedStock.symbol));
       addLog('SYSTEM', '매수', 0, 0, `[AI 추천 추가] ${recommendedStock.name}(${recommendedStock.symbol}) 종목이 분석 리스트에 추가되었습니다.`);
       return;
     }
 
     if (stocks.some(s => s.symbol === symbolToUse)) {
-      setSelectedSymbol(symbolToUse);
+      openOrSwitchScalperTab(symbolToUse, customName);
       return;
     }
 
@@ -1498,7 +1646,7 @@ export default function App() {
             }
             return [newStock, ...prev];
           });
-          setSelectedSymbol(symbolToUse);
+          openOrSwitchScalperTab(symbolToUse, liveName);
           setSearchSymbol("");
           addLog('SYSTEM', '매수', 0, 0, `[KIS 종목 추가] ${liveName}(${symbolToUse}) 종목이 실시간 연동 등록되었습니다 (현재가: ₩${livePriceData.current.toLocaleString()}).`);
           setIsSearchingStock(false);
@@ -4868,8 +5016,8 @@ export default function App() {
                         if (!stocks.some(s => s.symbol === st.symbol)) {
                           setStocks(prev => [...prev, st]);
                         }
-                        setSelectedSymbol(st.symbol);
-                        showNotification(`[스캘퍼 종목 지정] ${st.name}(${st.symbol}) 종목이 스캘핑 엔진에 선택되었습니다.`, "info");
+                        openOrSwitchScalperTab(st.symbol, st.name);
+                        showNotification(`[스캘퍼 종목 지정] ${st.name}(${st.symbol}) 종목 탭이 활성화되었습니다.`, "info");
                       }}
                       className={cn(
                         "p-2.5 rounded-xl border transition-all cursor-pointer group relative overflow-hidden",
@@ -5350,6 +5498,78 @@ export default function App() {
                   </span>
                 </div>
               </div>
+            </div>
+
+            {/* Multi-Tab Bar for Independent Scalper Bot Trading */}
+            <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar pb-2 pt-1 border-b border-white/10">
+              <div className="flex items-center gap-1.5 min-w-0">
+                {scalperTabs.map(tab => {
+                  const isSelected = tab.id === activeTabId;
+                  const tabStock = stocks.find(s => s.symbol === tab.symbol) || 
+                                   INITIAL_STOCKS_KR.find(s => s.symbol === tab.symbol) || 
+                                   INITIAL_STOCKS.find(s => s.symbol === tab.symbol);
+                  const tabName = tab.name || tabStock?.name || tab.symbol;
+
+                  return (
+                    <div
+                      key={tab.id}
+                      onClick={() => handleSwitchTab(tab.id)}
+                      className={cn(
+                        "px-3 py-1.5 rounded-xl border flex items-center gap-2 cursor-pointer transition-all shrink-0 text-xs font-mono select-none group",
+                        isSelected
+                          ? "bg-sleek-blue/20 border-sleek-blue text-white shadow-md font-bold"
+                          : "bg-black/40 border-white/5 hover:bg-white/5 text-gray-400 hover:text-white"
+                      )}
+                    >
+                      {/* Running Indicator Dot */}
+                      <span className={cn(
+                        "w-2 h-2 rounded-full shrink-0",
+                        tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]" : "bg-gray-500"
+                      )} />
+
+                      <span className="font-bold text-white text-xs">{tabName}</span>
+
+                      {tabStock && (
+                        <span className={cn("text-[10px] font-mono", tabStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
+                          ₩{tabStock.price.toLocaleString()}
+                        </span>
+                      )}
+
+                      {tab.isBotActive && (
+                        <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-1.5 py-0.2 rounded-full border border-emerald-500/30">
+                          RUNNING
+                        </span>
+                      )}
+
+                      {scalperTabs.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={(e) => closeScalperTab(tab.id, e)}
+                          className="opacity-60 hover:opacity-100 hover:bg-rose-500/30 text-gray-400 hover:text-rose-300 rounded-full p-0.5 transition-all ml-1"
+                          title="탭 닫기"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const available = stocks.find(s => !scalperTabs.some(t => t.symbol === s.symbol)) || stocks[0];
+                  if (available) {
+                    openOrSwitchScalperTab(available.symbol, available.name);
+                  }
+                }}
+                className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white text-xs font-bold font-mono flex items-center gap-1 transition-all shrink-0 ml-auto"
+                title="새 스캘퍼 종목 탭 추가"
+              >
+                <Plus className="w-3.5 h-3.5 text-sleek-blue" />
+                <span>+ 종목 추가</span>
+              </button>
             </div>
 
             {selectedStock ? (
