@@ -60,9 +60,7 @@ import {
   Trash2,
   PieChart,
   Calculator,
-  Coins,
-  SlidersHorizontal,
-  Filter
+  Coins
 } from 'lucide-react';
 import { 
   XAxis, 
@@ -784,17 +782,6 @@ export default function App() {
   const [top3RefreshNonce, setTop3RefreshNonce] = useState<number>(0);
   const [isRefreshingTop3, setIsRefreshingTop3] = useState<boolean>(false);
 
-  // Scanner Custom Filter State for Scalper Optimal Stock Capture
-  const [scannerMinPrice, setScannerMinPrice] = useState<string>('');
-  const [scannerMaxPrice, setScannerMaxPrice] = useState<string>('');
-  const [scannerOptUptrend, setScannerOptUptrend] = useState<boolean>(true);
-  const [scannerOptMomentum, setScannerOptMomentum] = useState<boolean>(true);
-  const [scannerOptHighVolume, setScannerOptHighVolume] = useState<boolean>(true);
-  const [scannerMinVolatility, setScannerMinVolatility] = useState<string>('2'); // default 2%
-  const [scannerRsiRange, setScannerRsiRange] = useState<'ALL' | 'SCALPER_OPTIMAL' | 'OVERSOLD'>('SCALPER_OPTIMAL');
-  const [scannerChangeRange, setScannerChangeRange] = useState<'ALL' | 'EARLY_RALLY' | 'MID_RALLY'>('EARLY_RALLY');
-  const [showScannerDetail, setShowScannerDetail] = useState<boolean>(false);
-
   useEffect(() => {
     setScalperTabs(prev => prev.map(tab => {
       if (tab.id !== activeTabId) return tab;
@@ -1104,65 +1091,17 @@ export default function App() {
       }
     });
 
-    const minPriceLimit = scannerMinPrice !== '' ? Number(scannerMinPrice) : 0;
-    const defaultMaxPrice = marketType === 'KR' ? 10000 : 10.0;
-    const maxPriceLimit = scannerMaxPrice !== '' ? Number(scannerMaxPrice) : (scannerMinPrice !== '' ? 99999999 : defaultMaxPrice);
-
     const candidates = Array.from(candidateMap.values()).filter(stock => {
       const name = (stock.name || INITIAL_STOCKS_KR.find(s => s.symbol === stock.symbol)?.name || stock.symbol).trim().toLowerCase();
-      if (name.startsWith('kodex')) return false;
-
-      // 1. Price Range filter
-      if (stock.price < minPriceLimit) return false;
-      if (maxPriceLimit > 0 && stock.price > maxPriceLimit) return false;
-
-      // 2. Basic Option: 1-Year Uptrend
-      if (scannerOptUptrend && stock.changePercent < -5) return false;
-
-      // 3. Basic Option: Momentum
-      if (scannerOptMomentum && stock.changePercent < 0) return false;
-
-      // 4. Basic Option: Volume
-      let rawVol = 100;
-      if (typeof stock.volume === 'string') {
-        if (stock.volume.endsWith('M')) rawVol = parseFloat(stock.volume) * 1000;
-        else if (stock.volume.endsWith('K')) rawVol = parseFloat(stock.volume);
-        else rawVol = parseFloat(stock.volume) || 100;
-      } else if (typeof stock.volume === 'number') {
-        rawVol = stock.volume;
-      }
-      if (scannerOptHighVolume && rawVol < 20) return false;
-
-      // 5. Extra: Volatility filter
-      const minVolVal = Number(scannerMinVolatility) || 0;
-      if (minVolVal > 0 && stock.history && stock.history.length > 1) {
-        const prices = stock.history.map(h => h.price).filter(p => p > 0);
-        if (prices.length > 0) {
-          const minP = Math.min(...prices);
-          const maxP = Math.max(...prices);
-          const oscillation = ((maxP - minP) / (minP || 1)) * 100;
-          if (oscillation < minVolVal) return false;
-        }
-      }
-
-      // 6. Extra: RSI filter
-      if (scannerRsiRange !== 'ALL' && stock.history && stock.history.length > 1) {
-        const prices = stock.history.map(h => h.price);
-        const rsi = calculateRSI(prices, 14);
-        if (scannerRsiRange === 'SCALPER_OPTIMAL' && (rsi < 35 || rsi > 70)) return false;
-        if (scannerRsiRange === 'OVERSOLD' && rsi > 35) return false;
-      }
-
-      // 7. Extra: Daily Change % filter
-      if (scannerChangeRange === 'EARLY_RALLY' && (stock.changePercent < 0.2 || stock.changePercent > 15)) return false;
-      if (scannerChangeRange === 'MID_RALLY' && (stock.changePercent < 2.0 || stock.changePercent > 25)) return false;
-
-      return true;
+      return !name.startsWith('kodex');
     });
+    const maxPrice = marketType === 'KR' ? 10000 : 10.0;
 
     const scoredCandidates = candidates.map((stock) => {
       const qty = holdings[stock.symbol] || 0;
       const isHeld = Number(qty) > 0;
+
+      const isPriceUnderLimit = stock.price > 0 && stock.price <= maxPrice;
       const isRisingTrend = stock.changePercent > 0;
 
       let oscillation = 1.8;
@@ -1184,6 +1123,7 @@ export default function App() {
         rawVol = stock.volume;
       }
 
+      // Liquidity & dynamic daily momentum scoring
       let liquidityScore = Math.min(35, Math.log10(rawVol + 10) * 9);
       let risingScore = isRisingTrend ? Math.min(45, stock.changePercent * 10 + 20) : -30;
       let volScore = Math.min(20, oscillation * 5);
@@ -1193,14 +1133,34 @@ export default function App() {
 
       const scalpScore = Math.min(99, Math.max(70, Math.round(30 + risingScore + liquidityScore + volScore + seed)));
 
+      // Priority Tiers:
+      // Tier 0: Price <= 10,000원 ($10) AND 1-Year Upward Trend & Real-time Rising Momentum (Highest Priority)
+      // Tier 1: Price <= 10,000원 ($10) only
+      // Tier 2: Others (Fallback)
+      let tier = 2;
+      if (isPriceUnderLimit && isRisingTrend) {
+        tier = 0;
+      } else if (isPriceUnderLimit) {
+        tier = 1;
+      }
+
       return {
         symbol: stock.symbol,
         isHeld,
+        tier,
+        rawVol,
         scalpScore
       };
     });
 
+    // Priority order:
+    // 1. Lower tier first (Tier 0 > Tier 1 > Tier 2)
+    // 2. Held stocks first
+    // 3. Highest scalpScore (driven by volume and momentum)
     scoredCandidates.sort((a, b) => {
+      if (a.tier !== b.tier) {
+        return a.tier - b.tier;
+      }
       if (a.isHeld !== b.isHeld) {
         return a.isHeld ? -1 : 1;
       }
@@ -1209,11 +1169,11 @@ export default function App() {
 
     return scoredCandidates.slice(0, 5).map(c => c.symbol);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [marketType, top3RefreshNonce, scannerMinPrice, scannerMaxPrice, scannerOptUptrend, scannerOptMomentum, scannerOptHighVolume, scannerMinVolatility, scannerRsiRange, scannerChangeRange]);
+  }, [marketType, top3RefreshNonce]);
 
   // Scalper Engine Optimal Top 5 Stocks mapping live stock snapshot
   const scalperTop5Stocks = useMemo(() => {
-    const pricePrefix = marketType === 'KR' ? '₩' : '$';
+    const maxPrice = marketType === 'KR' ? 10000 : 10.0;
 
     return stableTop5Symbols.map((sym) => {
       const stock = stocks.find(s => s.symbol === sym) ||
@@ -1223,6 +1183,7 @@ export default function App() {
 
       const qty = holdings[sym] || 0;
       const isHeld = Number(qty) > 0;
+      const isUnderLimit = stock.price > 0 && stock.price <= maxPrice;
       const isRising = stock.changePercent > 0;
 
       let oscillation = 1.8;
@@ -1254,20 +1215,15 @@ export default function App() {
       const rawTotal = 35 + risingScore + liquidityScore + volScore + seed;
       const scalpScore = Math.min(99, Math.max(70, Math.round(rawTotal)));
 
-      let priceTagStr = marketType === 'KR' ? '10,000원 이하' : '$10 이하';
-      if (scannerMinPrice || scannerMaxPrice) {
-        const minP = scannerMinPrice ? Number(scannerMinPrice) : 0;
-        const maxP = scannerMaxPrice ? Number(scannerMaxPrice) : null;
-        priceTagStr = `${minP > 0 ? pricePrefix + minP.toLocaleString() + '~' : ''}${maxP ? pricePrefix + maxP.toLocaleString() : '제한없음'}`;
-      }
-
       let reasonTag = "🚀 1년 우상향 · 실시간 상승기류";
       if (isHeld) {
-        reasonTag = `💼 보유 종목 (${priceTagStr})`;
-      } else if (isRising) {
-        reasonTag = `⚡ ${priceTagStr} · 1년 우상향 · 상승기류 (+${stock.changePercent.toFixed(1)}%)`;
-      } else {
+        reasonTag = `💼 보유 종목 (${marketType === 'KR' ? '10,000원 이하' : '$10 이하'})`;
+      } else if (isUnderLimit && isRising) {
+        reasonTag = `⚡ ${marketType === 'KR' ? '10,000원 이하' : '$10 이하'} · 1년 우상향 · 실시간 상승기류 (+${stock.changePercent.toFixed(1)}%)`;
+      } else if (stock.changePercent > 0) {
         reasonTag = `📈 1년 우상향 추세 (+${stock.changePercent.toFixed(1)}%)`;
+      } else {
+        reasonTag = `💧 거래량 유동성 우수`;
       }
 
       const resolvedStockName = (stock.name && stock.name !== sym) 
@@ -1284,7 +1240,7 @@ export default function App() {
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stableTop5Symbols, top3RefreshNonce, marketType, scannerMinPrice, scannerMaxPrice]);
+  }, [stableTop5Symbols, top3RefreshNonce, marketType]);
 
   // Real-time Exchange Rate Fetcher & Simulator
   const fetchRealExchangeRate = React.useCallback(async () => {
@@ -5016,7 +4972,7 @@ export default function App() {
               </div>
             )}
 
-            {/* 스캘퍼 엔진 최적 추천 종목 포착 스캐너 Widget */}
+            {/* 스캘퍼 엔진 최적 추천 종목 TOP 5 Ranking Widget */}
             <div className="space-y-3 pt-4 border-t border-white/10">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
@@ -5025,33 +4981,18 @@ export default function App() {
                   </div>
                   <div>
                     <h2 className="text-[11px] font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                      스캘퍼 최적 추천 종목 포착
+                      스캘퍼 최적 추천 종목 TOP 5
                       <span className="relative flex h-2 w-2">
                         <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
                         <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
                       </span>
                     </h2>
                     <div className="text-[9px] font-semibold text-amber-400/90 tracking-tight mt-0.5">
-                      {scannerMinPrice || scannerMaxPrice
-                        ? `가격: ${scannerMinPrice ? (marketType === 'KR' ? '₩' : '$') + Number(scannerMinPrice).toLocaleString() + '~' : ''}${scannerMaxPrice ? (marketType === 'KR' ? '₩' : '$') + Number(scannerMaxPrice).toLocaleString() : '제한없음'}`
-                        : (marketType === 'KR' ? '10,000원 이하 · 1년 우상향 · 실시간 상승기류 포착' : '$10 이하 · 1년 우상향 · 실시간 상승기류 포착')}
+                      {marketType === 'KR' ? '10,000원 이하 · 1년 우상향 · 실시간 상승기류 포착 5선' : '$10 이하 · 1년 우상향 · 실시간 상승기류 포착 5선'}
                     </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={() => setShowScannerDetail(!showScannerDetail)}
-                    className={cn(
-                      "flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-lg border transition-all cursor-pointer",
-                      showScannerDetail 
-                        ? "bg-amber-500 text-black border-amber-400 shadow-sm"
-                        : "bg-amber-500/10 text-amber-300 border-amber-500/30 hover:bg-amber-500/20"
-                    )}
-                  >
-                    <SlidersHorizontal className="w-3 h-3" />
-                    <span>{showScannerDetail ? "조건 닫기" : "조건 설정"}</span>
-                  </button>
                   <button
                     type="button"
                     onClick={handleRefreshScalperTop3}
@@ -5060,357 +5001,88 @@ export default function App() {
                     title="스캘퍼 최적 종목 갱신"
                   >
                     <RefreshCw className={cn("w-3 h-3 text-amber-400", isRefreshingTop3 && "animate-spin")} />
-                    <span>포착</span>
+                    <span>갱신</span>
                   </button>
+                  <span className="text-[9px] font-mono text-amber-300 font-bold px-2 py-0.5 bg-amber-500/10 rounded-full border border-amber-500/20">
+                    {marketType === 'KR' ? '국내' : '미국'}
+                  </span>
                 </div>
               </div>
 
-              {/* 스캘퍼 최적 포착 세부 조건 입력창 */}
-              <AnimatePresence>
-                {showScannerDetail && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: 'auto' }}
-                    exit={{ opacity: 0, height: 0 }}
-                    className="overflow-hidden bg-slate-950/80 border border-amber-500/30 rounded-xl p-3 space-y-3 shadow-inner"
-                  >
-                    <div className="text-[10px] font-bold text-amber-400 uppercase tracking-wider flex items-center justify-between border-b border-amber-500/20 pb-1.5">
-                      <span className="flex items-center gap-1">
-                        <Filter className="w-3 h-3 text-amber-400" />
-                        스캘퍼 최적 종목 직접 포착 조건
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setScannerMinPrice('');
-                          setScannerMaxPrice('');
-                          setScannerOptUptrend(true);
-                          setScannerOptMomentum(true);
-                          setScannerOptHighVolume(true);
-                          setScannerMinVolatility('2');
-                          setScannerRsiRange('SCALPER_OPTIMAL');
-                          setScannerChangeRange('EARLY_RALLY');
-                          showNotification("스캘퍼 포착 필터가 기본값으로 초기화되었습니다.", "info");
-                        }}
-                        className="text-[9px] text-slate-400 hover:text-amber-300 underline cursor-pointer"
-                      >
-                        필터 초기화
-                      </button>
-                    </div>
-
-                    {/* 1. 주식 가격 직접 입력 칸 */}
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-300 flex items-center justify-between">
-                        <span>🎯 주식 가격 범위 지정 입력 ({marketType === 'KR' ? '원' : '달러'})</span>
-                        <span className="text-[9px] font-mono text-amber-400/80">직접 입력 가능</span>
-                      </label>
-                      <div className="flex items-center gap-1.5">
-                        <div className="relative flex-1">
-                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-mono text-slate-500">
-                            {marketType === 'KR' ? '₩' : '$'}
-                          </span>
-                          <input
-                            type="number"
-                            value={scannerMinPrice}
-                            onChange={(e) => setScannerMinPrice(e.target.value)}
-                            placeholder="최저가 (0)"
-                            className="w-full bg-slate-900 border border-white/10 rounded-lg pl-6 pr-2 py-1 text-xs font-mono text-white placeholder:text-slate-600 focus:border-amber-400 outline-none transition-all"
-                          />
-                        </div>
-                        <span className="text-xs text-slate-500 font-bold">~</span>
-                        <div className="relative flex-1">
-                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-mono text-slate-500">
-                            {marketType === 'KR' ? '₩' : '$'}
-                          </span>
-                          <input
-                            type="number"
-                            value={scannerMaxPrice}
-                            onChange={(e) => setScannerMaxPrice(e.target.value)}
-                            placeholder={marketType === 'KR' ? "최고가 (10000)" : "최고가 (10)"}
-                            className="w-full bg-slate-900 border border-white/10 rounded-lg pl-6 pr-2 py-1 text-xs font-mono text-white placeholder:text-slate-600 focus:border-amber-400 outline-none transition-all"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Quick Presets */}
-                      <div className="flex items-center gap-1 pt-1 flex-wrap">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setScannerMinPrice('');
-                            setScannerMaxPrice(marketType === 'KR' ? '10000' : '10');
-                          }}
-                          className="text-[9px] font-bold px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20 hover:bg-amber-500/20 transition-all"
-                        >
-                          {marketType === 'KR' ? '1만원 이하 (기본)' : '$10 이하'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setScannerMinPrice('');
-                            setScannerMaxPrice(marketType === 'KR' ? '30000' : '30');
-                          }}
-                          className="text-[9px] font-bold px-2 py-0.5 rounded bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10 transition-all"
-                        >
-                          {marketType === 'KR' ? '3만원 이하' : '$30 이하'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setScannerMinPrice('');
-                            setScannerMaxPrice(marketType === 'KR' ? '50000' : '50');
-                          }}
-                          className="text-[9px] font-bold px-2 py-0.5 rounded bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10 transition-all"
-                        >
-                          {marketType === 'KR' ? '5만원 이하' : '$50 이하'}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setScannerMinPrice('');
-                            setScannerMaxPrice('');
-                          }}
-                          className="text-[9px] font-bold px-2 py-0.5 rounded bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10 transition-all"
-                        >
-                          전체 가격
-                        </button>
-                      </div>
-                    </div>
-
-                    {/* 2. 기본 필수 포착 옵션 */}
-                    <div className="space-y-1.5 pt-1 border-t border-white/5">
-                      <div className="text-[10px] font-bold text-slate-300">📌 기본 포착 핵심 옵션</div>
-                      <div className="grid grid-cols-1 gap-1 text-[10px]">
-                        <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={scannerOptUptrend}
-                            onChange={(e) => setScannerOptUptrend(e.target.checked)}
-                            className="rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0"
-                          />
-                          <span>📈 1년 우상향 추세 지지종목 (안정성 확보)</span>
-                        </label>
-                        <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={scannerOptMomentum}
-                            onChange={(e) => setScannerOptMomentum(e.target.checked)}
-                            className="rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0"
-                          />
-                          <span>⚡ 실시간 상승 기류 (양봉 모멘텀 포착)</span>
-                        </label>
-                        <label className="flex items-center gap-1.5 text-slate-300 cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={scannerOptHighVolume}
-                            onChange={(e) => setScannerOptHighVolume(e.target.checked)}
-                            className="rounded border-slate-700 bg-slate-900 text-amber-500 focus:ring-0"
-                          />
-                          <span>📊 풍부한 거래량 유동성 (체결 안정성)</span>
-                        </label>
-                      </div>
-                    </div>
-
-                    {/* 3. 스캘퍼 최적 추가 세부 옵션 */}
-                    <div className="space-y-2 pt-1 border-t border-white/5">
-                      <div className="text-[10px] font-bold text-amber-300">⚙️ 스캘퍼 최적화 세부 지표</div>
-                      
-                      {/* 변동성 옵션 */}
-                      <div className="space-y-1">
-                        <div className="text-[9px] text-slate-400">장중 변동성 범위:</div>
-                        <div className="grid grid-cols-4 gap-1">
-                          {[
-                            { label: '전체', val: '0' },
-                            { label: '2%+', val: '2' },
-                            { label: '4%+ (추천)', val: '4' },
-                            { label: '6%+', val: '6' }
-                          ].map(item => (
-                            <button
-                              key={item.val}
-                              type="button"
-                              onClick={() => setScannerMinVolatility(item.val)}
-                              className={cn(
-                                "text-[9px] font-bold py-1 px-1 rounded text-center transition-all border",
-                                scannerMinVolatility === item.val
-                                  ? "bg-amber-500 text-black border-amber-400 font-extrabold"
-                                  : "bg-slate-900 text-slate-300 border-white/10 hover:border-amber-500/30"
-                              )}
-                            >
-                              {item.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* RSI 구간 */}
-                      <div className="space-y-1">
-                        <div className="text-[9px] text-slate-400">RSI 구간 지표:</div>
-                        <div className="grid grid-cols-3 gap-1">
-                          {[
-                            { label: '전체 구간', key: 'ALL' },
-                            { label: '40~65 (스캘핑 최적)', key: 'SCALPER_OPTIMAL' },
-                            { label: '30 이하 (과매도)', key: 'OVERSOLD' }
-                          ].map(item => (
-                            <button
-                              key={item.key}
-                              type="button"
-                              onClick={() => setScannerRsiRange(item.key as any)}
-                              className={cn(
-                                "text-[9px] font-bold py-1 px-1 rounded text-center transition-all border",
-                                scannerRsiRange === item.key
-                                  ? "bg-amber-500 text-black border-amber-400 font-extrabold"
-                                  : "bg-slate-900 text-slate-300 border-white/10 hover:border-amber-500/30"
-                              )}
-                            >
-                              {item.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-
-                      {/* 당일 등락률 */}
-                      <div className="space-y-1">
-                        <div className="text-[9px] text-slate-400">당일 상승률 범주:</div>
-                        <div className="grid grid-cols-3 gap-1">
-                          {[
-                            { label: '전체', key: 'ALL' },
-                            { label: '+0.5%~+12% (상승 초중기)', key: 'EARLY_RALLY' },
-                            { label: '+3.0%~+20% (상승 강세)', key: 'MID_RALLY' }
-                          ].map(item => (
-                            <button
-                              key={item.key}
-                              type="button"
-                              onClick={() => setScannerChangeRange(item.key as any)}
-                              className={cn(
-                                "text-[9px] font-bold py-1 px-1 rounded text-center transition-all border",
-                                scannerChangeRange === item.key
-                                  ? "bg-amber-500 text-black border-amber-400 font-extrabold"
-                                  : "bg-slate-900 text-slate-300 border-white/10 hover:border-amber-500/30"
-                              )}
-                            >
-                              {item.label}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 포착 실행 버튼 */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        handleRefreshScalperTop3();
-                        showNotification("[스캘퍼 최적 종목 포착] 지정하신 가격 및 조건에 부합하는 종목을 탐색하였습니다.", "success");
-                      }}
-                      className="w-full py-2 bg-gradient-to-r from-amber-500 to-yellow-500 hover:from-amber-400 hover:to-yellow-400 text-black font-black text-xs rounded-lg shadow-md transition-all active:scale-95 flex items-center justify-center gap-1.5 cursor-pointer"
-                    >
-                      <Zap className="w-3.5 h-3.5 fill-current" />
-                      <span>조건에 맞춰 스캘퍼 최적 종목 포착하기</span>
-                    </button>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-
-              {/* 포착된 스캘퍼 최적 종목 리스트 */}
               <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1 custom-scrollbar">
-                {scalperTop5Stocks.length > 0 ? (
-                  scalperTop5Stocks.map((st, idx) => {
-                    const isSelected = selectedSymbol === st.symbol;
-                    const isUS = /^[A-Z]/.test(st.symbol);
-                    const pricePrefix = isUS ? '$' : '₩';
-                    
-                    return (
-                      <motion.div
-                        key={st.symbol}
-                        whileHover={{ scale: 1.01 }}
-                        onClick={() => {
-                          if (!stocks.some(s => s.symbol === st.symbol)) {
-                            setStocks(prev => [...prev, st]);
-                          }
-                          openOrSwitchScalperTab(st.symbol, st.name);
-                          showNotification(`[스캘퍼 종목 지정] ${st.name}(${st.symbol}) 종목 탭이 활성화되었습니다.`, "info");
-                        }}
-                        className={cn(
-                          "p-2.5 rounded-xl border transition-all cursor-pointer group relative overflow-hidden",
-                          isSelected
-                            ? "bg-amber-500/15 border-amber-500/50 shadow-md shadow-amber-500/5"
-                            : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-amber-500/30"
-                        )}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          {/* Left: Rank Badge + Stock Name & Symbol */}
-                          <div className="flex items-start gap-2 min-w-0 flex-1">
-                            <div className={cn(
-                              "w-5 h-5 rounded-md text-[10px] font-black font-mono flex items-center justify-center shrink-0 shadow-sm border mt-0.5",
-                              idx === 0 ? "bg-gradient-to-br from-amber-400 to-yellow-600 text-black border-amber-300 font-extrabold" :
-                              idx === 1 ? "bg-gradient-to-br from-slate-300 to-slate-500 text-black border-slate-200" :
-                              idx === 2 ? "bg-gradient-to-br from-amber-700 to-amber-900 text-amber-200 border-amber-600" :
-                              "bg-white/10 text-slate-300 border-white/10"
-                            )}>
-                              {idx + 1}
-                            </div>
-
-                            <div className="min-w-0 flex-1">
-                              {/* Full Stock Name */}
-                              <div className="text-xs font-bold text-white whitespace-normal break-words leading-snug flex items-center gap-1.5">
-                                <span>{st.name}</span>
-                                <span className="text-[9px] text-amber-300 font-normal bg-amber-500/10 px-1 py-0.2 rounded border border-amber-500/20 shrink-0">
-                                  + 탭 개설
-                                </span>
-                              </div>
-                              {/* Stock Symbol/Code below */}
-                              <div className="text-[10px] font-mono text-sleek-text-secondary mt-0.5 flex items-center gap-2">
-                                <span>{st.symbol}</span>
-                                <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-1 py-0.1 rounded border border-emerald-500/20 font-sans">
-                                  📈 1년 우상향
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-1.5 mt-1">
-                                <span className="text-[9px] font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
-                                  {st.reasonTag}
-                                </span>
-                              </div>
-                            </div>
+                {scalperTop5Stocks.map((st, idx) => {
+                  const isSelected = selectedSymbol === st.symbol;
+                  const isUS = /^[A-Z]/.test(st.symbol);
+                  const pricePrefix = isUS ? '$' : '₩';
+                  
+                  return (
+                    <motion.div
+                      key={st.symbol}
+                      whileHover={{ scale: 1.01 }}
+                      onClick={() => {
+                        if (!stocks.some(s => s.symbol === st.symbol)) {
+                          setStocks(prev => [...prev, st]);
+                        }
+                        openOrSwitchScalperTab(st.symbol, st.name);
+                        showNotification(`[스캘퍼 종목 지정] ${st.name}(${st.symbol}) 종목 탭이 활성화되었습니다.`, "info");
+                      }}
+                      className={cn(
+                        "p-2.5 rounded-xl border transition-all cursor-pointer group relative overflow-hidden",
+                        isSelected
+                          ? "bg-amber-500/15 border-amber-500/50 shadow-md shadow-amber-500/5"
+                          : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-amber-500/30"
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        {/* Left: Rank Badge + Stock Name & Symbol */}
+                        <div className="flex items-start gap-2 min-w-0 flex-1">
+                          <div className={cn(
+                            "w-5 h-5 rounded-md text-[10px] font-black font-mono flex items-center justify-center shrink-0 shadow-sm border mt-0.5",
+                            idx === 0 ? "bg-gradient-to-br from-amber-400 to-yellow-600 text-black border-amber-300 font-extrabold" :
+                            idx === 1 ? "bg-gradient-to-br from-slate-300 to-slate-500 text-black border-slate-200" :
+                            idx === 2 ? "bg-gradient-to-br from-amber-700 to-amber-900 text-amber-200 border-amber-600" :
+                            "bg-white/10 text-slate-300 border-white/10"
+                          )}>
+                            {idx + 1}
                           </div>
 
-                          {/* Right: Score + Price */}
-                          <div className="text-right shrink-0">
-                            <div className="flex items-center justify-end gap-1">
-                              <span className="text-[10px] text-sleek-text-secondary">포착적합도</span>
-                              <span className="text-sm font-black font-mono text-emerald-400">{st.scalpScore}점</span>
+                          <div className="min-w-0 flex-1">
+                            {/* Full Stock Name (No Truncation) */}
+                            <div className="text-xs font-bold text-white whitespace-normal break-words leading-snug">
+                              {st.name}
                             </div>
-                            <div className="text-xs font-mono font-bold text-slate-200 mt-0.5">
-                              {pricePrefix}{st.price?.toLocaleString()}
-                              <span className={cn("ml-1 text-[11px]", (st.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                                {(st.changePercent || 0) >= 0 ? '+' : ''}{(st.changePercent || 0).toFixed(1)}%
+                            {/* Stock Symbol/Code below */}
+                            <div className="text-[10px] font-mono text-sleek-text-secondary mt-0.5 flex items-center gap-2">
+                              <span>{st.symbol}</span>
+                              <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-1 py-0.1 rounded border border-emerald-500/20 font-sans">
+                                📈 1년 우상향
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1.5 mt-1">
+                              <span className="text-[9px] font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
+                                {st.reasonTag}
                               </span>
                             </div>
                           </div>
                         </div>
-                      </motion.div>
-                    );
-                  })
-                ) : (
-                  <div className="p-4 rounded-xl bg-slate-900/50 border border-white/10 text-center space-y-2">
-                    <div className="text-xs text-amber-300 font-bold">🔍 포착 조건 일치 종목 없음</div>
-                    <p className="text-[10px] text-slate-400 leading-relaxed">
-                      입력하신 가격 범위나 포착 조건에 부합하는 종목이 없습니다. 가격 범위를 넓히거나 필터 설정을 변경해보세요.
-                    </p>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setScannerMinPrice('');
-                        setScannerMaxPrice('');
-                        setScannerMinVolatility('0');
-                        setScannerRsiRange('ALL');
-                        setScannerChangeRange('ALL');
-                      }}
-                      className="px-3 py-1 bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30 rounded-lg text-[10px] font-bold transition-all cursor-pointer"
-                    >
-                      기본 포착 조건으로 변경
-                    </button>
-                  </div>
-                )}
+
+                        {/* Right: Score + Price */}
+                        <div className="text-right shrink-0">
+                          <div className="flex items-center justify-end gap-1">
+                            <span className="text-[10px] text-sleek-text-secondary">적합도</span>
+                            <span className="text-sm font-black font-mono text-emerald-400">{st.scalpScore}점</span>
+                          </div>
+                          <div className="text-xs font-mono font-bold text-slate-200 mt-0.5">
+                            {pricePrefix}{st.price?.toLocaleString()}
+                            <span className={cn("ml-1 text-[11px]", (st.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
+                              {(st.changePercent || 0) >= 0 ? '+' : ''}{(st.changePercent || 0).toFixed(1)}%
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  );
+                })}
               </div>
             </div>
 
@@ -5815,34 +5487,7 @@ export default function App() {
                   </div>
                 </div>
               </div>
-              <div className="text-right flex items-center gap-2 sm:gap-3 text-xs font-mono flex-wrap justify-end">
-                {/* Real-time Range Monitor Bar (Placed left of RSI - No Title Text) */}
-                <div className="flex items-center gap-2 bg-black/40 px-2.5 py-1 rounded-xl border border-sleek-blue/30 shadow-inner">
-                  <span className="text-[10px] font-mono text-sleek-text-secondary whitespace-nowrap">
-                    하한 ₩{gapBuyPrice > 0 ? gapBuyPrice.toLocaleString() : '미설정'}
-                  </span>
-                  
-                  {/* Range Progress Bar */}
-                  <div className="relative w-16 sm:w-24 h-2 bg-white/10 rounded-full overflow-hidden border border-white/5 shrink-0">
-                    <motion.div 
-                      className="absolute top-0 bottom-0 bg-gradient-to-r from-sleek-blue to-emerald-400 rounded-full"
-                      style={{ width: `${Math.min(100, Math.max(0, rangePercentage))}%` }}
-                      transition={{ type: "spring", stiffness: 80 }}
-                    />
-                    <div 
-                      className="absolute w-1 h-2 bg-white shadow-[0_0_6px_white] top-0 transition-all duration-300"
-                      style={{ left: `calc(${Math.min(100, Math.max(0, rangePercentage))}% - 2px)` }}
-                    />
-                  </div>
-
-                  <span className="text-[10px] font-mono text-sleek-text-secondary whitespace-nowrap">
-                    상한 ₩{gapSellPrice > 0 ? gapSellPrice.toLocaleString() : '미설정'}
-                  </span>
-                  <span className="text-[10px] font-black text-white italic font-mono">
-                    ({rangePercentage.toFixed(1)}%)
-                  </span>
-                </div>
-
+              <div className="text-right flex items-center gap-3 text-xs font-mono">
                 <div className="flex items-center gap-2 bg-black/40 px-2.5 py-1 rounded-xl border border-white/5 shadow-inner">
                   <span className="text-[11px] text-sleek-text-secondary uppercase font-black">RSI (14)</span>
                   <span className={cn(
@@ -5862,9 +5507,9 @@ export default function App() {
               </div>
             </div>
 
-            {/* Multi-Tab Bar for Independent Scalper Bot Trading (Max 4 items per row) */}
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 pb-2 pt-1 border-b border-white/10">
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 flex-1 w-full">
+            {/* Multi-Tab Bar for Independent Scalper Bot Trading */}
+            <div className="flex items-center gap-2 overflow-x-auto custom-scrollbar pb-2 pt-1 border-b border-white/10">
+              <div className="flex items-center gap-1.5 min-w-0">
                 {scalperTabs.map(tab => {
                   const isSelected = tab.id === activeTabId;
                   const tabStock = stocks.find(s => s.symbol === tab.symbol) || 
@@ -5877,46 +5522,42 @@ export default function App() {
                       key={tab.id}
                       onClick={() => handleSwitchTab(tab.id)}
                       className={cn(
-                        "px-2.5 py-1.5 rounded-xl border flex items-center justify-between gap-1.5 cursor-pointer transition-all text-xs font-mono select-none group min-w-0",
+                        "px-3 py-1.5 rounded-xl border flex items-center gap-2 cursor-pointer transition-all shrink-0 text-xs font-mono select-none group",
                         isSelected
                           ? "bg-sleek-blue/20 border-sleek-blue text-white shadow-md font-bold"
                           : "bg-black/40 border-white/5 hover:bg-white/5 text-gray-400 hover:text-white"
                       )}
                     >
-                      <div className="flex items-center gap-1.5 min-w-0 overflow-hidden">
-                        {/* Running Indicator Dot */}
-                        <span className={cn(
-                          "w-2 h-2 rounded-full shrink-0",
-                          tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]" : "bg-gray-500"
-                        )} />
+                      {/* Running Indicator Dot */}
+                      <span className={cn(
+                        "w-2 h-2 rounded-full shrink-0",
+                        tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]" : "bg-gray-500"
+                      )} />
 
-                        <span className="font-bold text-white text-xs truncate">{tabName}</span>
-                      </div>
+                      <span className="font-bold text-white text-xs">{tabName}</span>
 
-                      <div className="flex items-center gap-1 shrink-0">
-                        {tabStock && (
-                          <span className={cn("text-[10px] font-mono", tabStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
-                            ₩{tabStock.price.toLocaleString()}
-                          </span>
-                        )}
+                      {tabStock && (
+                        <span className={cn("text-[10px] font-mono", tabStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
+                          ₩{tabStock.price.toLocaleString()}
+                        </span>
+                      )}
 
-                        {tab.isBotActive && (
-                          <span className="text-[8px] font-black bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/30">
-                            RUN
-                          </span>
-                        )}
+                      {tab.isBotActive && (
+                        <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-1.5 py-0.2 rounded-full border border-emerald-500/30">
+                          RUNNING
+                        </span>
+                      )}
 
-                        {scalperTabs.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={(e) => closeScalperTab(tab.id, e)}
-                            className="opacity-60 hover:opacity-100 hover:bg-rose-500/30 text-gray-400 hover:text-rose-300 rounded-full p-0.5 transition-all ml-0.5"
-                            title="탭 닫기"
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        )}
-                      </div>
+                      {scalperTabs.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={(e) => closeScalperTab(tab.id, e)}
+                          className="opacity-60 hover:opacity-100 hover:bg-rose-500/30 text-gray-400 hover:text-rose-300 rounded-full p-0.5 transition-all ml-1"
+                          title="탭 닫기"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -5930,7 +5571,7 @@ export default function App() {
                     openOrSwitchScalperTab(available.symbol, available.name);
                   }
                 }}
-                className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white text-xs font-bold font-mono flex items-center gap-1 transition-all shrink-0 self-end sm:self-center"
+                className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 text-gray-300 hover:text-white text-xs font-bold font-mono flex items-center gap-1 transition-all shrink-0 ml-auto"
                 title="새 스캘퍼 종목 탭 추가"
               >
                 <Plus className="w-3.5 h-3.5 text-sleek-blue" />
@@ -6295,10 +5936,47 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* 3. Right Stack: Holdings Status (보유 주식 현황) (xl:col-span-3) */}
+                    {/* 3. Right Stack: Interval Monitor (Top) & Holdings Status (Bottom) (xl:col-span-3) */}
                     <div className="xl:col-span-3 flex flex-col gap-2.5 min-w-0">
-                      {/* Window: 보유 주식 현황 (Moved to Range Monitor location) */}
-                      <div className="bg-black/40 border border-white/10 rounded-2xl p-3 flex flex-col justify-between space-y-2 flex-1 h-full min-h-[220px]">
+                      {/* Top Window: 실시간 구간 모니터 */}
+                      <div className="bg-black/40 border border-sleek-blue/30 rounded-2xl p-3 flex flex-col justify-between space-y-2 flex-1">
+                        <div className="flex items-center justify-between pb-1 border-b border-white/5">
+                          <h4 className="text-xs font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1.5">
+                            <TrendingUp className="w-3.5 h-3.5 animate-bounce" /> 실시간 구간 모니터
+                          </h4>
+                          <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                            MONITORING
+                          </span>
+                        </div>
+
+                        <div className="space-y-1.5 font-mono text-xs">
+                          <div className="flex justify-between text-[11px] text-sleek-text-secondary">
+                            <span>하한 ₩{gapBuyPrice > 0 ? gapBuyPrice.toLocaleString() : '미설정'}</span>
+                            <span>상한 ₩{gapSellPrice > 0 ? gapSellPrice.toLocaleString() : '미설정'}</span>
+                          </div>
+
+                          {/* Range Progress Bar */}
+                          <div className="relative w-full h-2.5 bg-white/5 rounded-full overflow-hidden border border-white/5">
+                            <motion.div 
+                              className="absolute top-0 bottom-0 bg-gradient-to-r from-sleek-blue to-emerald-400 rounded-full"
+                              style={{ width: `${rangePercentage}%` }}
+                              transition={{ type: "spring", stiffness: 80 }}
+                            />
+                            <div 
+                              className="absolute w-1 h-2.5 bg-white shadow-[0_0_8px_white] top-0 transition-all duration-300"
+                              style={{ left: `calc(${rangePercentage}% - 2px)` }}
+                            />
+                          </div>
+
+                          <div className="flex justify-between items-center pt-0.5">
+                            <span className="text-[10px] text-sleek-text-secondary uppercase">현재가 위치</span>
+                            <span className="text-xs font-black text-white italic font-mono">{rangePercentage.toFixed(1)}%</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Bottom Window: 보유 주식 현황 */}
+                      <div className="bg-black/40 border border-white/10 rounded-2xl p-3 flex flex-col justify-between space-y-2 flex-1">
                         <div className="flex items-center justify-between pb-1 border-b border-white/5">
                           <div className="flex items-center gap-1.5">
                             <Briefcase className="w-3.5 h-3.5 text-amber-400" />
@@ -6309,10 +5987,9 @@ export default function App() {
                           </span>
                         </div>
 
-                        <div className="space-y-1.5 max-h-[240px] overflow-y-auto custom-scrollbar pr-0.5 flex-1">
+                        <div className="space-y-1 max-h-[140px] overflow-y-auto custom-scrollbar pr-0.5">
                           {Object.entries(holdings).filter(([_, qty]) => Number(qty) > 0).length === 0 ? (
-                            <div className="bg-white/5 border border-white/5 rounded-xl p-4 text-center flex flex-col items-center justify-center h-full min-h-[140px]">
-                              <Briefcase className="w-6 h-6 text-slate-600 mb-1" />
+                            <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center flex items-center justify-center">
                               <p className="text-[11px] text-sleek-text-secondary">보유 중인 주식이 없습니다.</p>
                             </div>
                           ) : (
