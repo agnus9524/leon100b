@@ -569,7 +569,7 @@ class KISService {
     if (!this.config) throw new Error("KIS Config not initialized");
 
     const token = await this.getAccessToken();
-    const endpoint = '/uapi/domestic-stock/v1/trading/inquire-ccnl';
+    const endpoint = '/uapi/domestic-stock/v1/trading/inquire-daily-ccnl';
     
     const headers = {
       'content-type': 'application/json',
@@ -742,7 +742,7 @@ class KISService {
   }
 
   private lastRequestTime = 0;
-  private minRequestInterval = 300; // Minimum 300ms interval between API calls to prevent Rate Limit (초당 거래건수 초과) and 500 errors
+  private minRequestInterval = 500; // Minimum 500ms interval between API calls to prevent Rate Limit (초당 거래건수 초과) and 500 errors
 
   public async getDomesticPrice(symbol: string, marketCode: string = 'J') {
     if (!this.config) throw new Error("KIS Config not initialized");

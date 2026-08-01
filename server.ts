@@ -31,6 +31,7 @@ async function fetchKrxStocks() {
 
     const html = iconv.decode(Buffer.from(response.data), 'euc-kr');
     const trs = html.match(/<tr>[\s\S]*?<\/tr>/gi) || [];
+    const seenSymbols = new Set<string>();
     const stocks: KrxStock[] = [];
 
     for (let i = 1; i < trs.length; i++) {
@@ -44,8 +45,9 @@ async function fetchKrxStocks() {
         
         const finalCode = code1.length === 6 ? code1 : (code2.length === 6 ? code2 : '');
         
-        if (finalCode && name) {
+        if (finalCode && name && !seenSymbols.has(finalCode)) {
           stocks.push({ symbol: finalCode, name, market: 'KR' });
+          seenSymbols.add(finalCode);
         }
       }
     }

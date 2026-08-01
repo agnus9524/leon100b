@@ -3487,22 +3487,22 @@ export default function App() {
               if (balance < scaledCost) {
                 setScalperMessage(`[매수 차단] 예수금 부족 (단계: ${currentStep}, 필요: ${formatCurrency(scaledCost)})`);
               } else {
-                setScalperMessage(`[슬롯#${currentStep} 가중진입] ₩${targetBuyPrice.toLocaleString()} (${scaledQuantity}주)...`);
+                setScalperMessage(`[슬롯#${currentStep} 가중진입] ${formatCurrency(targetBuyPrice)} (${formatQuantity(scaledQuantity)})...`);
                 
                 const lockEntry = { symbol: selectedStock.symbol, price: targetBuyPrice };
                 buyingLockPricesRef.current.push(lockEntry);
 
                 try {
                   const currentSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                  const executedQty = await executeTrade('BUY', selectedStock, scaledQuantity, `Scalper Slot #${currentStep} (Scaled): ₩${targetBuyPrice.toLocaleString()} 진입`, targetBuyPrice, undefined, currentSlotId);
+                  const executedQty = await executeTrade('BUY', selectedStock, scaledQuantity, `Scalper Slot #${currentStep} (Scaled): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId);
                   
                   if (executedQty > 0) {
-                    setScalperMessage(`[매수 완료] 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${executedQty}주)`);
-                    setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} ${executedQty}주 가중 진입 완료`);
+                    setScalperMessage(`[매수 완료] 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} (${formatQuantity(executedQty)})`);
+                    setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} ${formatQuantity(executedQty)} 가중 진입 완료`);
                     setHighWaterMark(prev => ({ ...prev, [targetBuyPrice]: targetBuyPrice }));
                     setLastTradeType('BUY');
                     setGapTradeCount(prev => prev + 1);
-                    showNotification(`${selectedStock.name} 슬롯#${currentStep} ₩${targetBuyPrice.toLocaleString()} (${executedQty}주) 매수 완료`, "success");
+                    showNotification(`${selectedStock.name} 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} (${formatQuantity(executedQty)}) 매수 완료`, "success");
                     playScalpingSound('BUY');
                   }
                 } finally {
@@ -3518,7 +3518,7 @@ export default function App() {
         }
       } else {
         if (gapInventoryRef.current.length === 0) {
-          setScalperMessage(`범위 외 관망 (₩${minPrice.toLocaleString()}~₩${maxPrice.toLocaleString()})`);
+          setScalperMessage(`범위 외 관망 (${formatCurrency(minPrice)}~${formatCurrency(maxPrice)})`);
         }
       }
 
@@ -3536,7 +3536,7 @@ export default function App() {
       if (enableCombinedAvgProfitExit && totalHeldQty > 0 && weightedAvgPrice > 0) {
         const overallProfitRatio = (currentPrice - weightedAvgPrice) / weightedAvgPrice;
         if (overallProfitRatio >= (scalpingTargetProfit / 100) && overallProfitRatio > 0) {
-          setScalperMessage(`[통합 평단가 일괄 익절] ₩${Math.round(weightedAvgPrice).toLocaleString()} -> ₩${currentPrice.toLocaleString()} (+${(overallProfitRatio * 100).toFixed(2)}%)`);
+          setScalperMessage(`[통합 평단가 일괄 익절] ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (+${(overallProfitRatio * 100).toFixed(2)}%)`);
           await executeTrade('SELL', selectedStock, totalHeldQty, `통합 평단가 일괄 익절 (+${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice, weightedAvgPrice);
           
           gapInventoryRef.current = [];
@@ -3595,7 +3595,7 @@ export default function App() {
               setHoldings(newHoldings);
               if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
 
-              addLog(selectedStock.symbol, '매도', currentPrice, buyQty, `[목표수익 즉시 체결] ₩${buyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} (+${(profitRatio * 100).toFixed(2)}%)`);
+              addLog(selectedStock.symbol, '매도', currentPrice, buyQty, `[목표수익 즉시 체결] ${formatCurrency(buyPrice)} -> ${formatCurrency(currentPrice)} (+${(profitRatio * 100).toFixed(2)}%)`);
               playScalpingSound('SELL');
             }
             continue;
@@ -3634,8 +3634,8 @@ export default function App() {
               else if (isProfitTarget) sellReason = `목표 수익 달성 (+${(profitRatio * 100).toFixed(2)}%)`;
               else sellReason = "리스크 관리 손절";
 
-              setScalperMessage(`[목표수익 즉시 매도] ₩${buyPrice.toLocaleString()} -> ₩${currentPrice.toLocaleString()} (${sellReason})`);
-              await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ₩${buyPrice.toLocaleString()}, 수량: ${sellQty}): ${sellReason}`, currentPrice, buyPrice, slotId);
+              setScalperMessage(`[목표수익 즉시 매도] ${formatCurrency(buyPrice)} -> ${formatCurrency(currentPrice)} (${sellReason})`);
+              await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ${formatCurrency(buyPrice)}, 수량: ${formatQuantity(sellQty)}): ${sellReason}`, currentPrice, buyPrice, slotId);
               
               setHighWaterMark(prev => {
                 const next = { ...prev };
@@ -3859,7 +3859,7 @@ export default function App() {
 
     if (action === 'BUY') {
       if (balance < cost) {
-        setBotStatus(`[매수 진입 차단] 예수금 부족 (필요: ₩${Math.round(cost).toLocaleString()} / 가능: ₩${Math.round(balance).toLocaleString()})`);
+        setBotStatus(`[매수 진입 차단] 예수금 부족 (필요: ${formatCurrency(cost)} / 가능: ${formatCurrency(balance)})`);
         setScalperMessage(`[매수 차단] 예수금 부족으로 진입 취소`);
         addLog(stock.symbol, '매수', tradePrice, finalAmount, `[진입차단] 예수금(매수 가능 금액) 초과 (필요: ₩${Math.round(cost).toLocaleString()}, 예수금: ₩${Math.round(balance).toLocaleString()})`);
         showNotification(`매수 진입 차단: 매수 가능 금액(예수금)을 초과하여 진입하지 않습니다.`, "error");
@@ -4954,7 +4954,37 @@ export default function App() {
                 setMarketType('KR');
                 setDisplayCurrency('KRW');
                 setStocks(stocksCache.KR);
-                setSelectedSymbol(lastSelectedKR);
+                
+                // Synchronize tab with market switch
+                const sym = lastSelectedKR;
+                setSelectedSymbol(sym);
+                
+                const stock = stocksCache.KR.find(s => s.symbol === sym) || stocksCache.KR[0];
+                if (stock) {
+                  const price = stock.price || 1000;
+                  const tickSize = price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5;
+                  
+                  const newTabs: ScalperTab[] = [{
+                    id: stock.symbol,
+                    symbol: stock.symbol,
+                    name: stock.name || stock.symbol,
+                    isBotActive: false,
+                    gapBuyPrice: Math.max(10, price - tickSize * 2),
+                    gapSellPrice: price + tickSize * 2,
+                    tradeQuantity: 1,
+                    maxSlots: 3,
+                    gapInventory: [],
+                    gapTradingProfit: 0,
+                    gapTradeCount: 0,
+                    lastTradeType: null,
+                    scalperMessage: "대기 중...",
+                    entryPriceMode: 'BID2',
+                    autoCancelThreshold: 0.2,
+                    tradeLogs: []
+                  }];
+                  setScalperTabs(newTabs);
+                  setActiveTabId(stock.symbol);
+                }
               }}
               className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all",
@@ -4970,7 +5000,37 @@ export default function App() {
                 setMarketType('US');
                 setDisplayCurrency('USD');
                 setStocks(stocksCache.US);
-                setSelectedSymbol(lastSelectedUS);
+                
+                // Synchronize tab with market switch
+                const sym = lastSelectedUS;
+                setSelectedSymbol(sym);
+                
+                const stock = stocksCache.US.find(s => s.symbol === sym) || stocksCache.US[0];
+                if (stock) {
+                  const price = stock.price || 1;
+                  const tickSize = 0.01;
+                  
+                  const newTabs: ScalperTab[] = [{
+                    id: stock.symbol,
+                    symbol: stock.symbol,
+                    name: stock.name || stock.symbol,
+                    isBotActive: false,
+                    gapBuyPrice: Math.max(0.01, price - tickSize * 2),
+                    gapSellPrice: price + tickSize * 2,
+                    tradeQuantity: 1,
+                    maxSlots: 3,
+                    gapInventory: [],
+                    gapTradingProfit: 0,
+                    gapTradeCount: 0,
+                    lastTradeType: null,
+                    scalperMessage: "대기 중...",
+                    entryPriceMode: 'BID2',
+                    autoCancelThreshold: 0.2,
+                    tradeLogs: []
+                  }];
+                  setScalperTabs(newTabs);
+                  setActiveTabId(stock.symbol);
+                }
               }}
               className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all",
@@ -5095,7 +5155,7 @@ export default function App() {
                     >
                       {searchSuggestions.map((s, idx) => (
                         <button 
-                          key={s.symbol}
+                          key={`${s.symbol}-${idx}`}
                           onClick={() => handleAddStock(s.symbol, undefined, s.name)}
                           className="w-full flex items-center justify-between p-3 hover:bg-white/5 transition-colors border-b border-white/5 last:border-0 text-left"
                         >
@@ -5188,7 +5248,7 @@ export default function App() {
                   
                   return (
                     <motion.div
-                      key={st.symbol}
+                      key={`${st.symbol}-${idx}`}
                       whileHover={{ scale: 1.01 }}
                       onClick={() => {
                         if (!stocks.some(s => s.symbol === st.symbol)) {
@@ -5652,7 +5712,7 @@ export default function App() {
                 <div className="flex items-center gap-2 bg-black/40 px-2.5 py-1 rounded-xl border border-white/5 shadow-inner">
                   <span className="text-[11px] text-sleek-text-secondary uppercase font-black">감시 구간 폭</span>
                   <span className="font-black text-sleek-blue italic text-xs font-mono">
-                    ₩{gapBuyPrice && gapSellPrice ? (gapSellPrice - gapBuyPrice).toLocaleString() : '0'}
+                    {formatCurrency(gapBuyPrice && gapSellPrice ? (gapSellPrice - gapBuyPrice) : 0)}
                   </span>
                 </div>
               </div>
@@ -5691,7 +5751,7 @@ export default function App() {
                     <div className="flex items-center gap-1 shrink-0 ml-auto">
                       {tabStock && (
                         <span className={cn("text-[10px] font-mono hidden md:inline-block", tabStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
-                          ₩{tabStock.price.toLocaleString()}
+                          {formatCurrency(tabStock.price)}
                         </span>
                       )}
 
@@ -6148,7 +6208,7 @@ export default function App() {
                           ) : (
                             Object.entries(holdings)
                               .filter(([_, qty]) => Number(qty) > 0)
-                              .map(([sym, rawQty]) => {
+                              .map(([sym, rawQty], idx) => {
                                 const qty = Number(rawQty);
                                 const st = stocks.find(s => s.symbol === sym) || 
                                            INITIAL_STOCKS_KR.find(s => s.symbol === sym) || 
@@ -6178,7 +6238,7 @@ export default function App() {
 
                                 return (
                                   <div 
-                                    key={sym}
+                                    key={`${sym}-${idx}`}
                                     onClick={() => setSelectedSymbol(sym)}
                                     className={cn(
                                       "p-1.5 rounded-xl border flex items-center justify-between text-[11px] font-mono cursor-pointer transition-all group",
@@ -6194,7 +6254,7 @@ export default function App() {
                                           {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(1)}%
                                         </span>
                                       </div>
-                                      <span className="text-amber-300 text-[9.5px]">평단 ₩{Math.floor(avgPrice).toLocaleString()}</span>
+                                      <span className="text-amber-300 text-[9.5px]">평단 {formatCurrency(avgPrice)}</span>
                                     </div>
 
                                     <div className="flex items-center gap-1.5">
@@ -6250,7 +6310,7 @@ export default function App() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
               <div className="bg-white/5 p-2 rounded-xl border border-white/5">
                 <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">주문가능자산 (44431721-01)</span>
-                <span className="text-sm font-black text-white italic mt-0.5 block truncate">₩{Math.floor(balance).toLocaleString()}</span>
+                <span className="text-sm font-black text-white italic mt-0.5 block truncate">{formatCurrency(balance)}</span>
               </div>
               
               <div 
@@ -6536,7 +6596,7 @@ export default function App() {
                                   <div className="grid grid-cols-2 gap-1 bg-black/30 p-1.5 rounded text-[10px]">
                                     <div>
                                       <span className="text-gray-400 block">{isBuy ? "진입가" : "체결가"}</span>
-                                      <span className="font-bold text-white">₩{log.price.toLocaleString()}</span>
+                                      <span className="font-bold text-white">{formatCurrency(log.price)}</span>
                                     </div>
                                     <div className="text-right">
                                       <span className="text-gray-400 block">{isBuy ? `목표가 (+${scalpingTargetProfit}%)` : "사유"}</span>
@@ -6629,8 +6689,8 @@ export default function App() {
 
       <footer className="h-8 bg-black border-t border-sleek-border/30 flex items-center overflow-hidden">
         <div className="flex px-4 animate-[marquee_60s_linear_infinite] gap-12 text-[10px] font-mono">
-          {stocks.map(s => (
-            <div key={s.symbol} className="flex gap-2">
+          {stocks.map((s, idx) => (
+            <div key={`${s.symbol}-${idx}`} className="flex gap-2">
               <span className="text-white font-bold">{s.name} ({s.symbol})</span>
               <span className="text-gray-500">₩{s.price?.toLocaleString()}</span>
               <span className={s.change >= 0 ? "text-up" : "text-down"}>{s.changePercent}%</span>
