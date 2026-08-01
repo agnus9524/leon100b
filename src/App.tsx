@@ -1165,7 +1165,7 @@ export default function App() {
 
     const candidates = Array.from(candidateMap.values()).filter(stock => {
       const name = (stock.name || INITIAL_STOCKS_KR.find(s => s.symbol === stock.symbol)?.name || stock.symbol).trim().toLowerCase();
-      return !name.startsWith('kodex');
+      return !name.startsWith('kodex') && stock.price > 0;
     });
     const maxPrice = marketType === 'KR' ? 10000 : 10.0;
 
@@ -1870,6 +1870,9 @@ export default function App() {
           setSearchSuggestions(prev => {
             const merged = [...prev];
             response.data.forEach((item: StockSuggestion) => {
+              // Filter out stocks with 0 price if price is provided
+              if (item.price !== undefined && item.price <= 0) return;
+              
               if (!merged.some(m => m.symbol === item.symbol)) {
                 merged.push(item);
               }
@@ -5792,6 +5795,52 @@ export default function App() {
                     </>
                   )}
                 </button>
+              </div>
+            </div>
+
+            {/* Engine Forecast Summary Mini Card */}
+            <div className="mt-4 bg-sleek-blue/10 border border-sleek-blue/20 rounded-3xl p-4 flex flex-col sm:flex-row items-center justify-between overflow-hidden relative shadow-lg">
+              <div className="absolute right-0 top-0 w-48 h-full bg-gradient-to-l from-sleek-blue/10 to-transparent pointer-events-none" />
+              <div className="flex items-center gap-5 relative z-10">
+                <div className="bg-sleek-blue/20 p-3 rounded-2xl shadow-inner border border-sleek-blue/30">
+                  <LineChart className="w-6 h-6 text-sleek-blue" />
+                </div>
+                <div className="flex flex-col">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-[10px] font-black text-sleek-blue uppercase tracking-[0.2em]">Engine Projection</span>
+                    <div className="h-2.5 w-px bg-sleek-blue/20" />
+                    <span className="text-[10px] font-bold text-sleek-blue/60 uppercase">{marketType === 'KR' ? 'KOSPI Context' : 'US Market Context'}</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
+                    <div className="flex flex-col">
+                      <span className="text-[9px] text-sleek-text-secondary font-black uppercase tracking-wider">Trading Range</span>
+                      <span className="text-lg font-black text-white font-mono leading-none">
+                        {gapBuyPrice > 0 ? (((gapSellPrice - gapBuyPrice) / gapBuyPrice) * 100).toFixed(1) : '0.0'}% 
+                        <span className="text-xs text-sleek-text-secondary ml-1.5 font-bold">({formatCurrency(Math.max(0, gapSellPrice - gapBuyPrice))})</span>
+                      </span>
+                    </div>
+                    <div className="w-px h-8 bg-white/5 hidden sm:block" />
+                    <div className="flex flex-col">
+                      <span className="text-[9px] text-sleek-text-secondary font-black uppercase tracking-wider">Expected Yield</span>
+                      <div className="flex items-baseline gap-1.5 leading-none">
+                        <span className="text-lg font-black text-emerald-400 font-mono">
+                          +{scalpingTargetProfit}%
+                        </span>
+                        <span className="text-[10px] text-sleek-text-secondary font-bold uppercase">per cycle</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div className="flex items-center gap-3 mt-4 sm:mt-0 relative z-10 bg-black/20 p-2 rounded-2xl border border-white/5 shadow-inner">
+                <div className="flex flex-col items-center px-3 border-r border-white/5">
+                  <span className="text-[8px] text-sleek-text-secondary font-black uppercase mb-0.5">Stop Loss</span>
+                  <span className="text-xs font-black text-rose-400 font-mono">{scalpingStopLoss}%</span>
+                </div>
+                <div className="flex flex-col items-center px-3">
+                  <span className="text-[8px] text-sleek-text-secondary font-black uppercase mb-0.5">Drop Limit</span>
+                  <span className="text-xs font-black text-amber-400 font-mono">-{autoCancelThreshold}%</span>
+                </div>
               </div>
             </div>
           </div>
