@@ -480,6 +480,34 @@ class KISService {
     return res.data;
   }
 
+  public async getOverseasBuyableAmount(symbol: string, price: string = '0', ovrsExchCd: string = 'NASD') {
+    if (!this.config) throw new Error("KIS Config not initialized");
+    const token = await this.getAccessToken();
+    const endpoint = '/uapi/overseas-stock/v1/trading/inquire-psbl-order';
+    
+    const headers = {
+      'content-type': 'application/json',
+      'authorization': `Bearer ${token}`,
+      'appkey': this.config.appKey,
+      'appsecret': this.config.appSecret,
+      'tr-id': 'TTTS3007R',
+      'custtype': 'P',
+    };
+
+    const params = {
+      CANO: this.config.accountNo,
+      ACNT_PRDT_CD: this.config.accountCode,
+      OVRS_EXCH_CD: ovrsExchCd,
+      PDNO: symbol,
+      ORD_UNPR: price,
+      ITEM_DVSN: '01',
+      CANO_PWD: this.config.accountPw || ''
+    };
+
+    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+    return res.data;
+  }
+
   public async getDomesticSellableQuantity(symbol: string) {
     if (!this.config) throw new Error("KIS Config not initialized");
 

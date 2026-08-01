@@ -486,6 +486,13 @@ export default function App() {
   const [marketType, setMarketType] = useState<'KR' | 'US'>(() => {
     return (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
   });
+
+  const [lastSelectedKR, setLastSelectedKR] = useState(() => {
+    return localStorage.getItem('sleek_last_symbol_KR') || '073240';
+  });
+  const [lastSelectedUS, setLastSelectedUS] = useState(() => {
+    return localStorage.getItem('sleek_last_symbol_US') || 'NVDA';
+  });
   const [displayCurrency, setDisplayCurrency] = useState<'KRW' | 'USD'>(() => {
     const lastMarket = localStorage.getItem('sleek_last_market');
     return lastMarket === 'US' ? 'USD' : 'KRW';
@@ -507,7 +514,11 @@ export default function App() {
     return lastMarket === 'US' ? INITIAL_STOCKS : INITIAL_STOCKS_KR;
   });
   const [selectedSymbol, setSelectedSymbol] = useState(() => {
-    return localStorage.getItem('sleek_last_symbol') || '073240';
+    const lastMarket = localStorage.getItem('sleek_last_market');
+    if (lastMarket === 'US') {
+      return localStorage.getItem('sleek_last_symbol_US') || 'NVDA';
+    }
+    return localStorage.getItem('sleek_last_symbol_KR') || '073240';
   });
   const [balance, setBalance] = useState(0); // User's money (will be synced via KIS)
   const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
@@ -530,7 +541,14 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('sleek_last_symbol', selectedSymbol);
-  }, [selectedSymbol]);
+    if (marketType === 'KR') {
+      setLastSelectedKR(selectedSymbol);
+      localStorage.setItem('sleek_last_symbol_KR', selectedSymbol);
+    } else {
+      setLastSelectedUS(selectedSymbol);
+      localStorage.setItem('sleek_last_symbol_US', selectedSymbol);
+    }
+  }, [selectedSymbol, marketType]);
   const [sellableHoldings, setSellableHoldings] = useState<Record<string, number>>({});
   const [isBotActive, setIsBotActive] = useState(false);
   const [tradeLogs, setTradeLogs] = useState<TradeLog[]>([]);
@@ -4936,9 +4954,7 @@ export default function App() {
                 setMarketType('KR');
                 setDisplayCurrency('KRW');
                 setStocks(stocksCache.KR);
-                if (stocksCache.KR.length > 0) {
-                  setSelectedSymbol(stocksCache.KR[0].symbol);
-                }
+                setSelectedSymbol(lastSelectedKR);
               }}
               className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all",
@@ -4954,9 +4970,7 @@ export default function App() {
                 setMarketType('US');
                 setDisplayCurrency('USD');
                 setStocks(stocksCache.US);
-                if (stocksCache.US.length > 0) {
-                  setSelectedSymbol(stocksCache.US[0].symbol);
-                }
+                setSelectedSymbol(lastSelectedUS);
               }}
               className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all",
