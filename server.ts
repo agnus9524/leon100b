@@ -404,7 +404,8 @@ async function startServer() {
                 return {
                   symbol: sym,
                   name: q.longname || q.shortname || sym,
-                  market: 'US' as const
+                  market: 'US' as const,
+                  price: q.regularMarketPrice
                 };
               });
 

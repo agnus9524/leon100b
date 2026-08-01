@@ -2006,45 +2006,61 @@ export default function App() {
       return;
     }
     const isKR = /^\d{6}$/.test(selectedStock.symbol);
-    if (!isKR) {
-      setKisBuyableQty(null);
-      return;
-    }
-
     const currentBalance = overrideBalance !== undefined ? overrideBalance : balance;
 
     try {
-      const ordDvsn = kisConfig.domesticOrderType || '00';
-      const tradePrice = selectedStock.price;
-      const queryPrice = ordDvsn === '00' ? tradePrice.toString() : '0';
+      if (isKR) {
+        const ordDvsn = kisConfig.domesticOrderType || '00';
+        const tradePrice = selectedStock.price;
+        const queryPrice = ordDvsn === '00' ? tradePrice.toString() : '0';
 
-      const res = await kisService.getDomesticBuyableAmount(
-        selectedStock.symbol,
-        queryPrice,
-        ordDvsn
-      );
+        const res = await kisService.getDomesticBuyableAmount(
+          selectedStock.symbol,
+          queryPrice,
+          ordDvsn
+        );
 
-      if (res && res.rt_cd === '0' && res.output) {
-        const nrcyStr = res.output.nrcy_buy_qty || res.output.nrcy_ord_psbl_qty;
-        const ordPsblStr = res.output.ord_psbl_qty || res.output.psbl_qty;
-        const maxQtyStr = res.output.max_ord_qty || res.output.tot_ord_psbl_qty || res.output.max_buy_qty;
+        if (res && res.rt_cd === '0' && res.output) {
+          const nrcyStr = res.output.nrcy_buy_qty || res.output.nrcy_ord_psbl_qty;
+          const ordPsblStr = res.output.ord_psbl_qty || res.output.psbl_qty;
+          const maxQtyStr = res.output.max_ord_qty || res.output.tot_ord_psbl_qty || res.output.max_buy_qty;
 
-        let qty = 0;
-        if (nrcyStr !== undefined && nrcyStr !== null && nrcyStr !== '') {
-          qty = parseInt(nrcyStr, 10);
-        } else if (ordPsblStr !== undefined && ordPsblStr !== null && ordPsblStr !== '') {
-          qty = parseInt(ordPsblStr, 10);
-        } else if (maxQtyStr !== undefined && maxQtyStr !== null && maxQtyStr !== '') {
-          qty = parseInt(maxQtyStr, 10);
+          let qty = 0;
+          if (nrcyStr !== undefined && nrcyStr !== null && nrcyStr !== '') {
+            qty = parseInt(nrcyStr, 10);
+          } else if (ordPsblStr !== undefined && ordPsblStr !== null && ordPsblStr !== '') {
+            qty = parseInt(ordPsblStr, 10);
+          } else if (maxQtyStr !== undefined && maxQtyStr !== null && maxQtyStr !== '') {
+            qty = parseInt(maxQtyStr, 10);
+          }
+
+          if (isNaN(qty) || qty < 0) qty = 0;
+          setKisBuyableQty(qty);
+          return;
         }
+      } else {
+        // Overseas (US)
+        const res = await kisService.getOverseasBuyableAmount(
+          selectedStock.symbol,
+          selectedStock.price.toString()
+        );
 
-        if (isNaN(qty) || qty < 0) qty = 0;
-        setKisBuyableQty(qty);
-        return;
+        if (res && res.rt_cd === '0' && res.output) {
+          const buyableStr = res.output.nrcy_buy_qty || res.output.ord_psbl_qty || res.output.max_buy_qty;
+          let qty = 0;
+          if (buyableStr !== undefined && buyableStr !== null && buyableStr !== '') {
+            qty = parseInt(buyableStr, 10);
+          }
+          
+          if (isNaN(qty) || qty < 0) qty = 0;
+          setKisBuyableQty(qty);
+          return;
+        }
       }
 
       if (currentBalance > 0 && selectedStock.price > 0) {
-        setKisBuyableQty(Math.max(0, Math.floor(currentBalance / selectedStock.price)));
+        const priceInBalanceCurrency = isKR ? selectedStock.price : selectedStock.price * exchangeRate;
+        setKisBuyableQty(Math.max(0, Math.floor(currentBalance / priceInBalanceCurrency)));
       } else {
         setKisBuyableQty(0);
       }
@@ -2052,7 +2068,8 @@ export default function App() {
       console.warn("Failed to update KIS buyable quantity:", err);
       // API 실패 시에도 실제 계좌 현금을 기준으로 계산하여 폴백
       if (currentBalance > 0 && selectedStock.price > 0) {
-        const fallbackQty = Math.floor(currentBalance / selectedStock.price);
+        const priceInBalanceCurrency = isKR ? selectedStock.price : selectedStock.price * exchangeRate;
+        const fallbackQty = Math.floor(currentBalance / priceInBalanceCurrency);
         setKisBuyableQty(fallbackQty);
       } else {
         setKisBuyableQty(null);
@@ -5236,8 +5253,15 @@ export default function App() {
                           onClick={() => handleAddStock(s.symbol, undefined, s.name)}
                           className="w-full flex items-center justify-between p-3 hover:bg-white/5 transition-colors border-b border-white/5 last:border-0 text-left"
                         >
-                          <div>
-                            <div className="text-xs font-bold text-white">{s.name}</div>
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-2">
+                              <div className="text-xs font-bold text-white">{s.name}</div>
+                              {s.price !== undefined && (
+                                <span className="text-[10px] text-sleek-blue font-black font-mono">
+                                  {s.market === 'US' ? `$${s.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `₩${Math.round(s.price).toLocaleString()}`}
+                                </span>
+                              )}
+                            </div>
                             <div className="text-[10px] text-sleek-text-secondary font-mono">{s.symbol}</div>
                           </div>
                           <ChevronRight className="w-3 h-3 opacity-30" />
@@ -5273,7 +5297,7 @@ export default function App() {
                     <span className="text-sleek-blue font-bold">
                       {kisConfig.isConnected && kisConfig.isRealOrderEnabled && kisBuyableQty !== null 
                         ? `${formatQuantity(kisBuyableQty)} (실계좌)` 
-                        : `${formatQuantity(Math.floor(balance / (selectedStock.price || 1)))} (로컬)`}
+                        : `${formatQuantity(Math.floor(balance / (selectedStock && /^[A-Z]/.test(selectedStock.symbol) ? selectedStock.price * exchangeRate : (selectedStock.price || 1))))} (로컬)`}
                     </span>
                   </div>
                 </div>
@@ -5423,7 +5447,7 @@ export default function App() {
                   <span className="text-sleek-text-secondary">매수 가능: <strong className="text-sleek-blue font-bold">
                     {kisConfig.isConnected && kisConfig.isRealOrderEnabled && kisBuyableQty !== null 
                       ? `${kisBuyableQty.toLocaleString()}주 (실계좌)` 
-                      : `${Math.floor(balance / (selectedStock?.price || 1)).toLocaleString()}주 (로컬)`}
+                      : `${Math.floor(balance / (selectedStock && /^[A-Z]/.test(selectedStock.symbol) ? selectedStock.price * exchangeRate : (selectedStock?.price || 1))).toLocaleString()}주 (로컬)`}
                   </strong></span>
                 </div>
               </div>

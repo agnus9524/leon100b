@@ -2,6 +2,7 @@ export interface StockSuggestion {
   symbol: string;
   name: string;
   market: 'KR' | 'US';
+  price?: number;
 }
 
 export const POPULAR_STOCKS: StockSuggestion[] = [
