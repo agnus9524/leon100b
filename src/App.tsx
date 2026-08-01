@@ -612,6 +612,18 @@ export default function App() {
       isConnected: config.isConnected
     };
   };
+
+  const formatCurrency = (val: number, forceKRW: boolean = false) => {
+    const isUSD = marketType === 'US' && !forceKRW;
+    if (isUSD) {
+      return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    return `₩${Math.round(val).toLocaleString()}`;
+  };
+
+  const formatQuantity = (val: number) => {
+    return `${val.toLocaleString()} ${marketType === 'US' ? '주' : '주'}`; // '주' is standard for both in KR context usually, but can be customized
+  };
   const [showKisModal, setShowKisModal] = useState(false);
   const [showKisPassword, setShowKisPassword] = useState(false);
   const [isAppInitialized, setIsAppInitialized] = useState(false);
@@ -812,23 +824,40 @@ export default function App() {
   // Helper for tick-aware target sell price calculation to guarantee positive profit above tick size
   const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number, currentMarketPrice?: number) => {
     if (basePrice <= 0) return 0;
-    const tickSize = basePrice >= 500000 ? 1000 : basePrice >= 100000 ? 500 : basePrice >= 50000 ? 100 : basePrice >= 10000 ? 50 : basePrice >= 5000 ? 10 : 5;
-    const rawTarget = basePrice * (1 + targetProfitPct / 100);
-    let rounded = Math.round(rawTarget / tickSize) * tickSize;
-    if (rounded <= basePrice) {
-      rounded = basePrice + tickSize;
+    
+    let tickSize;
+    if (marketType === 'US') {
+      tickSize = 0.01;
+    } else {
+      tickSize = basePrice >= 500000 ? 1000 : basePrice >= 100000 ? 500 : basePrice >= 50000 ? 100 : basePrice >= 10000 ? 50 : basePrice >= 5000 ? 10 : 5;
     }
-    // [수익률 극대화] 현재 시장가가 목표가보다 더 높은 경우, 목표가 때문에 현재가보다 낮은 가격으로 매도하면 안 됨!
-    // 시장가 이상으로 매도가를 자동 상향 지정하여 최대 수익률 확보
+    
+    const rawTarget = basePrice * (1 + targetProfitPct / 100);
+    let rounded = marketType === 'US' 
+      ? Number(rawTarget.toFixed(2)) 
+      : Math.round(rawTarget / tickSize) * tickSize;
+
+    if (rounded <= basePrice) {
+      rounded = marketType === 'US' ? Number((basePrice + 0.01).toFixed(2)) : basePrice + tickSize;
+    }
+
     if (currentMarketPrice && currentMarketPrice > 0) {
-      const marketTick = currentMarketPrice >= 500000 ? 1000 : currentMarketPrice >= 100000 ? 500 : currentMarketPrice >= 50000 ? 100 : currentMarketPrice >= 10000 ? 50 : currentMarketPrice >= 5000 ? 10 : 5;
-      const roundedMarket = Math.round(currentMarketPrice / marketTick) * marketTick;
+      let marketTick;
+      if (marketType === 'US') {
+        marketTick = 0.01;
+      } else {
+        marketTick = currentMarketPrice >= 500000 ? 1000 : currentMarketPrice >= 100000 ? 500 : currentMarketPrice >= 50000 ? 100 : currentMarketPrice >= 10000 ? 50 : currentMarketPrice >= 5000 ? 10 : 5;
+      }
+      const roundedMarket = marketType === 'US'
+        ? Number(currentMarketPrice.toFixed(2))
+        : Math.round(currentMarketPrice / marketTick) * marketTick;
+        
       if (roundedMarket > rounded) {
         return roundedMarket;
       }
     }
     return rounded;
-  }, []); 
+  }, [marketType]); 
 
   // Manual Limit Sell States
   const [manualSellModalOpen, setManualSellModalOpen] = useState<boolean>(false);
@@ -1656,7 +1685,7 @@ export default function App() {
           });
           openOrSwitchScalperTab(symbolToUse, liveName);
           setSearchSymbol("");
-          addLog('SYSTEM', '매수', 0, 0, `[KIS 종목 추가] ${liveName}(${symbolToUse}) 종목이 실시간 연동 등록되었습니다 (현재가: ₩${livePriceData.current.toLocaleString()}).`);
+          addLog('SYSTEM', '매수', 0, 0, `[KIS 종목 추가] ${liveName}(${symbolToUse}) 종목이 실시간 연동 등록되었습니다 (현재가: ${formatCurrency(livePriceData.current)}).`);
           setIsSearchingStock(false);
           return;
         }
@@ -1711,7 +1740,7 @@ export default function App() {
               }
               return s;
             }));
-            addLog('SYSTEM', '매수', 0, 0, `[종목 정보 동기화] ${data.name || customName}(${symbolToUse})의 주가가 ₩${data.price.toLocaleString()}으로 업데이트되었습니다.`);
+            addLog('SYSTEM', '매수', 0, 0, `[종목 정보 동기화] ${data.name || customName}(${symbolToUse})의 주가가 ${formatCurrency(data.price)}으로 업데이트되었습니다.`);
           }
         } catch (err) {
           console.error("Background search update error:", err);
@@ -2034,9 +2063,12 @@ export default function App() {
               const avgP = Number(item.pchs_avg_pric || item.pchs_unpr || item.pchs_avg_price || (item.pchs_amt && qty ? item.pchs_amt / qty : 0) || 0);
               const name = item.prdt_name;
               if (qty > 0) {
-                newHoldings[item.pdno] = (newHoldings[item.pdno] || 0) + qty;
-                if (avgP > 0) newAvgPrices[item.pdno] = avgP;
-                if (name) newStockNames[item.pdno] = name;
+                // Only add to holdings if we are in KR market mode
+                if (marketType === 'KR') {
+                  newHoldings[item.pdno] = (newHoldings[item.pdno] || 0) + qty;
+                  if (avgP > 0) newAvgPrices[item.pdno] = avgP;
+                  if (name) newStockNames[item.pdno] = name;
+                }
                 
                 totalStockPurchaseCost += (qty * (avgP > 0 ? avgP : 0));
 
@@ -2051,7 +2083,7 @@ export default function App() {
               }
             }
           }
-          setSellableHoldings(prev => ({ ...prev, ...newSellable }));
+          if (marketType === 'KR') setSellableHoldings(prev => ({ ...prev, ...newSellable }));
         }
 
         if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output2?.[0]) {
@@ -2065,12 +2097,55 @@ export default function App() {
           // Direct deposit/cash balance in account
           const domesticCash = dnclAmt > 0 ? dnclAmt : (ordPsblCash > 0 ? ordPsblCash : 0);
           
-          totalConvertedBalance += Math.round(domesticCash);
-          totalConvertedPrincipal += Math.round(domesticCash + actualPurchaseCost);
+          if (marketType === 'KR') {
+            totalConvertedBalance += Math.round(domesticCash);
+            totalConvertedPrincipal += Math.round(domesticCash + actualPurchaseCost);
+          }
         }
       } catch (err: any) {
         console.warn("Domestic Sync Skip:", err);
         domesticError = err.message;
+      }
+
+      // Overseas Stock Sync (TTTS3012R)
+      try {
+        const overseasBalanceData = await kisService.getOverseasBalance();
+        let totalOverseasPurchaseCostUSD = 0;
+        const currentExRate = Number(exchangeRate) || 1350;
+
+        if (overseasBalanceData?.rt_cd === '0' && overseasBalanceData.output1 && Array.isArray(overseasBalanceData.output1)) {
+          foundAnyData = true;
+          for (const item of overseasBalanceData.output1) {
+            if (item.pdno) {
+              const qty = Number(item.hldg_qty || 0);
+              const avgP = Number(item.pchs_avg_pric || 0);
+              const name = item.prdt_name || item.ovrs_item_name;
+              if (qty > 0) {
+                // Only add to holdings if we are in US market mode
+                if (marketType === 'US') {
+                  newHoldings[item.pdno] = (newHoldings[item.pdno] || 0) + qty;
+                  if (avgP > 0) newAvgPrices[item.pdno] = avgP;
+                  if (name) newStockNames[item.pdno] = name;
+                }
+                totalOverseasPurchaseCostUSD += (qty * avgP);
+              }
+            }
+          }
+        }
+
+        if (overseasBalanceData?.rt_cd === '0' && overseasBalanceData.output2) {
+          foundAnyData = true;
+          const out2 = overseasBalanceData.output2;
+          const frcr_dncl_amt = Number(out2.frcr_dncl_amt || 0); // Foreign currency deposit
+          const ovrs_tot_pchs_amt = Number(out2.ovrs_tot_pchs_amt || totalOverseasPurchaseCostUSD);
+          
+          if (marketType === 'US') {
+            totalConvertedBalance += frcr_dncl_amt;
+            totalConvertedPrincipal += (frcr_dncl_amt + ovrs_tot_pchs_amt);
+          }
+        }
+      } catch (err: any) {
+        console.warn("Overseas Sync Skip:", err);
       }
 
       // Final Check: If absolutely no data was fetched and there was a domestic error, notify user
@@ -2503,7 +2578,7 @@ export default function App() {
         ${newsContext || "뉴스 없음. 기술적 지표에만 의존하여 판단할 것."}
         
         계좌 상황:
-        - 가용 잔고: ₩${Math.round(balance).toLocaleString()}
+        - 가용 잔고: ${formatCurrency(balance)}
         - ${stockToAnalyze.symbol} 보유: ${holdings[stockToAnalyze.symbol] || 0}
         
         매매 규칙:
@@ -2756,7 +2831,7 @@ export default function App() {
           'SELL', 
           currentStock, 
           totalQty, 
-          `[통합평단가 목표익절] 평단가 ₩${newAvg.toLocaleString()} 대비 +${scalpingTargetProfit}% 자동 주문`, 
+          `[통합평단가 익절] 평단가 ${formatCurrency(newAvg)} 대비 +${scalpingTargetProfit}% 자동 주문`, 
           targetSellPrice,
           newAvg
         );
@@ -2769,7 +2844,7 @@ export default function App() {
           'SELL', 
           currentStock, 
           qty, 
-          `[슬롯 독립익절 주문] 매수가 ₩${buyPrice.toLocaleString()} 대비 +${scalpingTargetProfit}% (목표가: ₩${targetSellPrice.toLocaleString()})`, 
+          `[슬롯 독립익절] 매수가 ${formatCurrency(buyPrice)} 대비 +${scalpingTargetProfit}% (목표가: ${formatCurrency(targetSellPrice)})`, 
           targetSellPrice,
           buyPrice,
           slotId
@@ -2869,7 +2944,7 @@ export default function App() {
           
           if (!order.id) {
             // Placeholder / in-flight order without ID: clean up silently without error warning
-            console.log(`[Auto-Cancel] In-flight order without ID cleared: ₩${orderPrice} (${cancelReason})`);
+            console.log(`[Auto-Cancel] In-flight order without ID cleared: ${formatCurrency(orderPrice)} (${cancelReason})`);
             continue;
           }
 
@@ -2881,7 +2956,7 @@ export default function App() {
             
             addLog(order.symbol, '매수', orderPrice, order.quantity || 1, `[모의 자동취소] ${cancelReason}`);
             showNotification(`${currentStock.name} 모의 매수 자동 취소 (${isDropCancel ? '낙폭 과대' : '상승 이탈'})`, "info");
-            setBotStatus(`[모의 취소] ₩${orderPrice.toLocaleString()} 주문 취소 완료`);
+            setBotStatus(`[모의 취소] ${formatCurrency(orderPrice)} 주문 취소 완료`);
           } else {
             // Real KIS order cancel request!
             try {
@@ -2897,7 +2972,7 @@ export default function App() {
               if (cancelRes && cancelRes.rt_cd === '0') {
                 addLog(order.symbol, '매수', orderPrice, order.quantity, `[KIS 자동취소] ${cancelReason}`);
                 showNotification(`${currentStock.name} KIS 매수 자동 취소 (${isDropCancel ? '낙폭 과대' : '상승 이탈'})`, "info");
-                setBotStatus(`[KIS 취소] ₩${orderPrice.toLocaleString()} 주문 취소 완료`);
+                setBotStatus(`[KIS 취소] ${formatCurrency(orderPrice)} 주문 취소 완료`);
               } else {
                 const errMsg = cancelRes?.msg1 || "알 수 없는 오류";
                 
@@ -2922,7 +2997,7 @@ export default function App() {
                 if (!isFilledInMeantime) {
                   // Log status silently to trading logs without popping up user-facing error warnings
                   addLog(order.symbol, '매수', orderPrice, order.quantity, `[자동취소 완료] 대기 주문 정리 (${errMsg})`);
-                  setBotStatus(`[자동취소 완료] ₩${orderPrice.toLocaleString()} 주문 정리됨`);
+                  setBotStatus(`[자동취소 완료] ${formatCurrency(orderPrice)} 주문 정리됨`);
                   console.log(`[Auto-Cancel Suppressed Warning] ${errMsg}`);
                 }
               }
@@ -2948,9 +3023,9 @@ export default function App() {
             setAvgPrices(prev => ({ ...prev, [order.symbol]: newAvg }));
             if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
             
-            addLog(order.symbol, '매수', orderPrice, order.quantity, `[모의 체결] 주문가 ₩${orderPrice.toLocaleString()} 체결 완료 (현재가: ₩${currentPrice.toLocaleString()})`);
+            addLog(order.symbol, '매수', orderPrice, order.quantity, `[모의 체결] 주문가 ${formatCurrency(orderPrice)} 체결 완료 (현재가: ${formatCurrency(currentPrice)})`);
             showNotification(`${currentStock.name} 모의 매수 주문 체결 완료!`, "success");
-            setBotStatus(`[모의 체결] ₩${orderPrice.toLocaleString()} 완료`);
+            setBotStatus(`[모의 체결] ${formatCurrency(orderPrice)} 완료`);
             
             // Add to gapInventory and update ref
             const newSlotId = order.slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -2988,9 +3063,9 @@ export default function App() {
                 setAvgPrices(prev => ({ ...prev, [order.symbol]: newAvg }));
                 if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
                 
-                addLog(order.symbol, '매수', orderPrice, order.quantity, `[실제체결] 주문가 ₩${orderPrice.toLocaleString()} 전량 체결 완료`);
+                addLog(order.symbol, '매수', orderPrice, order.quantity, `[실제체결] 주문가 ${formatCurrency(orderPrice)} 전량 체결 완료`);
                 showNotification(`${currentStock.name} KIS 실거래 매수 체결 완료!`, "success");
-                setBotStatus(`[체결 완료] ₩${orderPrice.toLocaleString()} (${order.quantity}주)`);
+                setBotStatus(`[체결 완료] ${formatCurrency(orderPrice)} (${formatQuantity(order.quantity)})`);
                 setLastTradeType('BUY');
                 setGapTradeCount(prev => prev + 1);
                 playScalpingSound('BUY');
@@ -3046,7 +3121,7 @@ export default function App() {
                   
                   addLog(order.symbol, '매수', orderPrice, order.quantity, `[실제체결] 체결 완료`);
                   showNotification(`${currentStock.name} KIS 매수 체결 완료!`, "success");
-                  setBotStatus(`[체결 완료] ₩${orderPrice.toLocaleString()}`);
+                  setBotStatus(`[체결 완료] ${formatCurrency(orderPrice)}`);
                   
                   // Add to gapInventory and update ref
                   const realSlotId = order.slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -3137,7 +3212,7 @@ export default function App() {
                 }
               }
             } else {
-              showNotification(`${currentStock.name} 대기 중인 매도 주문 체결 완료 (₩${currentStock.price.toLocaleString()}, ${order.quantity}주)`, "success");
+              showNotification(`${currentStock.name} 대기 주문 체결 완료 (${formatCurrency(currentStock.price)}, ${formatQuantity(order.quantity)})`, "success");
             }
 
             // Update holdings
@@ -3146,7 +3221,7 @@ export default function App() {
             setHoldings(newHoldings);
             if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
 
-            addLog(order.symbol, '매도', currentStock.price, order.quantity, `[모의 지정가 매도 체결] 목표가 ₩${order.orderPrice.toLocaleString()} 도달`);
+            addLog(order.symbol, '매도', currentStock.price, order.quantity, `[모의 지정가 매도] 목표가 ${formatCurrency(order.orderPrice)} 도달`);
             playScalpingSound('SELL');
           } else {
             nextPending.push(order);
@@ -3255,8 +3330,8 @@ export default function App() {
             setGapInventory([autoSlot]);
           }
 
-          addLog(symbol, '매도', targetSellPrice, missingQty, `[자동 매도 주문 접수] 평단가 ₩${avgP.toLocaleString()} 대비 +${scalpingTargetProfit}% (목표가: ₩${targetSellPrice.toLocaleString()})`);
-          showNotification(`${stockObj.name} 보유 ${missingQty}주 매도 주문이 +${scalpingTargetProfit}% 목표가(₩${targetSellPrice.toLocaleString()})에 자동 등록되었습니다.`, "success");
+          addLog(symbol, '매도', targetSellPrice, missingQty, `[자동 매도 주문] 평단가 ${formatCurrency(avgP)} 대비 +${scalpingTargetProfit}% (목표가: ${formatCurrency(targetSellPrice)})`);
+          showNotification(`${stockObj.name} 보유 ${formatQuantity(missingQty)} 매도 주문이 +${scalpingTargetProfit}% 목표가(${formatCurrency(targetSellPrice)})에 자동 등록되었습니다.`, "success");
         }
       }
     });
@@ -3380,9 +3455,9 @@ export default function App() {
           if (isGapSatisfied && (meetsBuyCriteria || (immediateEntry && (currentInventory.length + pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length) < maxSlots))) {
             const totalOccupied = currentInventory.length + pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length;
             if (isSamePriceBlocked) {
-              setScalperMessage(`[중복 차단] ₩${targetBuyPrice.toLocaleString()} 보유 중`);
+              setScalperMessage(`[중복 차단] ${formatCurrency(targetBuyPrice)} 보유 중`);
             } else if (isLockActive) {
-              setScalperMessage(`[처리 중] ₩${targetBuyPrice.toLocaleString()} 대기...`);
+              setScalperMessage(`[처리 중] ${formatCurrency(targetBuyPrice)} 대기...`);
             } else if (totalOccupied >= maxSlots) {
               setScalperMessage(`[슬롯 가득 참] ${maxSlots}/${maxSlots} (매도 대기)`);
             } else {
@@ -3392,7 +3467,7 @@ export default function App() {
               const scaledCost = priceInKrw * scaledQuantity;
 
               if (balance < scaledCost) {
-                setScalperMessage(`[매수 차단] 예수금 부족 (단계: ${currentStep}, 필요: ₩${Math.round(scaledCost).toLocaleString()})`);
+                setScalperMessage(`[매수 차단] 예수금 부족 (단계: ${currentStep}, 필요: ${formatCurrency(scaledCost)})`);
               } else {
                 setScalperMessage(`[슬롯#${currentStep} 가중진입] ₩${targetBuyPrice.toLocaleString()} (${scaledQuantity}주)...`);
                 
@@ -3616,6 +3691,27 @@ export default function App() {
                             return 0;
                         }
                     }
+                } else {
+                    // Overseas buyable amount check
+                    setBotStatus(`[KIS API] ${stock.symbol} 해외 매수 가능 수량 조회 중...`);
+                    try {
+                        const psblRes = await kisService.getOverseasBuyableAmount(stock.symbol, tradePrice.toString());
+                        if (psblRes?.rt_cd === '0' && psblRes.output) {
+                            const psblQty = Number(psblRes.output.nrcy_buy_qty || psblRes.output.ord_psbl_qty || 0);
+                            if (psblQty <= 0) {
+                                setBotStatus(`[매수 취소] 실제 매수 가능 수량 0주`);
+                                showNotification(`해외 매수 스킵: 매수 가능 수량이 0주입니다.`, "error");
+                                return 0;
+                            }
+                            if (psblQty < finalAmount) {
+                                setBotStatus(`[매수 진입 차단] 해외 주문 가능 수량 부족 (${psblQty}주)`);
+                                showNotification(`해외 매수 차단: 가능 수량(${psblQty}주)이 부족합니다.`, "error");
+                                return 0;
+                            }
+                        }
+                    } catch (e) {
+                        console.warn("Overseas buyable check failed, proceeding anyway:", e);
+                    }
                 }
             } catch (err: any) {
                 console.error("Failed to query domestic buyable amount:", err);
@@ -3667,7 +3763,7 @@ export default function App() {
                    if (filled) {
                        setBotStatus(`[체결 완료] 주문 번호(${odno})가 전량 체결되었습니다.`);
                        addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', filledPrice, filledQty, `[실제체결 완료] ${reason}`);
-                       showNotification(`${stock.name} ${action === 'BUY' ? '매수' : '매도'} 주문이 전량 체결되었습니다. (가격: ${filledPrice}원)`, "success");
+                       showNotification(`${stock.name} ${action === 'BUY' ? '매수' : '매도'} 주문이 전량 체결되었습니다. (가격: ${formatCurrency(filledPrice)})`, "success");
                        finalAmount = filledQty;
                         if (action === "SELL" && slotId) {
                             const next = gapInventoryRef.current.filter(s => s.id !== slotId);
@@ -4833,19 +4929,59 @@ export default function App() {
       ) : (
         <>
       <header className="h-auto md:h-[60px] border-b border-sleek-border glass-header flex flex-col md:flex-row items-center justify-between px-6 py-4 md:py-0 sticky top-0 z-50 gap-4 md:gap-0">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 bg-sleek-blue rounded-md flex items-center justify-center">
-            <Bot className="w-4 h-4 text-white" />
+        <div className="flex items-center gap-4">
+          <div className="flex bg-black/40 p-1 rounded-xl border border-white/10">
+            <button 
+              onClick={() => {
+                setMarketType('KR');
+                setDisplayCurrency('KRW');
+                setStocks(stocksCache.KR);
+                if (stocksCache.KR.length > 0) {
+                  setSelectedSymbol(stocksCache.KR[0].symbol);
+                }
+              }}
+              className={cn(
+                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all",
+                marketType === 'KR' 
+                  ? "bg-sleek-blue text-white shadow-lg shadow-sleek-blue/30" 
+                  : "text-sleek-text-secondary hover:text-white"
+              )}
+            >
+              <SouthKoreaFlag /> KR
+            </button>
+            <button 
+              onClick={() => {
+                setMarketType('US');
+                setDisplayCurrency('USD');
+                setStocks(stocksCache.US);
+                if (stocksCache.US.length > 0) {
+                  setSelectedSymbol(stocksCache.US[0].symbol);
+                }
+              }}
+              className={cn(
+                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all",
+                marketType === 'US' 
+                  ? "bg-sleek-blue text-white shadow-lg shadow-sleek-blue/30" 
+                  : "text-sleek-text-secondary hover:text-white"
+              )}
+            >
+              <USAFlag /> US
+            </button>
           </div>
-          <h1 className="text-[16px] md:text-[18px] font-extrabold tracking-tighter uppercase relative">
-            <span className="text-sleek-blue">LEO</span> SCALPER BOT <span className="text-white/40 font-normal ml-2 text-xl tracking-widest">PRO</span>
+          <div className="flex items-center gap-2">
+            <div className="w-6 h-6 bg-sleek-blue rounded-md flex items-center justify-center">
+              <Bot className="w-4 h-4 text-white" />
+            </div>
+            <h1 className="text-[16px] md:text-[18px] font-extrabold tracking-tighter uppercase relative">
+              <span className="text-sleek-blue">LEO</span> SCALPER BOT <span className="text-white/40 font-normal ml-2 text-xl tracking-widest">PRO</span>
             {currentUser?.email === "agnus9524@gmail.com" && (
               <span className="absolute -top-1 -right-8 bg-sleek-blue text-[white] text-[7px] px-1 rounded-sm font-black tracking-widest leading-normal">SUPER</span>
             )}
           </h1>
         </div>
+      </div>
 
-        <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6">
+      <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6">
           <div className="flex items-center gap-4 text-[11px] md:text-[13px] font-mono border-r border-sleek-border pr-4 md:pr-6">
             <div className="flex flex-col items-end">
               <span className="text-[9px] md:text-[10px] text-sleek-text-secondary uppercase">User Account</span>
@@ -4979,14 +5115,14 @@ export default function App() {
                 <div className="pt-4 border-t border-white/5 space-y-2">
                   <div className="flex justify-between text-[10px] uppercase">
                     <span className="text-sleek-text-secondary">현재 보유</span>
-                    <span className="text-white font-bold">{holdings[selectedStock.symbol] || 0} 주</span>
+                    <span className="text-white font-bold">{formatQuantity(holdings[selectedStock.symbol] || 0)}</span>
                   </div>
                   <div className="flex justify-between text-[10px] uppercase">
                     <span className="text-sleek-text-secondary">매수 가능</span>
                     <span className="text-sleek-blue font-bold">
                       {kisConfig.isConnected && kisConfig.isRealOrderEnabled && kisBuyableQty !== null 
-                        ? `${kisBuyableQty.toLocaleString()} 주 (실계좌)` 
-                        : `${Math.floor(balance / (selectedStock.price || 1)).toLocaleString()} 주 (로컬)`}
+                        ? `${formatQuantity(kisBuyableQty)} (실계좌)` 
+                        : `${formatQuantity(Math.floor(balance / (selectedStock.price || 1)))} (로컬)`}
                     </span>
                   </div>
                 </div>
@@ -5094,7 +5230,7 @@ export default function App() {
                             <span className="text-sm font-black font-mono text-emerald-400">{st.scalpScore}점</span>
                           </div>
                           <div className="text-xs font-mono font-bold text-slate-200 mt-0.5">
-                            {pricePrefix}{st.price?.toLocaleString()}
+                            {formatCurrency(st.price)}
                             <span className={cn("ml-1 text-[11px]", (st.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
                               {(st.changePercent || 0) >= 0 ? '+' : ''}{(st.changePercent || 0).toFixed(1)}%
                             </span>
@@ -5738,10 +5874,10 @@ export default function App() {
                                             </span>
                                           </div>
                                           <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px]">
-                                            <div>시가: <strong className="text-white">₩{data.open.toLocaleString()}</strong></div>
-                                            <div>고가: <strong className="text-rose-400">₩{data.high.toLocaleString()}</strong></div>
-                                            <div>저가: <strong className="text-sky-400">₩{data.low.toLocaleString()}</strong></div>
-                                            <div>종가: <strong className={data.close >= data.open ? "text-rose-400" : "text-sky-400"}>₩{data.close.toLocaleString()}</strong></div>
+                                            <div>시가: <strong className="text-white">{formatCurrency(data.open)}</strong></div>
+                                            <div>고가: <strong className="text-rose-400">{formatCurrency(data.high)}</strong></div>
+                                            <div>저가: <strong className="text-sky-400">{formatCurrency(data.low)}</strong></div>
+                                            <div>종가: <strong className={data.close >= data.open ? "text-rose-400" : "text-sky-400"}>{formatCurrency(data.close)}</strong></div>
                                           </div>
                                         </div>
                                       );
@@ -5779,7 +5915,7 @@ export default function App() {
                                     strokeWidth={1}
                                   >
                                     <Label 
-                                      value={`${highCandle.high.toLocaleString()}원 (${(((highCandle.high - selectedStock.price)/selectedStock.price)*100).toFixed(1)}%) ↓`} 
+                                      value={`${formatCurrency(highCandle.high)} (${(((highCandle.high - selectedStock.price)/selectedStock.price)*100).toFixed(1)}%) ↓`} 
                                       position="top" 
                                       fill="#EF4444" 
                                       fontSize={9} 
@@ -5799,7 +5935,7 @@ export default function App() {
                                     strokeWidth={1}
                                   >
                                     <Label 
-                                      value={`${lowCandle.low.toLocaleString()}원 (${(((lowCandle.low - selectedStock.price)/selectedStock.price)*100).toFixed(1)}%) ↑`} 
+                                      value={`${formatCurrency(lowCandle.low)} (${(((lowCandle.low - selectedStock.price)/selectedStock.price)*100).toFixed(1)}%) ↑`} 
                                       position="bottom" 
                                       fill="#3B82F6" 
                                       fontSize={9} 
@@ -5885,9 +6021,9 @@ export default function App() {
                                   "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
                                   isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-300"
                                 )}>
-                                  ₩{lvlPrice.toLocaleString()}
+                                  {formatCurrency(lvlPrice)}
                                 </span>
-                                <span className="w-10 shrink-0 text-right text-sky-200/60 font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
+                                <span className="w-10 shrink-0 text-right text-sky-200/60 font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
                               </div>
                             );
                           })}
@@ -5897,7 +6033,7 @@ export default function App() {
                         <div className="my-1 h-5 px-1.5 bg-white/5 border-y border-white/10 flex items-center justify-between rounded font-mono tabular-nums">
                           <span className="text-[9px] font-black text-sleek-text-secondary uppercase shrink-0">현재 체결가</span>
                           <span className={cn("font-black text-[11px] font-mono tabular-nums animate-pulse", selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400")}>
-                            ₩{currentPrice.toLocaleString()}
+                            {formatCurrency(currentPrice)}
                           </span>
                           <span className={cn("text-[9px] font-mono tabular-nums font-bold shrink-0", selectedStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
                             {selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%
@@ -6114,7 +6250,7 @@ export default function App() {
                   </span>
                 </div>
                 <div className="flex items-baseline justify-between mt-0.5">
-                  <span className="text-sm font-black text-sleek-blue italic truncate">₩{totalValue.toLocaleString()}</span>
+                  <span className="text-sm font-black text-sleek-blue italic truncate">{formatCurrency(totalValue)}</span>
                   <span className={cn("text-[10px] font-bold shrink-0 ml-1", pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
                     {pnl >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
                   </span>
@@ -6124,7 +6260,7 @@ export default function App() {
               <div className="bg-white/5 p-2 rounded-xl border border-white/5">
                 <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">스캘핑 총 수익</span>
                 <span className={cn("text-sm font-black italic mt-0.5 block truncate", gapTradingProfit >= 0 ? "text-rose-400" : "text-sky-400")}>
-                  ₩{gapTradingProfit.toLocaleString()}
+                  {formatCurrency(gapTradingProfit)}
                 </span>
               </div>
 
@@ -6197,18 +6333,18 @@ export default function App() {
                         <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-black/40 p-2.5 rounded-xl border border-white/5">
                           <div>
                             <span className="text-[10px] text-sleek-text-secondary block uppercase">체결 매수 수량</span>
-                            <span className="text-base font-black text-amber-300">{totalQty}주</span>
+                            <span className="text-base font-black text-amber-300">{formatQuantity(totalQty)}</span>
                           </div>
                           <div className="text-right">
                             <span className="text-[10px] text-sleek-text-secondary block uppercase">통합 매수 평단가</span>
-                            <span className="text-sm font-bold text-white">₩{avgPrice.toLocaleString()}</span>
+                            <span className="text-sm font-bold text-white">{formatCurrency(avgPrice)}</span>
                           </div>
                         </div>
 
                         <div className="grid grid-cols-2 gap-2 text-xs font-mono">
                           <div>
                             <span className="text-[10px] text-sleek-text-secondary block font-bold">매도예상가 (+{scalpingTargetProfit}%)</span>
-                            <span className="text-sm font-bold text-rose-400">₩{targetSellPrice.toLocaleString()}</span>
+                            <span className="text-sm font-bold text-rose-400">{formatCurrency(targetSellPrice)}</span>
                           </div>
                           <div className="text-right">
                             <span className="text-[10px] text-sleek-text-secondary block font-bold">평단 대비 손익률</span>
@@ -6272,12 +6408,12 @@ export default function App() {
 
                           <div className="grid grid-cols-2 gap-2 bg-black/50 p-2.5 rounded-xl border border-white/5 text-[11px] tabular-nums">
                             <div>
-                              <span className="text-sleek-text-secondary text-[10px] block font-bold">진입가 ({buyQty}주)</span>
-                              <span className="text-emerald-400 font-extrabold text-xs block mt-0.5">₩{buyPrice.toLocaleString()}</span>
+                              <span className="text-sleek-text-secondary text-[10px] block font-bold">진입가 ({formatQuantity(buyQty)})</span>
+                              <span className="text-emerald-400 font-extrabold text-xs block mt-0.5">{formatCurrency(buyPrice)}</span>
                             </div>
                             <div className="text-right">
                               <span className="text-sleek-text-secondary text-[10px] block font-bold">목표가 (+{scalpingTargetProfit}%)</span>
-                              <span className="text-rose-400 font-extrabold text-xs block mt-0.5">₩{targetSellPrice.toLocaleString()}</span>
+                              <span className="text-rose-400 font-extrabold text-xs block mt-0.5">{formatCurrency(targetSellPrice)}</span>
                             </div>
                           </div>
 
