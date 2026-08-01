@@ -60,7 +60,8 @@ import {
   Trash2,
   PieChart,
   Calculator,
-  Coins
+  Coins,
+  HelpCircle
 } from 'lucide-react';
 import { 
   XAxis, 
@@ -668,10 +669,12 @@ export default function App() {
 
   // Multi-Tab Scalper Trading State
   const [scalperTabs, setScalperTabs] = useState<ScalperTab[]>(() => {
-    const initSymbol = localStorage.getItem('sleek_last_symbol') || '073240';
-    const initStock = INITIAL_STOCKS_KR.find(s => s.symbol === initSymbol) || INITIAL_STOCKS.find(s => s.symbol === initSymbol) || INITIAL_STOCKS_KR[0];
+    const lastMarket = localStorage.getItem('sleek_market_type') || 'KR';
+    const initSymbol = localStorage.getItem('sleek_last_symbol') || (lastMarket === 'US' ? 'SNDL' : '073240');
+    const defaults = lastMarket === 'US' ? INITIAL_STOCKS : INITIAL_STOCKS_KR;
+    const initStock = defaults.find(s => s.symbol === initSymbol) || defaults[0];
     const price = initStock?.price || 1000;
-    const tickSize = price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5;
+    const tickSize = lastMarket === 'US' ? 0.01 : (price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5);
 
     return [{
       id: initStock.symbol,
@@ -693,7 +696,10 @@ export default function App() {
     }];
   });
 
-  const [activeTabId, setActiveTabId] = useState<string>(() => scalperTabs[0]?.id || '073240');
+  const [activeTabId, setActiveTabId] = useState<string>(() => {
+    const lastMarket = localStorage.getItem('sleek_market_type') || 'KR';
+    return scalperTabs[0]?.id || (lastMarket === 'US' ? 'SNDL' : '073240');
+  });
   const scalperTabsRef = React.useRef<ScalperTab[]>(scalperTabs);
   useEffect(() => {
     scalperTabsRef.current = scalperTabs;
@@ -1024,6 +1030,9 @@ export default function App() {
   const [isAssetAnalysisModalOpen, setIsAssetAnalysisModalOpen] = useState<boolean>(false);
 
   const assetAnalysis = useMemo(() => {
+    const isUSD = displayCurrency === 'USD';
+    const conv = (krwVal: number) => isUSD ? krwVal / exchangeRate : krwVal;
+
     let totalStockValue = 0;
     let totalStockInvested = 0;
     const stockList: Array<{
@@ -1043,6 +1052,11 @@ export default function App() {
       const qty = Number(rawQty);
       if (qty <= 0) return;
 
+      const isStockUS = /^[A-Z]/.test(sym);
+      // Filter by current market mode
+      if (marketType === 'US' && !isStockUS) return;
+      if (marketType === 'KR' && isStockUS) return;
+
       const st = stocks.find(s => s.symbol === sym) ||
                  INITIAL_STOCKS_KR.find(s => s.symbol === sym) ||
                  INITIAL_STOCKS.find(s => s.symbol === sym) ||
@@ -1052,8 +1066,7 @@ export default function App() {
         ? st.name
         : (INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym);
 
-      const isUS = /^[A-Z]/.test(sym);
-      const currentPriceKRW = isUS ? (st.price || 0) * exchangeRate : (st.price || 0);
+      const currentPriceKRW = isStockUS ? (st.price || 0) * exchangeRate : (st.price || 0);
 
       let avgP = avgPrices[sym] || 0;
       if (avgP <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
@@ -1062,7 +1075,7 @@ export default function App() {
         avgP = totalQty > 0 ? Math.floor(totalCost / totalQty) : 0;
       }
       if (avgP <= 0) avgP = st.price || 0;
-      const avgPriceKRW = isUS ? Math.floor(avgP * exchangeRate) : Math.floor(avgP);
+      const avgPriceKRW = isStockUS ? Math.floor(avgP * exchangeRate) : Math.floor(avgP);
 
       const invested = qty * avgPriceKRW;
       const evaluated = qty * currentPriceKRW;
@@ -1076,46 +1089,52 @@ export default function App() {
         symbol: sym,
         name: resolvedStockName,
         qty,
-        avgPrice: avgPriceKRW,
-        currentPrice: currentPriceKRW,
-        investedAmount: invested,
-        evaluatedAmount: evaluated,
-        pnlAmount: pnlAmt,
+        avgPrice: conv(avgPriceKRW),
+        currentPrice: conv(currentPriceKRW),
+        investedAmount: conv(invested),
+        evaluatedAmount: conv(evaluated),
+        pnlAmount: conv(pnlAmt),
         pnlPercent: pnlPct,
         portfolioShare: 0
       });
     });
 
     stockList.forEach(item => {
-      item.portfolioShare = totalValue > 0 ? (item.evaluatedAmount / totalValue) * 100 : 0;
+      // portfolioShare should be based on totalValue (which is converted in convertedValue)
+      // but let's just keep it relative to its own category if filtered, or keep total
+      item.portfolioShare = totalValue > 0 ? ((item.evaluatedAmount * (isUSD ? exchangeRate : 1)) / totalValue) * 100 : 0;
     });
 
     const pendingOrderReserve = pendingBuyOrders.reduce((acc, order) => {
       if (!order.isSimulated) return acc;
-      const isUS = /^[A-Z]/.test(order.symbol);
-      const priceKRW = isUS ? order.orderPrice * exchangeRate : order.orderPrice;
+      const isOrderUS = /^[A-Z]/.test(order.symbol);
+      if (marketType === 'US' && !isOrderUS) return acc;
+      if (marketType === 'KR' && isOrderUS) return acc;
+
+      const priceKRW = isOrderUS ? order.orderPrice * exchangeRate : order.orderPrice;
       return acc + order.quantity * priceKRW;
     }, 0);
 
-    const cashShare = totalValue > 0 ? (balance / totalValue) * 100 : 0;
-    const stockShare = totalValue > 0 ? (totalStockValue / totalValue) * 100 : 0;
-    const pendingShare = totalValue > 0 ? (pendingOrderReserve / totalValue) * 100 : 0;
+    const filteredTotalValue = (marketType === 'US' ? balance : balance) + totalStockValue; // simplified for now
+
+    // Let's make shares relative to the filtered total for a consistent sub-view
+    const currentViewTotal = conv(balance) + totalStockValue + conv(pendingOrderReserve);
 
     return {
-      cashBalance: Math.round(balance),
-      stockValue: Math.round(totalStockValue),
-      stockInvested: Math.round(totalStockInvested),
-      pendingReserve: Math.round(pendingOrderReserve),
-      totalCalculatedAsset: Math.round(totalValue),
-      principal: Math.round(principal),
-      totalPnL: Math.round(pnl),
-      totalPnLPercent: pnlPercent,
-      cashShare,
-      stockShare,
-      pendingShare,
+      cashBalance: conv(balance),
+      stockValue: totalStockValue,
+      stockInvested: totalStockInvested,
+      pendingReserve: conv(pendingOrderReserve),
+      totalCalculatedAsset: conv(balance) + totalStockValue, // Only reflecting currently selected market's stocks + cash
+      principal: conv(principal),
+      totalPnL: totalStockValue - totalStockInvested,
+      totalPnLPercent: totalStockInvested > 0 ? ((totalStockValue - totalStockInvested) / totalStockInvested) * 100 : 0,
+      cashShare: currentViewTotal > 0 ? (conv(balance) / currentViewTotal) * 100 : 0,
+      stockShare: currentViewTotal > 0 ? (totalStockValue / currentViewTotal) * 100 : 0,
+      pendingShare: currentViewTotal > 0 ? (conv(pendingOrderReserve) / currentViewTotal) * 100 : 0,
       stockList
     };
-  }, [balance, holdings, stocks, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, principal, pnl, pnlPercent]);
+  }, [balance, holdings, stocks, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, principal, pnl, pnlPercent, marketType, displayCurrency]);
 
   // Stable symbol ordering for TOP 5 Scalper Optimal Stocks:
   // Priority: 10,000 KRW ($10) or less + 1-Year Upward Trend + High Volume + Dynamic Rising Momentum
@@ -3861,7 +3880,7 @@ export default function App() {
       if (balance < cost) {
         setBotStatus(`[매수 진입 차단] 예수금 부족 (필요: ${formatCurrency(cost)} / 가능: ${formatCurrency(balance)})`);
         setScalperMessage(`[매수 차단] 예수금 부족으로 진입 취소`);
-        addLog(stock.symbol, '매수', tradePrice, finalAmount, `[진입차단] 예수금(매수 가능 금액) 초과 (필요: ₩${Math.round(cost).toLocaleString()}, 예수금: ₩${Math.round(balance).toLocaleString()})`);
+        addLog(stock.symbol, '매수', tradePrice, finalAmount, `[진입차단] 예수금(매수 가능 금액) 초과 (필요: ${formatCurrency(cost)}, 예수금: ${formatCurrency(balance)})`);
         showNotification(`매수 진입 차단: 매수 가능 금액(예수금)을 초과하여 진입하지 않습니다.`, "error");
         return 0;
       }
@@ -3878,7 +3897,7 @@ export default function App() {
         );
 
         if (isDuplicateAtPrice) {
-          setScalperMessage(`[동일가 매수 중복 차단] ₩${tradePrice.toLocaleString()} 대기 중`);
+          setScalperMessage(`[동일가 매수 중복 차단] ${formatCurrency(tradePrice)} 대기 중`);
           return 0;
         }
 
@@ -3900,7 +3919,7 @@ export default function App() {
         setPendingBuyOrders(prev => [...prev, newPending]);
         addLog(stock.symbol, '매수', tradePrice, finalAmount, `[모의 주문접수] ${reason}`);
         showNotification(`${stock.name} 모의 매수 주문 접수 완료 (체결 대기 중...)`, "info");
-        setBotStatus(`[모의 대기] 주문가 ₩${tradePrice.toLocaleString()} 체결 대기 중...`);
+        setBotStatus(`[모의 대기] 주문가 ${formatCurrency(tradePrice)} 체결 대기 중...`);
         return 0; // Return 0 so it's not added to gapInventory immediately!
       }
 
@@ -4075,9 +4094,9 @@ export default function App() {
 
     const currentPrice = selectedStock.price;
 
-    showNotification(`${selectedStock.name} ₩${manualSellPrice.toLocaleString()} 지정가 매도 주문 전송 중...`, "info");
-    await executeTrade('SELL', selectedStock, manualSellQty, `[수동 지정가 매도] 희망가 ₩${manualSellPrice.toLocaleString()}`, manualSellPrice, avgPrices[selectedStock.symbol]);
-    showNotification(`${selectedStock.name} ₩${manualSellPrice.toLocaleString()} 지정가 매도 주문이 접수되었습니다.`, "success");
+    showNotification(`${selectedStock.name} ${formatCurrency(manualSellPrice)} 지정가 매도 주문 전송 중...`, "info");
+    await executeTrade('SELL', selectedStock, manualSellQty, `[수동 지정가 매도] 희망가 ${formatCurrency(manualSellPrice)}`, manualSellPrice, avgPrices[selectedStock.symbol]);
+    showNotification(`${selectedStock.name} ${formatCurrency(manualSellPrice)} 지정가 매도 주문이 접수되었습니다.`, "success");
     playScalpingSound('SELL');
     setManualSellModalOpen(false);
   };
@@ -5120,6 +5139,64 @@ export default function App() {
           </div>
         </div>
       </header>
+      
+      {/* Exchange Rate Ribbon */}
+      <div className="h-8 bg-black/80 sticky top-[60px] md:top-[60px] z-40 border-b border-sleek-border/50 flex items-center justify-between px-6 backdrop-blur-md overflow-x-auto no-scrollbar">
+        <div className="flex items-center gap-6 whitespace-nowrap">
+          <div className="flex items-center gap-2">
+            <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest flex items-center gap-1">
+              <Globe className="w-3 h-3" /> Market Context
+            </span>
+            <div className="h-3 w-px bg-white/10 mx-1" />
+            <div className="flex items-center gap-3">
+              <div className="flex items-center gap-1.5">
+                <USAFlag />
+                <span className="text-[11px] font-mono font-bold text-white">USD/KRW</span>
+                <span className={cn(
+                  "text-[11px] font-mono font-black",
+                  exchangeRateTrend === 'UP' ? "text-sleek-red" : "text-sleek-green"
+                )}>
+                  {exchangeRate.toLocaleString()}
+                </span>
+                {exchangeRateTrend === 'UP' ? <TrendingUp className="w-3 h-3 text-sleek-red" /> : <TrendingDown className="w-3 h-3 text-sleek-green" />}
+              </div>
+            </div>
+          </div>
+          
+          <div className="hidden sm:flex items-center gap-4 text-[10px] font-bold text-sleek-text-secondary uppercase">
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> KOSPI <span className="text-white">+0.8%</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> NASDAQ <span className="text-white">+1.2%</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3 ml-4">
+          <span className="text-[9px] font-black text-sleek-text-secondary uppercase">Display Currency</span>
+          <div className="flex bg-white/5 p-0.5 rounded-lg border border-white/5">
+            <button 
+              onClick={() => setDisplayCurrency('KRW')}
+              className={cn(
+                "px-2 py-0.5 rounded text-[9px] font-black transition-all",
+                displayCurrency === 'KRW' ? "bg-white/10 text-white" : "text-sleek-text-secondary hover:text-white"
+              )}
+            >
+              KRW
+            </button>
+            <button 
+              onClick={() => setDisplayCurrency('USD')}
+              className={cn(
+                "px-2 py-0.5 rounded text-[9px] font-black transition-all",
+                displayCurrency === 'USD' ? "bg-white/10 text-white" : "text-sleek-text-secondary hover:text-white"
+              )}
+            >
+              USD
+            </button>
+          </div>
+        </div>
+      </div>
 
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-[300px_1fr_350px] gap-px bg-sleek-border overflow-y-auto lg:overflow-hidden">
         {/* Left: Stock Info & Global Settings */}
@@ -5244,7 +5321,7 @@ export default function App() {
                 {scalperTop5Stocks.map((st, idx) => {
                   const isSelected = selectedSymbol === st.symbol;
                   const isUS = /^[A-Z]/.test(st.symbol);
-                  const pricePrefix = isUS ? '$' : '₩';
+                  const pricePrefix = marketType === 'US' ? '$' : '₩';
                   
                   return (
                     <motion.div
@@ -5427,7 +5504,7 @@ export default function App() {
                   <label className="text-[10px] font-black text-sleek-text-secondary uppercase flex items-center gap-1">
                     <TrendingUp className="w-3 h-3 text-sleek-green" /> 상한가
                   </label>
-                  <span className="text-xs font-bold text-sleek-green font-mono">₩{gapSellPrice.toLocaleString()}</span>
+                  <span className="text-xs font-bold text-sleek-green font-mono">{formatCurrency(gapSellPrice)}</span>
                 </div>
                 <input 
                   type="number" 
@@ -5440,7 +5517,7 @@ export default function App() {
                   <label className="text-[10px] font-black text-sleek-text-secondary uppercase flex items-center gap-1">
                     <TrendingDown className="w-3 h-3 text-sleek-red" /> 하한가
                   </label>
-                  <span className="text-xs font-bold text-sleek-red font-mono">₩{gapBuyPrice.toLocaleString()}</span>
+                  <span className="text-xs font-bold text-sleek-red font-mono">{formatCurrency(gapBuyPrice)}</span>
                 </div>
                 <input 
                   type="number" 
@@ -5500,8 +5577,20 @@ export default function App() {
               {/* 3. Smart Scalper Configuration */}
               <div className="bg-sleek-blue/5 border border-sleek-blue/20 p-2.5 rounded-2xl flex flex-col justify-between space-y-1.5">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1">
+                  <span className="text-[10px] font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1 group relative">
                     <Zap className="w-3 h-3" /> SMART SCALPER
+                    <HelpCircle className="w-2.5 h-2.5 text-sleek-blue/50 cursor-help hover:text-sleek-blue transition-colors" />
+                    
+                    {/* Help Tooltip */}
+                    <div className="absolute left-0 bottom-full mb-2 w-48 bg-slate-900 border border-sleek-blue/30 p-2 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none">
+                      <div className="text-[9px] font-bold text-sleek-blue mb-1 flex items-center gap-1 uppercase tracking-tighter">
+                        <Sparkles className="w-2.5 h-2.5" /> Scalping Logic
+                      </div>
+                      <div className="text-[10px] leading-relaxed text-slate-200 font-medium normal-case tracking-normal">
+                        실시간 틱 데이터를 분석하여 <span className="text-sleek-blue font-bold">과매도/과매수</span> 지점의 기술적 반등을 포착하는 모드입니다. 지지/저항 돌파 시 자동으로 진입합니다.
+                      </div>
+                      <div className="absolute left-4 top-full w-2 h-2 bg-slate-900 border-r border-b border-sleek-blue/30 rotate-45 -translate-y-1/2" />
+                    </div>
                   </span>
                   <button
                     type="button"
@@ -5723,8 +5812,9 @@ export default function App() {
               {scalperTabs.map(tab => {
                 const isSelected = tab.id === activeTabId;
                 const tabStock = stocks.find(s => s.symbol === tab.symbol) || 
-                                 INITIAL_STOCKS_KR.find(s => s.symbol === tab.symbol) || 
-                                 INITIAL_STOCKS.find(s => s.symbol === tab.symbol);
+                                 (marketType === 'KR' 
+                                   ? INITIAL_STOCKS_KR.find(s => s.symbol === tab.symbol) 
+                                   : INITIAL_STOCKS.find(s => s.symbol === tab.symbol));
                 const tabName = tab.name || tabStock?.name || tab.symbol;
 
                 return (
@@ -5876,7 +5966,7 @@ export default function App() {
                           <div>
                             <div className="flex items-center gap-2">
                               <span className="text-xl md:text-2xl font-black text-white italic tracking-tighter font-mono">
-                                ₩{selectedStock.price.toLocaleString()}
+                                {formatCurrency(selectedStock.price)}
                               </span>
                               <span className={cn(
                                 "text-xs font-black italic font-mono px-1.5 py-0.5 rounded",
@@ -5918,6 +6008,22 @@ export default function App() {
 
                         {/* Main Candlestick + MA Lines Chart */}
                         <div className="bg-slate-950/80 rounded-xl border border-white/5 p-1.5 relative shadow-inner w-full" style={{ height: 175 }}>
+                          {/* Chart Exchange Rate Overlay */}
+                          <div className="absolute top-3 left-4 z-20 flex flex-col items-start pointer-events-none select-none">
+                            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/10">
+                              <USAFlag />
+                              <span className="text-[10px] font-mono font-black text-white/40 tracking-widest uppercase">FX Context</span>
+                              <div className="h-2.5 w-px bg-white/10 mx-0.5" />
+                              <span className={cn(
+                                "text-[10px] font-mono font-black",
+                                exchangeRateTrend === 'UP' ? "text-sleek-red" : "text-sleek-green"
+                              )}>
+                                ₩{exchangeRate.toLocaleString()}
+                              </span>
+                              {exchangeRateTrend === 'UP' ? <TrendingUp className="w-2.5 h-2.5 text-sleek-red" /> : <TrendingDown className="w-2.5 h-2.5 text-sleek-green" />}
+                            </div>
+                          </div>
+
                           {candleData && candleData.length > 0 ? (
                             <ResponsiveContainer width="100%" height="100%">
                               <ComposedChart data={candleData} margin={{ top: 15, right: 45, left: 0, bottom: 0 }}>
@@ -6127,7 +6233,7 @@ export default function App() {
                                   "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
                                   isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-300"
                                 )}>
-                                  ₩{lvlPrice.toLocaleString()}
+                                  {formatCurrency(lvlPrice)}
                                 </span>
                                 <span className="w-10 shrink-0 text-right text-rose-200/60 font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
                               </div>
@@ -6164,8 +6270,8 @@ export default function App() {
 
                         <div className="space-y-1.5 font-mono text-xs">
                           <div className="flex justify-between text-[11px] text-sleek-text-secondary">
-                            <span>하한 ₩{gapBuyPrice > 0 ? gapBuyPrice.toLocaleString() : '미설정'}</span>
-                            <span>상한 ₩{gapSellPrice > 0 ? gapSellPrice.toLocaleString() : '미설정'}</span>
+                            <span>하한 {gapBuyPrice > 0 ? formatCurrency(gapBuyPrice) : '미설정'}</span>
+                            <span>상한 {gapSellPrice > 0 ? formatCurrency(gapSellPrice) : '미설정'}</span>
                           </div>
 
                           {/* Range Progress Bar */}
@@ -6532,11 +6638,11 @@ export default function App() {
                           <div className="grid grid-cols-2 gap-2 bg-black/50 p-2.5 rounded-xl border border-white/5 text-[11px] tabular-nums">
                             <div>
                               <span className="text-sleek-text-secondary text-[10px] block font-bold">진입 예상가 ({orderQty}주)</span>
-                              <span className="text-amber-300 font-extrabold text-xs block mt-0.5">₩{orderPrice.toLocaleString()}</span>
+                              <span className="text-amber-300 font-extrabold text-xs block mt-0.5">{formatCurrency(orderPrice)}</span>
                             </div>
                             <div className="text-right">
                               <span className="text-sleek-text-secondary text-[10px] block font-bold">목표가 (+{scalpingTargetProfit}%)</span>
-                              <span className="text-rose-400/90 font-extrabold text-xs block mt-0.5">₩{targetSellPrice.toLocaleString()}</span>
+                              <span className="text-rose-400/90 font-extrabold text-xs block mt-0.5">{formatCurrency(targetSellPrice)}</span>
                             </div>
                           </div>
 
@@ -6601,7 +6707,7 @@ export default function App() {
                                     <div className="text-right">
                                       <span className="text-gray-400 block">{isBuy ? `목표가 (+${scalpingTargetProfit}%)` : "사유"}</span>
                                       <span className={cn("font-bold", isBuy ? "text-rose-400" : "text-emerald-400")}>
-                                        {isBuy && targetPrice > 0 ? `₩${targetPrice.toLocaleString()}` : log.reason}
+                                        {isBuy && targetPrice > 0 ? formatCurrency(targetPrice) : log.reason}
                                       </span>
                                     </div>
                                   </div>
@@ -6633,8 +6739,8 @@ export default function App() {
 
                 <div className="space-y-2">
                   <div className="flex justify-between text-xs text-sleek-text-secondary font-mono">
-                    <span>하한가 ₩{gapBuyPrice.toLocaleString()}</span>
-                    <span>상한가 ₩{gapSellPrice.toLocaleString()}</span>
+                    <span>하한가 {formatCurrency(gapBuyPrice)}</span>
+                    <span>상한가 {formatCurrency(gapSellPrice)}</span>
                   </div>
 
                   {/* Range Progress Bar */}
@@ -6692,7 +6798,7 @@ export default function App() {
           {stocks.map((s, idx) => (
             <div key={`${s.symbol}-${idx}`} className="flex gap-2">
               <span className="text-white font-bold">{s.name} ({s.symbol})</span>
-              <span className="text-gray-500">₩{s.price?.toLocaleString()}</span>
+              <span className="text-gray-500">{formatCurrency(s.price || 0)}</span>
               <span className={s.change >= 0 ? "text-up" : "text-down"}>{s.changePercent}%</span>
             </div>
           ))}
@@ -6732,12 +6838,12 @@ export default function App() {
                 <div className="bg-sleek-bg/80 border border-sleek-border rounded-2xl p-4 space-y-2">
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-black text-white">{selectedStock.name} ({selectedStock.symbol})</span>
-                    <span className="text-xs font-mono font-bold text-sleek-blue">현재가: ₩{selectedStock.price?.toLocaleString()}</span>
+                    <span className="text-xs font-mono font-bold text-sleek-blue">현재가: {formatCurrency(selectedStock.price || 0)}</span>
                   </div>
                   <div className="flex justify-between items-center text-xs text-sleek-text-secondary pt-2 border-t border-white/5">
-                    <span>평단가: <strong className="text-amber-300 font-mono">₩{Math.round(avgPrices[selectedStock.symbol] || selectedStock.price || 0).toLocaleString()}</strong></span>
+                    <span>평단가: <strong className="text-amber-300 font-mono">{formatCurrency(Math.round(avgPrices[selectedStock.symbol] || selectedStock.price || 0))}</strong></span>
                     <span>보유수량: <strong className="text-white font-mono">{holdings[selectedStock.symbol] || 0} 주</strong></span>
-                    <span>평가금액: <strong className="text-white font-mono">₩{Math.round((holdings[selectedStock.symbol] || 0) * (selectedStock.price || 0)).toLocaleString()}</strong></span>
+                    <span>평가금액: <strong className="text-white font-mono">{formatCurrency(Math.round((holdings[selectedStock.symbol] || 0) * (selectedStock.price || 0)))}</strong></span>
                   </div>
                 </div>
               ) : (
@@ -6751,7 +6857,7 @@ export default function App() {
                 {/* Target Sell Price Input */}
                 <div className="space-y-2">
                   <div className="flex justify-between items-center text-xs font-bold text-sleek-text-secondary">
-                    <span>매도 희망 단가 (원하는 금액)</span>
+                    <span>매도 희망 단가 ({marketType === 'US' ? 'USD' : '원'})</span>
                     {selectedStock && manualSellPrice > 0 && (
                       <span className={cn(
                         "font-mono text-[11px]",
@@ -6766,10 +6872,10 @@ export default function App() {
                       type="number"
                       value={manualSellPrice || ''}
                       onChange={(e) => setManualSellPrice(Number(e.target.value))}
-                      placeholder="희망 매도가 입력 (원)"
+                      placeholder={`희망 매도가 입력 (${marketType === 'US' ? '$' : '원'})`}
                       className="w-full bg-sleek-bg border border-sleek-border rounded-2xl py-3 px-4 text-sm font-mono font-bold text-white focus:border-rose-500 outline-none transition-all"
                     />
-                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-sleek-text-secondary">KRW</span>
+                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-sleek-text-secondary">{marketType === 'US' ? 'USD' : 'KRW'}</span>
                   </div>
 
                   {/* Quick Price Adjust Buttons */}
@@ -6779,7 +6885,7 @@ export default function App() {
                         onClick={() => setManualSellPrice(selectedStock.price)}
                         className="px-2.5 py-1 bg-white/5 hover:bg-white/10 rounded-xl text-[10px] font-bold text-sleek-text-secondary hover:text-white transition-all border border-white/5"
                       >
-                        현재가 (₩{selectedStock.price.toLocaleString()})
+                        현재가 ({formatCurrency(selectedStock.price)})
                       </button>
                       <button
                         onClick={() => setManualSellPrice(Math.round(selectedStock.price * 1.005))}
@@ -6851,7 +6957,7 @@ export default function App() {
                   <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 flex justify-between items-center">
                     <span className="text-xs text-rose-300 font-bold">총 매도 예상 금액</span>
                     <span className="text-lg font-black font-mono text-rose-400">
-                      ₩{Math.round(manualSellPrice * manualSellQty).toLocaleString()}
+                      {formatCurrency(Math.round(manualSellPrice * manualSellQty))}
                     </span>
                   </div>
                 )}
@@ -6925,14 +7031,14 @@ export default function App() {
                         <Calculator className="w-4 h-4 text-sleek-blue" />
                       </div>
                       <div className="text-3xl md:text-4xl font-black text-white tracking-tight">
-                        ₩{assetAnalysis.totalCalculatedAsset.toLocaleString()}
+                        {formatCurrency(assetAnalysis.totalCalculatedAsset)}
                       </div>
                     </div>
                     
                     <div className="bg-white/5 border border-white/10 rounded-xl p-3.5 flex items-center gap-5 shrink-0">
                       <div>
                         <div className="text-xs text-slate-400 font-bold">투자 원금</div>
-                        <div className="text-sm md:text-base font-mono font-extrabold text-white">₩{assetAnalysis.principal.toLocaleString()}</div>
+                        <div className="text-sm md:text-base font-mono font-extrabold text-white">{formatCurrency(assetAnalysis.principal)}</div>
                       </div>
                       <div className="h-8 w-px bg-white/10" />
                       <div>
@@ -6942,7 +7048,7 @@ export default function App() {
                           assetAnalysis.totalPnL >= 0 ? "text-rose-400" : "text-sky-400"
                         )}>
                           {assetAnalysis.totalPnL >= 0 ? <TrendingUp className="w-4 h-4 text-rose-400" /> : <TrendingDown className="w-4 h-4 text-sky-400" />}
-                          <span>{assetAnalysis.totalPnL >= 0 ? '+' : ''}₩{Math.round(assetAnalysis.totalPnL).toLocaleString()}</span>
+                          <span>{assetAnalysis.totalPnL >= 0 ? '+' : ''}{formatCurrency(Math.round(assetAnalysis.totalPnL))}</span>
                           <span className="text-xs font-bold">({assetAnalysis.totalPnLPercent >= 0 ? '+' : ''}{assetAnalysis.totalPnLPercent.toFixed(2)}%)</span>
                         </div>
                       </div>
@@ -6984,7 +7090,7 @@ export default function App() {
                       <span className="text-sleek-blue font-mono font-bold text-xs">{assetAnalysis.cashShare.toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
-                      ₩{assetAnalysis.cashBalance.toLocaleString()}
+                      {formatCurrency(assetAnalysis.cashBalance)}
                     </div>
                     <p className="text-xs text-slate-400">즉시 주문에 사용 가능한 예수금</p>
                   </div>
@@ -6996,7 +7102,7 @@ export default function App() {
                       <span className="text-emerald-400 font-mono font-bold text-xs">{assetAnalysis.stockShare.toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
-                      ₩{Math.round(assetAnalysis.stockValue).toLocaleString()}
+                      {formatCurrency(Math.round(assetAnalysis.stockValue))}
                     </div>
                     <p className="text-xs text-slate-400">현재 시장가 × 보유 주식 수의 합산</p>
                   </div>
@@ -7008,7 +7114,7 @@ export default function App() {
                       <span className="text-amber-400 font-mono font-bold text-xs">{assetAnalysis.pendingShare.toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
-                      ₩{Math.round(assetAnalysis.pendingReserve).toLocaleString()}
+                      {formatCurrency(Math.round(assetAnalysis.pendingReserve))}
                     </div>
                     <p className="text-xs text-slate-400">모의/지정가 매수 대기 중 잠긴 예수금</p>
                   </div>
@@ -7024,7 +7130,7 @@ export default function App() {
                     총 자산 = [ 주문가능자산 ] + ∑( 보유 수량 × 실시간 현재가 )
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
-                    실시간 현재가 변화에 따라 보유 주식 평가액이 실시간 반영되며, 평단가는 내림(Math.floor) 기준 및 해외 주식의 경우 현재 환율(₩{exchangeRate.toLocaleString()}/$)로 원화 변환되어 계산됩니다.
+                    실시간 현재가 변화에 따라 보유 주식 평가액이 실시간 반영되며, 평단가는 내림(Math.floor) 기준 및 해외 주식의 경우 현재 환율({formatCurrency(exchangeRate, true)}/$)로 원화 변환되어 계산됩니다.
                   </p>
                 </div>
 
@@ -7037,14 +7143,14 @@ export default function App() {
                     </h4>
                     {assetAnalysis.stockList.length > 0 && (
                       <span className="text-xs text-slate-300 font-mono font-bold">
-                        총 매수가: ₩{Math.round(assetAnalysis.stockInvested).toLocaleString()}
+                        총 매수가: {formatCurrency(Math.round(assetAnalysis.stockInvested))}
                       </span>
                     )}
                   </div>
 
                   {assetAnalysis.stockList.length === 0 ? (
                     <div className="bg-white/5 border border-white/5 rounded-2xl p-6 text-center text-slate-400 text-xs md:text-sm">
-                      현재 보유 중인 주식이 없습니다. 주문가능자산(₩{Math.floor(balance).toLocaleString()})이 총 자산으로 평가됩니다.
+                      현재 보유 중인 주식이 없습니다. 주문가능자산({formatCurrency(Math.floor(balance))})이 총 자산으로 평가됩니다.
                     </div>
                   ) : (
                     <div className="space-y-2.5 max-h-[260px] overflow-y-auto custom-scrollbar pr-1">
@@ -7081,7 +7187,7 @@ export default function App() {
                                 ? "text-rose-400 bg-rose-500/10 border-rose-500/30" 
                                 : "text-sky-400 bg-sky-500/10 border-sky-500/30"
                             )}>
-                              {item.pnlAmount >= 0 ? '+' : ''}{Math.round(item.pnlAmount).toLocaleString()}원 ({item.pnlPercent >= 0 ? '+' : ''}{item.pnlPercent.toFixed(2)}%)
+                              {item.pnlAmount >= 0 ? '+' : ''}{formatCurrency(Math.round(item.pnlAmount))} ({item.pnlPercent >= 0 ? '+' : ''}{item.pnlPercent.toFixed(2)}%)
                             </div>
                           </div>
 
@@ -7092,15 +7198,15 @@ export default function App() {
                             </div>
                             <div>
                               <span>매수평단: </span>
-                              <strong className="text-amber-300 font-bold">₩{Math.floor(item.avgPrice).toLocaleString()}</strong>
+                              <strong className="text-amber-300 font-bold">{formatCurrency(Math.floor(item.avgPrice))}</strong>
                             </div>
                             <div>
                               <span>실시간현재가: </span>
-                              <strong className="text-white font-bold">₩{Math.round(item.currentPrice).toLocaleString()}</strong>
+                              <strong className="text-white font-bold">{formatCurrency(Math.round(item.currentPrice))}</strong>
                             </div>
                             <div>
                               <span>현재평가금: </span>
-                              <strong className="text-sleek-blue font-black">₩{Math.round(item.evaluatedAmount).toLocaleString()}</strong>
+                              <strong className="text-sleek-blue font-black">{formatCurrency(Math.round(item.evaluatedAmount))}</strong>
                             </div>
                           </div>
                         </div>
