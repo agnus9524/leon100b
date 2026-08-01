@@ -4927,6 +4927,11 @@ export default function App() {
                   type="text" 
                   value={searchSymbol}
                   onChange={(e) => setSearchSymbol(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleAddStock();
+                    }
+                  }}
                   className="w-full bg-sleek-card/30 border border-sleek-border rounded-xl py-3 pl-10 pr-4 text-xs focus:border-sleek-blue outline-none transition-all" 
                   placeholder="종목코드 또는 이름 입력"
                 />
@@ -5254,9 +5259,11 @@ export default function App() {
                   ))}
                 </select>
 
-                <div className="flex items-center justify-between pt-1 border-t border-white/5">
-                  <span className="text-[10px] font-black text-sleek-text-secondary uppercase">목표 익절 / 손절</span>
-                  <span className="text-xs font-bold text-emerald-400 font-mono">+{scalpingTargetProfit}% / {scalpingStopLoss}%</span>
+                <div className="pt-1 border-t border-white/5">
+                  <div className="text-[10px] font-black uppercase leading-tight space-y-0.5">
+                    <div className="text-emerald-400">목표 익절 +{scalpingTargetProfit}%</div>
+                    <div className="text-rose-400">손절 {scalpingStopLoss}%</div>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-1">
                   <select 
@@ -5344,9 +5351,9 @@ export default function App() {
                         "py-1 rounded text-[10px] font-bold border text-center transition-all cursor-pointer",
                         entryPriceMode === 'BID2' ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" : "bg-black/20 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
-                      title="현재가 대비 -2호가 적정 눌림목 진입 (체결률+안정성 최적)"
+                      title="기본 매수 1단계 진입"
                     >
-                      매수2단계★
+                      매수1단계★
                     </button>
                     <button
                       type="button"
@@ -5355,9 +5362,9 @@ export default function App() {
                         "py-1 rounded text-[10px] font-bold border text-center transition-all cursor-pointer",
                         entryPriceMode === 'BID4' ? "bg-amber-500/20 border-amber-500/40 text-amber-300" : "bg-black/20 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
-                      title="현재가 대비 -4호가 깊은 눌림목 진입"
+                      title="매수 2단계 진입"
                     >
-                      매수4단계
+                      매수2단계
                     </button>
                     <button
                       type="button"
@@ -5398,30 +5405,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 5. Max Slots & Speed */}
+              {/* 5. Speed (Max Slots hidden, default 3) */}
               <div className="bg-white/5 p-2.5 rounded-2xl border border-white/5 flex flex-col justify-between space-y-1.5">
-                <div>
-                  <span className="text-[10px] font-bold text-sleek-text-secondary uppercase block mb-1">최대 슬롯 개수</span>
-                  <div className="grid grid-cols-4 gap-1">
-                    {[3, 5, 10, 15].map(sVal => (
-                      <button
-                        key={sVal}
-                        type="button"
-                        disabled={isGapBotActive}
-                        onClick={() => setMaxSlots(sVal)}
-                        className={cn(
-                          "py-1 rounded text-[10px] font-mono transition-all text-center",
-                          maxSlots === sVal 
-                            ? "bg-sleek-blue/30 border border-sleek-blue/50 text-sleek-blue font-bold"
-                            : "bg-white/5 text-sleek-text-secondary hover:bg-white/10"
-                        )}
-                      >
-                        {sVal}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
                 <div>
                   <span className="text-[10px] font-bold text-sleek-text-secondary uppercase block mb-1">실행 속도</span>
                   <div className="grid grid-cols-3 gap-1">

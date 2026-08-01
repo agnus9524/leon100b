@@ -36,12 +36,16 @@ async function fetchKrxStocks() {
     for (let i = 1; i < trs.length; i++) {
       const tr = trs[i];
       const tds = tr.match(/<td[\s\S]*?>([\s\S]*?)<\/td>/gi) || [];
-      if (tds.length >= 3) {
+      if (tds.length >= 2) {
         const name = tds[0].replace(/<[^>]*>/g, '').trim();
-        let code = tds[2].replace(/<[^>]*>/g, '').trim();
-        code = code.replace(/[^0-9]/g, '');
-        if (code.length === 6) {
-          stocks.push({ symbol: code, name, market: 'KR' });
+        // Check both tds[1] and tds[2] as columns can vary by KIND export version
+        let code1 = tds[1] ? tds[1].replace(/<[^>]*>/g, '').trim().replace(/[^0-9]/g, '') : '';
+        let code2 = (tds.length >= 3) ? tds[2].replace(/<[^>]*>/g, '').trim().replace(/[^0-9]/g, '') : '';
+        
+        const finalCode = code1.length === 6 ? code1 : (code2.length === 6 ? code2 : '');
+        
+        if (finalCode && name) {
+          stocks.push({ symbol: finalCode, name, market: 'KR' });
         }
       }
     }
@@ -429,6 +433,28 @@ async function startServer() {
         let matched = krxStocksCache.filter(stock => {
           return stock.name.toLowerCase().includes(lowerKeyword) || stock.symbol.includes(cleanKeyword);
         });
+
+        // Fallback/Enhance with Yahoo Finance if results are few or searching for ETFs/ETNs
+        if (matched.length < 8) {
+          try {
+            const yfRes = await axios.get('https://query1.finance.yahoo.com/v1/finance/search', {
+              params: { q: cleanKeyword + '.KS' }, 
+              headers: { 'User-Agent': 'Mozilla/5.0' },
+              timeout: 1500
+            });
+            if (yfRes.data && Array.isArray(yfRes.data.quotes)) {
+              yfRes.data.quotes.forEach((q: any) => {
+                if (q.quoteType === 'EQUITY' || q.quoteType === 'ETF') {
+                  let sym = q.symbol || '';
+                  if (sym.includes('.')) sym = sym.split('.')[0];
+                  if (/^\d{6}$/.test(sym) && !matched.some(m => m.symbol === sym)) {
+                    matched.push({ symbol: sym, name: q.longname || q.shortname || sym, market: 'KR' as const });
+                  }
+                }
+              });
+            }
+          } catch (e) {}
+        }
 
         // Smart sorting: exact matches and items starting with keyword first
         matched.sort((a, b) => {

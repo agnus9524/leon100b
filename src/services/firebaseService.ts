@@ -1,9 +1,10 @@
 import { initializeApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInAnonymously } from 'firebase/auth';
 import { 
-  getFirestore, 
+  initializeFirestore,
   doc, 
   getDoc, 
+  getDocFromServer,
   collection, 
   getDocs, 
   updateDoc, 
@@ -18,10 +19,78 @@ import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
+
+// Use initializeFirestore with long polling to bypass potential gRPC-web issues in restricted environments
+export const db = initializeFirestore(app, {
+  experimentalForceLongPolling: true,
+}, firebaseConfig.firestoreDatabaseId);
+
 export const googleProvider = new GoogleAuthProvider();
 
+// Skill requirement: Validate connection to Firestore on boot
+async function testConnection() {
+  try {
+    const testDoc = doc(db, '_internal_', 'connection_test');
+    await getDocFromServer(testDoc);
+    console.log("Firestore connection verified successfully.");
+  } catch (error: any) {
+    if (error?.message?.includes('the client is offline') || error?.code === 'unavailable') {
+      console.warn("Firestore is currently unavailable or offline. This may be transient.");
+    }
+  }
+}
+testConnection();
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+    tenantId?: string | null;
+    providerInfo?: {
+      providerId?: string | null;
+      email?: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData?.map(provider => ({
+        providerId: provider.providerId,
+        email: provider.email,
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  // We throw a generic error message for the UI but log the full JSON for the system
+  throw new Error(error instanceof Error ? error.message : String(error));
+}
+
 export const checkLicense = async (userId: string) => {
+  const path = `licenses/${userId}`;
   try {
     const docRef = doc(db, 'licenses', userId);
     const docSnap = await getDoc(docRef);
@@ -38,13 +107,14 @@ export const checkLicense = async (userId: string) => {
     }
     return { isValid: false, data: null };
   } catch (error) {
-    console.error("License check error:", error);
+    handleFirestoreError(error, OperationType.GET, path);
     return { isValid: false, data: null };
   }
 };
 
 // Admin Functions
 export const getAllLicenses = async () => {
+  const path = 'licenses';
   try {
     const q = query(collection(db, 'licenses'), orderBy('updatedAt', 'desc'));
     const querySnapshot = await getDocs(q);
@@ -53,28 +123,19 @@ export const getAllLicenses = async () => {
       ...doc.data()
     }));
   } catch (error) {
-    console.error("Error fetching all licenses:", error);
-    // Fallback if index isn't ready or other error
-    try {
-      const querySnapshot = await getDocs(collection(db, 'licenses'));
-      return querySnapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      }));
-    } catch (innerError) {
-      console.error("Secondary error fetching licenses:", innerError);
-      return [];
-    }
+    handleFirestoreError(error, OperationType.LIST, path);
+    return [];
   }
 };
 
 export const updateLicense = async (userId: string, data: any) => {
+  const path = `licenses/${userId}`;
   try {
     const docRef = doc(db, 'licenses', userId);
     await setDoc(docRef, { ...data, updatedAt: serverTimestamp() }, { merge: true });
     return true;
   } catch (error) {
-    console.error("Error updating license:", error);
+    handleFirestoreError(error, OperationType.WRITE, path);
     return false;
   }
 };
@@ -85,6 +146,7 @@ export const updateLicense = async (userId: string, data: any) => {
  * Admin: Generate a random auth key
  */
 export const generateAuthKey = async (durationDays: number = 30) => {
+  const path = 'authKeys';
   try {
     const keyText = Array.from({ length: 4 }, () => 
       Math.random().toString(36).substring(2, 6).toUpperCase()
@@ -100,7 +162,7 @@ export const generateAuthKey = async (durationDays: number = 30) => {
     
     return keyText;
   } catch (error) {
-    console.error("Error generating auth key:", error);
+    handleFirestoreError(error, OperationType.WRITE, path);
     throw error;
   }
 };
@@ -190,6 +252,7 @@ export const activateLicenseWithKey = async (userId: string, keyText: string) =>
  * Admin: Get all auth keys
  */
 export const getAllAuthKeys = async () => {
+  const path = 'authKeys';
   try {
     const q = query(collection(db, 'authKeys'), orderBy('createdAt', 'desc'));
     const querySnapshot = await getDocs(q);
@@ -198,23 +261,25 @@ export const getAllAuthKeys = async () => {
       ...doc.data()
     }));
   } catch (error) {
-    console.error("Error fetching all auth keys:", error);
+    handleFirestoreError(error, OperationType.LIST, path);
     return [];
   }
 };
 
 export const saveUserKISConfig = async (userId: string, config: any) => {
+  const path = `userSettings/${userId}`;
   try {
     const docRef = doc(db, 'userSettings', userId);
     await setDoc(docRef, { kisConfig: config, updatedAt: serverTimestamp() }, { merge: true });
     return true;
   } catch (error) {
-    console.error("Error saving KIS config:", error);
+    handleFirestoreError(error, OperationType.WRITE, path);
     return false;
   }
 };
 
 export const getUserSettings = async (userId: string) => {
+  const path = `userSettings/${userId}`;
   try {
     const docRef = doc(db, 'userSettings', userId);
     const docSnap = await getDoc(docRef);
@@ -223,29 +288,31 @@ export const getUserSettings = async (userId: string) => {
     }
     return null;
   } catch (error) {
-    console.error("Error getting user settings:", error);
+    handleFirestoreError(error, OperationType.GET, path);
     return null;
   }
 };
 
 export const saveUserHoldings = async (userId: string, holdings: any) => {
+  const path = `userSettings/${userId}`;
   try {
     const docRef = doc(db, 'userSettings', userId);
     await setDoc(docRef, { holdings, updatedAt: serverTimestamp() }, { merge: true });
     return true;
   } catch (error) {
-    console.error("Error saving holdings:", error);
+    handleFirestoreError(error, OperationType.WRITE, path);
     return false;
   }
 };
 
 export const saveUserKISToken = async (userId: string, token: string, expiresAt: number) => {
+  const path = `userSettings/${userId}`;
   try {
     const docRef = doc(db, 'userSettings', userId);
     await setDoc(docRef, { kisTokenReal: { token, expiresAt }, updatedAt: serverTimestamp() }, { merge: true });
     return true;
   } catch (error) {
-    console.error("Error saving KIS token:", error);
+    handleFirestoreError(error, OperationType.WRITE, path);
     return false;
   }
 };
