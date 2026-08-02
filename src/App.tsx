@@ -1021,7 +1021,7 @@ export default function App() {
     return Math.min(100, Math.max(0, pct));
   }, [gapBuyPrice, gapSellPrice, selectedStock?.price]);
   const totalValue = useMemo(() => {
-    // Total Asset Valuation = Cash Balance + Current Market Value of Stock Holdings
+    // Total Asset Valuation = Cash Balance + Current Market Value of Stock Holdings + Pending Order Reserves
     let stockValue = 0;
     Object.entries(holdings).forEach(([sym, rawQty]) => {
       const qty = Number(rawQty);
@@ -1038,8 +1038,16 @@ export default function App() {
       stockValue += qty * priceInKRW;
     });
 
-    return Math.floor(balance + stockValue);
-  }, [balance, holdings, stocks, avgPrices, exchangeRate]);
+    // Add back the money reserved for pending simulated buy orders
+    const pendingReserve = pendingBuyOrders.reduce((acc, order) => {
+      if (!order.isSimulated) return acc;
+      const isOrderUS = /^[A-Z]/.test(order.symbol);
+      const priceKRW = isOrderUS ? order.orderPrice * exchangeRate : order.orderPrice;
+      return acc + order.quantity * priceKRW;
+    }, 0);
+
+    return Math.floor(balance + stockValue + pendingReserve);
+  }, [balance, holdings, stocks, avgPrices, exchangeRate, pendingBuyOrders]);
 
   const convertedValue = displayCurrency === 'USD' ? Math.round(totalValue / exchangeRate) : Math.round(totalValue);
   const convertedBalance = displayCurrency === 'USD' ? Math.round(balance / exchangeRate) : Math.round(balance);
@@ -1149,7 +1157,7 @@ export default function App() {
       stockValue: totalStockValue,
       stockInvested: totalStockInvested,
       pendingReserve: conv(pendingOrderReserve),
-      totalCalculatedAsset: conv(balance) + totalStockValue, // Only reflecting currently selected market's stocks + cash
+      totalCalculatedAsset: currentViewTotal, // Reflecting total valuation including reserves
       principal: conv(principal),
       totalPnL: totalStockValue - totalStockInvested,
       totalPnLPercent: totalStockInvested > 0 ? ((totalStockValue - totalStockInvested) / totalStockInvested) * 100 : 0,
@@ -6447,7 +6455,7 @@ export default function App() {
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
               <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">주문가능자산 (44431721-01)</span>
+                <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">예수금 (44431721-01)</span>
                 <span className="text-sm font-black text-white italic mt-0.5 block truncate">{formatCurrency(balance)}</span>
               </div>
               
@@ -7045,7 +7053,7 @@ export default function App() {
                       </span>
                     </h3>
                     <p className="text-xs md:text-sm text-slate-300 mt-1">
-                      주문가능자산과 실시간 주식 평가금액이 반영된 세부 내역 및 분석 리포트입니다.
+                      예수금과 실시간 주식 평가금액이 반영된 세부 내역 및 분석 리포트입니다.
                     </p>
                   </div>
                 </div>
@@ -7123,7 +7131,7 @@ export default function App() {
                   {/* Card 1: Cash */}
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-1.5">
                     <div className="text-xs text-slate-300 font-bold flex items-center justify-between">
-                      <span className="flex items-center gap-1.5"><Wallet className="w-4 h-4 text-sleek-blue" /> 주문가능자산</span>
+                      <span className="flex items-center gap-1.5"><Wallet className="w-4 h-4 text-sleek-blue" /> 예수금</span>
                       <span className="text-sleek-blue font-mono font-bold text-xs">{assetAnalysis.cashShare.toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
@@ -7164,7 +7172,7 @@ export default function App() {
                     <span>총 자산 평가액 산출 공식 (Calculation Logic)</span>
                   </div>
                   <div className="bg-black/50 p-3.5 rounded-xl font-mono text-xs md:text-sm text-amber-300 font-extrabold border border-white/10 overflow-x-auto">
-                    총 자산 = [ 주문가능자산 ] + ∑( 보유 수량 × 실시간 현재가 )
+                    총 자산 = [ 예수금 ] + [ 미체결 예약금 ] + ∑( 보유 수량 × 실시간 현재가 )
                   </div>
                   <p className="text-xs text-slate-300 leading-relaxed">
                     실시간 현재가 변화에 따라 보유 주식 평가액이 실시간 반영되며, 평단가는 내림(Math.floor) 기준 및 해외 주식의 경우 현재 환율({formatCurrency(exchangeRate, true)}/$)로 원화 변환되어 계산됩니다.
@@ -7187,7 +7195,7 @@ export default function App() {
 
                   {assetAnalysis.stockList.length === 0 ? (
                     <div className="bg-white/5 border border-white/5 rounded-2xl p-6 text-center text-slate-400 text-xs md:text-sm">
-                      현재 보유 중인 주식이 없습니다. 주문가능자산({formatCurrency(Math.floor(balance))})이 총 자산으로 평가됩니다.
+                      현재 보유 중인 주식이 없습니다. 예수금({formatCurrency(Math.floor(balance))})이 총 자산으로 평가됩니다.
                     </div>
                   ) : (
                     <div className="space-y-2.5 max-h-[260px] overflow-y-auto custom-scrollbar pr-1">
@@ -7259,7 +7267,7 @@ export default function App() {
                     <div className="font-bold text-white">포트폴리오 평가 총평</div>
                     <p className="text-slate-300 text-xs md:text-sm leading-relaxed">
                       {assetAnalysis.cashShare > 70 
-                        ? `주문가능자산 비중이 ${assetAnalysis.cashShare.toFixed(1)}%로 안정적인 현금 유동성을 확보하고 있어, 추가 매수 타점 포착 시 즉각적인 대응이 가능합니다.`
+                        ? `예수금 비중이 ${assetAnalysis.cashShare.toFixed(1)}%로 안정적인 현금 유동성을 확보하고 있어, 추가 매수 타점 포착 시 즉각적인 대응이 가능합니다.`
                         : assetAnalysis.stockShare > 70
                         ? `주식 보유 비중이 ${assetAnalysis.stockShare.toFixed(1)}%로 주가 상승 시 높은 수익률을 기대할 수 있으나, 시장 변동성에 유의할 필요가 있습니다.`
                         : `현금(${assetAnalysis.cashShare.toFixed(1)}%)과 주식(${assetAnalysis.stockShare.toFixed(1)}%)의 균형 잡힌 포트폴리오로 안정적인 리스크 관리가 이루어지고 있습니다.`}
