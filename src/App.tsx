@@ -406,17 +406,6 @@ const INITIAL_STOCKS_KR: Stock[] = [
     isAI: true
   },
   {
-    symbol: '252670',
-    name: 'KODEX 200선물인버스2X',
-    price: 2150,
-    change: 50,
-    changePercent: 2.38,
-    volume: '28.5M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2100 + Math.random() * 80 })),
-    market: 'KR',
-    isAI: true
-  },
-  {
     symbol: '005930',
     name: '삼성전자',
     price: 77600,
@@ -5932,16 +5921,32 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => {
+                  // Prioritize AI recommended stocks first if not already in tabs
+                  const aiAvailable = aiRecommendations.find(s => 
+                    s.market === marketType && 
+                    !scalperTabs.some(t => t.symbol === s.symbol)
+                  );
+                  
+                  if (aiAvailable) {
+                    openOrSwitchScalperTab(aiAvailable.symbol, aiAvailable.name);
+                    showNotification(`[AI 분석 추천] ${aiAvailable.name} 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
+                    return;
+                  }
+
+                  // Fallback to static list
                   const available = stocks.find(s => !scalperTabs.some(t => t.symbol === s.symbol)) || stocks[0];
                   if (available) {
                     openOrSwitchScalperTab(available.symbol, available.name);
                   }
                 }}
                 className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-sleek-blue/50 text-gray-300 hover:text-white text-xs font-bold font-mono flex items-center justify-center gap-1 transition-all w-full min-h-[34px]"
-                title="새 스캘퍼 종목 탭 추가"
+                title="새 스캘퍼 종목 탭 추가 (AI 추천 우선)"
               >
                 <Plus className="w-3.5 h-3.5 text-sleek-blue" />
-                <span>+ 종목 추가</span>
+                <div className="flex flex-col items-start leading-tight">
+                  <span className="text-[10px]">AI 분석 기반</span>
+                  <span>+ 종목 추가</span>
+                </div>
               </button>
             </div>
 
