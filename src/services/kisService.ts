@@ -10,7 +10,6 @@ interface KISConfig {
   accountNo: string; // 계좌번호 8자리
   accountCode: string; // 상품코드 2자리 (보통 01)
   accountPw: string; // 계좌비밀번호 4자리
-  isRealServer?: boolean;
   isConnected: boolean;
 }
 
@@ -49,7 +48,8 @@ class KISService {
       axios.interceptors.request.use((reqConfig: any) => {
         if (reqConfig.url?.includes('/api/kis') && this.config) {
           reqConfig.headers = reqConfig.headers || {};
-          reqConfig.headers['x-is-real-server'] = this.config.isRealServer === false ? 'false' : 'true';
+          // Default to true (Real Server) as mock investment support is being removed
+          reqConfig.headers['x-is-real-server'] = 'true';
         }
         return reqConfig;
       });
@@ -576,7 +576,7 @@ class KISService {
       'authorization': `Bearer ${token}`,
       'appkey': this.config.appKey,
       'appsecret': this.config.appSecret,
-      'tr-id': this.config.isRealServer === false ? 'VTTC8001R' : 'TTTC8001R',
+      'tr-id': 'TTTC8001R',
       'custtype': 'P',
     };
 

@@ -641,7 +641,6 @@ export default function App() {
     accountNo: '',
     accountCode: '01',
     accountPw: '',
-    isRealServer: true,
     isConnected: false,
     domesticOrderType: '00', // '00' (지정가 - Limit), '01' (시장가 - Market)
     isRealOrderEnabled: true // 실제 주문 전송 여부 (false일 경우 KIS 연동 가상 매매)
@@ -1459,15 +1458,11 @@ export default function App() {
                     accountNo: activeData.accountNo || '',
                     accountCode: activeData.accountCode || '01',
                     accountPw: activeData.accountPw || '',
-                    isRealServer: activeData.isRealServer !== undefined ? activeData.isRealServer : true,
                     isConnected: loadedConfig.isConnected || false,
                     domesticOrderType: activeData.domesticOrderType || '00',
                     isRealOrderEnabled: activeData.isRealOrderEnabled !== undefined ? activeData.isRealOrderEnabled : true
                  };
               } else {
-                 if (finalConfig.isRealServer === undefined) {
-                    finalConfig.isRealServer = true;
-                 }
                  if (finalConfig.isRealOrderEnabled === undefined) {
                     finalConfig.isRealOrderEnabled = true;
                  }
@@ -2318,10 +2313,9 @@ export default function App() {
          return;
       }
 
-      // 3. Integrated Asset Status (Real Only - CTRP6548R)
-      if (kisConfig.isRealServer) {
-        try {
-          const assetStatus = await kisService.getInvestmentAssetStatus();
+      // 3. Integrated Asset Status (CTRP6548R)
+      try {
+        const assetStatus = await kisService.getInvestmentAssetStatus();
           if (assetStatus?.output2) {
             const out2 = assetStatus.output2;
             const dncl_amt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.ord_psbl_cash || 0);
@@ -2339,7 +2333,6 @@ export default function App() {
         } catch (err) {
           console.warn("Asset Status Sync Skip:", err);
         }
-      }
 
       // Final fallback: if total is still 0, check if we have any total eval amount in output2
       // common for some accounts to only populate tot_evlu_amt
@@ -2929,7 +2922,7 @@ export default function App() {
       const priceInKrw = marketType === 'US' ? order.orderPrice * exchangeRate : order.orderPrice;
       const refundAmount = priceInKrw * order.quantity;
       setBalance(prev => prev + refundAmount);
-      addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[모의 매수취소] 수동 취소`);
+      addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[가상 매수취소] 수동 취소`);
     } else {
       try {
         await kisService.reviseDomestic(
@@ -3032,7 +3025,7 @@ export default function App() {
         const priceInKrw = marketType === 'US' ? order.orderPrice * exchangeRate : order.orderPrice;
         const refundAmount = priceInKrw * order.quantity;
         setBalance(prev => prev + refundAmount);
-        addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[모의 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
+        addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[가상 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
       } else {
         try {
           await kisService.reviseDomestic(
@@ -3064,7 +3057,7 @@ export default function App() {
           console.error("Failed to cancel KIS pending sell order:", e);
         }
       } else {
-        addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[모의 주문취소] 봇 종료로 인한 미체결 매도 주문 일괄 취소`);
+        addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[가상 주문취소] 봇 종료로 인한 미체결 매도 주문 일괄 취소`);
       }
     }
 
@@ -3121,9 +3114,9 @@ export default function App() {
             const refundAmount = priceInKrw * (order.quantity || 1);
             setBalance(prev => prev + refundAmount);
             
-            addLog(order.symbol, '매수', orderPrice, order.quantity || 1, `[모의 자동취소] ${cancelReason}`);
-            showNotification(`${currentStock.name} 모의 매수 자동 취소 (${isDropCancel ? '낙폭 과대' : '상승 이탈'})`, "info");
-            setBotStatus(`[모의 취소] ${formatCurrency(orderPrice)} 주문 취소 완료`);
+            addLog(order.symbol, '매수', orderPrice, order.quantity || 1, `[가상 자동취소] ${cancelReason}`);
+            showNotification(`${currentStock.name} 가상 매수 자동 취소 (${isDropCancel ? '낙폭 과대' : '상승 이탈'})`, "info");
+            setBotStatus(`[가상 취소] ${formatCurrency(orderPrice)} 주문 취소 완료`);
           } else {
             // Real KIS order cancel request!
             try {
@@ -3190,9 +3183,9 @@ export default function App() {
             setAvgPrices(prev => ({ ...prev, [order.symbol]: newAvg }));
             if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
             
-            addLog(order.symbol, '매수', orderPrice, order.quantity, `[모의 체결] 주문가 ${formatCurrency(orderPrice)} 체결 완료 (현재가: ${formatCurrency(currentPrice)})`);
-            showNotification(`${currentStock.name} 모의 매수 주문 체결 완료!`, "success");
-            setBotStatus(`[모의 체결] ${formatCurrency(orderPrice)} 완료`);
+            addLog(order.symbol, '매수', orderPrice, order.quantity, `[가상 체결] 주문가 ${formatCurrency(orderPrice)} 체결 완료 (현재가: ${formatCurrency(currentPrice)})`);
+            showNotification(`${currentStock.name} 가상 매수 주문 체결 완료!`, "success");
+            setBotStatus(`[가상 체결] ${formatCurrency(orderPrice)} 완료`);
             
             // Add to gapInventory and update ref
             const newSlotId = order.slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -3388,7 +3381,7 @@ export default function App() {
             setHoldings(newHoldings);
             if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
 
-            addLog(order.symbol, '매도', currentStock.price, order.quantity, `[모의 지정가 매도] 목표가 ${formatCurrency(order.orderPrice)} 도달`);
+            addLog(order.symbol, '매도', currentStock.price, order.quantity, `[가상 지정가 매도] 목표가 ${formatCurrency(order.orderPrice)} 도달`);
             playScalpingSound('SELL');
           } else {
             nextPending.push(order);
@@ -4047,9 +4040,9 @@ export default function App() {
         };
         
         setPendingBuyOrders(prev => [...prev, newPending]);
-        addLog(stock.symbol, '매수', tradePrice, finalAmount, `[모의 주문접수] ${reason}`);
-        showNotification(`${stock.name} 모의 매수 주문 접수 완료 (체결 대기 중...)`, "info");
-        setBotStatus(`[모의 대기] 주문가 ${formatCurrency(tradePrice)} 체결 대기 중...`);
+        addLog(stock.symbol, '매수', tradePrice, finalAmount, `[가상 주문접수] ${reason}`);
+        showNotification(`${stock.name} 가상 매수 주문 접수 완료 (체결 대기 중...)`, "info");
+        setBotStatus(`[가상 대기] 주문가 ${formatCurrency(tradePrice)} 체결 대기 중...`);
         return 0; // Return 0 so it's not added to gapInventory immediately!
       }
 
@@ -4148,8 +4141,8 @@ export default function App() {
               slotId: slotId
             };
             setPendingSellOrders(prev => [...prev, newPendingSell]);
-            addLog(stock.symbol, '매도', tradePrice, sellAmount, `[모의 매도 주문접수] ${reason}`);
-            showNotification(`${stock.name} 모의 매도 주문 접수 완료 (체결 대기 중...)`, "info");
+            addLog(stock.symbol, '매도', tradePrice, sellAmount, `[가상 매도 주문접수] ${reason}`);
+            showNotification(`${stock.name} 가상 매도 주문 접수 완료 (체결 대기 중...)`, "info");
             return 0;
           }
 
@@ -4288,7 +4281,7 @@ export default function App() {
       setBotStatus("계좌 잔고 조회 중...");
       try {
         await kisService.getBalance();
-        showNotification(`성공! ${kisConfig.isRealServer === false ? '모의' : '실전'} 서버 연결에 성공했습니다.`, "success");
+        showNotification("성공! KIS 서버 연결에 성공했습니다.", "success");
       } catch (e: any) {
         // Balance might fail even if token works (e.g. password)
         showNotification(`잔고 조회 실패: ${e.message}`, "error");
@@ -4318,7 +4311,7 @@ export default function App() {
     }
     
     setShowKisModal(false);
-    showNotification(`한국투자증권 ${kisConfig.isRealServer === false ? '모의' : '실전'}계좌가 연결되었습니다.`, "success");
+    showNotification("한국투자증권 계좌가 연결되었습니다.", "success");
     
     // Trigger immediate sync after connection
     setTimeout(() => {
@@ -4327,7 +4320,7 @@ export default function App() {
 
     setTradeLogs(prev => [{
       time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
-      symbol: 'SYSTEM', type: '매수', price: 0, amount: 0, reason: `한국투자증권 ${kisConfig.isRealServer === false ? '모의' : '실전'}계좌가 연결되었습니다. 데이터 동기화를 시작합니다.`
+      symbol: 'SYSTEM', type: '매수', price: 0, amount: 0, reason: "한국투자증권 계좌가 연결되었습니다. 데이터 동기화를 시작합니다."
     } as any, ...prev].slice(0, 50));
   };
 
@@ -4417,34 +4410,7 @@ export default function App() {
               
               <div className="space-y-4">
                 <div>
-                  <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-2 block">투자 유형 (Investment Type)</label>
-                  <div className="grid grid-cols-2 gap-2 bg-black/40 p-1 border border-sleek-border rounded-xl">
-                    <button
-                      type="button"
-                      onClick={() => setKisConfig((prev: any) => ({ ...prev, isRealServer: true }))}
-                      className={`py-2 rounded-lg text-xs font-bold transition-all ${
-                        kisConfig.isRealServer !== false 
-                          ? 'bg-sleek-blue text-white shadow-lg' 
-                          : 'text-sleek-text-secondary hover:text-white'
-                      }`}
-                    >
-                      실전투자 (Real)
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setKisConfig((prev: any) => ({ ...prev, isRealServer: false }))}
-                      className={`py-2 rounded-lg text-xs font-bold transition-all ${
-                        kisConfig.isRealServer === false 
-                          ? 'bg-sleek-blue text-white shadow-lg' 
-                          : 'text-sleek-text-secondary hover:text-white'
-                      }`}
-                    >
-                      모의투자 (Mock)
-                    </button>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">App Key ({kisConfig.isRealServer === false ? '모의' : '실전'})</label>
+                  <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">App Key</label>
                   <input 
                     type="password" 
                     value={kisConfig.appKey}
@@ -4453,11 +4419,11 @@ export default function App() {
                       appKey: e.target.value
                     }))}
                     className="w-full bg-black/40 border border-sleek-border rounded-lg p-3 text-xs focus:border-sleek-blue outline-none" 
-                    placeholder={`한국투자증권 ${kisConfig.isRealServer === false ? '모의' : '실전'} App Key 입력`}
+                    placeholder="한국투자증권 App Key 입력"
                   />
                 </div>
                 <div>
-                  <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">App Secret ({kisConfig.isRealServer === false ? '모의' : '실전'})</label>
+                  <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">App Secret</label>
                   <input 
                     type="password" 
                     value={kisConfig.appSecret}
@@ -4466,7 +4432,7 @@ export default function App() {
                       appSecret: e.target.value
                     }))}
                     className="w-full bg-black/40 border border-sleek-border rounded-lg p-3 text-xs focus:border-sleek-blue outline-none" 
-                    placeholder={`한국투자증권 ${kisConfig.isRealServer === false ? '모의' : '실전'} Secret Key 입력`}
+                    placeholder="한국투자증권 Secret Key 입력"
                   />
                 </div>
                 <div className="flex gap-2">
@@ -4541,7 +4507,7 @@ export default function App() {
                     <div className="max-w-[75%] text-left">
                       <label className="text-xs font-bold text-white block">실제 주문 전송 (Live Ordering)</label>
                       <p className="text-[9px] text-sleek-text-secondary leading-normal mt-1">
-                        활성화 시 KIS 실제/모의 계좌로 즉시 주문을 전송합니다. 비활성화 시 KIS 실시간 시세만 연동하고 가상 잔액(로컬)으로 거래하여 <strong>매수 가능량 0주 문제 및 자산 손실 위험을 방지</strong>합니다.
+                        활성화 시 KIS 계좌로 즉시 주문을 전송합니다. 비활성화 시 KIS 실시간 시세만 연동하고 가상 잔액(로컬)으로 거래하여 <strong>매수 가능량 0주 문제 및 자산 손실 위험을 방지</strong>합니다.
                       </p>
                     </div>
                     <button
@@ -7166,7 +7132,7 @@ export default function App() {
                     <div className="text-lg md:text-xl font-black font-mono text-white">
                       {formatCurrency(Math.round(assetAnalysis.pendingReserve))}
                     </div>
-                    <p className="text-xs text-slate-400">모의/지정가 매수 대기 중 잠긴 예수금</p>
+                    <p className="text-xs text-slate-400">가상/지정가 매수 대기 중 잠긴 예수금</p>
                   </div>
                 </div>
 
