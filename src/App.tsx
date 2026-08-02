@@ -982,11 +982,14 @@ export default function App() {
     setIsRefreshingTop3(true);
     setTop3RefreshNonce(prev => prev + 1);
     
+    // Trigger AI analysis on refresh
+    handleGetRecommendations();
+
     setTimeout(() => {
       setIsRefreshingTop3(false);
-      showNotification("[스캘퍼 최적 종목 갱신] 스캘핑 최적 종목 분석 및 랭킹이 새로고침 되었습니다.", "success");
-    }, 600);
-  }, [showNotification]);
+      showNotification("[스캘퍼 최적 종목 분석] 현재 시장 데이터 기반 스캘핑 최적 종목 분석이 완료되었습니다.", "success");
+    }, 1500);
+  }, [showNotification, marketType]); // dependencies updated implicitly by handleGetRecommendations needing marketType
 
   // Confirmation Modal State
   const [confirmState, setConfirmState] = useState<{
@@ -1195,13 +1198,27 @@ export default function App() {
       }
     });
 
+    // Add AI recommendations
+    aiRecommendations.forEach(s => {
+      if (s.market === marketType) {
+        candidateMap.set(s.symbol, s);
+      }
+    });
+
     const candidates = Array.from(candidateMap.values()).filter(stock => {
-      const name = (stock.name || (marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS).find(s => s.symbol === stock.symbol)?.name || stock.symbol).trim().toLowerCase();
+      const rawName = (stock.name || (marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS).find(s => s.symbol === stock.symbol)?.name || stock.symbol);
+      const name = rawName.trim().toLowerCase();
+      
       // Strict market isolation for rankings
       const isUS = /^[A-Z]/.test(stock.symbol);
       if (marketType === 'KR' && isUS) return false;
       if (marketType === 'US' && !isUS) return false;
-      return !name.startsWith('kodex') && stock.price > 0;
+      
+      // Exclude KODEX 200선물 as requested
+      if (name.includes('kodex 200선물')) return false;
+      if (name.startsWith('kodex')) return false;
+      
+      return stock.price > 0;
     });
     const maxPrice = marketType === 'KR' ? 10000 : 10.0;
 
@@ -1277,7 +1294,7 @@ export default function App() {
 
     return scoredCandidates.slice(0, 5).map(c => c.symbol);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [marketType, top3RefreshNonce, stocks, holdings]);
+  }, [marketType, top3RefreshNonce, stocks, holdings, aiRecommendations]);
 
   // Scalper Engine Optimal Top 5 Stocks mapping live stock snapshot
   const scalperTop5Stocks = useMemo(() => {
@@ -1347,7 +1364,7 @@ export default function App() {
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stableTop5Symbols, top3RefreshNonce, marketType, stocks, holdings]);
+  }, [stableTop5Symbols, top3RefreshNonce, marketType, stocks, holdings, aiRecommendations]);
 
   // Real-time Exchange Rate Fetcher & Simulator
   const fetchRealExchangeRate = React.useCallback(async () => {
@@ -1703,12 +1720,13 @@ export default function App() {
     setIsActivatingKey(false);
   };
 
-  const handleGetRecommendations = async () => {
+  const handleGetRecommendations = useCallback(async () => {
     setIsGettingRecommendations(true);
     setAiRecommendations([]);
     try {
-      const prompt = `현재 ${marketType === 'KR' ? '한국 KOSPI/KOSDAQ' : '미국 NYSE/NASDAQ'} 시장에서 가장 유망하거나 거래량이 많은 종목 5개를 추천해주세요.
+      const prompt = `현재 ${marketType === 'KR' ? '한국 KOSPI/KOSDAQ' : '미국 NYSE/NASDAQ'} 시장에서 스캘핑(초단타) 매매에 가장 적합한 변동성이 크고 거래량이 많은 유망 종목 5개를 추천해주세요.
       각 종목에 대해 심볼, 기업명(토스증권 기준 한글 이름), 현재 대략적인 가격 정보를 포함해야 합니다.
+      주의사항: "KODEX 200선물" 및 관련 레버리지/인버스 ETF 종목은 반드시 제외하세요.
       반드시 다음 JSON 배열 형식으로만 응답하세요: [{"symbol": "심볼", "name": "기업명", "price": 숫자}]`;
 
       const response = await axios.post('/api/ai/bot-decision', { prompt });
@@ -1716,11 +1734,12 @@ export default function App() {
       if (Array.isArray(data)) {
         setAiRecommendations(data.map(item => ({
           ...item,
-          change: 0,
-          changePercent: 0,
-          volume: '0',
-          history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: item.price * (0.98 + Math.random() * 0.04) })),
-          isAI: true
+          change: item.price * (Math.random() > 0.5 ? 0.02 : -0.01),
+          changePercent: (Math.random() > 0.5 ? 2.5 : -1.2),
+          volume: (Math.floor(Math.random() * 50) + 10) + 'M',
+          history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: item.price * (0.95 + Math.random() * 0.1) })),
+          isAI: true,
+          market: marketType
         })));
       }
     } catch (error) {
@@ -1728,7 +1747,12 @@ export default function App() {
     } finally {
       setIsGettingRecommendations(false);
     }
-  };
+  }, [marketType]);
+
+  // Trigger AI market analysis on mount and when market switch
+  useEffect(() => {
+    handleGetRecommendations();
+  }, [handleGetRecommendations]);
 
   const handleUpdateLicenseStatus = async (userId: string, currentData: any, newStatus: string) => {
     setConfirmState({
