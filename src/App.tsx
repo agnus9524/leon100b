@@ -7198,7 +7198,7 @@ export default function App() {
                       현재 보유 중인 주식이 없습니다. 예수금({formatCurrency(Math.floor(balance))})이 총 자산으로 평가됩니다.
                     </div>
                   ) : (
-                    <div className="space-y-2.5 max-h-[260px] overflow-y-auto custom-scrollbar pr-1">
+                    <div className="space-y-2.5">
                       {assetAnalysis.stockList.map((item) => {
                         const isSelected = selectedSymbol === item.symbol;
                         return (
