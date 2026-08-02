@@ -1552,82 +1552,6 @@ export default function App() {
     }
   }, [kisConfig.isConnected, stocks.length, isAppInitialized]);
 
-  // Toggle Market Type
-  useEffect(() => {
-    if (isFirstMarketType.current) {
-      isFirstMarketType.current = false;
-      return;
-    }
-    // Save current stocks to cache for the PREVIOUS market type
-    const prevMarket = marketType === 'US' ? 'KR' : 'US';
-    // Ensure we only save stocks belonging to that market
-    const filteredCurrentStocks = stocksRef.current.filter(s => s.market === prevMarket);
-    setStocksCache(prev => ({ ...prev, [prevMarket]: filteredCurrentStocks }));
-
-    // Load from cache for the NEW market type
-    const cachedStocks = stocksCache[marketType];
-    setStocks(cachedStocks);
-    
-    // Ensure selected symbol is valid for the market
-    let sym = marketType === 'US' ? lastSelectedUS : lastSelectedKR;
-    const isUS = /^[A-Z]/.test(sym);
-    
-    if (marketType === 'US') {
-      if (!isUS || !cachedStocks.some(s => s.symbol === sym)) {
-        sym = cachedStocks.find(s => /^[A-Z]/.test(s.symbol))?.symbol || 'NVDA';
-      }
-    } else {
-      if (isUS || !cachedStocks.some(s => s.symbol === sym)) {
-        sym = cachedStocks.find(s => !/^[A-Z]/.test(s.symbol))?.symbol || '073240';
-      }
-    }
-    
-    setSelectedSymbol(sym);
-    
-    // Update Scalper Tabs if necessary or at least update the active one
-    const stock = cachedStocks.find(s => s.symbol === sym) || cachedStocks[0];
-    if (stock) {
-      const price = stock.price || (marketType === 'KR' ? 1000 : 1);
-      const tickSize = marketType === 'KR' 
-        ? (price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5)
-        : 0.01;
-      
-      // Auto-switch to first valid tab for the market if active one is invalid
-      const validTabs = scalperTabsRef.current.filter(t => {
-        const tIsUS = /^[A-Z]/.test(t.symbol);
-        return marketType === 'US' ? tIsUS : !tIsUS;
-      });
-      
-      if (validTabs.length > 0) {
-        if (!validTabs.some(t => t.id === activeTabId)) {
-          handleSwitchTab(validTabs[0].id);
-        }
-      } else {
-        // Create a default tab for the new market if none exist
-        const newTabs: ScalperTab[] = [{
-          id: stock.symbol,
-          symbol: stock.symbol,
-          name: stock.name || stock.symbol,
-          isBotActive: false,
-          gapBuyPrice: Math.max(marketType === 'KR' ? 10 : 0.01, price - tickSize * 2),
-          gapSellPrice: price + tickSize * 2,
-          tradeQuantity: 1,
-          maxSlots: 3,
-          gapInventory: [],
-          gapTradingProfit: 0,
-          gapTradeCount: 0,
-          lastTradeType: null,
-          scalperMessage: "대기 중...",
-          entryPriceMode: 'BID2',
-          autoCancelThreshold: 0.2,
-          tradeLogs: []
-        }];
-        setScalperTabs(newTabs);
-        setActiveTabId(stock.symbol);
-      }
-    }
-  }, [marketType]);
-
   const handleLogin = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
@@ -1652,6 +1576,80 @@ export default function App() {
       showNotification("로그아웃 되었습니다.", "info");
     } catch (e: any) {
       showNotification("로그아웃 중 오류가 발생했습니다.", "error");
+    }
+  };
+
+  const handleMarketSwitch = (newMarket: 'KR' | 'US') => {
+    if (marketType === newMarket) return;
+
+    // 1. Save current stocks to cache
+    const currentMarket = marketType;
+    const currentStocks = stocksRef.current;
+    setStocksCache(prev => ({
+      ...prev,
+      [currentMarket]: currentStocks.filter(s => s.market === currentMarket)
+    }));
+
+    // 2. Set new market states
+    setMarketType(newMarket);
+    setDisplayCurrency(newMarket === 'KR' ? 'KRW' : 'USD');
+    
+    const cachedStocks = stocksCache[newMarket];
+    setStocks(cachedStocks);
+
+    // 3. Sync symbol
+    let sym = newMarket === 'US' ? lastSelectedUS : lastSelectedKR;
+    const isUS = /^[A-Z]/.test(sym);
+    if (newMarket === 'US') {
+      if (!isUS || !cachedStocks.some(s => s.symbol === sym)) {
+        sym = cachedStocks.find(s => /^[A-Z]/.test(s.symbol))?.symbol || 'NVDA';
+      }
+    } else {
+      if (isUS || !cachedStocks.some(s => s.symbol === sym)) {
+        sym = cachedStocks.find(s => !/^[A-Z]/.test(s.symbol))?.symbol || '073240';
+      }
+    }
+    setSelectedSymbol(sym);
+
+    // 4. Sync Tabs
+    const stock = cachedStocks.find(s => s.symbol === sym) || cachedStocks[0];
+    if (stock) {
+      const price = stock.price || (newMarket === 'KR' ? 1000 : 1);
+      const tickSize = newMarket === 'KR' 
+        ? (price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5)
+        : 0.01;
+      
+      const validTabs = scalperTabs.filter(t => {
+        const tIsUS = /^[A-Z]/.test(t.symbol);
+        return newMarket === 'US' ? tIsUS : !tIsUS;
+      });
+
+      if (validTabs.length > 0) {
+        if (!validTabs.some(t => t.id === activeTabId)) {
+          handleSwitchTab(validTabs[0].id);
+        }
+      } else {
+        const newTabs: ScalperTab[] = [{
+          id: stock.symbol,
+          symbol: stock.symbol,
+          name: stock.name || stock.symbol,
+          isBotActive: false,
+          gapBuyPrice: Math.max(newMarket === 'KR' ? 10 : 0.01, price - tickSize * 2),
+          gapSellPrice: price + tickSize * 2,
+          tradeQuantity: 1,
+          maxSlots: 3,
+          gapInventory: [],
+          gapTradingProfit: 0,
+          gapTradeCount: 0,
+          lastTradeType: null,
+          scalperMessage: "대기 중...",
+          entryPriceMode: 'BID2',
+          autoCancelThreshold: 0.2,
+          tradeLogs: []
+        }];
+        setScalperTabs(newTabs);
+        setActiveTabId(stock.symbol);
+      }
     }
   };
 
@@ -5101,10 +5099,7 @@ export default function App() {
         <div className="flex items-center gap-4">
           <div className="flex bg-black/40 p-1 rounded-xl border border-white/10">
             <button 
-              onClick={() => {
-                setMarketType('KR');
-                setDisplayCurrency('KRW');
-              }}
+              onClick={() => handleMarketSwitch('KR')}
               className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all",
                 marketType === 'KR' 
@@ -5115,10 +5110,7 @@ export default function App() {
               <SouthKoreaFlag /> KR
             </button>
             <button 
-              onClick={() => {
-                setMarketType('US');
-                setDisplayCurrency('USD');
-              }}
+              onClick={() => handleMarketSwitch('US')}
               className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all",
                 marketType === 'US' 
