@@ -5232,30 +5232,6 @@ export default function App() {
             </div>
           </div>
         </div>
-
-        <div className="flex items-center gap-3 ml-4">
-          <span className="text-[9px] font-black text-sleek-text-secondary uppercase">Display Currency</span>
-          <div className="flex bg-white/5 p-0.5 rounded-lg border border-white/5">
-            <button 
-              onClick={() => setDisplayCurrency('KRW')}
-              className={cn(
-                "px-2 py-0.5 rounded text-[9px] font-black transition-all",
-                displayCurrency === 'KRW' ? "bg-white/10 text-white" : "text-sleek-text-secondary hover:text-white"
-              )}
-            >
-              KRW
-            </button>
-            <button 
-              onClick={() => setDisplayCurrency('USD')}
-              className={cn(
-                "px-2 py-0.5 rounded text-[9px] font-black transition-all",
-                displayCurrency === 'USD' ? "bg-white/10 text-white" : "text-sleek-text-secondary hover:text-white"
-              )}
-            >
-              USD
-            </button>
-          </div>
-        </div>
       </div>
 
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-[300px_1fr_350px] gap-px bg-sleek-border overflow-y-auto lg:overflow-hidden">
