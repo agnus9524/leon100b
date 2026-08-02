@@ -5452,8 +5452,9 @@ export default function App() {
               <div className="w-full">
                 <div className="flex items-center justify-between gap-2 mb-1">
                   <div className="flex items-center gap-1.5">
-                    <span className="text-base font-black text-white">{selectedStock?.name || '종목 미선택'}</span>
-                    <span className="text-xs font-mono text-sleek-text-secondary">({selectedStock?.symbol || '-'})</span>
+                    <span className="text-base font-black text-white">
+                      {selectedStock?.name || '종목 미선택'}({selectedStock?.symbol || '-'})
+                    </span>
                   </div>
                   {selectedStock && (
                     <span className={cn(
@@ -6404,7 +6405,7 @@ export default function App() {
                                   >
                                     <div className="flex flex-col">
                                       <div className="flex items-center gap-1">
-                                        <span className="font-bold text-white">{stockDisplayName}</span>
+                                        <span className="font-bold text-white">{stockDisplayName}({sym})</span>
                                         <span className={cn("font-bold text-[10px]", profitRatio >= 0 ? "text-rose-400" : "text-sky-400")}>
                                           {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(1)}%
                                         </span>
@@ -7224,8 +7225,7 @@ export default function App() {
                           >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2.5">
-                              <span className="font-extrabold text-white text-base md:text-lg">{item.name}</span>
-                              <span className="text-xs font-mono text-slate-400">({item.symbol})</span>
+                              <span className="font-extrabold text-white text-base md:text-lg">{item.name}({item.symbol})</span>
                               <span className="text-xs font-mono font-bold px-2 py-0.5 bg-white/10 text-slate-200 rounded-md">
                                 포트폴리오 {item.portfolioShare.toFixed(1)}%
                               </span>
