@@ -144,6 +144,7 @@ interface Stock {
   changePercent: number;
   volume: string;
   history: { time: string; price: number }[];
+  market: 'KR' | 'US';
   isAI?: boolean;
   momentum?: number; // 0-100 score
   sentiment?: number; // -1 to 1 score
@@ -194,6 +195,7 @@ const INITIAL_STOCKS: Stock[] = [
     changePercent: 3.86,
     volume: '28.4M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1.70 + (i / 40) * 0.45 + Math.random() * 0.05 })),
+    market: 'US',
     isAI: true
   },
   {
@@ -204,6 +206,7 @@ const INITIAL_STOCKS: Stock[] = [
     changePercent: 3.64,
     volume: '19.2M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2.30 + (i / 40) * 0.55 + Math.random() * 0.05 })),
+    market: 'US',
     isAI: true
   },
   {
@@ -214,6 +217,7 @@ const INITIAL_STOCKS: Stock[] = [
     changePercent: 5.04,
     volume: '32.1M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2.20 + (i / 40) * 0.72 + Math.random() * 0.05 })),
+    market: 'US',
     isAI: true
   },
   {
@@ -224,6 +228,7 @@ const INITIAL_STOCKS: Stock[] = [
     changePercent: 2.84,
     volume: '15.8M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1.10 + (i / 40) * 0.35 + Math.random() * 0.03 })),
+    market: 'US',
     isAI: true
   },
   {
@@ -234,6 +239,7 @@ const INITIAL_STOCKS: Stock[] = [
     changePercent: 5.86,
     volume: '24.5M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 4.50 + (i / 40) * 1.28 + Math.random() * 0.08 })),
+    market: 'US',
     isAI: true
   },
   {
@@ -244,6 +250,7 @@ const INITIAL_STOCKS: Stock[] = [
     changePercent: 5.07,
     volume: '38.2M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 5.80 + (i / 40) * 1.45 + Math.random() * 0.09 })),
+    market: 'US',
     isAI: true
   },
   {
@@ -254,6 +261,7 @@ const INITIAL_STOCKS: Stock[] = [
     changePercent: 5.38,
     volume: '18.9M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1.80 + (i / 40) * 0.55 + Math.random() * 0.05 })),
+    market: 'US',
     isAI: true
   },
   {
@@ -264,6 +272,7 @@ const INITIAL_STOCKS: Stock[] = [
     changePercent: 5.70,
     volume: '21.4M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 6.90 + (i / 40) * 2.00 + Math.random() * 0.12 })),
+    market: 'US',
     isAI: true
   }
 ];
@@ -294,6 +303,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 4.20,
     volume: '14.8M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2400 + Math.round((i / 40) * 450) + Math.floor(Math.random() * 30) })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -304,6 +314,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 3.33,
     volume: '11.2M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1050 + Math.round((i / 40) * 190) + Math.floor(Math.random() * 20) })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -314,6 +325,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 4.62,
     volume: '18.4M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1800 + Math.round((i / 40) * 350) + Math.floor(Math.random() * 25) })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -324,6 +336,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 2.89,
     volume: '12.1M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 750 + Math.round((i / 40) * 140) + Math.floor(Math.random() * 15) })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -334,6 +347,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 3.70,
     volume: '15.6M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1400 + Math.round((i / 40) * 280) + Math.floor(Math.random() * 20) })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -344,6 +358,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 4.00,
     volume: '22.4M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2600 + Math.round((i / 40) * 520) + Math.floor(Math.random() * 30) })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -354,6 +369,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 4.06,
     volume: '16.5M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1820 + Math.round((i / 40) * 360) + Math.floor(Math.random() * 25) })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -364,6 +380,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 4.48,
     volume: '14.2M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2000 + Math.round((i / 40) * 450) + Math.floor(Math.random() * 25) })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -374,6 +391,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 4.23,
     volume: '12.8M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2900 + Math.round((i / 40) * 550) + Math.floor(Math.random() * 35) })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -384,6 +402,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 3.87,
     volume: '10.5M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2500 + Math.round((i / 40) * 450) + Math.floor(Math.random() * 30) })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -394,6 +413,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 2.38,
     volume: '28.5M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2100 + Math.random() * 80 })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -404,6 +424,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 0,
     volume: '15.2M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 77000 + Math.random() * 1000 })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -414,6 +435,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 0,
     volume: '2.8M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 170000 + Math.random() * 5000 })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -424,6 +446,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 0,
     volume: '0.9M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 180000 + Math.random() * 10000 })),
+    market: 'KR',
     isAI: true
   },
   {
@@ -434,6 +457,7 @@ const INITIAL_STOCKS_KR: Stock[] = [
     changePercent: 0,
     volume: '0.6M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 240000 + Math.random() * 10000 })),
+    market: 'KR',
     isAI: true
   }
 ];
@@ -511,11 +535,11 @@ export default function App() {
   const [exchangeRateTrend, setExchangeRateTrend] = useState<'UP' | 'DOWN'>('UP');
   const [selectionMode, setSelectionMode] = useState<'RECOMMENDED' | 'MANUAL'>('RECOMMENDED');
   const [stocks, setStocks] = useState<Stock[]>(() => {
-    const lastMarket = localStorage.getItem('sleek_last_market');
+    const lastMarket = localStorage.getItem('sleek_last_market') || 'KR';
     return lastMarket === 'US' ? INITIAL_STOCKS : INITIAL_STOCKS_KR;
   });
   const [selectedSymbol, setSelectedSymbol] = useState(() => {
-    const lastMarket = localStorage.getItem('sleek_last_market');
+    const lastMarket = localStorage.getItem('sleek_last_market') || 'KR';
     if (lastMarket === 'US') {
       return localStorage.getItem('sleek_last_symbol_US') || 'NVDA';
     }
@@ -542,10 +566,11 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('sleek_last_symbol', selectedSymbol);
-    if (marketType === 'KR') {
+    const isUS = /^[A-Z]/.test(selectedSymbol);
+    if (marketType === 'KR' && !isUS) {
       setLastSelectedKR(selectedSymbol);
       localStorage.setItem('sleek_last_symbol_KR', selectedSymbol);
-    } else {
+    } else if (marketType === 'US' && isUS) {
       setLastSelectedUS(selectedSymbol);
       localStorage.setItem('sleek_last_symbol_US', selectedSymbol);
     }
@@ -1165,6 +1190,10 @@ export default function App() {
 
     const candidates = Array.from(candidateMap.values()).filter(stock => {
       const name = (stock.name || (marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS).find(s => s.symbol === stock.symbol)?.name || stock.symbol).trim().toLowerCase();
+      // Strict market isolation for rankings
+      const isUS = /^[A-Z]/.test(stock.symbol);
+      if (marketType === 'KR' && isUS) return false;
+      if (marketType === 'US' && !isUS) return false;
       return !name.startsWith('kodex') && stock.price > 0;
     });
     const maxPrice = marketType === 'KR' ? 10000 : 10.0;
@@ -1249,9 +1278,8 @@ export default function App() {
 
     return stableTop5Symbols.map((sym) => {
       const stock = stocks.find(s => s.symbol === sym) ||
-                    INITIAL_STOCKS_KR.find(s => s.symbol === sym) ||
-                    INITIAL_STOCKS.find(s => s.symbol === sym) ||
-                    { name: sym, symbol: sym, price: 0, changePercent: 0, volume: '0', history: [] };
+                    (marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS).find(s => s.symbol === sym) ||
+                    { name: sym, symbol: sym, price: 0, changePercent: 0, volume: '0', history: [], market: marketType };
 
       const qty = holdings[sym] || 0;
       const isHeld = Number(qty) > 0;
@@ -1532,17 +1560,71 @@ export default function App() {
     }
     // Save current stocks to cache for the PREVIOUS market type
     const prevMarket = marketType === 'US' ? 'KR' : 'US';
-    setStocksCache(prev => ({ ...prev, [prevMarket]: stocks }));
+    // Ensure we only save stocks belonging to that market
+    const filteredCurrentStocks = stocksRef.current.filter(s => s.market === prevMarket);
+    setStocksCache(prev => ({ ...prev, [prevMarket]: filteredCurrentStocks }));
 
     // Load from cache for the NEW market type
     const cachedStocks = stocksCache[marketType];
     setStocks(cachedStocks);
     
     // Ensure selected symbol is valid for the market
+    let sym = marketType === 'US' ? lastSelectedUS : lastSelectedKR;
+    const isUS = /^[A-Z]/.test(sym);
+    
     if (marketType === 'US') {
-      if (!cachedStocks.some(s => s.symbol === selectedSymbol)) setSelectedSymbol('NVDA');
+      if (!isUS || !cachedStocks.some(s => s.symbol === sym)) {
+        sym = cachedStocks.find(s => /^[A-Z]/.test(s.symbol))?.symbol || 'NVDA';
+      }
     } else {
-      if (!cachedStocks.some(s => s.symbol === selectedSymbol)) setSelectedSymbol('073240');
+      if (isUS || !cachedStocks.some(s => s.symbol === sym)) {
+        sym = cachedStocks.find(s => !/^[A-Z]/.test(s.symbol))?.symbol || '073240';
+      }
+    }
+    
+    setSelectedSymbol(sym);
+    
+    // Update Scalper Tabs if necessary or at least update the active one
+    const stock = cachedStocks.find(s => s.symbol === sym) || cachedStocks[0];
+    if (stock) {
+      const price = stock.price || (marketType === 'KR' ? 1000 : 1);
+      const tickSize = marketType === 'KR' 
+        ? (price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5)
+        : 0.01;
+      
+      // Auto-switch to first valid tab for the market if active one is invalid
+      const validTabs = scalperTabsRef.current.filter(t => {
+        const tIsUS = /^[A-Z]/.test(t.symbol);
+        return marketType === 'US' ? tIsUS : !tIsUS;
+      });
+      
+      if (validTabs.length > 0) {
+        if (!validTabs.some(t => t.id === activeTabId)) {
+          handleSwitchTab(validTabs[0].id);
+        }
+      } else {
+        // Create a default tab for the new market if none exist
+        const newTabs: ScalperTab[] = [{
+          id: stock.symbol,
+          symbol: stock.symbol,
+          name: stock.name || stock.symbol,
+          isBotActive: false,
+          gapBuyPrice: Math.max(marketType === 'KR' ? 10 : 0.01, price - tickSize * 2),
+          gapSellPrice: price + tickSize * 2,
+          tradeQuantity: 1,
+          maxSlots: 3,
+          gapInventory: [],
+          gapTradingProfit: 0,
+          gapTradeCount: 0,
+          lastTradeType: null,
+          scalperMessage: "대기 중...",
+          entryPriceMode: 'BID2',
+          autoCancelThreshold: 0.2,
+          tradeLogs: []
+        }];
+        setScalperTabs(newTabs);
+        setActiveTabId(stock.symbol);
+      }
     }
   }, [marketType]);
 
@@ -1682,7 +1764,12 @@ export default function App() {
         openOrSwitchScalperTab(recommendedStock.symbol, recommendedStock.name);
         return;
       }
-      setStocks(prev => [{ ...recommendedStock, isAI: true }, ...prev]);
+      const newStock: Stock = { ...recommendedStock, isAI: true, market: marketType };
+      setStocks(prev => [newStock, ...prev]);
+      setStocksCache(prev => ({
+        ...prev,
+        [marketType]: [newStock, ...prev[marketType]]
+      }));
       openOrSwitchScalperTab(recommendedStock.symbol, recommendedStock.name);
       setAiRecommendations(prev => prev.filter(r => r.symbol !== recommendedStock.symbol));
       addLog('SYSTEM', '매수', 0, 0, `[AI 추천 추가] ${recommendedStock.name}(${recommendedStock.symbol}) 종목이 분석 리스트에 추가되었습니다.`);
@@ -1712,6 +1799,7 @@ export default function App() {
               time: `${i}:00`, 
               price: livePriceData.current * (0.98 + Math.random() * 0.04) 
             })),
+            market: marketType,
             isAI: false
           };
           setStocks(prev => {
@@ -1719,6 +1807,19 @@ export default function App() {
               return prev.map(s => s.symbol === symbolToUse ? newStock : s);
             }
             return [newStock, ...prev];
+          });
+          setStocksCache(prev => {
+            const currentCache = prev[marketType];
+            if (currentCache.some(s => s.symbol === symbolToUse)) {
+              return {
+                ...prev,
+                [marketType]: currentCache.map(s => s.symbol === symbolToUse ? newStock : s)
+              };
+            }
+            return {
+              ...prev,
+              [marketType]: [newStock, ...currentCache]
+            };
           });
           openOrSwitchScalperTab(symbolToUse, liveName);
           setSearchSymbol("");
@@ -1745,15 +1846,21 @@ export default function App() {
           time: `${i}:00`, 
           price: initialPrice * (0.98 + Math.random() * 0.04) 
         })),
+        market: marketType,
         isAI: false
       };
       
       setStocks(prev => {
         if (prev.some(s => s.symbol === symbolToUse)) {
-          return prev;
+          return prev.map(s => s.symbol === symbolToUse ? newStock : s);
         }
         return [newStock, ...prev];
       });
+      setStocksCache(prev => ({
+        ...prev,
+        [marketType]: [newStock, ...prev[marketType].filter(s => s.symbol !== symbolToUse)]
+      }));
+      openOrSwitchScalperTab(symbolToUse, customName);
       setSelectedSymbol(symbolToUse);
       
       // Load real name and price asynchronously from Gemini without blocking UI transition
@@ -1809,6 +1916,7 @@ export default function App() {
           time: `${i}:00`, 
           price: data.price * (0.98 + Math.random() * 0.04) 
         })),
+        market: marketType,
         isAI: false
       };
 
@@ -2245,6 +2353,8 @@ export default function App() {
       if (missingSymbols.length > 0) {
         setBotStatus(`새로운 보유 종목 ${missingSymbols.length}개 발견. 데이터 동기화 중...`);
         const addedStocks: Stock[] = await Promise.all(missingSymbols.map(async (sym) => {
+          const isUSStock = /^[A-Z]/.test(sym);
+          const stockMarket = isUSStock ? 'US' : 'KR';
           try {
             const p = await kisService.getPrice(sym);
             const resolvedName = (p && p.name && p.name !== sym) 
@@ -2259,6 +2369,7 @@ export default function App() {
                 changePercent: p.changePercent,
                 volume: p.volume,
                 history: [{ time: '09:00', price: p.current }],
+                market: stockMarket,
                 isAI: false
               };
             }
@@ -2273,6 +2384,7 @@ export default function App() {
               changePercent: 0,
               volume: '0',
               history: [],
+              market: stockMarket,
               isAI: false
             };
           }
@@ -4992,38 +5104,6 @@ export default function App() {
               onClick={() => {
                 setMarketType('KR');
                 setDisplayCurrency('KRW');
-                setStocks(stocksCache.KR);
-                
-                // Synchronize tab with market switch
-                const sym = lastSelectedKR;
-                setSelectedSymbol(sym);
-                
-                const stock = stocksCache.KR.find(s => s.symbol === sym) || stocksCache.KR[0];
-                if (stock) {
-                  const price = stock.price || 1000;
-                  const tickSize = price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5;
-                  
-                  const newTabs: ScalperTab[] = [{
-                    id: stock.symbol,
-                    symbol: stock.symbol,
-                    name: stock.name || stock.symbol,
-                    isBotActive: false,
-                    gapBuyPrice: Math.max(10, price - tickSize * 2),
-                    gapSellPrice: price + tickSize * 2,
-                    tradeQuantity: 1,
-                    maxSlots: 3,
-                    gapInventory: [],
-                    gapTradingProfit: 0,
-                    gapTradeCount: 0,
-                    lastTradeType: null,
-                    scalperMessage: "대기 중...",
-                    entryPriceMode: 'BID2',
-                    autoCancelThreshold: 0.2,
-                    tradeLogs: []
-                  }];
-                  setScalperTabs(newTabs);
-                  setActiveTabId(stock.symbol);
-                }
               }}
               className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all",
@@ -5038,38 +5118,6 @@ export default function App() {
               onClick={() => {
                 setMarketType('US');
                 setDisplayCurrency('USD');
-                setStocks(stocksCache.US);
-                
-                // Synchronize tab with market switch
-                const sym = lastSelectedUS;
-                setSelectedSymbol(sym);
-                
-                const stock = stocksCache.US.find(s => s.symbol === sym) || stocksCache.US[0];
-                if (stock) {
-                  const price = stock.price || 1;
-                  const tickSize = 0.01;
-                  
-                  const newTabs: ScalperTab[] = [{
-                    id: stock.symbol,
-                    symbol: stock.symbol,
-                    name: stock.name || stock.symbol,
-                    isBotActive: false,
-                    gapBuyPrice: Math.max(0.01, price - tickSize * 2),
-                    gapSellPrice: price + tickSize * 2,
-                    tradeQuantity: 1,
-                    maxSlots: 3,
-                    gapInventory: [],
-                    gapTradingProfit: 0,
-                    gapTradeCount: 0,
-                    lastTradeType: null,
-                    scalperMessage: "대기 중...",
-                    entryPriceMode: 'BID2',
-                    autoCancelThreshold: 0.2,
-                    tradeLogs: []
-                  }];
-                  setScalperTabs(newTabs);
-                  setActiveTabId(stock.symbol);
-                }
               }}
               className={cn(
                 "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all",
@@ -5839,7 +5887,10 @@ export default function App() {
 
             {/* Multi-Tab Bar for Independent Scalper Bot Trading */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pb-2 pt-1 border-b border-white/10">
-              {scalperTabs.map(tab => {
+              {scalperTabs.filter(tab => {
+                const isUS = /^[A-Z]/.test(tab.symbol);
+                return marketType === 'US' ? isUS : !isUS;
+              }).map(tab => {
                 const isSelected = tab.id === activeTabId;
                 const tabStock = stocks.find(s => s.symbol === tab.symbol) || 
                                  (marketType === 'KR' 
