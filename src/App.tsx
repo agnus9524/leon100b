@@ -200,12 +200,12 @@ const INITIAL_STOCKS: Stock[] = [
   },
   {
     symbol: 'RIG',
-    name: 'Transocean',
-    price: 2.85,
-    change: 0.10,
-    changePercent: 3.64,
+    name: '트랜스오션',
+    price: 5.89,
+    change: 0.12,
+    changePercent: 2.08,
     volume: '19.2M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2.30 + (i / 40) * 0.55 + Math.random() * 0.05 })),
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 5.30 + (i / 40) * 0.55 + Math.random() * 0.05 })),
     market: 'US',
     isAI: true
   },
@@ -5364,11 +5364,23 @@ export default function App() {
                           </div>
 
                           <div className="min-w-0 flex-1">
-                            {/* Full Stock Name (No Truncation) */}
-                            <div className="text-xs font-bold text-white whitespace-normal break-words leading-snug flex items-center gap-2 flex-wrap">
-                              {st.name}
-                              <span className="text-[10px] text-sleek-blue font-black font-mono bg-sleek-blue/10 px-1.5 py-0.5 rounded-lg border border-sleek-blue/20 shadow-sm">
+                            {/* Toss Style Stock Display */}
+                            <div className="text-xs font-bold text-white whitespace-normal break-words leading-snug flex items-center gap-1.5 flex-wrap">
+                              <span>{st.name}</span>
+                              <span className="text-[11px] font-mono text-white/90">
                                 {formatCurrency(st.price)}
+                              </span>
+                              <span className={cn(
+                                "text-[10px] font-mono font-bold",
+                                st.change >= 0 ? "text-rose-400" : "text-sky-400"
+                              )}>
+                                {st.change >= 0 ? '+' : ''}{formatCurrency(Math.abs(st.change))}
+                              </span>
+                              <span className={cn(
+                                "text-[10px] font-mono font-bold",
+                                st.change >= 0 ? "text-rose-400" : "text-sky-400"
+                              )}>
+                                ({st.changePercent >= 0 ? '+' : ''}{st.changePercent.toFixed(1)}%)
                               </span>
                             </div>
                             {/* Stock Symbol/Code below */}
@@ -5386,17 +5398,11 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Right: Score + Price */}
+                        {/* Right: Score only (Price moved to header for Toss style) */}
                         <div className="text-right shrink-0">
                           <div className="flex items-center justify-end gap-1">
                             <span className="text-[10px] text-sleek-text-secondary">적합도</span>
                             <span className="text-sm font-black font-mono text-emerald-400">{st.scalpScore}점</span>
-                          </div>
-                          <div className="text-xs font-mono font-bold text-slate-200 mt-0.5">
-                            {formatCurrency(st.price)}
-                            <span className={cn("ml-1 text-[11px]", (st.changePercent || 0) >= 0 ? "text-emerald-400" : "text-rose-400")}>
-                              {(st.changePercent || 0) >= 0 ? '+' : ''}{(st.changePercent || 0).toFixed(1)}%
-                            </span>
                           </div>
                         </div>
                       </div>
@@ -5417,19 +5423,28 @@ export default function App() {
             <div className="bg-sleek-card border border-sleek-border p-3.5 rounded-2xl shadow-lg lg:col-span-4 flex items-center justify-between">
               <div className="w-full">
                 <div className="flex items-center justify-between gap-2 mb-1">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="text-base font-black text-white">
-                      {selectedStock?.name || '종목 미선택'}({selectedStock?.symbol || '-'})
+                      {selectedStock?.name || '종목 미선택'}
                     </span>
+                    {selectedStock && (
+                      <div className="flex items-center gap-1.5 font-mono text-sm">
+                        <span className="text-white/90">{formatCurrency(selectedStock.price)}</span>
+                        <span className={cn(
+                          "font-bold",
+                          selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400"
+                        )}>
+                          {selectedStock.change >= 0 ? '+' : ''}{formatCurrency(Math.abs(selectedStock.change))}
+                        </span>
+                        <span className={cn(
+                          "font-bold",
+                          selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400"
+                        )}>
+                          ({selectedStock.change >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%)
+                        </span>
+                      </div>
+                    )}
                   </div>
-                  {selectedStock && (
-                    <span className={cn(
-                      "text-xs font-black font-mono px-2 py-0.5 rounded-full border",
-                      selectedStock.change >= 0 ? "bg-rose-500/10 text-rose-400 border-rose-500/20" : "bg-sky-500/10 text-sky-400 border-sky-500/20"
-                    )}>
-                      {selectedStock.change >= 0 ? '▲ +' : '▼ '}{selectedStock.changePercent.toFixed(2)}%
-                    </span>
-                  )}
                 </div>
                 <div className="flex items-center justify-between text-xs font-mono pt-1.5 border-t border-white/5">
                   <span className="text-sleek-text-secondary">현재 보유: <strong className="text-white font-bold">{holdings[selectedStock?.symbol || ''] || 0}주</strong></span>
@@ -6370,8 +6385,9 @@ export default function App() {
                                     )}
                                   >
                                     <div className="flex flex-col">
-                                      <div className="flex items-center gap-1">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
                                         <span className="font-bold text-white">{stockDisplayName}({sym})</span>
+                                        <span className="text-[10px] text-white/80">{formatCurrency(st.price || 0)}</span>
                                         <span className={cn("font-bold text-[10px]", profitRatio >= 0 ? "text-rose-400" : "text-sky-400")}>
                                           {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(1)}%
                                         </span>
@@ -6812,10 +6828,15 @@ export default function App() {
       <footer className="h-8 bg-black border-t border-sleek-border/30 flex items-center overflow-hidden">
         <div className="flex px-4 animate-[marquee_60s_linear_infinite] gap-12 text-[10px] font-mono">
           {stocks.map((s, idx) => (
-            <div key={`${s.symbol}-${idx}`} className="flex gap-2">
-              <span className="text-white font-bold">{s.name} ({s.symbol})</span>
-              <span className="text-gray-500">{formatCurrency(s.price || 0)}</span>
-              <span className={s.change >= 0 ? "text-up" : "text-down"}>{s.changePercent}%</span>
+            <div key={`${s.symbol}-${idx}`} className="flex gap-2 whitespace-nowrap">
+              <span className="text-white font-bold">{s.name}</span>
+              <span className="text-white/80">{formatCurrency(s.price || 0)}</span>
+              <span className={cn("font-bold", (s.change || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
+                {(s.change || 0) >= 0 ? '+' : ''}{formatCurrency(Math.abs(s.change || 0))}
+              </span>
+              <span className={cn("font-bold", (s.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
+                ({(s.changePercent || 0) >= 0 ? '+' : ''}{(s.changePercent || 0).toFixed(1)}%)
+              </span>
             </div>
           ))}
         </div>
