@@ -5485,7 +5485,7 @@ export default function App() {
             <p className="text-sleek-text-secondary text-base mb-10 leading-relaxed max-w-md mx-auto">
               {kisConfig.isConnected 
                 ? "계좌 연동이 성공적으로 설정되어 있습니다. 아래 '정보 업데이트' 버튼을 눌러 최신 잔고와 시세를 동기화하고 트레이딩을 시작하세요."
-                : "처음 오셨군요! 우측 상단 '설정(톱니바퀴)' 아이콘을 클릭하여 한국투자증권(KIS) API 키를 먼저 등록해주세요. 설정이 완료되면 아래 버튼으로 엔진을 기동할 수 있습니다."}
+                : "처음 오셨군요! 아래 '설정(톱니바퀴)' 아이콘을 클릭하여 한국투자증권(KIS) API 키를 먼저 등록해주세요. 설정이 완료되면 아래 버튼으로 엔진을 기동할 수 있습니다."}
             </p>
 
             <div className="space-y-4">
@@ -5493,13 +5493,21 @@ export default function App() {
                 onClick={() => {
                   if (kisConfig.isConnected) {
                     handleSyncKIS();
+                    setIsAppInitialized(true);
+                  } else {
+                    showNotification("한국투자증권(KIS) 연동 설정 및 연결 확인이 완료되어야 시스템을 가동할 수 있습니다. 아래 설정 버튼을 클릭해주세요.", "error");
+                    setShowKisModal(true);
                   }
-                  setIsAppInitialized(true);
                 }}
-                className="w-full py-5 bg-sleek-blue text-white rounded-2xl font-black text-lg shadow-[0_10px_30px_-10px_rgba(30,144,255,0.5)] hover:scale-[1.03] active:scale-95 transition-all flex items-center justify-center gap-3 group"
+                className={cn(
+                  "w-full py-5 rounded-2xl font-black text-lg transition-all flex items-center justify-center gap-3 group",
+                  kisConfig.isConnected
+                    ? "bg-sleek-blue text-white shadow-[0_10px_30px_-10px_rgba(30,144,255,0.5)] hover:scale-[1.03] active:scale-95 cursor-pointer"
+                    : "bg-white/10 text-slate-400 border border-amber-500/30 hover:bg-white/15 cursor-pointer"
+                )}
               >
-                <Zap className="w-6 h-6 fill-white group-hover:animate-bounce" />
-                정보 업데이트 및 시스템 가동
+                <Zap className={cn("w-6 h-6", kisConfig.isConnected ? "fill-white group-hover:animate-bounce" : "text-amber-400")} />
+                {kisConfig.isConnected ? "정보 업데이트 및 시스템 가동" : "정보 업데이트 및 시스템 가동 (KIS 연동 필요)"}
               </button>
 
               <button 
