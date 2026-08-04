@@ -1471,7 +1471,7 @@ export default function App() {
 
   const assetAnalysis = useMemo(() => {
     const isUSD = displayCurrency === 'USD';
-    const conv = (krwVal: number) => isUSD ? krwVal / exchangeRate : krwVal;
+    const conv = (krwVal: number) => isUSD ? krwVal / (exchangeRate || 1350) : krwVal;
 
     let totalStockValue = 0;
     let totalStockInvested = 0;
@@ -1805,7 +1805,8 @@ export default function App() {
 
       if (realRate) {
         setExchangeRate(prev => {
-          setExchangeRateTrend(realRate >= prev ? 'UP' : 'DOWN');
+          const oldRate = typeof prev === 'number' && prev > 0 ? prev : 1350;
+          setExchangeRateTrend(realRate >= oldRate ? 'UP' : 'DOWN');
           return realRate;
         });
         setExchangeData(prev => {
@@ -1823,11 +1824,11 @@ export default function App() {
             history: newHistory
           };
         });
-        setIsRateLoading(false);
       }
     } catch (error: any) {
       console.error("Failed to fetch real exchange rate:", error);
-      showNotification("환율 정보를 가져오는 데 실패했습니다.", "error");
+    } finally {
+      setIsRateLoading(false);
     }
   }, [kisConfig.isConnected]);
 
@@ -2020,7 +2021,7 @@ export default function App() {
 
     const nextCache = {
       ...stocksCache,
-      [currentMarket]: currentStocks.filter(s => s.market === currentMarket)
+      [currentMarket]: currentStocks.filter(s => s && s.market === currentMarket)
     };
     setStocksCache(nextCache);
 
@@ -2035,7 +2036,7 @@ export default function App() {
 
     // 3. Sync symbol
     let sym = newMarket === 'US' ? lastSelectedUS : lastSelectedKR;
-    const isUS = /^[A-Z]/.test(sym);
+    const isUS = sym ? /^[A-Z]/.test(sym) : false;
     if (newMarket === 'US') {
       if (!isUS || !cachedStocks.some(s => s.symbol === sym)) {
         sym = cachedStocks.find(s => /^[A-Z]/.test(s.symbol))?.symbol || 'NVDA';
@@ -2056,16 +2057,17 @@ export default function App() {
         : 0.01;
       
       const validTabs = scalperTabs.filter(t => {
-        const tIsUS = /^[A-Z]/.test(t.symbol);
+        const tIsUS = t.symbol ? /^[A-Z]/.test(t.symbol) : false;
         return newMarket === 'US' ? tIsUS : !tIsUS;
       });
 
       if (validTabs.length > 0) {
-        if (!validTabs.some(t => t.id === activeTabId)) {
-          handleSwitchTab(validTabs[0].id);
-        }
+        // If there are existing tabs for this market, switch to the most appropriate one
+        const tabToSwitch = validTabs.find(t => t.symbol === sym) || validTabs[0];
+        handleSwitchTab(tabToSwitch.id);
       } else {
-        const newTabs: ScalperTab[] = [{
+        // Create a default tab if none exists for the market
+        const newTab: ScalperTab = {
           id: stock.symbol,
           symbol: stock.symbol,
           name: stock.name || stock.symbol,
@@ -2082,9 +2084,16 @@ export default function App() {
           entryPriceMode: 'BID2',
           autoCancelThreshold: 0.2,
           tradeLogs: []
-        }];
-        setScalperTabs(newTabs);
-        setActiveTabId(stock.symbol);
+        };
+        setScalperTabs([newTab]);
+        setActiveTabId(newTab.id);
+        
+        // Sync local states manually for the new tab
+        setGapBuyPrice(newTab.gapBuyPrice);
+        setGapSellPrice(newTab.gapSellPrice);
+        setIsGapBotActive(false);
+        setTradeQuantity(1);
+        setTradeLogs([]);
       }
     }
   };
@@ -5709,7 +5718,7 @@ export default function App() {
                   "text-[11px] font-mono font-black",
                   exchangeRateTrend === 'UP' ? "text-sleek-red" : "text-sleek-green"
                 )}>
-                  {exchangeRate.toLocaleString()}
+                  {(exchangeRate || 1350).toLocaleString()}
                 </span>
                 {exchangeRateTrend === 'UP' ? <TrendingUp className="w-3 h-3 text-sleek-red" /> : <TrendingDown className="w-3 h-3 text-sleek-green" />}
               </div>
