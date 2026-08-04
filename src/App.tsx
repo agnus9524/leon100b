@@ -61,7 +61,8 @@ import {
   PieChart,
   Calculator,
   Coins,
-  HelpCircle
+  HelpCircle,
+  LogOut
 } from 'lucide-react';
 import { 
   XAxis, 
@@ -5455,9 +5456,9 @@ export default function App() {
             </button>
             <button 
               onClick={handleLogout}
-              className="w-full py-3 rounded-xl border border-sleek-border text-xs font-bold text-sleek-text-secondary hover:bg-white/5 transition-all"
+              className="w-full py-3.5 rounded-xl border border-white/10 text-xs font-bold text-slate-400 hover:text-white hover:bg-white/5 transition-all flex items-center justify-center gap-2"
             >
-              다른 계정으로 로그인
+              <LogOut className="w-4 h-4 text-slate-400" /> 로그아웃 (다른 계정으로 로그인)
             </button>
           </motion.div>
         </div>
@@ -5515,6 +5516,13 @@ export default function App() {
                 className="w-full py-4 bg-white/5 border border-white/10 text-sleek-text-secondary rounded-2xl font-bold text-sm hover:bg-white/10 hover:text-white transition-all flex items-center justify-center gap-2"
               >
                 <Settings className="w-4 h-4" /> {kisConfig.isConnected ? "KIS 연동 설정 변경" : "KIS 연동 설정하기"}
+              </button>
+
+              <button 
+                onClick={handleLogout}
+                className="w-full py-3.5 bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-2"
+              >
+                <LogOut className="w-4 h-4 text-slate-400" /> 로그아웃 (다른 계정으로 로그인)
               </button>
             </div>
 
