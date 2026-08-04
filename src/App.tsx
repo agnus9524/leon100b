@@ -1164,7 +1164,7 @@ export default function App() {
   }, [balance, holdings, stocks, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, principal, pnl, pnlPercent, marketType, displayCurrency]);
 
   // Stable symbol ordering for TOP 5 Scalper Optimal Stocks:
-  // Priority: 10,000 KRW ($10) or less + 1-Year Upward Trend + High Volume + Dynamic Rising Momentum
+  // Priority: Real-time Rising Momentum + 1-Year Upward Trend + AI Recommended Optimal Candidates (No Price Limit)
   const heldSymbolsKey = useMemo(() => {
     return Object.entries(holdings)
       .filter(([_, qty]) => Number(qty) > 0)
@@ -1212,14 +1212,13 @@ export default function App() {
       
       return stock.price > 0;
     });
-    const maxPrice = marketType === 'KR' ? 10000 : 10.0;
 
     const scoredCandidates = candidates.map((stock) => {
       const qty = holdings[stock.symbol] || 0;
       const isHeld = Number(qty) > 0;
 
-      const isPriceUnderLimit = stock.price > 0 && stock.price <= maxPrice;
       const isRisingTrend = stock.changePercent > 0;
+      const isAiRec = stock.isAI || aiRecommendations.some(r => r.symbol === stock.symbol);
 
       let oscillation = 1.8;
       if (stock.history && stock.history.length > 1) {
@@ -1242,22 +1241,23 @@ export default function App() {
 
       // Liquidity & dynamic daily momentum scoring
       let liquidityScore = Math.min(35, Math.log10(rawVol + 10) * 9);
-      let risingScore = isRisingTrend ? Math.min(45, stock.changePercent * 10 + 20) : -30;
+      let risingScore = isRisingTrend ? Math.min(45, stock.changePercent * 10 + 20) : -20;
       let volScore = Math.min(20, oscillation * 5);
+      let aiBonus = isAiRec ? 15 : 0;
 
       const charSum = stock.symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
       const seed = ((charSum + top3RefreshNonce * 7) % 13);
 
-      const scalpScore = Math.min(99, Math.max(70, Math.round(30 + risingScore + liquidityScore + volScore + seed)));
+      const scalpScore = Math.min(99, Math.max(70, Math.round(30 + risingScore + liquidityScore + volScore + aiBonus + seed)));
 
-      // Priority Tiers:
-      // Tier 0: Price <= 10,000원 ($10) AND 1-Year Upward Trend & Real-time Rising Momentum (Highest Priority)
-      // Tier 1: Price <= 10,000원 ($10) only
+      // Priority Tiers (No price restriction):
+      // Tier 0: AI Recommended or Strong Real-time Rising Trend + 1-Year Upward Trend
+      // Tier 1: General Rising Momentum
       // Tier 2: Others (Fallback)
       let tier = 2;
-      if (isPriceUnderLimit && isRisingTrend) {
+      if (isAiRec || (isRisingTrend && stock.changePercent >= 1.0)) {
         tier = 0;
-      } else if (isPriceUnderLimit) {
+      } else if (isRisingTrend) {
         tier = 1;
       }
 
@@ -1273,7 +1273,7 @@ export default function App() {
     // Priority order:
     // 1. Lower tier first (Tier 0 > Tier 1 > Tier 2)
     // 2. Held stocks first
-    // 3. Highest scalpScore (driven by volume and momentum)
+    // 3. Highest scalpScore (driven by volume, momentum and AI recommendation)
     scoredCandidates.sort((a, b) => {
       if (a.tier !== b.tier) {
         return a.tier - b.tier;
@@ -1290,8 +1290,6 @@ export default function App() {
 
   // Scalper Engine Optimal Top 5 Stocks mapping live stock snapshot
   const scalperTop5Stocks = useMemo(() => {
-    const maxPrice = marketType === 'KR' ? 10000 : 10.0;
-
     return stableTop5Symbols.map((sym) => {
       const stock = stocks.find(s => s.symbol === sym) ||
                     (marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS).find(s => s.symbol === sym) ||
@@ -1299,8 +1297,8 @@ export default function App() {
 
       const qty = holdings[sym] || 0;
       const isHeld = Number(qty) > 0;
-      const isUnderLimit = stock.price > 0 && stock.price <= maxPrice;
       const isRising = stock.changePercent > 0;
+      const isAiRec = stock.isAI || aiRecommendations.some(r => r.symbol === sym);
 
       let oscillation = 1.8;
       if (stock.history && stock.history.length > 1) {
@@ -1312,7 +1310,7 @@ export default function App() {
         }
       }
 
-      const risingScore = isRising ? Math.min(45, stock.changePercent * 10 + 20) : -25;
+      const risingScore = isRising ? Math.min(45, stock.changePercent * 10 + 20) : -15;
 
       let rawVol = 100;
       if (typeof stock.volume === 'string') {
@@ -1324,22 +1322,23 @@ export default function App() {
       }
       let liquidityScore = Math.min(25, Math.log10(rawVol + 10) * 6);
       let volScore = Math.min(20, oscillation * 5);
+      let aiBonus = isAiRec ? 10 : 0;
 
       const charSum = stock.symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
       const seed = (charSum % 8);
 
-      const rawTotal = 35 + risingScore + liquidityScore + volScore + seed;
+      const rawTotal = 35 + risingScore + liquidityScore + volScore + aiBonus + seed;
       const scalpScore = Math.min(99, Math.max(70, Math.round(rawTotal)));
 
-      let reasonTag = "🚀 1년 우상향 · 실시간 상승기류";
+      let reasonTag = "🚀 실시간 상승기류 · 1년 우상향 · AI 최적 추천";
       if (isHeld) {
-        reasonTag = `💼 보유 종목 (${marketType === 'KR' ? '10,000원 이하' : '$10 이하'})`;
-      } else if (isUnderLimit && isRising) {
-        reasonTag = `⚡ ${marketType === 'KR' ? '10,000원 이하' : '$10 이하'} · 1년 우상향 · 실시간 상승기류 (+${stock.changePercent.toFixed(1)}%)`;
+        reasonTag = `💼 보유 종목 (스캘핑 관리 대상)`;
+      } else if (isAiRec) {
+        reasonTag = `🔥 AI 스캘퍼 최적 추천 · 실시간 상승기류 · 1년 우상향 (+${stock.changePercent.toFixed(1)}%)`;
       } else if (stock.changePercent > 0) {
-        reasonTag = `📈 1년 우상향 추세 (+${stock.changePercent.toFixed(1)}%)`;
+        reasonTag = `⚡ 실시간 상승기류 · 1년 우상향 추세 (+${stock.changePercent.toFixed(1)}%)`;
       } else {
-        reasonTag = `💧 거래량 유동성 우수`;
+        reasonTag = `💧 AI 분석 유동성 우수 종목`;
       }
 
       const resolvedStockName = (stock.name && stock.name !== sym) 
@@ -1716,7 +1715,7 @@ export default function App() {
     setIsGettingRecommendations(true);
     setAiRecommendations([]);
     try {
-      const prompt = `현재 ${marketType === 'KR' ? '한국 KOSPI/KOSDAQ' : '미국 NYSE/NASDAQ'} 시장에서 스캘핑(초단타) 매매에 가장 적합한 변동성이 크고 거래량이 많은 유망 종목 5개를 추천해주세요.
+      const prompt = `현재 ${marketType === 'KR' ? '한국 KOSPI/KOSDAQ' : '미국 NYSE/NASDAQ'} 시장에서 주가 금액 제한 없이(가격 상관없이), 실시간 상승기류 및 1년 우상향 추세를 나타내며 스캘핑(초단타) 매매에 가장 적합한 AI 최적 종목 5개를 추천해주세요.
       각 종목에 대해 심볼, 기업명(토스증권 기준 한글 이름), 현재 대략적인 가격 정보를 포함해야 합니다.
       주의사항: "KODEX 200선물" 및 관련 레버리지/인버스 ETF 종목은 반드시 제외하세요.
       반드시 다음 JSON 배열 형식으로만 응답하세요: [{"symbol": "심볼", "name": "기업명", "price": 숫자}]`;
@@ -5329,7 +5328,7 @@ export default function App() {
                       </span>
                     </h2>
                     <div className="text-[9px] font-semibold text-amber-400/90 tracking-tight mt-0.5">
-                      {marketType === 'KR' ? '10,000원 이하 · 1년 우상향 · 실시간 상승기류 포착 5선' : '$10 이하 · 1년 우상향 · 실시간 상승기류 포착 5선'}
+                      가격 상관없이 · 실시간 상승기류 · 1년 우상향 · AI 최적 종목 포착 5선
                     </div>
                   </div>
                 </div>
