@@ -2023,7 +2023,7 @@ export default function App() {
     setIsGettingRecommendations(true);
     setAiRecommendations([]);
     try {
-      const prompt = `현재 ${marketType === 'KR' ? '한국 KOSPI/KOSDAQ' : '미국 NYSE/NASDAQ'} 시장에서 주가 금액 제한 없이(가격 상관없이), 실시간 상승기류 및 1년 우상향 추세를 나타내며 스캘핑(초단타) 매매에 가장 적합한 AI 최적 종목 50개를 추천해주세요.
+      const prompt = `현재 ${marketType === 'KR' ? '한국 KOSPI/KOSDAQ' : '미국 NYSE/NASDAQ'} 시장에서 주가 금액 제한 없이(가격 상관없이), 실시간 상승기류 및 1년 우상향 추세를 나타내며 스캘핑(초단타) 매매에 가장 적합한 AI 최적 종목 25개를 추천해주세요.
       각 종목에 대해 심볼, 기업명(토스증권 기준 한글 이름), 현재 대략적인 가격 정보를 포함해야 합니다.
       주의사항: "KODEX 200선물" 및 관련 레버리지/인버스 ETF 종목은 반드시 제외하세요.
       반드시 다음 JSON 배열 형식으로만 응답하세요: [{"symbol": "심볼", "name": "기업명", "price": 숫자}]`;
@@ -6234,8 +6234,8 @@ export default function App() {
                   const currentMarketTabs = scalperTabs.filter(t => 
                     marketType === 'US' ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol)
                   );
-                  if (currentMarketTabs.length >= 50) {
-                    showNotification("최대 50개 종목까지 AI 분석 기반 스캘퍼 탭을 생성할 수 있습니다.", "warning");
+                  if (currentMarketTabs.length >= 25) {
+                    showNotification("최대 25개 종목까지 AI 분석 기반 스캘퍼 탭을 생성할 수 있습니다.", "warning");
                     return;
                   }
 
@@ -6267,7 +6267,7 @@ export default function App() {
                     return;
                   }
 
-                  // 3. Dynamic AI stock generator if all preset/AI stocks are used up to 50
+                  // 3. Dynamic AI stock generator if all preset/AI stocks are used up to 25
                   const tabIdx = currentMarketTabs.length + 1;
                   const newSymbol = marketType === 'US' ? `AIUS${tabIdx}` : `099${String(tabIdx).padStart(3, '0')}`;
                   const newName = marketType === 'US' ? `AI 추천 종목 ${tabIdx}` : `AI 최적추천주 ${tabIdx}`;
@@ -6289,12 +6289,12 @@ export default function App() {
                   showNotification(`[AI 분석 추천] ${dynamicStock.name}(${dynamicStock.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
                 }}
                 className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-sleek-blue/50 text-gray-300 hover:text-white text-xs font-bold font-mono flex items-center justify-center gap-1 transition-all w-full min-h-[34px]"
-                title="새 스캘퍼 종목 탭 추가 (AI 분석 기반, 최대 50개)"
+                title="새 스캘퍼 종목 탭 추가 (AI 분석 기반, 최대 25개)"
               >
                 <Plus className="w-3.5 h-3.5 text-sleek-blue" />
                 <div className="flex flex-col items-start leading-tight">
                   <span className="text-[10px]">AI 분석 기반</span>
-                  <span>+ 종목 추가 (50개)</span>
+                  <span>+ 종목 추가 (25개)</span>
                 </div>
               </button>
             </div>
