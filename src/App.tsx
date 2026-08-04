@@ -500,6 +500,9 @@ export default function App() {
   const [marketType, setMarketType] = useState<'KR' | 'US'>(() => {
     return (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
   });
+  const [holdingsViewTab, setHoldingsViewTab] = useState<'KR' | 'US'>(() => {
+    return (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
+  });
 
   const [lastSelectedKR, setLastSelectedKR] = useState(() => {
     return localStorage.getItem('sleek_last_symbol_KR') || '073240';
@@ -6249,208 +6252,253 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* 2. Real-time Order Book (Attached directly to right of chart: xl:col-span-3) */}
-                    <div className="xl:col-span-3 flex flex-col min-w-0 bg-black/40 rounded-2xl border border-sleek-border p-2.5 justify-between">
-                      <div>
-                        <div className="text-center font-black text-sleek-text-secondary uppercase text-[10px] tracking-widest pb-1 border-b border-white/5 mb-1">
-                          실시간 잔량 호가창 (4단계)
-                        </div>
-                        
-                        {/* Ask Levels (매도 4~1단계) */}
-                        <div className="space-y-0.5">
-                          {askLevels.map((lvlPrice, idx) => {
-                            const vol = getLevelVolume(lvlPrice);
-                            const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
-                            return (
-                              <div key={`ask-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
-                                <div className="absolute right-0 top-0 bottom-0 bg-sky-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
-                                <span className="w-12 shrink-0 text-[9px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}단계</span>
-                                <span className={cn(
-                                  "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
-                                  isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-300"
-                                )}>
-                                  {formatCurrency(lvlPrice)}
-                                </span>
-                                <span className="w-10 shrink-0 text-right text-sky-200/60 font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
-                              </div>
-                            );
-                          })}
+                    {/* 2. Right Stack Group: Top Row (Order Book + Interval Monitor) & Bottom Row (Holdings Status) */}
+                    <div className="xl:col-span-6 flex flex-col gap-2.5 min-w-0 justify-between">
+                      {/* Top Row: Real-time Order Book (Left) & Real-time Interval Monitor (Right) */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {/* Real-time Order Book (4단계) */}
+                        <div className="bg-black/40 rounded-2xl border border-sleek-border p-2.5 flex flex-col justify-between min-w-0">
+                          <div>
+                            <div className="text-center font-black text-sleek-text-secondary uppercase text-[10px] tracking-widest pb-1 border-b border-white/5 mb-1">
+                              실시간 잔량 호가창 (4단계)
+                            </div>
+                            
+                            {/* Ask Levels (매도 4~1단계) */}
+                            <div className="space-y-0.5">
+                              {askLevels.map((lvlPrice, idx) => {
+                                const vol = getLevelVolume(lvlPrice);
+                                const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
+                                return (
+                                  <div key={`ask-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
+                                    {/* Brighter volume bar */}
+                                    <div className="absolute right-0 top-0 bottom-0 bg-sky-500/30 border-l border-sky-400/60 pointer-events-none transition-all duration-300" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
+                                    <span className="w-12 shrink-0 text-[9px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}단계</span>
+                                    <span className={cn(
+                                      "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
+                                      isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-200"
+                                    )}>
+                                      {formatCurrency(lvlPrice)}
+                                    </span>
+                                    <span className="w-10 shrink-0 text-right text-sky-100 font-bold font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+
+                            {/* Spread Line */}
+                            <div className="my-1 h-4.5 px-1.5 bg-white/5 border-y border-white/10 flex items-center justify-between rounded font-mono tabular-nums">
+                              <span className="text-[9px] font-black text-sleek-text-secondary uppercase shrink-0">현재 체결가</span>
+                              <span className={cn("font-black text-[11px] font-mono tabular-nums animate-pulse", selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400")}>
+                                {formatCurrency(currentPrice)}
+                              </span>
+                              <span className={cn("text-[9px] font-mono tabular-nums font-bold shrink-0", selectedStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
+                                {selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%
+                              </span>
+                            </div>
+
+                            {/* Bid Levels (매수 1~4단계) */}
+                            <div className="space-y-0.5">
+                              {bidLevels.map((lvlPrice, idx) => {
+                                const vol = getLevelVolume(lvlPrice);
+                                const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
+                                return (
+                                  <div key={`bid-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
+                                    {/* Brighter volume bar */}
+                                    <div className="absolute right-0 top-0 bottom-0 bg-rose-500/30 border-l border-rose-400/60 pointer-events-none transition-all duration-300" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
+                                    <span className="w-12 shrink-0 text-[9px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}단계</span>
+                                    <span className={cn(
+                                      "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
+                                      isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-200"
+                                    )}>
+                                      {formatCurrency(lvlPrice)}
+                                    </span>
+                                    <span className="w-10 shrink-0 text-right text-rose-100 font-bold font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          {/* Order Book Pressure Gauge */}
+                          <div className="pt-1 border-t border-white/5 space-y-0.5 mt-1">
+                            <div className="flex justify-between text-[9px] text-sleek-text-secondary font-bold font-sans">
+                              <span className="text-sky-400">매도잔량 47.8%</span>
+                              <span className="text-rose-400">매수잔량 52.2%</span>
+                            </div>
+                            <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex">
+                              <div className="h-full bg-sky-400" style={{ width: '47.8%' }} />
+                              <div className="h-full bg-rose-400" style={{ width: '52.2%' }} />
+                            </div>
+                          </div>
                         </div>
 
-                        {/* Spread Line */}
-                        <div className="my-1 h-5 px-1.5 bg-white/5 border-y border-white/10 flex items-center justify-between rounded font-mono tabular-nums">
-                          <span className="text-[9px] font-black text-sleek-text-secondary uppercase shrink-0">현재 체결가</span>
-                          <span className={cn("font-black text-[11px] font-mono tabular-nums animate-pulse", selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400")}>
-                            {formatCurrency(currentPrice)}
-                          </span>
-                          <span className={cn("text-[9px] font-mono tabular-nums font-bold shrink-0", selectedStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
-                            {selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%
-                          </span>
-                        </div>
+                        {/* Top Right Window: 실시간 구간 모니터 */}
+                        <div className="bg-black/40 border border-sleek-blue/30 rounded-2xl p-2.5 flex flex-col justify-between space-y-2 min-w-0">
+                          <div className="flex items-center justify-between pb-1 border-b border-white/5">
+                            <h4 className="text-xs font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1.5">
+                              <TrendingUp className="w-3.5 h-3.5 animate-bounce" /> 실시간 구간 모니터
+                            </h4>
+                            <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                              MONITORING
+                            </span>
+                          </div>
 
-                        {/* Bid Levels (매수 1~4단계) */}
-                        <div className="space-y-0.5">
-                          {bidLevels.map((lvlPrice, idx) => {
-                            const vol = getLevelVolume(lvlPrice);
-                            const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
-                            return (
-                              <div key={`bid-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
-                                <div className="absolute right-0 top-0 bottom-0 bg-rose-500/5 pointer-events-none" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
-                                <span className="w-12 shrink-0 text-[9px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}단계</span>
-                                <span className={cn(
-                                  "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
-                                  isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-300"
-                                )}>
-                                  {formatCurrency(lvlPrice)}
-                                </span>
-                                <span className="w-10 shrink-0 text-right text-rose-200/60 font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
-                              </div>
-                            );
-                          })}
+                          <div className="space-y-2 font-mono text-xs my-auto">
+                            <div className="flex justify-between text-[11px] text-sleek-text-secondary">
+                              <span>하한 {gapBuyPrice > 0 ? formatCurrency(gapBuyPrice) : '미설정'}</span>
+                              <span>상한 {gapSellPrice > 0 ? formatCurrency(gapSellPrice) : '미설정'}</span>
+                            </div>
+
+                            {/* Range Progress Bar */}
+                            <div className="relative w-full h-2.5 bg-white/5 rounded-full overflow-hidden border border-white/5">
+                              <motion.div 
+                                className="absolute top-0 bottom-0 bg-gradient-to-r from-sleek-blue to-emerald-400 rounded-full"
+                                style={{ width: `${rangePercentage}%` }}
+                                transition={{ type: "spring", stiffness: 80 }}
+                              />
+                              <div 
+                                className="absolute w-1 h-2.5 bg-white shadow-[0_0_8px_white] top-0 transition-all duration-300"
+                                style={{ left: `calc(${rangePercentage}% - 2px)` }}
+                              />
+                            </div>
+
+                            <div className="flex justify-between items-center pt-0.5">
+                              <span className="text-[10px] text-sleek-text-secondary uppercase">현재가 위치</span>
+                              <span className="text-xs font-black text-white italic font-mono">{rangePercentage.toFixed(1)}%</span>
+                            </div>
+                          </div>
+
+                          <div className="pt-1 border-t border-white/5 text-[9.5px] text-slate-400 flex justify-between items-center">
+                            <span>구간 진입 감시</span>
+                            <span className="text-emerald-400 font-bold">정상 작동 중</span>
+                          </div>
                         </div>
                       </div>
 
-                      {/* Order Book Pressure Gauge */}
-                      <div className="pt-1.5 border-t border-white/5 space-y-0.5">
-                        <div className="flex justify-between text-[9px] text-sleek-text-secondary font-bold font-sans">
-                          <span className="text-sky-400">매도잔량 47.8%</span>
-                          <span className="text-rose-400">매수잔량 52.2%</span>
-                        </div>
-                        <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex">
-                          <div className="h-full bg-sky-400" style={{ width: '47.8%' }} />
-                          <div className="h-full bg-rose-400" style={{ width: '52.2%' }} />
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 3. Right Stack: Interval Monitor (Top) & Holdings Status (Bottom) (xl:col-span-3) */}
-                    <div className="xl:col-span-3 flex flex-col gap-2.5 min-w-0">
-                      {/* Top Window: 실시간 구간 모니터 */}
-                      <div className="bg-black/40 border border-sleek-blue/30 rounded-2xl p-3 flex flex-col justify-between space-y-2 flex-1">
-                        <div className="flex items-center justify-between pb-1 border-b border-white/5">
-                          <h4 className="text-xs font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1.5">
-                            <TrendingUp className="w-3.5 h-3.5 animate-bounce" /> 실시간 구간 모니터
-                          </h4>
-                          <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                            MONITORING
-                          </span>
-                        </div>
-
-                        <div className="space-y-1.5 font-mono text-xs">
-                          <div className="flex justify-between text-[11px] text-sleek-text-secondary">
-                            <span>하한 {gapBuyPrice > 0 ? formatCurrency(gapBuyPrice) : '미설정'}</span>
-                            <span>상한 {gapSellPrice > 0 ? formatCurrency(gapSellPrice) : '미설정'}</span>
-                          </div>
-
-                          {/* Range Progress Bar */}
-                          <div className="relative w-full h-2.5 bg-white/5 rounded-full overflow-hidden border border-white/5">
-                            <motion.div 
-                              className="absolute top-0 bottom-0 bg-gradient-to-r from-sleek-blue to-emerald-400 rounded-full"
-                              style={{ width: `${rangePercentage}%` }}
-                              transition={{ type: "spring", stiffness: 80 }}
-                            />
-                            <div 
-                              className="absolute w-1 h-2.5 bg-white shadow-[0_0_8px_white] top-0 transition-all duration-300"
-                              style={{ left: `calc(${rangePercentage}% - 2px)` }}
-                            />
-                          </div>
-
-                          <div className="flex justify-between items-center pt-0.5">
-                            <span className="text-[10px] text-sleek-text-secondary uppercase">현재가 위치</span>
-                            <span className="text-xs font-black text-white italic font-mono">{rangePercentage.toFixed(1)}%</span>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Bottom Window: 보유 주식 현황 */}
-                      <div className="bg-black/40 border border-white/10 rounded-2xl p-3 flex flex-col justify-between space-y-2 flex-1">
+                      {/* Bottom Window: 보유 주식 현황 (Order Book 왼쪽 시작점부터 구간모니터 끝까지 가로 확장) */}
+                      <div className="bg-black/40 border border-white/10 rounded-2xl p-3 flex flex-col justify-between space-y-2 w-full flex-1 min-w-0">
                         <div className="flex items-center justify-between pb-1 border-b border-white/5">
                           <div className="flex items-center gap-1.5">
                             <Briefcase className="w-3.5 h-3.5 text-amber-400" />
                             <h4 className="text-xs font-black text-white uppercase tracking-wider">보유 주식 현황</h4>
                           </div>
-                          <span className="text-[9px] font-mono text-amber-300 font-bold px-1.5 py-0.5 bg-amber-500/10 rounded-full border border-amber-500/20">
-                            {Object.entries(holdings).filter(([_, qty]) => Number(qty) > 0).length}종목
-                          </span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={() => setHoldingsViewTab('KR')}
+                              className={cn(
+                                "text-[9px] font-bold px-2 py-0.5 rounded-full border transition-all",
+                                holdingsViewTab === 'KR'
+                                  ? "bg-sleek-blue/20 border-sleek-blue text-white"
+                                  : "bg-white/5 border-white/5 text-slate-400 hover:text-white"
+                              )}
+                            >
+                              국내
+                            </button>
+                            <button
+                              onClick={() => setHoldingsViewTab('US')}
+                              className={cn(
+                                "text-[9px] font-bold px-2 py-0.5 rounded-full border transition-all",
+                                holdingsViewTab === 'US'
+                                  ? "bg-sleek-blue/20 border-sleek-blue text-white"
+                                  : "bg-white/5 border-white/5 text-slate-400 hover:text-white"
+                              )}
+                            >
+                              미국
+                            </button>
+                          </div>
                         </div>
 
                         <div className="space-y-1 max-h-[140px] overflow-y-auto custom-scrollbar pr-0.5">
-                          {Object.entries(holdings).filter(([_, qty]) => Number(qty) > 0).length === 0 ? (
-                            <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center flex items-center justify-center">
-                              <p className="text-[11px] text-sleek-text-secondary">보유 중인 주식이 없습니다.</p>
-                            </div>
-                          ) : (
-                            Object.entries(holdings)
-                              .filter(([_, qty]) => Number(qty) > 0)
-                              .map(([sym, rawQty], idx) => {
-                                const qty = Number(rawQty);
-                                const st = stocks.find(s => s.symbol === sym) || 
-                                           INITIAL_STOCKS_KR.find(s => s.symbol === sym) || 
-                                           INITIAL_STOCKS.find(s => s.symbol === sym) || 
-                                           { name: sym, symbol: sym, price: 0, changePercent: 0 };
+                          {(() => {
+                            const filteredHoldings = Object.entries(holdings).filter(([sym, qty]) => {
+                              if (Number(qty) <= 0) return false;
+                              const isKR = /^[0-9]/.test(sym);
+                              return holdingsViewTab === 'KR' ? isKR : !isKR;
+                            });
 
-                                const stockDisplayName = (st.name && st.name !== sym) 
-                                  ? st.name 
-                                  : (INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym);
-                                
-                                let avgPrice = avgPrices[sym] || 0;
-                                if (avgPrice <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
-                                  const totalCost = gapInventory.reduce((acc, slot) => {
-                                    const p = typeof slot === 'number' ? slot : (slot.price || 0);
-                                    const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
-                                    return acc + (p * q);
-                                  }, 0);
-                                  const totalQty = gapInventory.reduce((acc, slot) => {
-                                    return acc + (typeof slot === 'number' ? 1 : (slot.quantity || 1));
-                                  }, 0);
-                                  avgPrice = totalQty > 0 ? Math.floor(totalCost / totalQty) : 0;
-                                }
-                                if (avgPrice <= 0) avgPrice = st.price || 0;
+                            if (filteredHoldings.length === 0) {
+                              return (
+                                <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center flex items-center justify-center">
+                                  <p className="text-[11px] text-sleek-text-secondary">
+                                    {holdingsViewTab === 'KR' ? '보유 중인 국내 주식이 없습니다.' : '보유 중인 미국 주식이 없습니다.'}
+                                  </p>
+                                </div>
+                              );
+                            }
 
-                                const profitRatio = avgPrice > 0 ? (((st.price || 0) - avgPrice) / avgPrice) * 100 : 0;
-                                const isSelected = selectedSymbol === sym;
+                            return (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-1.5">
+                                {filteredHoldings.map(([sym, rawQty], idx) => {
+                                  const qty = Number(rawQty);
+                                  const st = stocks.find(s => s.symbol === sym) || 
+                                             INITIAL_STOCKS_KR.find(s => s.symbol === sym) || 
+                                             INITIAL_STOCKS.find(s => s.symbol === sym) || 
+                                             { name: sym, symbol: sym, price: 0, changePercent: 0 };
 
-                                return (
-                                  <div 
-                                    key={`${sym}-${idx}`}
-                                    onClick={() => setSelectedSymbol(sym)}
-                                    className={cn(
-                                      "p-1.5 rounded-xl border flex items-center justify-between text-[11px] font-mono cursor-pointer transition-all group",
-                                      isSelected
-                                        ? "bg-sleek-blue/20 border-sleek-blue text-white shadow-sm"
-                                        : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-sleek-blue/30 text-slate-200"
-                                    )}
-                                  >
-                                    <div className="flex flex-col">
-                                      <div className="flex items-center gap-1.5 flex-wrap">
-                                        <span className="font-bold text-white">{stockDisplayName}({sym})</span>
-                                        <span className="text-[10px] text-white/80">{formatCurrency(st.price || 0)}</span>
-                                        <span className={cn("font-bold text-[10px]", profitRatio >= 0 ? "text-rose-400" : "text-sky-400")}>
-                                          {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(1)}%
-                                        </span>
+                                  const stockDisplayName = (st.name && st.name !== sym) 
+                                    ? st.name 
+                                    : (INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym);
+                                  
+                                  let avgPrice = avgPrices[sym] || 0;
+                                  if (avgPrice <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
+                                    const totalCost = gapInventory.reduce((acc, slot) => {
+                                      const p = typeof slot === 'number' ? slot : (slot.price || 0);
+                                      const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
+                                      return acc + (p * q);
+                                    }, 0);
+                                    const totalQty = gapInventory.reduce((acc, slot) => {
+                                      return acc + (typeof slot === 'number' ? 1 : (slot.quantity || 1));
+                                    }, 0);
+                                    avgPrice = totalQty > 0 ? Math.floor(totalCost / totalQty) : 0;
+                                  }
+                                  if (avgPrice <= 0) avgPrice = st.price || 0;
+
+                                  const profitRatio = avgPrice > 0 ? (((st.price || 0) - avgPrice) / avgPrice) * 100 : 0;
+                                  const isSelected = selectedSymbol === sym;
+
+                                  return (
+                                    <div 
+                                      key={`${sym}-${idx}`}
+                                      onClick={() => setSelectedSymbol(sym)}
+                                      className={cn(
+                                        "p-1.5 rounded-xl border flex items-center justify-between text-[11px] font-mono cursor-pointer transition-all group",
+                                        isSelected
+                                          ? "bg-sleek-blue/20 border-sleek-blue text-white shadow-sm"
+                                          : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-sleek-blue/30 text-slate-200"
+                                      )}
+                                    >
+                                      <div className="flex flex-col">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
+                                          <span className="font-bold text-white">{stockDisplayName}({sym})</span>
+                                          <span className="text-[10px] text-white/80">{formatCurrency(st.price || 0)}</span>
+                                          <span className={cn("font-bold text-[10px]", profitRatio >= 0 ? "text-rose-400" : "text-sky-400")}>
+                                            {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(1)}%
+                                          </span>
+                                        </div>
+                                        <span className="text-amber-300 text-[9.5px]">평단 {formatCurrency(avgPrice)}</span>
                                       </div>
-                                      <span className="text-amber-300 text-[9.5px]">평단 {formatCurrency(avgPrice)}</span>
-                                    </div>
 
-                                    <div className="flex items-center gap-1.5">
-                                      <span className="text-white font-bold">{qty}주</span>
-                                      <button
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          setSelectedSymbol(sym);
-                                          setManualSellPrice(st.price || 0);
-                                          setManualSellQty(qty);
-                                          setManualSellModalOpen(true);
-                                        }}
-                                        className="px-1.5 py-0.5 bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/30 rounded text-[9px] font-bold transition-all"
-                                      >
-                                        매도
-                                      </button>
+                                      <div className="flex items-center gap-1.5">
+                                        <span className="text-white font-bold">{qty}주</span>
+                                        <button
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setSelectedSymbol(sym);
+                                            setManualSellPrice(st.price || 0);
+                                            setManualSellQty(qty);
+                                            setManualSellModalOpen(true);
+                                          }}
+                                          className="px-1.5 py-0.5 bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/30 rounded text-[9px] font-bold transition-all"
+                                        >
+                                          매도
+                                        </button>
+                                      </div>
                                     </div>
-                                  </div>
-                                );
-                              })
-                          )}
+                                  );
+                                })}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -7210,43 +7258,82 @@ export default function App() {
 
                 {/* 4. Individual Stock Breakdown */}
                 <div className="space-y-3">
-                  <div className="flex items-center justify-between">
-                    <h4 className="text-xs md:text-sm font-bold text-white flex items-center gap-2">
-                      <Briefcase className="w-4 h-4 text-sleek-blue" />
-                      보유 종목별 세부 평가 내역 ({assetAnalysis.stockList.length}개 종목)
-                    </h4>
-                    {assetAnalysis.stockList.length > 0 && (
-                      <span className="text-xs text-slate-300 font-mono font-bold">
-                        총 매수가: {formatCurrency(Math.round(assetAnalysis.stockInvested))}
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 bg-white/5 p-3 rounded-2xl border border-white/10">
+                    <div className="flex items-center gap-3">
+                      <h4 className="text-xs md:text-sm font-bold text-white flex items-center gap-2">
+                        <Briefcase className="w-4 h-4 text-sleek-blue" />
+                        보유 종목별 세부 평가 내역
+                      </h4>
+                      <div className="flex items-center gap-1 bg-black/30 p-1 rounded-xl border border-white/10">
+                        <button
+                          onClick={() => setHoldingsViewTab('KR')}
+                          className={cn(
+                            "text-[10px] md:text-xs font-bold px-3 py-1 rounded-lg transition-all",
+                            holdingsViewTab === 'KR'
+                              ? "bg-sleek-blue text-white shadow-lg"
+                              : "text-slate-400 hover:text-white"
+                          )}
+                        >
+                          국내주식
+                        </button>
+                        <button
+                          onClick={() => setHoldingsViewTab('US')}
+                          className={cn(
+                            "text-[10px] md:text-xs font-bold px-3 py-1 rounded-lg transition-all",
+                            holdingsViewTab === 'US'
+                              ? "bg-sleek-blue text-white shadow-lg"
+                              : "text-slate-400 hover:text-white"
+                          )}
+                        >
+                          미국주식
+                        </button>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-[10px] md:text-xs text-slate-300 font-mono font-bold">
+                        {holdingsViewTab === 'KR' ? '국내' : '미국'} 총 매수가: {formatCurrency(Math.round(assetAnalysis.stockList.filter(item => {
+                          const isKR = /^[0-9]/.test(item.symbol);
+                          return holdingsViewTab === 'KR' ? isKR : !isKR;
+                        }).reduce((acc, curr) => acc + curr.invested, 0)))}
                       </span>
-                    )}
+                    </div>
                   </div>
 
-                  {assetAnalysis.stockList.length === 0 ? (
-                    <div className="bg-white/5 border border-white/5 rounded-2xl p-6 text-center text-slate-400 text-xs md:text-sm">
-                      현재 보유 중인 주식이 없습니다. 예수금({formatCurrency(Math.floor(balance))})이 총 자산으로 평가됩니다.
-                    </div>
-                  ) : (
-                    <div className="space-y-2.5">
-                      {assetAnalysis.stockList.map((item) => {
-                        const isSelected = selectedSymbol === item.symbol;
-                        return (
-                          <div 
-                            key={item.symbol} 
-                            onClick={() => {
-                              setSelectedSymbol(item.symbol);
-                              const configEl = document.getElementById('ai-scalping-config-panel');
-                              if (configEl) {
-                                configEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
-                              }
-                            }}
-                            className={cn(
-                              "border rounded-2xl p-4 transition-all space-y-2.5 cursor-pointer",
-                              isSelected 
-                                ? "bg-sleek-blue/15 border-sleek-blue shadow-lg ring-1 ring-sleek-blue/40" 
-                                : "bg-white/5 border-white/10 hover:border-sleek-blue/40"
-                            )}
-                          >
+                  {(() => {
+                    const filteredList = assetAnalysis.stockList.filter(item => {
+                      const isKR = /^[0-9]/.test(item.symbol);
+                      return holdingsViewTab === 'KR' ? isKR : !isKR;
+                    });
+
+                    if (filteredList.length === 0) {
+                      return (
+                        <div className="bg-white/5 border border-white/5 rounded-2xl p-6 text-center text-slate-400 text-xs md:text-sm">
+                          {holdingsViewTab === 'KR' ? '현재 보유 중인 국내 주식이 없습니다.' : '현재 보유 중인 미국 주식이 없습니다.'}
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-2.5">
+                        {filteredList.map((item) => {
+                          const isSelected = selectedSymbol === item.symbol;
+                          return (
+                            <div 
+                              key={item.symbol} 
+                              onClick={() => {
+                                setSelectedSymbol(item.symbol);
+                                const configEl = document.getElementById('ai-scalping-config-panel');
+                                if (configEl) {
+                                  configEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                                }
+                              }}
+                              className={cn(
+                                "border rounded-2xl p-4 transition-all space-y-2.5 cursor-pointer",
+                                isSelected 
+                                  ? "bg-sleek-blue/15 border-sleek-blue shadow-lg ring-1 ring-sleek-blue/40" 
+                                  : "bg-white/5 border-white/10 hover:border-sleek-blue/40"
+                              )}
+                            >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2.5">
                               <span className="font-extrabold text-white text-base md:text-lg">{item.name}({item.symbol})</span>
@@ -7283,10 +7370,10 @@ export default function App() {
                             </div>
                           </div>
                         </div>
-                      );
-                    })}
+                        );
+                      })}
                     </div>
-                  )}
+                  )})()}
                 </div>
 
                 {/* 5. Summary / Insight Box */}
