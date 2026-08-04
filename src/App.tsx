@@ -7310,7 +7310,7 @@ export default function App() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
               <div className="bg-white/5 p-2 rounded-xl border border-white/5">
                 <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">예수금 (44431721-01)</span>
-                <span className="text-sm font-black text-white italic mt-0.5 block truncate">{formatCurrency(balance)}</span>
+                <span className="text-sm font-black text-white italic mt-0.5 block truncate">{formatCurrency(balance, true)}</span>
               </div>
               
               <div 
@@ -7324,7 +7324,7 @@ export default function App() {
                   </span>
                 </div>
                 <div className="flex items-baseline justify-between mt-0.5">
-                  <span className="text-sm font-black text-sleek-blue italic truncate">{formatCurrency(totalValue)}</span>
+                  <span className="text-sm font-black text-sleek-blue italic truncate">{formatCurrency(totalValue, true)}</span>
                   <span className={cn("text-[10px] font-bold shrink-0 ml-1", pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
                     {pnl >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
                   </span>
@@ -7334,7 +7334,7 @@ export default function App() {
               <div className="bg-white/5 p-2 rounded-xl border border-white/5">
                 <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">스캘핑 총 수익</span>
                 <span className={cn("text-sm font-black italic mt-0.5 block truncate", gapTradingProfit >= 0 ? "text-rose-400" : "text-sky-400")}>
-                  {formatCurrency(gapTradingProfit)}
+                  {formatCurrency(gapTradingProfit, true)}
                 </span>
               </div>
 
@@ -7881,14 +7881,14 @@ export default function App() {
                         <Calculator className="w-4 h-4 text-sleek-blue" />
                       </div>
                       <div className="text-3xl md:text-4xl font-black text-white tracking-tight">
-                        {formatCurrency(assetAnalysis.totalCalculatedAsset)}
+                        {formatCurrency(assetAnalysis.totalCalculatedAsset, true)}
                       </div>
                     </div>
                     
                     <div className="bg-white/5 border border-white/10 rounded-xl p-3.5 flex items-center gap-5 shrink-0">
                       <div>
                         <div className="text-xs text-slate-400 font-bold">투자 원금</div>
-                        <div className="text-sm md:text-base font-mono font-extrabold text-white">{formatCurrency(assetAnalysis.principal)}</div>
+                        <div className="text-sm md:text-base font-mono font-extrabold text-white">{formatCurrency(assetAnalysis.principal, true)}</div>
                       </div>
                       <div className="h-8 w-px bg-white/10" />
                       <div>
@@ -7898,7 +7898,7 @@ export default function App() {
                           assetAnalysis.totalPnL >= 0 ? "text-rose-400" : "text-sky-400"
                         )}>
                           {assetAnalysis.totalPnL >= 0 ? <TrendingUp className="w-4 h-4 text-rose-400" /> : <TrendingDown className="w-4 h-4 text-sky-400" />}
-                          <span>{assetAnalysis.totalPnL >= 0 ? '+' : ''}{formatCurrency(Math.round(assetAnalysis.totalPnL))}</span>
+                          <span>{assetAnalysis.totalPnL >= 0 ? '+' : ''}{formatCurrency(Math.round(assetAnalysis.totalPnL), true)}</span>
                           <span className="text-xs font-bold">({assetAnalysis.totalPnLPercent >= 0 ? '+' : ''}{assetAnalysis.totalPnLPercent.toFixed(2)}%)</span>
                         </div>
                       </div>
@@ -7940,7 +7940,7 @@ export default function App() {
                       <span className="text-sleek-blue font-mono font-bold text-xs">{assetAnalysis.cashShare.toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
-                      {formatCurrency(assetAnalysis.cashBalance)}
+                      {formatCurrency(assetAnalysis.cashBalance, true)}
                     </div>
                     <p className="text-xs text-slate-400">즉시 주문에 사용 가능한 예수금</p>
                   </div>
@@ -7952,7 +7952,7 @@ export default function App() {
                       <span className="text-emerald-400 font-mono font-bold text-xs">{assetAnalysis.stockShare.toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
-                      {formatCurrency(Math.round(assetAnalysis.stockValue))}
+                      {formatCurrency(Math.round(assetAnalysis.stockValue), true)}
                     </div>
                     <p className="text-xs text-slate-400">현재 시장가 × 보유 주식 수의 합산</p>
                   </div>
@@ -7964,7 +7964,7 @@ export default function App() {
                       <span className="text-amber-400 font-mono font-bold text-xs">{assetAnalysis.pendingShare.toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
-                      {formatCurrency(Math.round(assetAnalysis.pendingReserve))}
+                      {formatCurrency(Math.round(assetAnalysis.pendingReserve), true)}
                     </div>
                     <p className="text-xs text-slate-400">가상/지정가 매수 대기 중 잠긴 예수금</p>
                   </div>
