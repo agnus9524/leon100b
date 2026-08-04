@@ -5443,9 +5443,9 @@ export default function App() {
               현재 <b>{currentUser.email || "간편로그인(인증키)"}</b> 계정은 구독 상태가 아닙니다.<br/>
               프로그램 이용권을 구매하여 자동매매 엔진을 기동하세요.
             </p>
-            <div className="bg-white/5 border border-white/5 rounded-xl p-4 mb-4 text-left">
-              <div className="text-[10px] text-sleek-text-secondary uppercase mb-1">사용자 UID (입금 시 전달용)</div>
-              <code className="text-[10px] font-mono text-sleek-blue break-all">{currentUser.uid}</code>
+            <div className="bg-white/5 border border-white/10 rounded-xl p-4 mb-4 text-left">
+              <div className="text-xs font-bold text-sleek-text-secondary uppercase mb-2">사용자 UID (입금 시 전달용)</div>
+              <code className="text-xs sm:text-sm font-mono font-bold text-sleek-blue break-all select-all block bg-black/40 p-2.5 rounded-lg border border-white/10 tracking-wide">{currentUser.uid}</code>
             </div>
             <button 
               onClick={() => setShowActivationModal(true)}
