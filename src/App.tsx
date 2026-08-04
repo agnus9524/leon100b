@@ -62,7 +62,8 @@ import {
   Calculator,
   Coins,
   HelpCircle,
-  LogOut
+  LogOut,
+  ExternalLink
 } from 'lucide-react';
 import { 
   XAxis, 
@@ -5517,6 +5518,15 @@ export default function App() {
               >
                 <Settings className="w-4 h-4" /> {kisConfig.isConnected ? "KIS 연동 설정 변경" : "KIS 연동 설정하기"}
               </button>
+
+              <a 
+                href="https://securities.koreainvestment.com/main/member/login/login.jsp?returnUrl=%2Fmain%2Fcustomer%2Fsystemdown%2FRestAPIService.jsp&isXecurePass=Y"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="w-full py-3.5 bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 hover:text-amber-200 rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-2"
+              >
+                <ExternalLink className="w-4 h-4 text-amber-400" /> 한국투자증권 KIS API 키 발급 바로가기
+              </a>
 
               <button 
                 onClick={handleLogout}
