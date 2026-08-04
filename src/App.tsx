@@ -829,6 +829,43 @@ const USAFlag = () => (
   </svg>
 );
 
+// Market hours helper functions (Timezone-aware)
+// Korean Stock Market (KR): Mon-Fri 09:00 ~ 15:30 KST (Asia/Seoul)
+function isKRMarketClosed(): boolean {
+  try {
+    const kstString = new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" });
+    const kstDate = new Date(kstString);
+    const day = kstDate.getDay();
+    if (day === 0 || day === 6) return true; // Weekend
+
+    const currentMin = kstDate.getHours() * 60 + kstDate.getMinutes();
+    const startMin = 9 * 60; // 09:00
+    const endMin = 15 * 60 + 30; // 15:30
+
+    return currentMin < startMin || currentMin >= endMin;
+  } catch (e) {
+    return false;
+  }
+}
+
+// US Stock Market (US): Mon-Fri 09:30 ~ 16:00 EST/EDT (America/New_York)
+function isUSMarketClosed(): boolean {
+  try {
+    const nyString = new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
+    const nyDate = new Date(nyString);
+    const day = nyDate.getDay();
+    if (day === 0 || day === 6) return true; // Weekend
+
+    const currentMin = nyDate.getHours() * 60 + nyDate.getMinutes();
+    const startMin = 9 * 60 + 30; // 09:30
+    const endMin = 16 * 60; // 16:00
+
+    return currentMin < startMin || currentMin >= endMin;
+  } catch (e) {
+    return false;
+  }
+}
+
 export default function App() {
   const [marketType, setMarketType] = useState<'KR' | 'US'>(() => {
     return (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
@@ -872,12 +909,15 @@ export default function App() {
   });
   const [krBalance, setKrBalance] = useState<number>(10000000); // 원화예수금
   const [usBalance, setUsBalance] = useState<number>(49874); // 외화예수금 (실시간 환율 기준 49,874원)
+  const [krPrincipal, setKrPrincipal] = useState<number>(10000000); // 원화 투자 원금
+  const [usPrincipal, setUsPrincipal] = useState<number>(49874); // 외화 투자 원금
   const [balance, setBalance] = useState<number>(10000000); // User's active market money (synced via KIS)
+  const [principal, setPrincipal] = useState<number>(10000000); // User's active market principal
 
   useEffect(() => {
     setBalance(marketType === 'KR' ? krBalance : usBalance);
-  }, [marketType, krBalance, usBalance]);
-  const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
+    setPrincipal(marketType === 'KR' ? krPrincipal : usPrincipal);
+  }, [marketType, krBalance, usBalance, krPrincipal, usPrincipal]);
   const [holdings, setHoldings] = useState<Record<string, number>>({});
   const [avgPrices, setAvgPrices] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem('sleek_avg_prices') || '{}'); } catch { return {}; }
@@ -1093,20 +1133,38 @@ export default function App() {
 
   // Multi-Tab Scalper Trading State
   const [scalperTabs, setScalperTabs] = useState<ScalperTab[]>(() => {
-    const lastMarket = localStorage.getItem('sleek_market_type') || 'KR';
-    const initSymbol = localStorage.getItem('sleek_last_symbol') || (lastMarket === 'US' ? 'SNDL' : '073240');
-    const defaults = lastMarket === 'US' ? INITIAL_STOCKS : INITIAL_STOCKS_KR;
-    const initStock = defaults.find(s => s.symbol === initSymbol) || defaults[0];
-    const price = initStock?.price || 1000;
-    const tickSize = lastMarket === 'US' ? 0.01 : (price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5);
+    try {
+      const saved = localStorage.getItem('sleek_scalper_tabs_v2');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {
+      console.error("Error parsing saved scalperTabs:", e);
+    }
 
-    return [{
-      id: initStock.symbol,
-      symbol: initStock.symbol,
-      name: initStock.name || initStock.symbol,
+    const lastMarket = (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
+    const krSymbol = localStorage.getItem('sleek_last_symbol_KR') || '073240';
+    const usSymbol = localStorage.getItem('sleek_last_symbol_US') || 'NVDA';
+
+    const krStock = INITIAL_STOCKS_KR.find(s => s.symbol === krSymbol) || INITIAL_STOCKS_KR[0];
+    const usStock = INITIAL_STOCKS.find(s => s.symbol === usSymbol) || INITIAL_STOCKS[0];
+
+    const krPrice = krStock?.price || 1000;
+    const usPrice = usStock?.price || 100;
+
+    const krTick = krPrice >= 500000 ? 1000 : krPrice >= 100000 ? 500 : krPrice >= 50000 ? 100 : krPrice >= 10000 ? 50 : krPrice >= 5000 ? 10 : 5;
+    const usTick = 0.01;
+
+    const defaultKRTab: ScalperTab = {
+      id: krStock.symbol,
+      symbol: krStock.symbol,
+      name: krStock.name || krStock.symbol,
       isBotActive: false,
-      gapBuyPrice: Math.max(10, price - tickSize * 2),
-      gapSellPrice: price + tickSize * 2,
+      gapBuyPrice: Math.max(10, krPrice - krTick * 2),
+      gapSellPrice: krPrice + krTick * 2,
       tradeQuantity: 1,
       maxSlots: 3,
       gapInventory: [],
@@ -1117,12 +1175,45 @@ export default function App() {
       entryPriceMode: 'BID2',
       autoCancelThreshold: 0.2,
       tradeLogs: []
-    }];
+    };
+
+    const defaultUSTab: ScalperTab = {
+      id: usStock.symbol,
+      symbol: usStock.symbol,
+      name: usStock.name || usStock.symbol,
+      isBotActive: false,
+      gapBuyPrice: Math.max(0.01, Number((usPrice - usTick * 2).toFixed(2))),
+      gapSellPrice: Number((usPrice + usTick * 2).toFixed(2)),
+      tradeQuantity: 1,
+      maxSlots: 3,
+      gapInventory: [],
+      gapTradingProfit: 0,
+      gapTradeCount: 0,
+      lastTradeType: null,
+      scalperMessage: "대기 중...",
+      entryPriceMode: 'BID2',
+      autoCancelThreshold: 0.2,
+      tradeLogs: []
+    };
+
+    return [defaultKRTab, defaultUSTab];
   });
 
   const [activeTabId, setActiveTabId] = useState<string>(() => {
-    const lastMarket = localStorage.getItem('sleek_market_type') || 'KR';
-    return scalperTabs[0]?.id || (lastMarket === 'US' ? 'SNDL' : '073240');
+    const lastMarket = (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
+    const saved = localStorage.getItem('sleek_scalper_tabs_v2');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const matching = parsed.find((t: ScalperTab) => lastMarket === 'US' ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol));
+          if (matching) return matching.id;
+          return parsed[0].id;
+        }
+      } catch (e) {}
+    }
+    const lastSymbol = lastMarket === 'US' ? (localStorage.getItem('sleek_last_symbol_US') || 'NVDA') : (localStorage.getItem('sleek_last_symbol_KR') || '073240');
+    return lastSymbol;
   });
   const scalperTabsRef = React.useRef<ScalperTab[]>(scalperTabs);
   useEffect(() => {
@@ -1265,6 +1356,78 @@ export default function App() {
       };
     }));
   }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, activeTabId]);
+
+  // Initial Sync for Active Tab State on App Load
+  useEffect(() => {
+    const activeTab = scalperTabs.find(t => t.id === activeTabId) || scalperTabs[0];
+    if (activeTab) {
+      setSelectedSymbol(activeTab.symbol);
+      setIsGapBotActive(activeTab.isBotActive || false);
+      setGapBuyPrice(activeTab.gapBuyPrice || 0);
+      setGapSellPrice(activeTab.gapSellPrice || 0);
+      setTradeQuantity(activeTab.tradeQuantity || 1);
+      setMaxSlots(activeTab.maxSlots || 3);
+      setGapInventory(activeTab.gapInventory || []);
+      setGapTradingProfit(activeTab.gapTradingProfit || 0);
+      setGapTradeCount(activeTab.gapTradeCount || 0);
+      setLastTradeType(activeTab.lastTradeType || null);
+      setScalperMessage(activeTab.scalperMessage || "대기 중...");
+      setEntryPriceMode(activeTab.entryPriceMode || 'BID2');
+      setAutoCancelThreshold(activeTab.autoCancelThreshold || 0.2);
+    }
+  }, []);
+
+  // Save scalperTabs to localStorage whenever updated
+  useEffect(() => {
+    if (scalperTabs && scalperTabs.length > 0) {
+      try {
+        localStorage.setItem('sleek_scalper_tabs_v2', JSON.stringify(scalperTabs));
+      } catch (e) {
+        console.error("Error saving scalperTabs to localStorage:", e);
+      }
+    }
+  }, [scalperTabs]);
+
+  // Automated Market Closing Auto-Stop Effect (KR: 15:30 KST, US: 16:00 EST)
+  useEffect(() => {
+    const checkMarketClose = () => {
+      const krClosed = isKRMarketClosed();
+      const usClosed = isUSMarketClosed();
+
+      setScalperTabs(prevTabs => {
+        let changed = false;
+        const updated = prevTabs.map(tab => {
+          const isUS = /^[A-Z]/.test(tab.symbol);
+          const isClosed = isUS ? usClosed : krClosed;
+          if (isClosed && tab.isBotActive) {
+            changed = true;
+            return {
+              ...tab,
+              isBotActive: false,
+              scalperMessage: isUS 
+                ? "[장 마감] 미국 장 마감시간(16:00 EST) 도달로 스캘퍼 중지"
+                : "[장 마감] 한국 장 마감시간(15:30) 도달로 스캘퍼 중지"
+            };
+          }
+          return tab;
+        });
+
+        if (changed) {
+          const currentActive = updated.find(t => t.id === activeTabId);
+          if (currentActive && !currentActive.isBotActive && isGapBotActive) {
+            setIsGapBotActive(false);
+            setScalperMessage(currentActive.scalperMessage);
+          }
+          showNotification("장 마감 시간에 도달하여 작동 중인 스캘퍼가 자동 중지되었습니다.", "info");
+        }
+        return changed ? updated : prevTabs;
+      });
+    };
+
+    checkMarketClose();
+    const closeInterval = setInterval(checkMarketClose, 10000);
+    return () => clearInterval(closeInterval);
+  }, [activeTabId, isGapBotActive]);
 
   // Helper for tick-aware target sell price calculation to guarantee positive profit above tick size
   const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number, currentMarketPrice?: number) => {
@@ -1436,19 +1599,24 @@ export default function App() {
     return Math.min(100, Math.max(0, pct));
   }, [gapBuyPrice, gapSellPrice, selectedStock?.price]);
   const totalValue = useMemo(() => {
-    // Total Asset Valuation = Cash Balance + Current Market Value of Stock Holdings + Pending Order Reserves
+    // Total Asset Valuation = Cash Balance + Current Market Value of Stock Holdings + Pending Order Reserves (filtered by active market)
     let stockValue = 0;
     const rate = exchangeRate || 1350;
     Object.entries(holdings).forEach(([sym, rawQty]) => {
       const qty = Number(rawQty);
       if (qty <= 0) return;
 
+      const isUS = /^[A-Z]/.test(sym);
+      if (marketType === 'US' && !isUS) return;
+      if (marketType === 'KR' && isUS) return;
+
       const st = stocks.find(s => s.symbol === sym) ||
+                 stocksCache.KR?.find(s => s.symbol === sym) ||
+                 stocksCache.US?.find(s => s.symbol === sym) ||
                  INITIAL_STOCKS_KR.find(s => s.symbol === sym) ||
                  INITIAL_STOCKS.find(s => s.symbol === sym);
 
       const currentPrice = st ? st.price : (avgPrices[sym] || 0);
-      const isUS = /^[A-Z]/.test(sym);
       const priceInKRW = isUS ? currentPrice * rate : currentPrice;
 
       stockValue += qty * priceInKRW;
@@ -1458,21 +1626,26 @@ export default function App() {
     const pendingReserve = pendingBuyOrders.reduce((acc, order) => {
       if (!order.isSimulated) return acc;
       const isOrderUS = /^[A-Z]/.test(order.symbol);
+      if (marketType === 'US' && !isOrderUS) return acc;
+      if (marketType === 'KR' && isOrderUS) return acc;
+
       const priceKRW = isOrderUS ? order.orderPrice * rate : order.orderPrice;
       return acc + order.quantity * priceKRW;
     }, 0);
 
-    return Math.floor(balance + stockValue + pendingReserve);
-  }, [balance, holdings, stocks, avgPrices, exchangeRate, pendingBuyOrders]);
+    const activeBal = marketType === 'KR' ? krBalance : usBalance;
+    return Math.floor(activeBal + stockValue + pendingReserve);
+  }, [balance, krBalance, usBalance, holdings, stocks, stocksCache, avgPrices, exchangeRate, pendingBuyOrders, marketType]);
 
   const convertedValue = displayCurrency === 'USD' ? Math.round(totalValue / (exchangeRate || 1350)) : Math.round(totalValue);
   const convertedBalance = displayCurrency === 'USD' ? Math.round(balance / (exchangeRate || 1350)) : Math.round(balance);
   
-  const pnl = Math.round(totalValue - principal);
-  const pnlPercent = principal > 0 ? (pnl / principal) * 100 : 0;
+  const activePrincipal = marketType === 'KR' ? krPrincipal : usPrincipal;
+  const pnl = Math.round(totalValue - (activePrincipal > 0 ? activePrincipal : totalValue));
+  const pnlPercent = (activePrincipal > 0 && activePrincipal !== totalValue) ? (pnl / activePrincipal) * 100 : 0;
 
   const convertedPnl = displayCurrency === 'USD' ? Math.round(pnl / exchangeRate) : Math.round(pnl);
-  const convertedPrincipal = displayCurrency === 'USD' ? Math.round(principal / exchangeRate) : Math.round(principal);
+  const convertedPrincipal = displayCurrency === 'USD' ? Math.round(activePrincipal / exchangeRate) : Math.round(activePrincipal);
   const curPrefix = displayCurrency === 'USD' ? '$' : '₩';
 
   const [isAssetAnalysisModalOpen, setIsAssetAnalysisModalOpen] = useState<boolean>(false);
@@ -1480,6 +1653,8 @@ export default function App() {
   const assetAnalysis = useMemo(() => {
     const isUSD = displayCurrency === 'USD';
     const conv = (krwVal: number) => isUSD ? krwVal / (exchangeRate || 1350) : krwVal;
+    const activeBal = marketType === 'KR' ? krBalance : usBalance;
+    const activePrin = marketType === 'KR' ? krPrincipal : usPrincipal;
 
     let totalStockValue = 0;
     let totalStockInvested = 0;
@@ -1548,8 +1723,6 @@ export default function App() {
     });
 
     stockList.forEach(item => {
-      // portfolioShare should be based on totalValue (which is converted in convertedValue)
-      // but let's just keep it relative to its own category if filtered, or keep total
       item.portfolioShare = totalValue > 0 ? ((item.evaluatedAmount * (isUSD ? exchangeRate : 1)) / totalValue) * 100 : 0;
     });
 
@@ -1563,26 +1736,23 @@ export default function App() {
       return acc + order.quantity * priceKRW;
     }, 0);
 
-    const filteredTotalValue = (marketType === 'US' ? balance : balance) + totalStockValue; // simplified for now
-
-    // Let's make shares relative to the filtered total for a consistent sub-view
-    const currentViewTotal = conv(balance) + totalStockValue + conv(pendingOrderReserve);
+    const currentViewTotal = conv(activeBal) + conv(totalStockValue) + conv(pendingOrderReserve);
 
     return {
-      cashBalance: conv(balance),
-      stockValue: totalStockValue,
-      stockInvested: totalStockInvested,
+      cashBalance: conv(activeBal),
+      stockValue: conv(totalStockValue),
+      stockInvested: conv(totalStockInvested),
       pendingReserve: conv(pendingOrderReserve),
       totalCalculatedAsset: currentViewTotal, // Reflecting total valuation including reserves
-      principal: conv(principal),
-      totalPnL: totalStockValue - totalStockInvested,
+      principal: conv(activePrin),
+      totalPnL: conv(totalStockValue - totalStockInvested),
       totalPnLPercent: totalStockInvested > 0 ? ((totalStockValue - totalStockInvested) / totalStockInvested) * 100 : 0,
-      cashShare: currentViewTotal > 0 ? (conv(balance) / currentViewTotal) * 100 : 0,
-      stockShare: currentViewTotal > 0 ? (totalStockValue / currentViewTotal) * 100 : 0,
+      cashShare: currentViewTotal > 0 ? (conv(activeBal) / currentViewTotal) * 100 : 0,
+      stockShare: currentViewTotal > 0 ? (conv(totalStockValue) / currentViewTotal) * 100 : 0,
       pendingShare: currentViewTotal > 0 ? (conv(pendingOrderReserve) / currentViewTotal) * 100 : 0,
       stockList
     };
-  }, [balance, holdings, stocks, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, principal, pnl, pnlPercent, marketType, displayCurrency]);
+  }, [krBalance, usBalance, krPrincipal, usPrincipal, holdings, stocks, stocksCache, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, marketType, displayCurrency]);
 
   // Stable symbol ordering for TOP 5 Scalper Optimal Stocks:
   // Priority: Real-time Rising Momentum + 1-Year Upward Trend + AI Recommended Optimal Candidates (No Price Limit)
@@ -2073,12 +2243,20 @@ export default function App() {
 
       if (validTabs.length > 0) {
         const tabToSwitch = validTabs.find(t => t.symbol === sym) || validTabs[0];
-        // Manually trigger tab switch logic since state won't be updated yet
         setActiveTabId(tabToSwitch.id);
+        setSelectedSymbol(tabToSwitch.symbol);
         setIsGapBotActive(tabToSwitch.isBotActive || false);
-        setGapBuyPrice(tabToSwitch.gapBuyPrice);
-        setGapSellPrice(tabToSwitch.gapSellPrice);
+        setGapBuyPrice(tabToSwitch.gapBuyPrice || 0);
+        setGapSellPrice(tabToSwitch.gapSellPrice || 0);
         setTradeQuantity(tabToSwitch.tradeQuantity || 1);
+        setMaxSlots(tabToSwitch.maxSlots || 3);
+        setGapInventory(tabToSwitch.gapInventory || []);
+        setGapTradingProfit(tabToSwitch.gapTradingProfit || 0);
+        setGapTradeCount(tabToSwitch.gapTradeCount || 0);
+        setLastTradeType(tabToSwitch.lastTradeType || null);
+        setScalperMessage(tabToSwitch.scalperMessage || "대기 중...");
+        setEntryPriceMode(tabToSwitch.entryPriceMode || 'BID2');
+        setAutoCancelThreshold(tabToSwitch.autoCancelThreshold || 0.2);
       } else {
         const newTab: ScalperTab = {
           id: stock.symbol,
@@ -2098,12 +2276,21 @@ export default function App() {
           autoCancelThreshold: 0.2,
           tradeLogs: []
         };
-        setScalperTabs([newTab]);
+        setScalperTabs(prev => [...prev, newTab]);
         setActiveTabId(newTab.id);
+        setSelectedSymbol(newTab.symbol);
         setIsGapBotActive(false);
         setGapBuyPrice(newTab.gapBuyPrice);
         setGapSellPrice(newTab.gapSellPrice);
         setTradeQuantity(1);
+        setMaxSlots(3);
+        setGapInventory([]);
+        setGapTradingProfit(0);
+        setGapTradeCount(0);
+        setLastTradeType(null);
+        setScalperMessage("대기 중...");
+        setEntryPriceMode('BID2');
+        setAutoCancelThreshold(0.2);
       }
     }
   };
@@ -4724,13 +4911,20 @@ export default function App() {
       return;
     }
 
-    const currentPrice = selectedStock.price;
-
-    showNotification(`${selectedStock.name} ${formatCurrency(manualSellPrice)} 지정가 매도 주문 전송 중...`, "info");
-    await executeTrade('SELL', selectedStock, manualSellQty, `[수동 지정가 매도] 희망가 ${formatCurrency(manualSellPrice)}`, manualSellPrice, avgPrices[selectedStock.symbol]);
-    showNotification(`${selectedStock.name} ${formatCurrency(manualSellPrice)} 지정가 매도 주문이 접수되었습니다.`, "success");
-    playScalpingSound('SELL');
+    // Instantly close modal so UI responds immediately
     setManualSellModalOpen(false);
+
+    try {
+      showNotification(`${selectedStock.name} ${formatCurrency(manualSellPrice)} 지정가 매도 주문 전송 중...`, "info");
+      await executeTrade('SELL', selectedStock, manualSellQty, `[수동 지정가 매도] 희망가 ${formatCurrency(manualSellPrice)}`, manualSellPrice, avgPrices[selectedStock.symbol]);
+      showNotification(`${selectedStock.name} ${formatCurrency(manualSellPrice)} 지정가 매도 주문이 접수되었습니다.`, "success");
+      playScalpingSound('SELL');
+    } catch (err: any) {
+      console.error("Manual sell error:", err);
+      showNotification(`지정가 매도 주문 전송 오류: ${err?.message || '처리 중 문제 발생'}`, "error");
+    } finally {
+      setManualSellModalOpen(false);
+    }
   };
 
   const handleExecuteXtxSignal = (sig: MarketSignal) => {
