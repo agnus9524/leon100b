@@ -140,6 +140,7 @@ interface Stock {
   symbol: string;
   name: string;
   price: number;
+  basePrice?: number;
   change: number;
   changePercent: number;
   volume: string;
@@ -150,6 +151,26 @@ interface Stock {
   sentiment?: number; // -1 to 1 score
   pattern?: string; // e.g. "Double Bottom", "Cup and Handle"
 }
+
+// Utility function to get tick size by market and price
+const getTickSize = (price: number, market: 'KR' | 'US' = 'KR'): number => {
+  if (market === 'US') return 0.01;
+  if (price >= 500000) return 1000;
+  if (price >= 100000) return 500;
+  if (price >= 50000) return 100;
+  if (price >= 10000) return 50;
+  if (price >= 5000) return 10;
+  return 5;
+};
+
+// Utility function to accurately calculate price change and percentage against base price
+const calcStockChange = (currentPrice: number, basePrice: number, market: 'KR' | 'US' = 'KR') => {
+  const isUS = market === 'US';
+  const diff = currentPrice - basePrice;
+  const change = isUS ? Number(diff.toFixed(2)) : Math.round(diff);
+  const changePercent = basePrice > 0 ? Number(((diff / basePrice) * 100).toFixed(2)) : 0;
+  return { change, changePercent };
+};
 
 interface PendingBuyOrder {
   id: string; // generated SIM-ID or KIS odno
@@ -2923,15 +2944,23 @@ export default function App() {
 
       // If not connected, we keep a very slow simulation just to keep UI alive
       setStocks(prev => prev.map(stock => {
-        const volatility = 0.0005; // Reduced volatility
-        const change = (Math.random() - 0.5) * 2 * volatility;
-        const newPrice = stock.price * (1 + change);
+        const isUS = stock.market === 'US' || /^[A-Z]/.test(stock.symbol);
+        const tickSize = getTickSize(stock.price, isUS ? 'US' : 'KR');
+        const moves = [-tickSize, 0, tickSize];
+        const move = moves[Math.floor(Math.random() * moves.length)];
+        if (move === 0) return stock;
+
+        const newPrice = Math.max(tickSize, isUS ? Number((stock.price + move).toFixed(2)) : stock.price + move);
+        const basePrice = stock.basePrice || (stock.price - stock.change) || newPrice;
+        const { change, changePercent } = calcStockChange(newPrice, basePrice, isUS ? 'US' : 'KR');
+
         const newHistory = [...stock.history.slice(1), { time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }), price: newPrice }];
         return {
           ...stock,
-          price: Number(newPrice.toFixed(2)),
-          change: Number((newPrice - stock.history[0].price).toFixed(2)),
-          changePercent: Number(((newPrice - stock.history[0].price) / stock.history[0].price * 100).toFixed(2)),
+          price: newPrice,
+          basePrice,
+          change,
+          changePercent,
           history: newHistory
         };
       }));
@@ -3184,61 +3213,58 @@ export default function App() {
         if (stock.symbol !== selectedStock.symbol) return stock;
 
         const currentPrice = stock.price;
+        const isUS = stock.market === 'US' || /^[A-Z]/.test(stock.symbol);
+        const tickSize = getTickSize(currentPrice, isUS ? 'US' : 'KR');
 
+        let move = 0;
         if (kisConfig.isConnected) {
-          // A. KIS Connected: Rapid micro-tick fluctuations to look exactly like real brokerage rapid price changes
-          const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
+          // A. KIS Connected: Rapid micro-tick fluctuations using exact exchange tick sizes
           const moves = [-tickSize, 0, tickSize];
-          const move = moves[Math.floor(Math.random() * moves.length)];
-          if (move === 0) return stock;
-
-          const newPrice = Math.max(tickSize, currentPrice + move);
-          const newHistory = [...stock.history];
-          if (newHistory.length > 0) {
-            newHistory[newHistory.length - 1] = {
-              ...newHistory[newHistory.length - 1],
-              price: newPrice
-            };
-          }
-
-          return {
-            ...stock,
-            price: newPrice,
-            change: newPrice - stock.history[0].price,
-            changePercent: ((newPrice - stock.history[0].price) / stock.history[0].price) * 100,
-            history: newHistory
-          };
+          move = moves[Math.floor(Math.random() * moves.length)];
         } else {
-          // B. Simulated Mode: Oscillate price around the defined range
-          const minPrice = gapBuyPrice > 0 ? gapBuyPrice : stock.price * 0.95;
-          const maxPrice = gapSellPrice > 0 ? gapSellPrice : stock.price * 1.05;
+          // B. Simulated Mode: Oscillate price around the defined range using discrete tick sizes
+          const minPrice = gapBuyPrice > 0 ? gapBuyPrice : currentPrice * 0.95;
+          const maxPrice = gapSellPrice > 0 ? gapSellPrice : currentPrice * 1.05;
           const centerPrice = (minPrice + maxPrice) / 2;
 
-          const distanceToCenter = (currentPrice - centerPrice) / (centerPrice || 1);
-          const drift = -0.003 * distanceToCenter; // Magnet strength towards center
-
-          const volatility = scalpingSpeed <= 500 ? 0.0035 : scalpingSpeed <= 1000 ? 0.0025 : 0.0018;
-          const randomShock = (Math.random() - 0.5) * 2 * volatility;
-
-          const changePercent = drift + randomShock;
-          const newPrice = Math.max(100, Math.round(currentPrice * (1 + changePercent)));
-
-          const newHistory = [...stock.history];
-          if (newHistory.length > 0) {
-            newHistory[newHistory.length - 1] = {
-              ...newHistory[newHistory.length - 1],
-              price: newPrice
-            };
+          let upProb = 0.42;
+          let downProb = 0.42;
+          if (currentPrice > centerPrice) {
+            upProb = 0.32;
+            downProb = 0.52;
+          } else if (currentPrice < centerPrice) {
+            upProb = 0.52;
+            downProb = 0.32;
           }
 
-          return {
-            ...stock,
-            price: newPrice,
-            change: newPrice - (stock.history[0]?.price || newPrice),
-            changePercent: stock.history[0]?.price ? ((newPrice - stock.history[0].price) / stock.history[0].price * 100) : 0,
-            history: newHistory
+          const rand = Math.random();
+          if (rand < downProb) move = -tickSize;
+          else if (rand < downProb + upProb) move = tickSize;
+          else move = 0;
+        }
+
+        if (move === 0) return stock;
+
+        const newPrice = Math.max(tickSize, isUS ? Number((currentPrice + move).toFixed(2)) : currentPrice + move);
+        const basePrice = stock.basePrice || (stock.price - stock.change) || newPrice;
+        const { change, changePercent } = calcStockChange(newPrice, basePrice, isUS ? 'US' : 'KR');
+
+        const newHistory = [...stock.history];
+        if (newHistory.length > 0) {
+          newHistory[newHistory.length - 1] = {
+            ...newHistory[newHistory.length - 1],
+            price: newPrice
           };
         }
+
+        return {
+          ...stock,
+          price: newPrice,
+          basePrice,
+          change,
+          changePercent,
+          history: newHistory
+        };
       }));
     }, kisConfig.isConnected ? 450 : scalpingSpeed); // 450ms for extremely responsive KIS visual ticks, or scalpingSpeed for simulation
 
@@ -6235,7 +6261,7 @@ export default function App() {
                     marketType === 'US' ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol)
                   );
                   if (currentMarketTabs.length >= 25) {
-                    showNotification("최대 25개 종목까지 AI 분석 기반 스캘퍼 탭을 생성할 수 있습니다.", "warning");
+                    showNotification("최대 25개 종목까지 AI 분석 기반 스캘퍼 탭을 생성할 수 있습니다.", "info");
                     return;
                   }
 
@@ -6386,10 +6412,11 @@ export default function App() {
                                 {formatCurrency(selectedStock.price)}
                               </span>
                               <span className={cn(
-                                "text-xs font-black italic font-mono px-1.5 py-0.5 rounded",
+                                "text-xs font-black italic font-mono px-1.5 py-0.5 rounded flex items-center gap-1",
                                 selectedStock.change >= 0 ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400"
                               )}>
-                                {selectedStock.change >= 0 ? '▲ +' : '▼ '}{selectedStock.changePercent.toFixed(2)}%
+                                <span>{selectedStock.change >= 0 ? '▲ +' : '▼ '}{formatCurrency(Math.abs(selectedStock.change))}</span>
+                                <span>({selectedStock.change >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%)</span>
                               </span>
                             </div>
                             
