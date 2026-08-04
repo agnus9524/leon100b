@@ -5470,17 +5470,17 @@ export default function App() {
           <motion.div 
             initial={{ opacity: 0, scale: 0.9, y: 20 }} 
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-sleek-card border border-sleek-blue/20 rounded-[2.5rem] p-12 w-full max-w-xl shadow-2xl text-center relative z-10"
+            className="bg-sleek-card border border-sleek-blue/20 rounded-[2.5rem] p-6 sm:p-12 w-full max-w-xl shadow-2xl text-center relative z-10"
           >
             <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-transparent via-sleek-blue to-transparent opacity-50"></div>
             
-            <div className="w-24 h-24 bg-sleek-blue/10 rounded-3xl flex items-center justify-center mx-auto mb-8 relative">
+            <div className="w-20 h-20 sm:w-24 sm:h-24 bg-sleek-blue/10 rounded-3xl flex items-center justify-center mx-auto mb-6 sm:mb-8 relative">
               <div className="absolute inset-0 bg-sleek-blue/5 rounded-3xl animate-ping opacity-20"></div>
-              <Bot className="w-12 h-12 text-sleek-blue drop-shadow-[0_0_10px_rgba(30,144,255,0.5)]" />
+              <Bot className="w-10 h-10 sm:w-12 sm:h-12 text-sleek-blue drop-shadow-[0_0_10px_rgba(30,144,255,0.5)]" />
             </div>
             
-            <h1 className="text-4xl font-black text-white mb-4 tracking-tighter uppercase italic leading-none">
-              Welcome to <span className="text-sleek-blue">LEO BOT</span>
+            <h1 className="text-lg xs:text-xl sm:text-2xl md:text-3xl font-black text-white mb-4 tracking-tight leading-none whitespace-nowrap">
+              <span className="text-sleek-blue">LEO 10B AI 봇</span>에 오신 것을 환영합니다
             </h1>
             
             <p className="text-sleek-text-secondary text-base mb-10 leading-relaxed max-w-md mx-auto">
