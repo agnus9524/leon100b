@@ -5968,10 +5968,10 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="pt-2 mt-1 border-t border-white/10 text-xs font-mono">
-                <div className="flex items-baseline gap-1.5">
-                  <span className="text-[11px] font-black text-sleek-text-secondary uppercase shrink-0">상태 메시지:</span>
-                  <span className="font-bold text-sleek-blue text-xs leading-relaxed break-words">
+              <div className="pt-2 mt-1 border-t border-white/10 text-xs font-mono min-h-[2.75rem] h-[2.75rem] flex items-center overflow-hidden">
+                <div className="flex items-start gap-1.5 w-full my-auto">
+                  <span className="text-[11px] font-black text-sleek-text-secondary uppercase shrink-0 mt-0.5">상태 메시지:</span>
+                  <span className="font-bold text-sleek-blue text-xs leading-snug break-words line-clamp-2">
                     {scalperMessage || "대기 중..."}
                   </span>
                 </div>
