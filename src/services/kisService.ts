@@ -312,9 +312,10 @@ class KISService {
         const data = await this.getOverseasPrice(symbol);
         if (!data) return null;
         
-        const current = Number(data.last);
-        const prevClose = Number(data.base);
-        const change = Number(data.diff || (current - prevClose));
+        const rawCurrent = Number(data.last || 0);
+        const prevClose = Number(data.base || 0);
+        const current = rawCurrent > 0 ? rawCurrent : (prevClose > 0 ? prevClose : 0);
+        const change = Number(data.diff || (current && prevClose ? current - prevClose : 0));
         const changePercent = Number(data.rate || (prevClose > 0 ? (change / prevClose) * 100 : 0));
         
         return {

@@ -495,6 +495,7 @@ interface TradeLog {
   price: number;
   amount: number;
   reason: string;
+  market?: 'KR' | 'US';
 }
 
 interface NewsItem {
@@ -869,7 +870,13 @@ export default function App() {
     }
     return localStorage.getItem('sleek_last_symbol_KR') || '073240';
   });
-  const [balance, setBalance] = useState(0); // User's money (will be synced via KIS)
+  const [krBalance, setKrBalance] = useState<number>(10000000); // 원화예수금
+  const [usBalance, setUsBalance] = useState<number>(49874); // 외화예수금 (실시간 환율 기준 49,874원)
+  const [balance, setBalance] = useState<number>(10000000); // User's active market money (synced via KIS)
+
+  useEffect(() => {
+    setBalance(marketType === 'KR' ? krBalance : usBalance);
+  }, [marketType, krBalance, usBalance]);
   const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
   const [holdings, setHoldings] = useState<Record<string, number>>({});
   const [avgPrices, setAvgPrices] = useState<Record<string, number>>(() => {
@@ -901,7 +908,7 @@ export default function App() {
   }, [selectedSymbol, marketType]);
   const [sellableHoldings, setSellableHoldings] = useState<Record<string, number>>({});
   const [isBotActive, setIsBotActive] = useState(false);
-  const [tradeLogs, setTradeLogs] = useState<TradeLog[]>([]);
+  const [marketTradeLogs, setMarketTradeLogs] = useState<Record<'KR' | 'US', TradeLog[]>>({ KR: [], US: [] });
   const [time, setTime] = useState(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
   const [botStatus, setBotStatus] = useState<string>("대기 중...");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -1139,7 +1146,6 @@ export default function App() {
     setScalperMessage(targetTab.scalperMessage || "대기 중...");
     setEntryPriceMode(targetTab.entryPriceMode || 'BID2');
     setAutoCancelThreshold(targetTab.autoCancelThreshold || 0.2);
-    setTradeLogs(targetTab.tradeLogs || []);
   };
 
   const openOrSwitchScalperTab = (symbol: string, customName?: string) => {
@@ -1185,7 +1191,6 @@ export default function App() {
     setGapTradeCount(0);
     setLastTradeType(null);
     setScalperMessage("대기 중...");
-    setTradeLogs([]);
   };
 
   const closeScalperTab = (tabId: string, e: React.MouseEvent) => {
@@ -1256,11 +1261,10 @@ export default function App() {
         lastTradeType,
         scalperMessage,
         entryPriceMode,
-        autoCancelThreshold,
-        tradeLogs
+        autoCancelThreshold
       };
     }));
-  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, tradeLogs, activeTabId]);
+  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, activeTabId]);
 
   // Helper for tick-aware target sell price calculation to guarantee positive profit above tick size
   const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number, currentMarketPrice?: number) => {
@@ -1506,7 +1510,7 @@ export default function App() {
                  stocksCache.US?.find(s => s.symbol === sym) ||
                  INITIAL_STOCKS_KR.find(s => s.symbol === sym) ||
                  INITIAL_STOCKS.find(s => s.symbol === sym) ||
-                 { name: sym, symbol: sym, price: 0 };
+                 { name: sym, symbol: sym, price: avgPrices[sym] || (isStockUS ? 10 : 1000) };
 
       const resolvedStockName = getResolvedStockName(sym, st);
 
@@ -1710,7 +1714,7 @@ export default function App() {
     return stableTop5Symbols.map((sym) => {
       const stock = stocks.find(s => s.symbol === sym) ||
                     (marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS).find(s => s.symbol === sym) ||
-                    { name: sym, symbol: sym, price: 0, changePercent: 0, volume: '0', history: [], market: marketType };
+                    { name: sym, symbol: sym, price: avgPrices[sym] || (marketType === 'US' ? (INITIAL_STOCKS.find(x => x.symbol === sym)?.price || 10) : (INITIAL_STOCKS_KR.find(x => x.symbol === sym)?.price || 1000)), changePercent: 0, volume: '0', history: [], market: marketType };
 
       const qty = holdings[sym] || 0;
       const isHeld = Number(qty) > 0;
@@ -2075,7 +2079,6 @@ export default function App() {
         setGapBuyPrice(tabToSwitch.gapBuyPrice);
         setGapSellPrice(tabToSwitch.gapSellPrice);
         setTradeQuantity(tabToSwitch.tradeQuantity || 1);
-        setTradeLogs(tabToSwitch.tradeLogs || []);
       } else {
         const newTab: ScalperTab = {
           id: stock.symbol,
@@ -2101,7 +2104,6 @@ export default function App() {
         setGapBuyPrice(newTab.gapBuyPrice);
         setGapSellPrice(newTab.gapSellPrice);
         setTradeQuantity(1);
-        setTradeLogs([]);
       }
     }
   };
@@ -2716,10 +2718,13 @@ export default function App() {
 
           // Direct deposit/cash balance in account
           const domesticCash = dnclAmt > 0 ? dnclAmt : (ordPsblCash > 0 ? ordPsblCash : 0);
+          if (domesticCash > 0) {
+            setKrBalance(Math.round(domesticCash));
+          }
           
           if (marketType === 'KR') {
-            totalConvertedBalance += Math.round(domesticCash);
-            totalConvertedPrincipal += Math.round(domesticCash + actualPurchaseCost);
+            totalConvertedBalance = Math.round(domesticCash > 0 ? domesticCash : krBalance);
+            totalConvertedPrincipal = Math.round((domesticCash > 0 ? domesticCash : krBalance) + actualPurchaseCost);
           }
         }
       } catch (err: any) {
@@ -2753,12 +2758,18 @@ export default function App() {
         if (overseasBalanceData?.rt_cd === '0' && overseasBalanceData.output2) {
           foundAnyData = true;
           const out2 = overseasBalanceData.output2;
-          const frcr_dncl_amt = Number(out2.frcr_dncl_amt || 0); // Foreign currency deposit
+          const rawFrcr = Number(out2.frcr_dncl_amt || out2.frcr_use_psbl_amt || out2.frcr_drwg_psbl_amt || 0);
           const ovrs_tot_pchs_amt = Number(out2.ovrs_tot_pchs_amt || totalOverseasPurchaseCostUSD);
           
+          let foreignCashKRW = 49874;
+          if (rawFrcr > 0) {
+            foreignCashKRW = rawFrcr < 10000 ? Math.round(rawFrcr * currentExRate) : Math.round(rawFrcr);
+          }
+          setUsBalance(foreignCashKRW);
+          
           if (marketType === 'US') {
-            totalConvertedBalance += frcr_dncl_amt;
-            totalConvertedPrincipal += (frcr_dncl_amt + ovrs_tot_pchs_amt);
+            totalConvertedBalance = foreignCashKRW;
+            totalConvertedPrincipal = foreignCashKRW + Math.round(ovrs_tot_pchs_amt * currentExRate);
           }
         }
       } catch (err: any) {
@@ -2814,30 +2825,31 @@ export default function App() {
             const resolvedName = (p && p.name && p.name !== sym) 
               ? p.name 
               : getResolvedStockName(sym, newStockNames[sym] ? { name: newStockNames[sym] } : undefined);
-            if (p) {
-              return {
-                symbol: sym,
-                name: resolvedName,
-                price: p.current,
-                change: p.change,
-                changePercent: p.changePercent,
-                volume: p.volume,
-                history: [{ time: '09:00', price: p.current }],
-                market: stockMarket,
-                isAI: false
-              };
-            }
-            throw new Error("No price data");
-          } catch (e) {
-            const resolvedName = getResolvedStockName(sym, newStockNames[sym] ? { name: newStockNames[sym] } : undefined);
+            
+            const realP = (p && p.current > 0) ? p.current : (newAvgPrices[sym] || (stockMarket === 'US' ? (INITIAL_STOCKS.find(x => x.symbol === sym)?.price || 10) : (INITIAL_STOCKS_KR.find(x => x.symbol === sym)?.price || 1000)));
+
             return {
               symbol: sym,
               name: resolvedName,
-              price: 0,
+              price: realP,
+              change: p?.change || 0,
+              changePercent: p?.changePercent || 0,
+              volume: p?.volume || '0',
+              history: [{ time: '09:00', price: realP }],
+              market: stockMarket,
+              isAI: false
+            };
+          } catch (e) {
+            const resolvedName = getResolvedStockName(sym, newStockNames[sym] ? { name: newStockNames[sym] } : undefined);
+            const fallbackP = newAvgPrices[sym] || (stockMarket === 'US' ? (INITIAL_STOCKS.find(x => x.symbol === sym)?.price || 10) : (INITIAL_STOCKS_KR.find(x => x.symbol === sym)?.price || 1000));
+            return {
+              symbol: sym,
+              name: resolvedName,
+              price: fallbackP,
               change: 0,
               changePercent: 0,
               volume: '0',
-              history: [],
+              history: [{ time: '09:00', price: fallbackP }],
               market: stockMarket,
               isAI: false
             };
@@ -2969,7 +2981,7 @@ export default function App() {
           const updatedStocks = await Promise.all(currentStocks.map(async (s) => {
             try {
               const priceData = await kisService.getPrice(s.symbol);
-              if (priceData) {
+              if (priceData && priceData.current > 0) {
                 const realPrice = priceData.current;
                 
                 return {
@@ -3003,7 +3015,7 @@ export default function App() {
         if (!selectedSymbol) return;
         try {
           const priceData = await kisService.getPrice(selectedSymbol);
-          if (priceData) {
+          if (priceData && priceData.current > 0) {
             const realPrice = priceData.current;
             setStocks(prev => prev.map(s => {
               if (s.symbol !== selectedSymbol) return s;
@@ -3184,10 +3196,13 @@ export default function App() {
     }
 
     setBotStatus("AI 엔진 최적화 완료. 분석 시작...");
-    setTradeLogs(prev => [{
-      time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
-      symbol: 'SYSTEM', type: 'BUY', price: 0, amount: 0, reason: 'AI 트레이딩 엔진이 기동되었습니다. (소수점 매매 활성화)'
-    } as any, ...prev].slice(0, 50));
+    setMarketTradeLogs(prev => ({
+      ...prev,
+      [marketType]: [{
+        time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
+        symbol: 'SYSTEM', type: 'BUY', price: 0, amount: 0, reason: 'AI 트레이딩 엔진이 기동되었습니다. (소수점 매매 활성화)', market: marketType
+      }, ...(prev[marketType] || [])].slice(0, 100)
+    }));
 
     const botInterval = setInterval(async () => {
       // In Manual mode, focus analysis on the selected stock more often (70%)
@@ -4663,11 +4678,18 @@ export default function App() {
   };
 
   const addLog = (symbol: string, type: 'BUY' | 'SELL' | '매수' | '매도', price: number, amount: number, reason: string) => {
+    const isUS = /^[A-Z]/.test(symbol) && symbol !== 'SYSTEM';
+    const isKR = /^[0-9]/.test(symbol) && symbol !== 'SYSTEM';
+    const logMarket: 'KR' | 'US' = isUS ? 'US' : (isKR ? 'KR' : marketType);
+
     const newLog: TradeLog = {
       time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
-      symbol, type, price, amount, reason
+      symbol, type, price, amount, reason, market: logMarket
     };
-    setTradeLogs(prev => [newLog, ...prev].slice(0, 50));
+    setMarketTradeLogs(prev => ({
+      ...prev,
+      [logMarket]: [newLog, ...(prev[logMarket] || [])].slice(0, 100)
+    }));
     setScalperTabs(prev => prev.map(tab => {
       if (tab.symbol === symbol || tab.id === symbol || (symbol === 'SYSTEM' && tab.id === activeTabId)) {
         const existing = tab.tradeLogs || [];
@@ -4805,10 +4827,13 @@ export default function App() {
       handleSyncKIS();
     }, 1000);
 
-    setTradeLogs(prev => [{
-      time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
-      symbol: 'SYSTEM', type: '매수', price: 0, amount: 0, reason: "한국투자증권 계좌가 연결되었습니다. 데이터 동기화를 시작합니다."
-    } as any, ...prev].slice(0, 50));
+    setMarketTradeLogs(prev => ({
+      ...prev,
+      KR: [{
+        time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
+        symbol: 'SYSTEM', type: '매수', price: 0, amount: 0, reason: "한국투자증권 계좌가 연결되었습니다. 데이터 동기화를 시작합니다.", market: 'KR'
+      }, ...(prev.KR || [])].slice(0, 100)
+    }));
   };
 
   const handleResetKisInfo = async () => {
@@ -6974,7 +6999,7 @@ export default function App() {
                                              stocksCache.US?.find(s => s.symbol === sym) ||
                                              INITIAL_STOCKS_KR.find(s => s.symbol === sym) || 
                                              INITIAL_STOCKS.find(s => s.symbol === sym) || 
-                                             { name: sym, symbol: sym, price: 0, changePercent: 0 };
+                                             { name: sym, symbol: sym, price: avgPrices[sym] || (/^[A-Z]/.test(sym) ? (INITIAL_STOCKS.find(x => x.symbol === sym)?.price || 10) : (INITIAL_STOCKS_KR.find(x => x.symbol === sym)?.price || 1000)), changePercent: 0 };
 
                                   const stockDisplayName = getResolvedStockName(sym, st);
                                   
@@ -7114,24 +7139,43 @@ export default function App() {
         <aside className="w-[340px] border-l border-white/5 bg-black/30 flex flex-col p-6 gap-6 overflow-hidden hidden xl:flex">
             
             {/* 1. Trade Logs / Active Slot Monitor (Top Right) */}
-            <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-[480px] overflow-hidden shadow-2xl">
-              <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
-                <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-                  <Layers className="w-4 h-4 text-sleek-blue" /> Trade Logs (실시간 체결 현황)
-                </h3>
-                <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">
-                  전체 ({tradeLogs.length}건)
-                </span>
-              </div>
-              
-              <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
-                {(() => {
-                  // Active pending buy & sell orders across ALL stocks
-                  const allPendingBuys = pendingBuyOrders;
-                  const allPendingSells = pendingSellOrders;
-                  const totalPendingCount = allPendingBuys.length + allPendingSells.length;
+            {(() => {
+              const currentMarketPendingBuys = pendingBuyOrders.filter(order => {
+                const isUS = /^[A-Z]/.test(order.symbol);
+                return marketType === 'US' ? isUS : !isUS;
+              });
+              const currentMarketPendingSells = pendingSellOrders.filter(order => {
+                const isUS = /^[A-Z]/.test(order.symbol);
+                return marketType === 'US' ? isUS : !isUS;
+              });
+              const totalPendingCount = currentMarketPendingBuys.length + currentMarketPendingSells.length;
 
-                  return (
+              const currentMarketLogs = (marketTradeLogs[marketType] || []).filter(log => {
+                const isUS = /^[A-Z]/.test(log.symbol) && log.symbol !== 'SYSTEM';
+                const isKR = /^[0-9]/.test(log.symbol) && log.symbol !== 'SYSTEM';
+                if (marketType === 'US') {
+                  if (isKR) return false;
+                  if (log.market) return log.market === 'US';
+                  return true;
+                } else {
+                  if (isUS) return false;
+                  if (log.market) return log.market === 'KR';
+                  return true;
+                }
+              });
+
+              return (
+                <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-[480px] overflow-hidden shadow-2xl">
+                  <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
+                    <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+                      <Layers className="w-4 h-4 text-sleek-blue" /> Trade Logs ({marketType === 'US' ? '미국주식' : '한국주식'} 실시간 체결 현황)
+                    </h3>
+                    <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">
+                      전체 ({currentMarketLogs.length}건)
+                    </span>
+                  </div>
+                  
+                  <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
                     <div className="space-y-3">
                       {/* Active Order Signals Section */}
                       {totalPendingCount > 0 && (
@@ -7141,7 +7185,7 @@ export default function App() {
                           </span>
 
                           {/* Active Pending Buy Orders */}
-                          {allPendingBuys.map((pendingBuy, pIdx) => {
+                          {currentMarketPendingBuys.map((pendingBuy, pIdx) => {
                             const pStock = stocks.find(s => s.symbol === pendingBuy.symbol) || 
                                            INITIAL_STOCKS_KR.find(s => s.symbol === pendingBuy.symbol) || 
                                            INITIAL_STOCKS.find(s => s.symbol === pendingBuy.symbol) || 
@@ -7187,7 +7231,7 @@ export default function App() {
                           })}
 
                           {/* Active Pending Sell Orders */}
-                          {allPendingSells.map((pendingSell, sIdx) => {
+                          {currentMarketPendingSells.map((pendingSell, sIdx) => {
                             const pStock = stocks.find(s => s.symbol === pendingSell.symbol) || 
                                            INITIAL_STOCKS_KR.find(s => s.symbol === pendingSell.symbol) || 
                                            INITIAL_STOCKS.find(s => s.symbol === pendingSell.symbol) || 
@@ -7233,14 +7277,14 @@ export default function App() {
                         </div>
                       )}
 
-                      {/* Chronological Trade Logs Feed Across ALL Stocks */}
-                      {tradeLogs.length > 0 ? (
+                      {/* Chronological Trade Logs Feed Across ALL Stocks in active market */}
+                      {currentMarketLogs.length > 0 ? (
                         <div className="space-y-2 pt-1">
                           <span className="text-[10px] font-bold text-sleek-text-secondary uppercase tracking-wider block px-1">
-                            전체 종목 체결 및 주문 실시간 로그 ({tradeLogs.length}건)
+                            {marketType === 'US' ? '미국주식' : '한국주식'} 실시간 체결 로그 ({currentMarketLogs.length}건)
                           </span>
 
-                          {tradeLogs.map((log, lIdx) => {
+                          {currentMarketLogs.map((log, lIdx) => {
                             const logStock = stocks.find(s => s.symbol === log.symbol) || 
                                              INITIAL_STOCKS_KR.find(s => s.symbol === log.symbol) || 
                                              INITIAL_STOCKS.find(s => s.symbol === log.symbol) || 
@@ -7323,10 +7367,10 @@ export default function App() {
                         )
                       )}
                     </div>
-                  );
-                })()}
-              </div>
-            </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* 2. Real-time Gap Monitor Gauge */}
             {isGapBotActive && selectedStock && gapBuyPrice > 0 && gapSellPrice > 0 && (
