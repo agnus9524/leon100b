@@ -935,6 +935,73 @@ export default function App() {
     KR: INITIAL_STOCKS_KR
   });
 
+  const [customStockNames, setCustomStockNames] = useState<Record<string, string>>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('sleek_custom_stock_names') || '{}');
+      const initialMap: Record<string, string> = { ...saved };
+      INITIAL_STOCKS_KR.forEach(s => { initialMap[s.symbol] = s.name; });
+      INITIAL_STOCKS.forEach(s => { initialMap[s.symbol] = s.name; });
+      return initialMap;
+    } catch {
+      const initialMap: Record<string, string> = {};
+      INITIAL_STOCKS_KR.forEach(s => { initialMap[s.symbol] = s.name; });
+      INITIAL_STOCKS.forEach(s => { initialMap[s.symbol] = s.name; });
+      return initialMap;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sleek_custom_stock_names', JSON.stringify(customStockNames));
+    } catch (e) {
+      console.error("Failed to persist customStockNames", e);
+    }
+  }, [customStockNames]);
+
+  const getResolvedStockName = useCallback((symbol: string, stockObj?: { name?: string }) => {
+    if (!symbol) return '';
+
+    // 1. Check customStockNames state
+    if (customStockNames[symbol] && customStockNames[symbol] !== symbol) {
+      return customStockNames[symbol];
+    }
+
+    // 2. Check passed stock object name
+    if (stockObj?.name && stockObj.name !== symbol) {
+      return stockObj.name;
+    }
+
+    // 3. Check current active stocks state
+    const foundInStocks = stocks.find(s => s.symbol === symbol);
+    if (foundInStocks?.name && foundInStocks.name !== symbol) {
+      return foundInStocks.name;
+    }
+
+    // 4. Check stocksCache KR and US
+    const foundInCacheKR = stocksCache?.KR?.find(s => s.symbol === symbol);
+    if (foundInCacheKR?.name && foundInCacheKR.name !== symbol) {
+      return foundInCacheKR.name;
+    }
+    const foundInCacheUS = stocksCache?.US?.find(s => s.symbol === symbol);
+    if (foundInCacheUS?.name && foundInCacheUS.name !== symbol) {
+      return foundInCacheUS.name;
+    }
+
+    // 5. Check INITIAL_STOCKS_KR
+    const foundInInitKR = INITIAL_STOCKS_KR.find(s => s.symbol === symbol);
+    if (foundInInitKR?.name && foundInInitKR.name !== symbol) {
+      return foundInInitKR.name;
+    }
+
+    // 6. Check INITIAL_STOCKS (US)
+    const foundInInitUS = INITIAL_STOCKS.find(s => s.symbol === symbol);
+    if (foundInInitUS?.name && foundInInitUS.name !== symbol) {
+      return foundInInitUS.name;
+    }
+
+    return symbol;
+  }, [customStockNames, stocks, stocksCache]);
+
   // Use a ref to always have the latest stocks for intervals
   const stocksRef = React.useRef<Stock[]>(stocks);
   useEffect(() => {
@@ -1327,7 +1394,21 @@ export default function App() {
     isLoading: false
   });
 
-  const selectedStock = useMemo(() => stocks.find(s => s.symbol === selectedSymbol) || stocks[0] || null, [stocks, selectedSymbol]);
+  const selectedStock = useMemo(() => {
+    const found = stocks.find(s => s.symbol === selectedSymbol) ||
+                  stocksCache.KR?.find(s => s.symbol === selectedSymbol) ||
+                  stocksCache.US?.find(s => s.symbol === selectedSymbol) ||
+                  INITIAL_STOCKS_KR.find(s => s.symbol === selectedSymbol) ||
+                  INITIAL_STOCKS.find(s => s.symbol === selectedSymbol);
+    if (found) {
+      return {
+        ...found,
+        name: getResolvedStockName(selectedSymbol, found)
+      };
+    }
+    if (stocks.length > 0) return stocks[0];
+    return null;
+  }, [stocks, stocksCache, selectedSymbol, getResolvedStockName]);
 
   // Auto-set Upper/Lower Price Limits (당일 상/하한가) when selectedStock changes
   useEffect(() => {
@@ -1414,13 +1495,13 @@ export default function App() {
       if (marketType === 'KR' && isStockUS) return;
 
       const st = stocks.find(s => s.symbol === sym) ||
+                 stocksCache.KR?.find(s => s.symbol === sym) ||
+                 stocksCache.US?.find(s => s.symbol === sym) ||
                  INITIAL_STOCKS_KR.find(s => s.symbol === sym) ||
                  INITIAL_STOCKS.find(s => s.symbol === sym) ||
                  { name: sym, symbol: sym, price: 0 };
 
-      const resolvedStockName = (st.name && st.name !== sym)
-        ? st.name
-        : (INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym);
+      const resolvedStockName = getResolvedStockName(sym, st);
 
       const currentPriceKRW = isStockUS ? (st.price || 0) * exchangeRate : (st.price || 0);
 
@@ -1670,9 +1751,7 @@ export default function App() {
         reasonTag = `💧 AI 분석 유동성 우수 종목`;
       }
 
-      const resolvedStockName = (stock.name && stock.name !== sym) 
-        ? stock.name 
-        : (INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym);
+      const resolvedStockName = getResolvedStockName(sym, stock);
 
       return {
         ...stock,
@@ -1922,19 +2001,33 @@ export default function App() {
   const handleMarketSwitch = (newMarket: 'KR' | 'US') => {
     if (marketType === newMarket) return;
 
-    // 1. Save current stocks to cache
+    // 1. Save current stocks to cache & custom names
     const currentMarket = marketType;
     const currentStocks = stocksRef.current;
-    setStocksCache(prev => ({
-      ...prev,
+
+    const newNamesFromCurrent: Record<string, string> = {};
+    currentStocks.forEach(s => {
+      if (s.symbol && s.name && s.name !== s.symbol) {
+        newNamesFromCurrent[s.symbol] = s.name;
+      }
+    });
+    if (Object.keys(newNamesFromCurrent).length > 0) {
+      setCustomStockNames(prev => ({ ...prev, ...newNamesFromCurrent }));
+    }
+
+    const nextCache = {
+      ...stocksCache,
       [currentMarket]: currentStocks.filter(s => s.market === currentMarket)
-    }));
+    };
+    setStocksCache(nextCache);
 
     // 2. Set new market states
     setMarketType(newMarket);
     setDisplayCurrency(newMarket === 'KR' ? 'KRW' : 'USD');
     
-    const cachedStocks = stocksCache[newMarket];
+    const cachedStocks = nextCache[newMarket] && nextCache[newMarket].length > 0
+      ? nextCache[newMarket]
+      : (newMarket === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS);
     setStocks(cachedStocks);
 
     // 3. Sync symbol
@@ -2573,12 +2666,9 @@ export default function App() {
               const avgP = Number(item.pchs_avg_pric || item.pchs_unpr || item.pchs_avg_price || (item.pchs_amt && qty ? item.pchs_amt / qty : 0) || 0);
               const name = item.prdt_name;
               if (qty > 0) {
-                // Only add to holdings if we are in KR market mode
-                if (marketType === 'KR') {
-                  newHoldings[item.pdno] = (newHoldings[item.pdno] || 0) + qty;
-                  if (avgP > 0) newAvgPrices[item.pdno] = avgP;
-                  if (name) newStockNames[item.pdno] = name;
-                }
+                newHoldings[item.pdno] = (newHoldings[item.pdno] || 0) + qty;
+                if (avgP > 0) newAvgPrices[item.pdno] = avgP;
+                if (name) newStockNames[item.pdno] = name;
                 
                 totalStockPurchaseCost += (qty * (avgP > 0 ? avgP : 0));
 
@@ -2631,12 +2721,9 @@ export default function App() {
               const avgP = Number(item.pchs_avg_pric || 0);
               const name = item.prdt_name || item.ovrs_item_name;
               if (qty > 0) {
-                // Only add to holdings if we are in US market mode
-                if (marketType === 'US') {
-                  newHoldings[item.pdno] = (newHoldings[item.pdno] || 0) + qty;
-                  if (avgP > 0) newAvgPrices[item.pdno] = avgP;
-                  if (name) newStockNames[item.pdno] = name;
-                }
+                newHoldings[item.pdno] = (newHoldings[item.pdno] || 0) + qty;
+                if (avgP > 0) newAvgPrices[item.pdno] = avgP;
+                if (name) newStockNames[item.pdno] = name;
                 totalOverseasPurchaseCostUSD += (qty * avgP);
               }
             }
@@ -2689,6 +2776,10 @@ export default function App() {
       // Final fallback: if total is still 0, check if we have any total eval amount in output2
       // common for some accounts to only populate tot_evlu_amt
       
+      if (Object.keys(newStockNames).length > 0) {
+        setCustomStockNames(prev => ({ ...prev, ...newStockNames }));
+      }
+
       const symbolsFromHoldings = Object.keys(newHoldings);
       const existingSymbols = new Set(stocks.map(s => s.symbol));
       const missingSymbols = symbolsFromHoldings.filter(s => !existingSymbols.has(s));
@@ -2702,7 +2793,7 @@ export default function App() {
             const p = await kisService.getPrice(sym);
             const resolvedName = (p && p.name && p.name !== sym) 
               ? p.name 
-              : (newStockNames[sym] || INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym);
+              : getResolvedStockName(sym, newStockNames[sym] ? { name: newStockNames[sym] } : undefined);
             if (p) {
               return {
                 symbol: sym,
@@ -2718,7 +2809,7 @@ export default function App() {
             }
             throw new Error("No price data");
           } catch (e) {
-            const resolvedName = newStockNames[sym] || INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym;
+            const resolvedName = getResolvedStockName(sym, newStockNames[sym] ? { name: newStockNames[sym] } : undefined);
             return {
               symbol: sym,
               name: resolvedName,
@@ -2732,7 +2823,26 @@ export default function App() {
             };
           }
         }));
-        setStocks(prev => [...prev, ...addedStocks]);
+        
+        // Add to current active stocks if market matches
+        const currentMarketAdded = addedStocks.filter(s => s.market === marketType);
+        if (currentMarketAdded.length > 0) {
+          setStocks(prev => [...prev, ...currentMarketAdded]);
+        }
+
+        // Update stocksCache so that stocks are preserved across market switches
+        setStocksCache(prev => {
+          const nextKR = [...prev.KR];
+          const nextUS = [...prev.US];
+          addedStocks.forEach(s => {
+            if (s.market === 'US') {
+              if (!nextUS.some(x => x.symbol === s.symbol)) nextUS.push(s);
+            } else {
+              if (!nextKR.some(x => x.symbol === s.symbol)) nextKR.push(s);
+            }
+          });
+          return { KR: nextKR, US: nextUS };
+        });
       }
 
       // Update States
@@ -6200,10 +6310,12 @@ export default function App() {
               }).map(tab => {
                 const isSelected = tab.id === activeTabId;
                 const tabStock = stocks.find(s => s.symbol === tab.symbol) || 
+                                 stocksCache.KR?.find(s => s.symbol === tab.symbol) ||
+                                 stocksCache.US?.find(s => s.symbol === tab.symbol) ||
                                  (marketType === 'KR' 
                                    ? INITIAL_STOCKS_KR.find(s => s.symbol === tab.symbol) 
                                    : INITIAL_STOCKS.find(s => s.symbol === tab.symbol));
-                const tabName = tab.name || tabStock?.name || tab.symbol;
+                const tabName = (tab.name && tab.name !== tab.symbol) ? tab.name : getResolvedStockName(tab.symbol, tabStock);
 
                 return (
                   <div
@@ -6804,13 +6916,13 @@ export default function App() {
                                 {filteredHoldings.map(([sym, rawQty], idx) => {
                                   const qty = Number(rawQty);
                                   const st = stocks.find(s => s.symbol === sym) || 
+                                             stocksCache.KR?.find(s => s.symbol === sym) ||
+                                             stocksCache.US?.find(s => s.symbol === sym) ||
                                              INITIAL_STOCKS_KR.find(s => s.symbol === sym) || 
                                              INITIAL_STOCKS.find(s => s.symbol === sym) || 
                                              { name: sym, symbol: sym, price: 0, changePercent: 0 };
 
-                                  const stockDisplayName = (st.name && st.name !== sym) 
-                                    ? st.name 
-                                    : (INITIAL_STOCKS_KR.find(s => s.symbol === sym)?.name || INITIAL_STOCKS.find(s => s.symbol === sym)?.name || sym);
+                                  const stockDisplayName = getResolvedStockName(sym, st);
                                   
                                   let avgPrice = avgPrices[sym] || 0;
                                   if (avgPrice <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
@@ -7709,7 +7821,7 @@ export default function App() {
                             >
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-2.5">
-                              <span className="font-extrabold text-white text-base md:text-lg">{item.name}({item.symbol})</span>
+                              <span className="font-extrabold text-white text-base md:text-lg">{getResolvedStockName(item.symbol, { name: item.name })}({item.symbol})</span>
                               <span className="text-xs font-mono font-bold px-2 py-0.5 bg-white/10 text-slate-200 rounded-md">
                                 포트폴리오 {item.portfolioShare.toFixed(1)}%
                               </span>
