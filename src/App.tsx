@@ -5593,70 +5593,62 @@ export default function App() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6">
-          <div className="flex items-center gap-4 text-[11px] md:text-[13px] font-mono border-r border-sleek-border pr-4 md:pr-6">
-            <div className="flex flex-col items-end">
-              <span className="text-[9px] md:text-[10px] text-sleek-text-secondary uppercase">User Account</span>
-              <div className="flex items-center gap-2">
-                {currentUser?.email === "agnus9524@gmail.com" && (
-                  <button 
-                    onClick={() => { setShowAdminPanel(true); handleFetchAllLicenses(); }}
-                    className="text-sleek-blue hover:text-white transition-colors flex items-center gap-1 text-[10px]"
-                  >
-                    <Settings className="w-3 h-3" /> ADMIN
-                  </button>
-                )}
-                <button 
-                  onClick={handleLogout}
-                  className="text-sleek-text-secondary hover:text-white transition-colors"
-                  title="로그아웃"
-                >
-                  LOGOUT
-                </button>
-              </div>
+      <div className="flex flex-wrap items-center justify-center gap-3 md:gap-4">
+        {/* User Account & KIS Connection side-by-side */}
+        <div className="flex items-center gap-2 md:gap-3 bg-black/40 p-1.5 rounded-2xl border border-white/10 text-xs font-mono">
+          {/* User Account */}
+          <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
+            <div className="flex flex-col">
+              <span className="text-[9px] text-sleek-text-secondary uppercase font-bold tracking-wider">User Account</span>
+              <span className="text-white font-extrabold text-xs truncate max-w-[100px] md:max-w-[140px]">
+                {currentUser?.email ? currentUser.email.split('@')[0] : 'LOGGED IN'}
+              </span>
             </div>
-            <div className="flex flex-col items-end">
-              <span className="text-[9px] md:text-[10px] text-sleek-text-secondary uppercase">KIS Connection</span>
-              <div className="flex items-center gap-2">
-                {kisConfig.isConnected && (
-                  <button 
-                    onClick={handleSyncKIS}
-                    className="text-[10px] text-sleek-blue hover:text-white flex items-center gap-1"
-                    title="잔고 동기화"
-                  >
-                    <RefreshCw className="w-3 h-3" /> SYNC
-                  </button>
-                )}
-                <button 
-                  onClick={() => setShowKisModal(true)}
-                  className={cn(
-                    "flex items-center gap-2 font-black text-sm", 
-                    kisConfig.isConnected ? "text-emerald-400" : "text-rose-500 animate-pulse"
-                  )}
-                >
-                  <div className={cn("w-2 h-2 rounded-full", kisConfig.isConnected ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,1)]" : "bg-rose-500")} />
-                  {kisConfig.isConnected 
-                    ? "연동 중" 
-                    : "계좌 연결 필요"}
-                </button>
-              </div>
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
+            {currentUser?.email === "agnus9524@gmail.com" && (
+              <button 
+                onClick={() => { setShowAdminPanel(true); handleFetchAllLicenses(); }}
+                className="text-sleek-blue hover:text-white transition-colors flex items-center gap-1 text-[10px] bg-sleek-blue/20 px-1.5 py-0.5 rounded border border-sleek-blue/30 font-bold cursor-pointer"
+              >
+                <Settings className="w-3 h-3" /> ADMIN
+              </button>
+            )}
             <button 
-              onClick={() => setIsGapBotActive(!isGapBotActive)}
-              className={cn(
-                "flex items-center gap-2 px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-bold text-[10px] md:text-xs transition-all",
-                isGapBotActive 
-                  ? "bg-sleek-red/20 text-sleek-red border border-sleek-red/30 hover:bg-sleek-red hover:text-white" 
-                  : "bg-sleek-blue/20 text-sleek-blue border border-sleek-blue/30 hover:bg-sleek-blue hover:text-white"
-              )}
+              onClick={handleLogout}
+              className="text-rose-400 hover:text-rose-200 bg-rose-500/10 hover:bg-rose-500/20 px-2 py-1 rounded text-[10px] font-bold border border-rose-500/30 transition-all flex items-center gap-1 cursor-pointer"
+              title="로그아웃"
             >
-              {isGapBotActive ? <Square className="w-2.5 h-2.5 fill-current" /> : <Play className="w-2.5 h-2.5 fill-current" />}
-              {isGapBotActive ? "정지" : "자동 스캘핑 시작"}
+              <LogOut className="w-3 h-3" /> LOGOUT
             </button>
           </div>
+
+          {/* KIS Connection */}
+          <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
+            <div className="flex flex-col">
+              <span className="text-[9px] text-sleek-text-secondary uppercase font-bold tracking-wider">KIS Connection</span>
+              <button 
+                onClick={() => setShowKisModal(true)}
+                className={cn(
+                  "flex items-center gap-1.5 font-black text-xs transition-colors cursor-pointer", 
+                  kisConfig.isConnected ? "text-emerald-400 hover:text-emerald-300" : "text-rose-400 hover:text-rose-300 animate-pulse"
+                )}
+              >
+                <div className={cn("w-2 h-2 rounded-full shrink-0", kisConfig.isConnected ? "bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]" : "bg-rose-500")} />
+                {kisConfig.isConnected ? "연동 중" : "계좌 연결 필요"}
+              </button>
+            </div>
+          </div>
         </div>
+
+        {/* Far Right SYNC Button */}
+        <button 
+          onClick={handleSyncKIS}
+          className="flex items-center gap-1.5 px-3.5 md:px-4 py-2 rounded-xl font-black text-xs md:text-sm bg-gradient-to-r from-sleek-blue to-blue-600 text-white shadow-lg hover:shadow-sleek-blue/30 hover:scale-[1.02] active:scale-95 transition-all border border-sleek-blue/50 cursor-pointer shrink-0"
+          title="실시간 계좌/잔고/시세 동기화"
+        >
+          <RefreshCw className="w-4 h-4 text-white" />
+          <span>SYNC</span>
+        </button>
+      </div>
       </header>
       
       {/* Exchange Rate Ribbon */}
