@@ -293,6 +293,22 @@ export const getUserSettings = async (userId: string) => {
   }
 };
 
+export const deleteUserKISConfig = async (userId: string) => {
+  const path = `userSettings/${userId}`;
+  try {
+    const docRef = doc(db, 'userSettings', userId);
+    await setDoc(docRef, { 
+      kisConfig: null, 
+      kisTokenReal: null,
+      updatedAt: serverTimestamp() 
+    }, { merge: true });
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.WRITE, path);
+    return false;
+  }
+};
+
 export const saveUserHoldings = async (userId: string, holdings: any) => {
   const path = `userSettings/${userId}`;
   try {

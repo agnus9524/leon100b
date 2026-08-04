@@ -101,6 +101,7 @@ import {
   getAllAuthKeys,
   loginWithKey,
   saveUserKISConfig,
+  deleteUserKISConfig,
   getUserSettings,
   saveUserHoldings,
   saveUserKISToken,
@@ -4793,6 +4794,37 @@ export default function App() {
     } as any, ...prev].slice(0, 50));
   };
 
+  const handleResetKisInfo = async () => {
+    if (!window.confirm("정말로 모든 API 키와 개인 정보를 초기화하시겠습니까?\n이 작업은 되돌릴 수 없습니다.")) {
+      return;
+    }
+
+    try {
+      const resetConfig = {
+        appKey: '',
+        appSecret: '',
+        accountNo: '',
+        accountCode: '01',
+        accountPw: '',
+        isConnected: false,
+        domesticOrderType: '00',
+        isRealOrderEnabled: true
+      };
+
+      if (currentUser) {
+        await deleteUserKISConfig(currentUser.uid);
+      }
+
+      setKisConfig(resetConfig);
+      kisService.init(getActiveKisConfig(resetConfig));
+      showNotification("모든 개인 정보 및 API 설정이 초기화되었습니다.", "info");
+      setShowKisModal(false);
+    } catch (err: any) {
+      console.error("Reset info error:", err);
+      showNotification("초기화 중 오류가 발생했습니다: " + err.message, "error");
+    }
+  };
+
   if (isAuthLoading || isRateLoading) {
     return (
       <div className="min-h-screen bg-sleek-bg flex flex-col items-center justify-center gap-6">
@@ -5044,6 +5076,16 @@ export default function App() {
                   접근 토큰은 24시간 유효하며, 보안을 위해 토큰 발급 시 한국투자증권에서 LMS 알림이 발송됩니다. 
                   본 앱은 토큰을 저장하여 알림 발송 횟수를 최소화합니다.
                 </p>
+              </div>
+
+              <div className="mt-6 pt-4 border-t border-white/5">
+                <button 
+                  onClick={handleResetKisInfo}
+                  className="w-full py-2.5 rounded-xl text-[10px] font-bold text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-500/80 border border-rose-500/20 transition-all flex items-center justify-center gap-2"
+                >
+                  <Trash2 className="w-3 h-3" />
+                  API 키 및 모든 개인정보 초기화 (영구 삭제)
+                </button>
               </div>
             </motion.div>
           </motion.div>
