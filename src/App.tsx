@@ -1048,6 +1048,7 @@ export default function App() {
   };
 
   const formatCurrency = (val: number, forceKRW: boolean = false) => {
+    if (typeof val !== 'number' || isNaN(val)) return '-';
     const isUSD = marketType === 'US' && !forceKRW;
     if (isUSD) {
       return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1056,7 +1057,8 @@ export default function App() {
   };
 
   const formatQuantity = (val: number) => {
-    return `${val.toLocaleString()} ${marketType === 'US' ? '주' : '주'}`; // '주' is standard for both in KR context usually, but can be customized
+    if (typeof val !== 'number' || isNaN(val)) return '0 주';
+    return `${val.toLocaleString()} ${marketType === 'US' ? '주' : '주'}`;
   };
   const [showKisModal, setShowKisModal] = useState(false);
   const [showKisPassword, setShowKisPassword] = useState(false);
@@ -1398,19 +1400,20 @@ export default function App() {
   });
 
   const selectedStock = useMemo(() => {
-    const found = stocks.find(s => s.symbol === selectedSymbol) ||
-                  stocksCache.KR?.find(s => s.symbol === selectedSymbol) ||
-                  stocksCache.US?.find(s => s.symbol === selectedSymbol) ||
+    if (!selectedSymbol) return stocks[0] || INITIAL_STOCKS_KR[0];
+    const found = stocks.find(s => s.symbol === selectedSymbol) || 
+                  (stocksCache?.KR || []).find(s => s.symbol === selectedSymbol) ||
+                  (stocksCache?.US || []).find(s => s.symbol === selectedSymbol) ||
                   INITIAL_STOCKS_KR.find(s => s.symbol === selectedSymbol) ||
                   INITIAL_STOCKS.find(s => s.symbol === selectedSymbol);
+    
     if (found) {
       return {
         ...found,
         name: getResolvedStockName(selectedSymbol, found)
       };
     }
-    if (stocks.length > 0) return stocks[0];
-    return null;
+    return stocks[0] || INITIAL_STOCKS_KR[0];
   }, [stocks, stocksCache, selectedSymbol, getResolvedStockName]);
 
   // Auto-set Upper/Lower Price Limits (당일 상/하한가) when selectedStock changes
@@ -1431,6 +1434,7 @@ export default function App() {
   const totalValue = useMemo(() => {
     // Total Asset Valuation = Cash Balance + Current Market Value of Stock Holdings + Pending Order Reserves
     let stockValue = 0;
+    const rate = exchangeRate || 1350;
     Object.entries(holdings).forEach(([sym, rawQty]) => {
       const qty = Number(rawQty);
       if (qty <= 0) return;
@@ -1441,7 +1445,7 @@ export default function App() {
 
       const currentPrice = st ? st.price : (avgPrices[sym] || 0);
       const isUS = /^[A-Z]/.test(sym);
-      const priceInKRW = isUS ? currentPrice * exchangeRate : currentPrice;
+      const priceInKRW = isUS ? currentPrice * rate : currentPrice;
 
       stockValue += qty * priceInKRW;
     });
@@ -1450,15 +1454,15 @@ export default function App() {
     const pendingReserve = pendingBuyOrders.reduce((acc, order) => {
       if (!order.isSimulated) return acc;
       const isOrderUS = /^[A-Z]/.test(order.symbol);
-      const priceKRW = isOrderUS ? order.orderPrice * exchangeRate : order.orderPrice;
+      const priceKRW = isOrderUS ? order.orderPrice * rate : order.orderPrice;
       return acc + order.quantity * priceKRW;
     }, 0);
 
     return Math.floor(balance + stockValue + pendingReserve);
   }, [balance, holdings, stocks, avgPrices, exchangeRate, pendingBuyOrders]);
 
-  const convertedValue = displayCurrency === 'USD' ? Math.round(totalValue / exchangeRate) : Math.round(totalValue);
-  const convertedBalance = displayCurrency === 'USD' ? Math.round(balance / exchangeRate) : Math.round(balance);
+  const convertedValue = displayCurrency === 'USD' ? Math.round(totalValue / (exchangeRate || 1350)) : Math.round(totalValue);
+  const convertedBalance = displayCurrency === 'USD' ? Math.round(balance / (exchangeRate || 1350)) : Math.round(balance);
   
   const pnl = Math.round(totalValue - principal);
   const pnlPercent = principal > 0 ? (pnl / principal) * 100 : 0;
@@ -2007,11 +2011,11 @@ export default function App() {
 
     // 1. Save current stocks to cache & custom names
     const currentMarket = marketType;
-    const currentStocks = stocksRef.current;
+    const currentStocks = Array.isArray(stocks) ? [...stocks] : [];
 
     const newNamesFromCurrent: Record<string, string> = {};
     currentStocks.forEach(s => {
-      if (s.symbol && s.name && s.name !== s.symbol) {
+      if (s && s.symbol && s.name && s.name !== s.symbol) {
         newNamesFromCurrent[s.symbol] = s.name;
       }
     });
@@ -2028,22 +2032,23 @@ export default function App() {
     // 2. Set new market states
     setMarketType(newMarket);
     setDisplayCurrency(newMarket === 'KR' ? 'KRW' : 'USD');
+    setHoldingsViewTab(newMarket);
     
     const cachedStocks = nextCache[newMarket] && nextCache[newMarket].length > 0
       ? nextCache[newMarket]
       : (newMarket === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS);
-    setStocks(cachedStocks);
+    setStocks([...cachedStocks]); // Spread to force reference change
 
     // 3. Sync symbol
     let sym = newMarket === 'US' ? lastSelectedUS : lastSelectedKR;
     const isUS = sym ? /^[A-Z]/.test(sym) : false;
     if (newMarket === 'US') {
       if (!isUS || !cachedStocks.some(s => s.symbol === sym)) {
-        sym = cachedStocks.find(s => /^[A-Z]/.test(s.symbol))?.symbol || 'NVDA';
+        sym = cachedStocks.find(s => /^[A-Z]/.test(s.symbol))?.symbol || (cachedStocks[0]?.symbol) || 'NVDA';
       }
     } else {
       if (isUS || !cachedStocks.some(s => s.symbol === sym)) {
-        sym = cachedStocks.find(s => !/^[A-Z]/.test(s.symbol))?.symbol || '073240';
+        sym = cachedStocks.find(s => !/^[A-Z]/.test(s.symbol))?.symbol || (cachedStocks[0]?.symbol) || '073240';
       }
     }
     setSelectedSymbol(sym);
@@ -2052,9 +2057,10 @@ export default function App() {
     const stock = cachedStocks.find(s => s.symbol === sym) || cachedStocks[0];
     if (stock) {
       const price = stock.price || (newMarket === 'KR' ? 1000 : 1);
-      const tickSize = newMarket === 'KR' 
-        ? (price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5)
-        : 0.01;
+      const isStockUS = /^[A-Z]/.test(stock.symbol);
+      const tickSize = isStockUS 
+        ? 0.01 
+        : (price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5);
       
       const validTabs = scalperTabs.filter(t => {
         const tIsUS = t.symbol ? /^[A-Z]/.test(t.symbol) : false;
@@ -2062,11 +2068,15 @@ export default function App() {
       });
 
       if (validTabs.length > 0) {
-        // If there are existing tabs for this market, switch to the most appropriate one
         const tabToSwitch = validTabs.find(t => t.symbol === sym) || validTabs[0];
-        handleSwitchTab(tabToSwitch.id);
+        // Manually trigger tab switch logic since state won't be updated yet
+        setActiveTabId(tabToSwitch.id);
+        setIsGapBotActive(tabToSwitch.isBotActive || false);
+        setGapBuyPrice(tabToSwitch.gapBuyPrice);
+        setGapSellPrice(tabToSwitch.gapSellPrice);
+        setTradeQuantity(tabToSwitch.tradeQuantity || 1);
+        setTradeLogs(tabToSwitch.tradeLogs || []);
       } else {
-        // Create a default tab if none exists for the market
         const newTab: ScalperTab = {
           id: stock.symbol,
           symbol: stock.symbol,
@@ -2087,11 +2097,9 @@ export default function App() {
         };
         setScalperTabs([newTab]);
         setActiveTabId(newTab.id);
-        
-        // Sync local states manually for the new tab
+        setIsGapBotActive(false);
         setGapBuyPrice(newTab.gapBuyPrice);
         setGapSellPrice(newTab.gapSellPrice);
-        setIsGapBotActive(false);
         setTradeQuantity(1);
         setTradeLogs([]);
       }
