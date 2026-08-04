@@ -1104,8 +1104,8 @@ export default function App() {
   };
 
   const formatQuantity = (val: number) => {
-    if (typeof val !== 'number' || isNaN(val)) return '0 주';
-    return `${val.toLocaleString()} ${marketType === 'US' ? '주' : '주'}`;
+    if (typeof val !== 'number' || isNaN(val)) return '0주';
+    return `${val.toLocaleString()}주`;
   };
   const [showKisModal, setShowKisModal] = useState(false);
   const [showKisPassword, setShowKisPassword] = useState(false);
@@ -1388,9 +1388,9 @@ export default function App() {
     }
   }, [scalperTabs]);
 
-  // Automated Market Closing Auto-Stop Effect (KR: 15:30 KST, US: 16:00 EST)
+  // Market Hours Status Check Effect (Pre-Market Analysis Mode when Market is Closed)
   useEffect(() => {
-    const checkMarketClose = () => {
+    const checkMarketStatus = () => {
       const krClosed = isKRMarketClosed();
       const usClosed = isUSMarketClosed();
 
@@ -1400,34 +1400,34 @@ export default function App() {
           const isUS = /^[A-Z]/.test(tab.symbol);
           const isClosed = isUS ? usClosed : krClosed;
           if (isClosed && tab.isBotActive) {
-            changed = true;
-            return {
-              ...tab,
-              isBotActive: false,
-              scalperMessage: isUS 
-                ? "[장 마감] 미국 장 마감시간(16:00 EST) 도달로 스캘퍼 중지"
-                : "[장 마감] 한국 장 마감시간(15:30) 도달로 스캘퍼 중지"
-            };
+            const preMsg = isUS 
+              ? "[개장 대기] 미국 장 개장 전 매수 타점 사전 분석 중... (09:30 EST 자동 주문)"
+              : "[개장 대기] 한국 장 개장 전 매수 타점 사전 분석 중... (09:00 개장 시 자동 주문)";
+            if (tab.scalperMessage !== preMsg) {
+              changed = true;
+              return {
+                ...tab,
+                scalperMessage: preMsg
+              };
+            }
           }
           return tab;
         });
 
         if (changed) {
           const currentActive = updated.find(t => t.id === activeTabId);
-          if (currentActive && !currentActive.isBotActive && isGapBotActive) {
-            setIsGapBotActive(false);
+          if (currentActive && currentActive.scalperMessage) {
             setScalperMessage(currentActive.scalperMessage);
           }
-          showNotification("장 마감 시간에 도달하여 작동 중인 스캘퍼가 자동 중지되었습니다.", "info");
         }
         return changed ? updated : prevTabs;
       });
     };
 
-    checkMarketClose();
-    const closeInterval = setInterval(checkMarketClose, 10000);
+    checkMarketStatus();
+    const closeInterval = setInterval(checkMarketStatus, 10000);
     return () => clearInterval(closeInterval);
-  }, [activeTabId, isGapBotActive]);
+  }, [activeTabId]);
 
   // Helper for tick-aware target sell price calculation to guarantee positive profit above tick size
   const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number, currentMarketPrice?: number) => {
@@ -4243,6 +4243,25 @@ export default function App() {
       const historyPrices = currentStock.history.map(h => h.price);
 
       if (gapBuyPrice <= 0 || gapSellPrice <= 0) return;
+
+      // Check if market is currently closed
+      const isUS = /^[A-Z]/.test(selectedStock.symbol);
+      const isClosedNow = isUS ? isUSMarketClosed() : isKRMarketClosed();
+
+      if (isClosedNow) {
+        const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
+        const rawTargetBuyPrice = entryPriceMode === 'BID4' 
+          ? (currentPrice - 4 * tickSize) 
+          : entryPriceMode === 'BID2' 
+          ? (currentPrice - 2 * tickSize) 
+          : currentPrice;
+        const targetBuyPrice = Math.round(rawTargetBuyPrice / tickSize) * tickSize;
+        const targetSellPrice = calculateTargetSellPrice(targetBuyPrice, scalpingTargetProfit, currentPrice);
+
+        setScalperMessage(`[개장 전 분석 완료] 매수가: ${formatCurrency(targetBuyPrice)} / 목표가: ${formatCurrency(targetSellPrice)} (${isUS ? '09:30 EST' : '09:00'} 개장 시 자동 주문)`);
+        setBotStatus(`[개장 대기] ${selectedStock.name} 타점 분석 완료 (매수가: ${formatCurrency(targetBuyPrice)})`);
+        return;
+      }
 
       // 1. Calculate Indicators for Precise Entry/Exit
       const rsi = calculateRSI(historyPrices, 14);
@@ -7344,7 +7363,7 @@ export default function App() {
               });
               const totalPendingCount = currentMarketPendingBuys.length + currentMarketPendingSells.length;
 
-              const currentMarketLogs = (marketTradeLogs[marketType] || []).filter(log => {
+              const rawMarketLogs = (marketTradeLogs[marketType] || []).filter(log => {
                 const isUS = /^[A-Z]/.test(log.symbol) && log.symbol !== 'SYSTEM';
                 const isKR = /^[0-9]/.test(log.symbol) && log.symbol !== 'SYSTEM';
                 if (marketType === 'US') {
@@ -7358,6 +7377,18 @@ export default function App() {
                 }
               });
 
+              // Strict filter: only actual completed fills in "실시간 체결 로그"
+              const currentMarketLogs = rawMarketLogs.filter(log => {
+                const r = log.reason || '';
+                if (r.includes('미체결') || r.includes('주문접수') || r.includes('주문대기') || r.includes('진입차단') || r.includes('주문건너뜀') || r.includes('시도')) {
+                  return false;
+                }
+                if (r.includes('자동 매도 주문') && !r.includes('체결')) {
+                  return false;
+                }
+                return true;
+              });
+
               return (
                 <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-[480px] overflow-hidden shadow-2xl">
                   <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
@@ -7365,7 +7396,7 @@ export default function App() {
                       <Layers className="w-4 h-4 text-sleek-blue" /> Trade Logs ({marketType === 'US' ? '미국주식' : '한국주식'} 실시간 체결 현황)
                     </h3>
                     <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">
-                      전체 ({currentMarketLogs.length}건)
+                      체결 ({currentMarketLogs.length}건)
                     </span>
                   </div>
                   
@@ -7412,7 +7443,7 @@ export default function App() {
 
                                 <div className="grid grid-cols-2 gap-2 bg-black/50 p-2 rounded-xl border border-white/5 text-[10px] tabular-nums">
                                   <div>
-                                    <span className="text-gray-400 block font-bold">진입 예상가 ({pendingBuy.quantity}주)</span>
+                                    <span className="text-gray-400 block font-bold">주문가 ({pendingBuy.quantity}주)</span>
                                     <span className="text-amber-300 font-extrabold text-xs block mt-0.5">{formatCurrency(pendingBuy.orderPrice)}</span>
                                   </div>
                                   <div className="text-right">
@@ -7457,8 +7488,8 @@ export default function App() {
 
                                 <div className="grid grid-cols-2 gap-2 bg-black/50 p-2 rounded-xl border border-white/5 text-[10px] tabular-nums">
                                   <div>
-                                    <span className="text-gray-400 block font-bold">매도 목표가 ({pendingSell.quantity}주)</span>
-                                    <span className="text-sky-300 font-extrabold text-xs block mt-0.5">{formatCurrency(pendingSell.targetPrice)}</span>
+                                    <span className="text-gray-400 block font-bold">주문가 ({pendingSell.quantity}주)</span>
+                                    <span className="text-sky-300 font-extrabold text-xs block mt-0.5">{formatCurrency(pendingSell.orderPrice || pendingSell.targetPrice)}</span>
                                   </div>
                                   <div className="text-right">
                                     <span className="text-gray-400 block font-bold">진입 매수가</span>
@@ -7485,63 +7516,38 @@ export default function App() {
                                              { name: log.symbol, symbol: log.symbol, price: log.price };
 
                             const isBuyType = log.type === 'BUY' || log.type === '매수';
-                            const isSellType = log.type === 'SELL' || log.type === '매도';
-                            const reasonStr = log.reason || '';
 
-                            // Precise Action Badge Mapping (매수진입 / 매수완료 / 매도진입 / 매도완료)
-                            let badgeLabel = '진입';
-                            let badgeStyle = 'bg-white/10 text-white border-white/20';
-
-                            if (reasonStr.includes('체결 완료') || reasonStr.includes('전량 체결') || reasonStr.includes('실제체결') || reasonStr.includes('체결완료') || reasonStr.includes('가상 체결') || reasonStr.includes('체결 완료')) {
-                              if (isBuyType) {
-                                badgeLabel = '매수완료';
-                                badgeStyle = 'bg-rose-500/20 text-rose-400 border-rose-500/40 font-black';
-                              } else {
-                                badgeLabel = '매도완료';
-                                badgeStyle = 'bg-emerald-500/20 text-emerald-400 border-emerald-500/40 font-black';
-                              }
-                            } else if (reasonStr.includes('주문접수') || reasonStr.includes('가상 주문') || reasonStr.includes('시도') || reasonStr.includes('대기')) {
-                              if (isBuyType) {
-                                badgeLabel = '매수진입 시도';
-                                badgeStyle = 'bg-amber-500/20 text-amber-300 border-amber-500/40 font-bold';
-                              } else {
-                                badgeLabel = '매도진입 시도';
-                                badgeStyle = 'bg-sky-500/20 text-sky-300 border-sky-500/40 font-bold';
-                              }
-                            } else if (isBuyType) {
-                              badgeLabel = '매수진입';
-                              badgeStyle = 'bg-rose-500/20 text-rose-400 border-rose-500/30 font-bold';
-                            } else if (isSellType) {
-                              badgeLabel = '매도진입';
-                              badgeStyle = 'bg-sky-500/20 text-sky-400 border-sky-500/30 font-bold';
+                            // Clean up reason for succinct display
+                            let cleanReason = (log.reason || '').replace(/\[.*?\]/g, '').trim();
+                            if (!cleanReason || cleanReason.includes('목표') || cleanReason.includes('익절')) {
+                              cleanReason = isBuyType ? 'AI 스캘퍼 타점 매수' : '목표 익절 달성';
+                            } else if (cleanReason.includes('손절') || cleanReason.includes('리스크')) {
+                              cleanReason = '손절 대응 매도';
+                            } else if (cleanReason.includes('수동')) {
+                              cleanReason = '수동 지정가 매도';
                             }
 
-                            const targetPrice = isBuyType && log.price > 0 ? calculateTargetSellPrice(log.price, scalpingTargetProfit, logStock.price) : 0;
-
                             return (
-                              <div key={`log-${lIdx}`} className="bg-black/40 border border-white/5 hover:border-white/10 rounded-xl p-3 text-xs font-mono space-y-1.5 transition-all">
-                                <div className="flex items-center justify-between text-[11px]">
-                                  <div className="flex items-center gap-1.5 min-w-0">
-                                    <span className={cn("px-1.5 py-0.2 rounded text-[9px] shrink-0 border", badgeStyle)}>
-                                      {badgeLabel}
-                                    </span>
-                                    <span className="font-black text-white truncate">{logStock.name}</span>
-                                    <span className="text-[10px] text-sleek-text-secondary shrink-0">({log.symbol})</span>
-                                  </div>
-                                  <span className="text-[10px] text-gray-500 shrink-0 tabular-nums">{log.time}</span>
+                              <div key={`log-${lIdx}`} className="bg-black/40 border border-white/5 hover:border-white/10 rounded-xl p-3 text-xs font-mono space-y-1 transition-all">
+                                <div className="font-extrabold text-white text-xs flex items-center gap-1.5">
+                                  <span className={cn(
+                                    "px-1.5 py-0.5 rounded text-[10px] font-black border shrink-0",
+                                    isBuyType 
+                                      ? "bg-rose-500/20 text-rose-400 border-rose-500/40" 
+                                      : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                                  )}>
+                                    {isBuyType ? "매수체결" : "매도체결"}
+                                  </span>
+                                  <span className="truncate">{logStock.name}({log.symbol})</span>
                                 </div>
 
-                                <div className="grid grid-cols-2 gap-1 bg-black/30 p-1.5 rounded text-[10px] tabular-nums">
-                                  <div>
-                                    <span className="text-gray-400 block">{isBuyType ? "진입가" : "체결가"} ({formatQuantity(log.amount)}주)</span>
-                                    <span className="font-bold text-white">{formatCurrency(log.price)}</span>
-                                  </div>
-                                  <div className="text-right">
-                                    <span className="text-gray-400 block">{isBuyType ? `목표가 (+${scalpingTargetProfit}%)` : "사유"}</span>
-                                    <span className={cn("font-bold truncate block", isBuyType ? "text-rose-400" : "text-emerald-400")}>
-                                      {isBuyType && targetPrice > 0 ? formatCurrency(targetPrice) : log.reason}
-                                    </span>
-                                  </div>
+                                <div className="text-[11px] text-gray-300 flex items-center justify-between pt-1 tabular-nums font-mono">
+                                  <span>
+                                    체결가({log.amount}주) <strong className="text-white font-black">{formatCurrency(log.price)}</strong>
+                                  </span>
+                                  <span className="text-slate-400 text-right">
+                                    사유 <strong className={cn("font-bold", isBuyType ? "text-rose-400" : "text-emerald-400")}>{cleanReason}</strong>
+                                  </span>
                                 </div>
                               </div>
                             );
