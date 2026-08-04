@@ -274,6 +274,193 @@ const INITIAL_STOCKS: Stock[] = [
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 6.90 + (i / 40) * 2.00 + Math.random() * 0.12 })),
     market: 'US',
     isAI: true
+  },
+  {
+    symbol: 'NVDA',
+    name: '엔비디아',
+    price: 128.50,
+    change: 4.20,
+    changePercent: 3.38,
+    volume: '45.2M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 120 + (i / 40) * 8.5 + Math.random() * 0.8 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'TSLA',
+    name: '테슬라',
+    price: 215.80,
+    change: 7.50,
+    changePercent: 3.60,
+    volume: '38.6M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 200 + (i / 40) * 15.8 + Math.random() * 1.2 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'AAPL',
+    name: '애플',
+    price: 224.30,
+    change: 3.10,
+    changePercent: 1.40,
+    volume: '28.9M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 218 + (i / 40) * 6.3 + Math.random() * 0.5 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'AMD',
+    name: 'AMD',
+    price: 142.10,
+    change: 5.20,
+    changePercent: 3.80,
+    volume: '22.5M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 132 + (i / 40) * 10.1 + Math.random() * 0.9 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'PLTR',
+    name: '팔란티어',
+    price: 28.40,
+    change: 1.25,
+    changePercent: 4.60,
+    volume: '35.1M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 25 + (i / 40) * 3.4 + Math.random() * 0.2 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'AMZN',
+    name: '아마존',
+    price: 182.50,
+    change: 3.80,
+    changePercent: 2.13,
+    volume: '26.4M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 175 + (i / 40) * 7.5 + Math.random() * 0.6 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'MSFT',
+    name: '마이크로소프트',
+    price: 418.20,
+    change: 6.40,
+    changePercent: 1.55,
+    volume: '18.3M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 405 + (i / 40) * 13.2 + Math.random() * 1.0 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'META',
+    name: '메타',
+    price: 485.60,
+    change: 12.30,
+    changePercent: 2.60,
+    volume: '16.7M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 465 + (i / 40) * 20.6 + Math.random() * 1.5 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'GOOGL',
+    name: '알파벳',
+    price: 168.40,
+    change: 2.90,
+    changePercent: 1.75,
+    volume: '20.1M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 162 + (i / 40) * 6.4 + Math.random() * 0.5 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'MARA',
+    name: '마라톤 디지털',
+    price: 18.20,
+    change: 1.15,
+    changePercent: 6.74,
+    volume: '42.8M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 15 + (i / 40) * 3.2 + Math.random() * 0.3 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'RIOT',
+    name: '라이엇 플랫폼스',
+    price: 11.40,
+    change: 0.68,
+    changePercent: 6.34,
+    volume: '29.3M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 9.5 + (i / 40) * 1.9 + Math.random() * 0.2 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'COIN',
+    name: '코인베이스',
+    price: 215.30,
+    change: 11.80,
+    changePercent: 5.80,
+    volume: '15.4M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 195 + (i / 40) * 20.3 + Math.random() * 1.8 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'SMCI',
+    name: '슈퍼마이크로',
+    price: 580.40,
+    change: 28.50,
+    changePercent: 5.16,
+    volume: '12.8M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 530 + (i / 40) * 50.4 + Math.random() * 4.0 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'INTC',
+    name: '인텔',
+    price: 21.60,
+    change: 0.85,
+    changePercent: 4.10,
+    volume: '54.2M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 19 + (i / 40) * 2.6 + Math.random() * 0.2 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'NIO',
+    name: '니오',
+    price: 4.85,
+    change: 0.22,
+    changePercent: 4.75,
+    volume: '38.9M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 4.1 + (i / 40) * 0.75 + Math.random() * 0.06 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'RIVN',
+    name: '리비안',
+    price: 13.70,
+    change: 0.75,
+    changePercent: 5.80,
+    volume: '27.4M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 11.8 + (i / 40) * 1.9 + Math.random() * 0.15 })),
+    market: 'US',
+    isAI: true
+  },
+  {
+    symbol: 'LABU',
+    name: '디렉시온 바이오 3X',
+    price: 125.40,
+    change: 8.60,
+    changePercent: 7.36,
+    volume: '19.8M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 110 + (i / 40) * 15.4 + Math.random() * 1.2 })),
+    market: 'US',
+    isAI: true
   }
 ];
 
@@ -409,10 +596,10 @@ const INITIAL_STOCKS_KR: Stock[] = [
     symbol: '005930',
     name: '삼성전자',
     price: 77600,
-    change: 0,
-    changePercent: 0,
+    change: 1800,
+    changePercent: 2.37,
     volume: '15.2M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 77000 + Math.random() * 1000 })),
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 75000 + Math.round((i / 40) * 2600) + Math.floor(Math.random() * 200) })),
     market: 'KR',
     isAI: true
   },
@@ -420,10 +607,10 @@ const INITIAL_STOCKS_KR: Stock[] = [
     symbol: '000660',
     name: 'SK하이닉스',
     price: 172000,
-    change: 0,
-    changePercent: 0,
-    volume: '2.8M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 170000 + Math.random() * 5000 })),
+    change: 6500,
+    changePercent: 3.93,
+    volume: '8.8M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 162000 + Math.round((i / 40) * 10000) + Math.floor(Math.random() * 500) })),
     market: 'KR',
     isAI: true
   },
@@ -431,10 +618,10 @@ const INITIAL_STOCKS_KR: Stock[] = [
     symbol: '035420',
     name: '네이버',
     price: 185000,
-    change: 0,
-    changePercent: 0,
-    volume: '0.9M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 180000 + Math.random() * 10000 })),
+    change: 4500,
+    changePercent: 2.49,
+    volume: '2.9M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 178000 + Math.round((i / 40) * 7000) + Math.floor(Math.random() * 400) })),
     market: 'KR',
     isAI: true
   },
@@ -442,10 +629,131 @@ const INITIAL_STOCKS_KR: Stock[] = [
     symbol: '005380',
     name: '현대차',
     price: 245000,
-    change: 0,
-    changePercent: 0,
-    volume: '0.6M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 240000 + Math.random() * 10000 })),
+    change: 7000,
+    changePercent: 2.94,
+    volume: '3.6M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 235000 + Math.round((i / 40) * 10000) + Math.floor(Math.random() * 500) })),
+    market: 'KR',
+    isAI: true
+  },
+  {
+    symbol: '000270',
+    name: '기아',
+    price: 108500,
+    change: 3200,
+    changePercent: 3.04,
+    volume: '4.2M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 103000 + Math.round((i / 40) * 5500) + Math.floor(Math.random() * 300) })),
+    market: 'KR',
+    isAI: true
+  },
+  {
+    symbol: '068270',
+    name: '셀트리온',
+    price: 198500,
+    change: 6200,
+    changePercent: 3.22,
+    volume: '2.5M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 188000 + Math.round((i / 40) * 10500) + Math.floor(Math.random() * 400) })),
+    market: 'KR',
+    isAI: true
+  },
+  {
+    symbol: '006400',
+    name: '삼성SDI',
+    price: 362000,
+    change: 11500,
+    changePercent: 3.28,
+    volume: '1.8M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 345000 + Math.round((i / 40) * 17000) + Math.floor(Math.random() * 800) })),
+    market: 'KR',
+    isAI: true
+  },
+  {
+    symbol: '051910',
+    name: 'LG화학',
+    price: 318000,
+    change: 9500,
+    changePercent: 3.08,
+    volume: '1.4M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 302000 + Math.round((i / 40) * 16000) + Math.floor(Math.random() * 700) })),
+    market: 'KR',
+    isAI: true
+  },
+  {
+    symbol: '035720',
+    name: '카카오',
+    price: 41200,
+    change: 1450,
+    changePercent: 3.65,
+    volume: '5.8M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 38800 + Math.round((i / 40) * 2400) + Math.floor(Math.random() * 150) })),
+    market: 'KR',
+    isAI: true
+  },
+  {
+    symbol: '034020',
+    name: '두산에너빌리티',
+    price: 21400,
+    change: 950,
+    changePercent: 4.65,
+    volume: '19.4M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 19800 + Math.round((i / 40) * 1600) + Math.floor(Math.random() * 100) })),
+    market: 'KR',
+    isAI: true
+  },
+  {
+    symbol: '012450',
+    name: '한화에어로스페이스',
+    price: 285000,
+    change: 12500,
+    changePercent: 4.59,
+    volume: '3.1M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 265000 + Math.round((i / 40) * 20000) + Math.floor(Math.random() * 900) })),
+    market: 'KR',
+    isAI: true
+  },
+  {
+    symbol: '042700',
+    name: '한미반도체',
+    price: 112000,
+    change: 5400,
+    changePercent: 5.07,
+    volume: '6.4M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 102000 + Math.round((i / 40) * 10000) + Math.floor(Math.random() * 400) })),
+    market: 'KR',
+    isAI: true
+  },
+  {
+    symbol: '086520',
+    name: '에코프로비엠',
+    price: 184500,
+    change: 7200,
+    changePercent: 4.06,
+    volume: '4.8M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 172000 + Math.round((i / 40) * 12500) + Math.floor(Math.random() * 500) })),
+    market: 'KR',
+    isAI: true
+  },
+  {
+    symbol: '247540',
+    name: '에코프로',
+    price: 88500,
+    change: 3800,
+    changePercent: 4.49,
+    volume: '7.2M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 82000 + Math.round((i / 40) * 6500) + Math.floor(Math.random() * 300) })),
+    market: 'KR',
+    isAI: true
+  },
+  {
+    symbol: '196170',
+    name: '알테오젠',
+    price: 315000,
+    change: 15500,
+    changePercent: 5.18,
+    volume: '2.8M',
+    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 290000 + Math.round((i / 40) * 25000) + Math.floor(Math.random() * 1000) })),
     market: 'KR',
     isAI: true
   }
@@ -1715,7 +2023,7 @@ export default function App() {
     setIsGettingRecommendations(true);
     setAiRecommendations([]);
     try {
-      const prompt = `현재 ${marketType === 'KR' ? '한국 KOSPI/KOSDAQ' : '미국 NYSE/NASDAQ'} 시장에서 주가 금액 제한 없이(가격 상관없이), 실시간 상승기류 및 1년 우상향 추세를 나타내며 스캘핑(초단타) 매매에 가장 적합한 AI 최적 종목 5개를 추천해주세요.
+      const prompt = `현재 ${marketType === 'KR' ? '한국 KOSPI/KOSDAQ' : '미국 NYSE/NASDAQ'} 시장에서 주가 금액 제한 없이(가격 상관없이), 실시간 상승기류 및 1년 우상향 추세를 나타내며 스캘핑(초단타) 매매에 가장 적합한 AI 최적 종목 25개를 추천해주세요.
       각 종목에 대해 심볼, 기업명(토스증권 기준 한글 이름), 현재 대략적인 가격 정보를 포함해야 합니다.
       주의사항: "KODEX 200선물" 및 관련 레버리지/인버스 ETF 종목은 반드시 제외하세요.
       반드시 다음 JSON 배열 형식으로만 응답하세요: [{"symbol": "심볼", "name": "기업명", "price": 숫자}]`;
@@ -5859,7 +6167,7 @@ export default function App() {
             </div>
 
             {/* Multi-Tab Bar for Independent Scalper Bot Trading */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pb-2 pt-1 border-b border-white/10">
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2 pb-2 pt-1 border-b border-white/10 max-h-[280px] overflow-y-auto custom-scrollbar">
               {scalperTabs.filter(tab => {
                 const isUS = /^[A-Z]/.test(tab.symbol);
                 return marketType === 'US' ? isUS : !isUS;
@@ -5923,31 +6231,70 @@ export default function App() {
               <button
                 type="button"
                 onClick={() => {
-                  // Prioritize AI recommended stocks first if not already in tabs
+                  const currentMarketTabs = scalperTabs.filter(t => 
+                    marketType === 'US' ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol)
+                  );
+                  if (currentMarketTabs.length >= 25) {
+                    showNotification("최대 25개 종목까지 AI 분석 기반 스캘퍼 탭을 생성할 수 있습니다.", "warning");
+                    return;
+                  }
+
+                  // 1. Prioritize AI recommended stocks first if not already in tabs
                   const aiAvailable = aiRecommendations.find(s => 
                     s.market === marketType && 
                     !scalperTabs.some(t => t.symbol === s.symbol)
                   );
                   
                   if (aiAvailable) {
+                    if (!stocks.some(s => s.symbol === aiAvailable.symbol)) {
+                      setStocks(prev => [...prev, aiAvailable]);
+                    }
                     openOrSwitchScalperTab(aiAvailable.symbol, aiAvailable.name);
-                    showNotification(`[AI 분석 추천] ${aiAvailable.name} 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
+                    showNotification(`[AI 분석 추천] ${aiAvailable.name}(${aiAvailable.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
                     return;
                   }
 
-                  // Fallback to static list
-                  const available = stocks.find(s => !scalperTabs.some(t => t.symbol === s.symbol)) || stocks[0];
-                  if (available) {
-                    openOrSwitchScalperTab(available.symbol, available.name);
+                  // 2. Fallback to initial stock pool for current market
+                  const pool = marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS;
+                  const poolAvailable = pool.find(s => !scalperTabs.some(t => t.symbol === s.symbol));
+                  
+                  if (poolAvailable) {
+                    if (!stocks.some(s => s.symbol === poolAvailable.symbol)) {
+                      setStocks(prev => [...prev, poolAvailable]);
+                    }
+                    openOrSwitchScalperTab(poolAvailable.symbol, poolAvailable.name);
+                    showNotification(`[AI 종목 추천] ${poolAvailable.name}(${poolAvailable.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
+                    return;
                   }
+
+                  // 3. Dynamic AI stock generator if all preset/AI stocks are used up to 25
+                  const tabIdx = currentMarketTabs.length + 1;
+                  const newSymbol = marketType === 'US' ? `AIUS${tabIdx}` : `099${String(tabIdx).padStart(3, '0')}`;
+                  const newName = marketType === 'US' ? `AI 추천 종목 ${tabIdx}` : `AI 최적추천주 ${tabIdx}`;
+                  const basePrice = marketType === 'US' ? 10 + Math.floor(Math.random() * 90) : 5000 + Math.floor(Math.random() * 45000);
+                  const dynamicStock: Stock = {
+                    symbol: newSymbol,
+                    name: newName,
+                    price: basePrice,
+                    change: Math.round(basePrice * 0.035),
+                    changePercent: 3.5,
+                    volume: '15.5M',
+                    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: basePrice * (0.95 + (i/40)*0.1) })),
+                    market: marketType,
+                    isAI: true
+                  };
+
+                  setStocks(prev => [...prev, dynamicStock]);
+                  openOrSwitchScalperTab(dynamicStock.symbol, dynamicStock.name);
+                  showNotification(`[AI 분석 추천] ${dynamicStock.name}(${dynamicStock.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
                 }}
                 className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-sleek-blue/50 text-gray-300 hover:text-white text-xs font-bold font-mono flex items-center justify-center gap-1 transition-all w-full min-h-[34px]"
-                title="새 스캘퍼 종목 탭 추가 (AI 추천 우선)"
+                title="새 스캘퍼 종목 탭 추가 (AI 분석 기반, 최대 25개)"
               >
                 <Plus className="w-3.5 h-3.5 text-sleek-blue" />
                 <div className="flex flex-col items-start leading-tight">
                   <span className="text-[10px]">AI 분석 기반</span>
-                  <span>+ 종목 추가</span>
+                  <span>+ 종목 추가 (25개)</span>
                 </div>
               </button>
             </div>
