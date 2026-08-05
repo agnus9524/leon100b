@@ -3657,7 +3657,7 @@ export default function App() {
           order.id,
           order.quantity.toString(),
           "0",
-          '01'
+          '02'
         );
         addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 매수취소] 수동 취소`);
       } catch (e) {
@@ -3680,7 +3680,7 @@ export default function App() {
           order.id,
           order.quantity.toString(),
           "0",
-          '01'
+          '02'
         );
         addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소] 수동 취소`);
       } catch (e) {
@@ -3760,7 +3760,7 @@ export default function App() {
             order.id,
             order.quantity.toString(),
             "0",
-            '01'
+            '02'
           );
           addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
         } catch (e) {
@@ -3777,7 +3777,7 @@ export default function App() {
             order.id,
             order.quantity.toString(),
             "0",
-            '01'
+            '02'
           );
           addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매도 주문 일괄 취소`);
         } catch (e) {
@@ -3853,7 +3853,7 @@ export default function App() {
                 order.id,
                 (order.quantity || 1).toString(),
                 "0",
-                '01' // 01 is Cancel
+                '02' // 02 is Cancel
               );
               
               if (cancelRes && cancelRes.rt_cd === '0') {
@@ -7555,9 +7555,17 @@ export default function App() {
                                                { name: log.symbol, symbol: log.symbol, price: log.price };
 
                               const isBuyType = log.type === 'BUY' || log.type === '매수';
+                              const rawReason = log.reason || '';
+                              
+                              // Determine if log is an order/cancel/pending log vs confirmed execution fill
+                              const isOrderLog = (rawReason.includes('주문') || rawReason.includes('취소') || rawReason.includes('정리') || rawReason.includes('대기') || rawReason.includes('접수') || rawReason.includes('미체결') || rawReason.includes('실패') || rawReason.includes('차단')) && 
+                                                 !rawReason.includes('실제체결') && !rawReason.includes('전량 체결') && !rawReason.includes('일부체결') && !rawReason.includes('체결완료') && !rawReason.includes('체결 완료');
+
+                              const badgeText = isOrderLog ? (isBuyType ? "매수주문" : "매도주문") : (isBuyType ? "매수체결" : "매도체결");
+                              const priceLabel = isOrderLog ? "주문가" : "체결가";
 
                               // Clean up reason for succinct display
-                              let cleanReason = (log.reason || '').replace(/\[.*?\]/g, '').trim();
+                              let cleanReason = rawReason.replace(/\[.*?\]/g, '').trim();
                               if (!cleanReason || cleanReason.includes('목표') || cleanReason.includes('익절')) {
                                 cleanReason = isBuyType ? 'AI 스캘퍼 타점 매수' : '목표 익절 달성';
                               } else if (cleanReason.includes('손절') || cleanReason.includes('리스크')) {
@@ -7575,14 +7583,14 @@ export default function App() {
                                         ? "bg-rose-500/20 text-rose-400 border-rose-500/40" 
                                         : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
                                     )}>
-                                      {isBuyType ? "매수체결" : "매도체결"}
+                                      {badgeText}
                                     </span>
                                     <span className="truncate">{logStock.name}({log.symbol})</span>
                                   </div>
 
                                   <div className="text-[11px] text-gray-300 flex items-center justify-between pt-1 tabular-nums font-mono">
                                     <span>
-                                      체결가({log.amount}주) <strong className="text-white font-black">{formatCurrency(log.price)}</strong>
+                                      {priceLabel}({log.amount}주) <strong className="text-white font-black">{formatCurrency(log.price)}</strong>
                                     </span>
                                     <span className="text-slate-400 text-right">
                                       사유 <strong className={cn("font-bold", isBuyType ? "text-rose-400" : "text-emerald-400")}>{cleanReason}</strong>

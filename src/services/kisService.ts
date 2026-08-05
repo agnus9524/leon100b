@@ -678,11 +678,15 @@ class KISService {
     }
   }
 
-  public async reviseDomestic(orgNo: string, ordNo: string, qty: string, price: string, dvsn: '01' | '02' = '01', ordDvsn: string = '00') {
+  public async reviseDomestic(orgNo: string, ordNo: string, qty: string, price: string, dvsn: '01' | '02' = '02', ordDvsn: string = '00') {
     if (!this.config) throw new Error("KIS Config not initialized");
     const token = await this.getAccessToken();
     const endpoint = '/uapi/domestic-stock/v1/trading/order-rvsecncl';
     
+    // RVSE_CNCL_DVSN_CD: '01' is Revise (정정), '02' is Cancel (취소)
+    // For Cancel ('02'), ORD_UNPR must be '0'
+    const ordPrice = dvsn === '02' ? '0' : (price && price !== '0' ? price : '0');
+
     const body = {
       CANO: this.config.accountNo,
       ACNT_PRDT_CD: this.config.accountCode,
@@ -691,7 +695,7 @@ class KISService {
       ORD_DVSN: ordDvsn,
       RVSE_CNCL_DVSN_CD: dvsn,
       ORD_QTY: qty,
-      ORD_UNPR: price,
+      ORD_UNPR: ordPrice,
       QTY_ALL_ORD_YN: 'Y',
       CNDT_PRIC: '',
       EXCG_ID_DVSN_CD: 'KRX'
