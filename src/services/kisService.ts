@@ -69,6 +69,12 @@ class KISService {
     this.onTokenUpdate = handler;
   }
 
+  public clear() {
+    this.config = null;
+    this.accessToken = null;
+    this.tokenExpireTime = 0;
+  }
+
   private async getAccessToken() {
     if (this.accessToken && Date.now() < this.tokenExpireTime) {
       return this.accessToken;

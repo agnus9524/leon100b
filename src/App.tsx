@@ -4792,6 +4792,44 @@ export default function App() {
     } as any, ...prev].slice(0, 50));
   };
 
+  const handleResetKISConfig = async () => {
+    if (!window.confirm("저장된 API 키, 계좌번호, 비밀번호 등 모든 개인정보를 삭제하고 초기화하시겠습니까?")) {
+      return;
+    }
+
+    const emptyConfig = {
+      appKey: '',
+      appSecret: '',
+      accountNo: '',
+      accountCode: '01',
+      accountPw: '',
+      isConnected: false,
+      domesticOrderType: '00',
+      isRealOrderEnabled: true
+    };
+
+    setKisConfig(emptyConfig);
+    kisService.clear();
+
+    if (currentUser) {
+      try {
+        await saveUserKISConfig(currentUser.uid, emptyConfig);
+      } catch (e) {
+        console.error("Firestore KIS 설정 초기화 실패:", e);
+      }
+    }
+
+    setBotStatus("대기 중");
+    setShowKisModal(false);
+
+    setTradeLogs(prev => [{
+      time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
+      symbol: 'SYSTEM', type: '매도', price: 0, amount: 0, reason: "KIS API 키 및 계좌 개인정보가 초기화되었습니다."
+    } as any, ...prev].slice(0, 50));
+
+    alert("API 키 및 개인정보가 성공적으로 초기화되었습니다.");
+  };
+
   if (isAuthLoading || isRateLoading) {
     return (
       <div className="min-h-screen bg-sleek-bg flex flex-col items-center justify-center gap-6">
@@ -4823,7 +4861,7 @@ export default function App() {
           </div>
 
           <div className="flex flex-col items-center justify-center text-center">
-            <h1 className="text-2xl font-black text-white mb-2 uppercase italic tracking-tighter">LEO 10B AI BOT</h1>
+            <h1 className="text-2xl font-black text-white mb-2 uppercase italic tracking-tighter">LEO 100B AI BOT</h1>
             <p className="text-sleek-text-secondary text-sm mb-8 leading-relaxed">
               레오의 100억 주식매매 프로그램에 오신 것을 환영합니다.<br/>
               서비스 이용을 위해 로그인이 필요합니다.
@@ -5042,6 +5080,21 @@ export default function App() {
                   <span className="text-sleek-blue font-bold">INFO:</span> OAuth 2.0 Client Credentials 방식(2-Legged)을 사용합니다. 
                   접근 토큰은 24시간 유효하며, 보안을 위해 토큰 발급 시 한국투자증권에서 LMS 알림이 발송됩니다. 
                   본 앱은 토큰을 저장하여 알림 발송 횟수를 최소화합니다.
+                </p>
+              </div>
+
+              {/* API 키 및 개인정보 초기화 버튼 (팝업창 맨 밑) */}
+              <div className="mt-5 pt-4 border-t border-rose-500/20">
+                <button
+                  type="button"
+                  onClick={handleResetKISConfig}
+                  className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 hover:border-rose-500/50 flex items-center justify-center gap-2 transition-all shadow-sm group"
+                >
+                  <Trash2 className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
+                  <span>API 키 삭제 및 개인정보 초기화</span>
+                </button>
+                <p className="text-[9px] text-rose-400/70 text-center mt-1.5">
+                  * 저장된 KIS App Key, Secret, 계좌번호, 비밀번호 등 모든 연동 정보를 즉시 삭제합니다.
                 </p>
               </div>
             </motion.div>
@@ -5470,7 +5523,7 @@ export default function App() {
           <motion.div 
             initial={{ opacity: 0, scale: 0.9, y: 20 }} 
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-sleek-card border border-sleek-blue/20 rounded-[2.5rem] p-6 sm:p-12 w-full max-w-xl shadow-2xl text-center relative z-10"
+            className="bg-sleek-card border border-sleek-blue/20 rounded-[2.5rem] p-6 sm:p-12 w-full max-w-2xl shadow-2xl text-center relative z-10"
           >
             <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-transparent via-sleek-blue to-transparent opacity-50"></div>
             
@@ -5479,8 +5532,8 @@ export default function App() {
               <Bot className="w-10 h-10 sm:w-12 sm:h-12 text-sleek-blue drop-shadow-[0_0_10px_rgba(30,144,255,0.5)]" />
             </div>
             
-            <h1 className="text-lg xs:text-xl sm:text-2xl md:text-3xl font-black text-white mb-4 tracking-tight leading-none whitespace-nowrap">
-              <span className="text-sleek-blue">LEO 10B AI 봇</span>에 오신 것을 환영합니다
+            <h1 className="text-xl xs:text-2xl sm:text-3xl md:text-3xl lg:text-4xl font-black text-white mb-4 tracking-tight leading-none whitespace-nowrap">
+              <span className="text-sleek-blue">LEO 100B AI 봇</span>에 오신 것을 환영합니다
             </h1>
             
             <p className="text-sleek-text-secondary text-base mb-10 leading-relaxed max-w-md mx-auto">
@@ -5741,39 +5794,8 @@ export default function App() {
               </div>
             </div>
 
-            {selectedStock && (
-              <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-2xl p-5 space-y-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-sm font-black text-white">{selectedStock.name}</h3>
-                    <p className="text-[10px] font-mono text-sleek-text-secondary">{selectedStock.symbol}</p>
-                  </div>
-                  <div className={cn(
-                    "text-xs font-black",
-                    selectedStock.change >= 0 ? "text-sleek-green" : "text-sleek-red"
-                  )}>
-                    {selectedStock.changePercent.toFixed(2)}%
-                  </div>
-                </div>
-                <div className="pt-4 border-t border-white/5 space-y-2">
-                  <div className="flex justify-between text-[10px] uppercase">
-                    <span className="text-sleek-text-secondary">현재 보유</span>
-                    <span className="text-white font-bold">{formatQuantity(holdings[selectedStock.symbol] || 0)}</span>
-                  </div>
-                  <div className="flex justify-between text-[10px] uppercase">
-                    <span className="text-sleek-text-secondary">매수 가능</span>
-                    <span className="text-sleek-blue font-bold">
-                      {kisConfig.isConnected && kisConfig.isRealOrderEnabled && kisBuyableQty !== null 
-                        ? `${formatQuantity(kisBuyableQty)} (실계좌)` 
-                        : `${formatQuantity(Math.floor(balance / (selectedStock && /^[A-Z]/.test(selectedStock.symbol) ? selectedStock.price * exchangeRate : (selectedStock.price || 1))))} (로컬)`}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* 스캘퍼 엔진 최적 추천 종목 TOP 5 Ranking Widget */}
-            <div className="space-y-3 pt-4 border-t border-white/10">
+            <div className="space-y-3 pt-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <div className="p-1 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-400">
@@ -5905,29 +5927,27 @@ export default function App() {
             {/* Stock Quick Info Badge */}
             <div className="bg-sleek-card border border-sleek-border p-3.5 rounded-2xl shadow-lg lg:col-span-4 flex items-center justify-between">
               <div className="w-full">
-                <div className="flex items-center justify-between gap-2 mb-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className="text-base font-black text-white">
-                      {selectedStock?.name || '종목 미선택'}
-                    </span>
-                    {selectedStock && (
-                      <div className="flex items-center gap-1.5 font-mono text-sm">
-                        <span className="text-white/90">{formatCurrency(selectedStock.price)}</span>
-                        <span className={cn(
-                          "font-bold",
-                          selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400"
-                        )}>
-                          {selectedStock.change >= 0 ? '+' : ''}{formatCurrency(Math.abs(selectedStock.change))}
-                        </span>
-                        <span className={cn(
-                          "font-bold",
-                          selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400"
-                        )}>
-                          ({selectedStock.change >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%)
-                        </span>
-                      </div>
-                    )}
-                  </div>
+                <div className="flex items-center justify-between gap-2 mb-1.5 w-full">
+                  <span className="text-base font-black text-white text-left shrink-0">
+                    {selectedStock?.name || '종목 미선택'}
+                  </span>
+                  {selectedStock && (
+                    <div className="flex items-center justify-end gap-1.5 font-mono text-xs sm:text-sm text-right shrink-0">
+                      <span className="text-white font-black">{formatCurrency(selectedStock.price)}</span>
+                      <span className={cn(
+                        "font-bold",
+                        selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400"
+                      )}>
+                        {selectedStock.change >= 0 ? '+' : ''}{formatCurrency(Math.abs(selectedStock.change))}
+                      </span>
+                      <span className={cn(
+                        "font-bold",
+                        selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400"
+                      )}>
+                        ({selectedStock.change >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%)
+                      </span>
+                    </div>
+                  )}
                 </div>
                 <div className="flex items-center justify-between text-xs font-mono pt-1.5 border-t border-white/5">
                   <span className="text-sleek-text-secondary">현재 보유: <strong className="text-white font-bold">{holdings[selectedStock?.symbol || ''] || 0}주</strong></span>
