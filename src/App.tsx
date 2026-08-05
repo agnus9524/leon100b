@@ -2932,23 +2932,24 @@ export default function App() {
           if (marketType === 'KR') setSellableHoldings(prev => ({ ...prev, ...newSellable }));
         }
 
-        if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output2?.[0]) {
+        const out2 = Array.isArray(domesticBalanceData?.output2) 
+          ? domesticBalanceData.output2[0] 
+          : domesticBalanceData?.output2;
+
+        if (domesticBalanceData?.rt_cd === '0' && out2 && typeof out2 === 'object') {
           foundAnyData = true;
-          const out2 = domesticBalanceData.output2[0];
-          const dnclAmt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.prsm_dncl_amt || 0);
+          const dnclAmt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.prsm_dncl_amt || out2.n2_dncl_amt || 0);
           const ordPsblCash = Number(out2.ord_psbl_cash || out2.ord_psbl_amt || 0);
-          const domesticPurchase = Number(out2.pchs_amt_smtl_amt || 0);
+          const domesticPurchase = Number(out2.pchs_amt_smtl_amt || out2.pchs_amt_smtl || 0);
           const actualPurchaseCost = Math.max(domesticPurchase, totalStockPurchaseCost);
 
           // Direct deposit/cash balance in account
-          const domesticCash = dnclAmt > 0 ? dnclAmt : (ordPsblCash > 0 ? ordPsblCash : 0);
-          if (domesticCash > 0) {
-            setKrBalance(Math.round(domesticCash));
-          }
+          const domesticCash = Math.max(0, Math.round(dnclAmt > 0 ? dnclAmt : (ordPsblCash >= 0 ? ordPsblCash : 0)));
+          setKrBalance(domesticCash);
           
           if (marketType === 'KR') {
-            totalConvertedBalance = Math.round(domesticCash > 0 ? domesticCash : krBalance);
-            totalConvertedPrincipal = Math.round((domesticCash > 0 ? domesticCash : krBalance) + actualPurchaseCost);
+            totalConvertedBalance = domesticCash;
+            totalConvertedPrincipal = Math.round(domesticCash + actualPurchaseCost);
           }
         }
       } catch (err: any) {
