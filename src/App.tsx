@@ -1490,10 +1490,7 @@ export default function App() {
       const qty = Number(rawQty);
       if (qty <= 0) return;
 
-      const isStockUS = /^[A-Z]/.test(sym);
-      // Filter by current market mode
-      if (marketType === 'US' && !isStockUS) return;
-      if (marketType === 'KR' && isStockUS) return;
+      const isStockUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
 
       const st = stocks.find(s => s.symbol === sym) ||
                  stocksCache.KR?.find(s => s.symbol === sym) ||
@@ -2650,6 +2647,8 @@ export default function App() {
       const newStockNames: Record<string, string> = {};
       let totalConvertedBalance = 0;
       let totalConvertedPrincipal = 0;
+      let domesticSuccess = false;
+      let overseasSuccess = false;
       let domesticError = null;
       let foundAnyData = false;
 
@@ -2660,6 +2659,7 @@ export default function App() {
 
         if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output1 && Array.isArray(domesticBalanceData.output1)) {
           foundAnyData = true;
+          domesticSuccess = true;
           const newSellable: Record<string, number> = {};
           for (const item of domesticBalanceData.output1) {
             if (item.pdno && item.pdno !== '000000') {
@@ -2667,7 +2667,7 @@ export default function App() {
               const avgP = Number(item.pchs_avg_pric || item.pchs_unpr || item.pchs_avg_price || (item.pchs_amt && qty ? item.pchs_amt / qty : 0) || 0);
               const name = item.prdt_name;
               if (qty > 0) {
-                newHoldings[item.pdno] = (newHoldings[item.pdno] || 0) + qty;
+                newHoldings[item.pdno] = qty;
                 if (avgP > 0) newAvgPrices[item.pdno] = avgP;
                 if (name) newStockNames[item.pdno] = name;
                 
@@ -2689,6 +2689,7 @@ export default function App() {
 
         if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output2?.[0]) {
           foundAnyData = true;
+          domesticSuccess = true;
           const out2 = domesticBalanceData.output2[0];
           const dnclAmt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.prsm_dncl_amt || 0);
           const ordPsblCash = Number(out2.ord_psbl_cash || out2.ord_psbl_amt || 0);
@@ -2712,17 +2713,17 @@ export default function App() {
       try {
         const overseasBalanceData = await kisService.getOverseasBalance();
         let totalOverseasPurchaseCostUSD = 0;
-        const currentExRate = Number(exchangeRate) || 1350;
 
         if (overseasBalanceData?.rt_cd === '0' && overseasBalanceData.output1 && Array.isArray(overseasBalanceData.output1)) {
           foundAnyData = true;
+          overseasSuccess = true;
           for (const item of overseasBalanceData.output1) {
             if (item.pdno) {
               const qty = Number(item.hldg_qty || 0);
               const avgP = Number(item.pchs_avg_pric || 0);
               const name = item.prdt_name || item.ovrs_item_name;
               if (qty > 0) {
-                newHoldings[item.pdno] = (newHoldings[item.pdno] || 0) + qty;
+                newHoldings[item.pdno] = qty;
                 if (avgP > 0) newAvgPrices[item.pdno] = avgP;
                 if (name) newStockNames[item.pdno] = name;
                 totalOverseasPurchaseCostUSD += (qty * avgP);
@@ -2733,6 +2734,7 @@ export default function App() {
 
         if (overseasBalanceData?.rt_cd === '0' && overseasBalanceData.output2) {
           foundAnyData = true;
+          overseasSuccess = true;
           const out2 = overseasBalanceData.output2;
           const frcr_dncl_amt = Number(out2.frcr_dncl_amt || 0); // Foreign currency deposit
           const ovrs_tot_pchs_amt = Number(out2.ovrs_tot_pchs_amt || totalOverseasPurchaseCostUSD);
@@ -2746,10 +2748,12 @@ export default function App() {
         console.warn("Overseas Sync Skip:", err);
       }
 
-      // Final Check: If absolutely no data was fetched and there was a domestic error, notify user
-      if (!foundAnyData && domesticError) {
-         setBotStatus("연동 데이터 수신 실패");
-         showNotification(`KIS 계좌 잔고 수신 실패: ${domesticError}`, "error");
+      // Final Check: If absolutely no data was fetched, keep existing state and notify user
+      if (!foundAnyData) {
+         setBotStatus("연동 데이터 수신 일시 지연 (기존 보유 잔고 유지)");
+         if (domesticError) {
+           showNotification(`KIS 계좌 잔고 수신 일시 실패: ${domesticError}`, "error");
+         }
          return;
       }
 
@@ -2846,15 +2850,47 @@ export default function App() {
         });
       }
 
-      // Update States
-      setBalance(totalConvertedBalance);
-      setPrincipal(totalConvertedPrincipal);
-      
-      setHoldings(newHoldings);
-      setAvgPrices(prev => ({ ...prev, ...newAvgPrices }));
-      if (currentUser) {
-        saveUserHoldings(currentUser.uid, newHoldings);
+      // Update States safely
+      if (totalConvertedBalance > 0) {
+        setBalance(totalConvertedBalance);
       }
+      if (totalConvertedPrincipal > 0) {
+        setPrincipal(totalConvertedPrincipal);
+      }
+      
+      // Smart Holdings Merge: Preserve non-synced market holdings if one market failed
+      setHoldings(prevHoldings => {
+        const merged = { ...prevHoldings };
+        
+        // If domestic synced successfully, clear old KR holdings and update with new
+        if (domesticSuccess) {
+          Object.keys(merged).forEach(sym => {
+            const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
+            if (!isUS) delete merged[sym];
+          });
+        }
+        
+        // If overseas synced successfully, clear old US holdings and update with new
+        if (overseasSuccess) {
+          Object.keys(merged).forEach(sym => {
+            const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
+            if (isUS) delete merged[sym];
+          });
+        }
+        
+        // Add all newly fetched holdings
+        Object.entries(newHoldings).forEach(([sym, qty]) => {
+          merged[sym] = qty;
+        });
+
+        if (currentUser) {
+          saveUserHoldings(currentUser.uid, merged);
+        }
+        
+        return merged;
+      });
+
+      setAvgPrices(prev => ({ ...prev, ...newAvgPrices }));
 
       // Self-Healing Slot Matching: Ensure gapInventory total quantity matches the actual holdings on KIS
       if (selectedStock && isGapBotActive) {
@@ -6933,7 +6969,8 @@ export default function App() {
                           {(() => {
                             const filteredHoldings = Object.entries(holdings).filter(([sym, qty]) => {
                               if (Number(qty) <= 0) return false;
-                              const isKR = /^[0-9]/.test(sym);
+                              const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
+                              const isKR = !isUS;
                               return holdingsViewTab === 'KR' ? isKR : !isKR;
                             });
 
@@ -7053,7 +7090,7 @@ export default function App() {
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
               <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">예수금 (44431721-01)</span>
+                <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">예수금 {kisConfig.isConnected && kisConfig.accountNo ? `(${kisConfig.accountNo})` : ''}</span>
                 <span className="text-sm font-black text-white italic mt-0.5 block truncate">{formatCurrency(balance)}</span>
               </div>
               
@@ -7813,7 +7850,8 @@ export default function App() {
                     <div className="flex items-center gap-3">
                       <span className="text-[10px] md:text-xs text-slate-300 font-mono font-bold">
                         {holdingsViewTab === 'KR' ? '국내' : '미국'} 총 매수가: {formatCurrency(Math.round(assetAnalysis.stockList.filter(item => {
-                          const isKR = /^[0-9]/.test(item.symbol);
+                          const isUS = /^[A-Za-z]/.test(item.symbol) && !/^\d+$/.test(item.symbol);
+                          const isKR = !isUS;
                           return holdingsViewTab === 'KR' ? isKR : !isKR;
                         }).reduce((acc, curr) => acc + curr.invested, 0)))}
                       </span>
@@ -7822,7 +7860,8 @@ export default function App() {
 
                   {(() => {
                     const filteredList = assetAnalysis.stockList.filter(item => {
-                      const isKR = /^[0-9]/.test(item.symbol);
+                      const isUS = /^[A-Za-z]/.test(item.symbol) && !/^\d+$/.test(item.symbol);
+                      const isKR = !isUS;
                       return holdingsViewTab === 'KR' ? isKR : !isKR;
                     });
 
