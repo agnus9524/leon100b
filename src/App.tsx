@@ -7547,49 +7547,51 @@ export default function App() {
                             {marketType === 'US' ? '미국주식' : '한국주식'} 실시간 체결 로그 ({currentMarketLogs.length}건)
                           </span>
 
-                          {currentMarketLogs.map((log, lIdx) => {
-                            const logStock = stocks.find(s => s.symbol === log.symbol) || 
-                                             INITIAL_STOCKS_KR.find(s => s.symbol === log.symbol) || 
-                                             INITIAL_STOCKS.find(s => s.symbol === log.symbol) || 
-                                             { name: log.symbol, symbol: log.symbol, price: log.price };
+                          <div className="max-h-[220px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                            {currentMarketLogs.map((log, lIdx) => {
+                              const logStock = stocks.find(s => s.symbol === log.symbol) || 
+                                               INITIAL_STOCKS_KR.find(s => s.symbol === log.symbol) || 
+                                               INITIAL_STOCKS.find(s => s.symbol === log.symbol) || 
+                                               { name: log.symbol, symbol: log.symbol, price: log.price };
 
-                            const isBuyType = log.type === 'BUY' || log.type === '매수';
+                              const isBuyType = log.type === 'BUY' || log.type === '매수';
 
-                            // Clean up reason for succinct display
-                            let cleanReason = (log.reason || '').replace(/\[.*?\]/g, '').trim();
-                            if (!cleanReason || cleanReason.includes('목표') || cleanReason.includes('익절')) {
-                              cleanReason = isBuyType ? 'AI 스캘퍼 타점 매수' : '목표 익절 달성';
-                            } else if (cleanReason.includes('손절') || cleanReason.includes('리스크')) {
-                              cleanReason = '손절 대응 매도';
-                            } else if (cleanReason.includes('수동')) {
-                              cleanReason = '수동 지정가 매도';
-                            }
+                              // Clean up reason for succinct display
+                              let cleanReason = (log.reason || '').replace(/\[.*?\]/g, '').trim();
+                              if (!cleanReason || cleanReason.includes('목표') || cleanReason.includes('익절')) {
+                                cleanReason = isBuyType ? 'AI 스캘퍼 타점 매수' : '목표 익절 달성';
+                              } else if (cleanReason.includes('손절') || cleanReason.includes('리스크')) {
+                                cleanReason = '손절 대응 매도';
+                              } else if (cleanReason.includes('수동')) {
+                                cleanReason = '수동 지정가 매도';
+                              }
 
-                            return (
-                              <div key={`log-${lIdx}`} className="bg-black/40 border border-white/5 hover:border-white/10 rounded-xl p-3 text-xs font-mono space-y-1 transition-all">
-                                <div className="font-extrabold text-white text-xs flex items-center gap-1.5">
-                                  <span className={cn(
-                                    "px-1.5 py-0.5 rounded text-[10px] font-black border shrink-0",
-                                    isBuyType 
-                                      ? "bg-rose-500/20 text-rose-400 border-rose-500/40" 
-                                      : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                                  )}>
-                                    {isBuyType ? "매수체결" : "매도체결"}
-                                  </span>
-                                  <span className="truncate">{logStock.name}({log.symbol})</span>
+                              return (
+                                <div key={`log-${lIdx}`} className="bg-black/40 border border-white/5 hover:border-white/10 rounded-xl p-3 text-xs font-mono space-y-1 transition-all">
+                                  <div className="font-extrabold text-white text-xs flex items-center gap-1.5">
+                                    <span className={cn(
+                                      "px-1.5 py-0.5 rounded text-[10px] font-black border shrink-0",
+                                      isBuyType 
+                                        ? "bg-rose-500/20 text-rose-400 border-rose-500/40" 
+                                        : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
+                                    )}>
+                                      {isBuyType ? "매수체결" : "매도체결"}
+                                    </span>
+                                    <span className="truncate">{logStock.name}({log.symbol})</span>
+                                  </div>
+
+                                  <div className="text-[11px] text-gray-300 flex items-center justify-between pt-1 tabular-nums font-mono">
+                                    <span>
+                                      체결가({log.amount}주) <strong className="text-white font-black">{formatCurrency(log.price)}</strong>
+                                    </span>
+                                    <span className="text-slate-400 text-right">
+                                      사유 <strong className={cn("font-bold", isBuyType ? "text-rose-400" : "text-emerald-400")}>{cleanReason}</strong>
+                                    </span>
+                                  </div>
                                 </div>
-
-                                <div className="text-[11px] text-gray-300 flex items-center justify-between pt-1 tabular-nums font-mono">
-                                  <span>
-                                    체결가({log.amount}주) <strong className="text-white font-black">{formatCurrency(log.price)}</strong>
-                                  </span>
-                                  <span className="text-slate-400 text-right">
-                                    사유 <strong className={cn("font-bold", isBuyType ? "text-rose-400" : "text-emerald-400")}>{cleanReason}</strong>
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          })}
+                              );
+                            })}
+                          </div>
                         </div>
                       ) : (
                         totalPendingCount === 0 && (
