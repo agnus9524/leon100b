@@ -907,17 +907,54 @@ export default function App() {
     }
     return localStorage.getItem('sleek_last_symbol_KR') || '073240';
   });
-  const [krBalance, setKrBalance] = useState<number>(10000000); // 원화예수금
-  const [usBalance, setUsBalance] = useState<number>(49874); // 외화예수금 (실시간 환율 기준 49,874원)
-  const [krPrincipal, setKrPrincipal] = useState<number>(10000000); // 원화 투자 원금
-  const [usPrincipal, setUsPrincipal] = useState<number>(49874); // 외화 투자 원금
-  const [balance, setBalance] = useState<number>(10000000); // User's active market money (synced via KIS)
-  const [principal, setPrincipal] = useState<number>(10000000); // User's active market principal
+  const [krBalance, setKrBalance] = useState<number>(() => {
+    const saved = localStorage.getItem('sleek_kr_balance');
+    return saved ? Number(saved) : 10000000;
+  });
+  const [usBalance, setUsBalance] = useState<number>(() => {
+    const saved = localStorage.getItem('sleek_us_balance');
+    return saved ? Number(saved) : 49874;
+  });
+  const [krPrincipal, setKrPrincipal] = useState<number>(() => {
+    const saved = localStorage.getItem('sleek_kr_principal');
+    return saved ? Number(saved) : 10000000;
+  });
+  const [usPrincipal, setUsPrincipal] = useState<number>(() => {
+    const saved = localStorage.getItem('sleek_us_principal');
+    return saved ? Number(saved) : 49874;
+  });
+  const [balance, setBalance] = useState<number>(() => marketType === 'KR' ? krBalance : usBalance);
+  const [principal, setPrincipal] = useState<number>(() => marketType === 'KR' ? krPrincipal : usPrincipal);
 
   useEffect(() => {
     setBalance(marketType === 'KR' ? krBalance : usBalance);
     setPrincipal(marketType === 'KR' ? krPrincipal : usPrincipal);
   }, [marketType, krBalance, usBalance, krPrincipal, usPrincipal]);
+
+  useEffect(() => {
+    localStorage.setItem('sleek_kr_balance', krBalance.toString());
+    localStorage.setItem('sleek_kr_principal', krPrincipal.toString());
+  }, [krBalance, krPrincipal]);
+
+  useEffect(() => {
+    localStorage.setItem('sleek_us_balance', usBalance.toString());
+    localStorage.setItem('sleek_us_principal', usPrincipal.toString());
+  }, [usBalance, usPrincipal]);
+
+  const updateActiveBalance = useCallback((updater: number | ((prev: number) => number), symbol?: string) => {
+    const isUS = symbol ? /^[A-Z]/.test(symbol) && symbol !== 'SYSTEM' : marketType === 'US';
+    if (isUS) {
+      setUsBalance(prev => {
+        const next = typeof updater === 'function' ? updater(prev) : prev + updater;
+        return Math.max(0, Math.round(next));
+      });
+    } else {
+      setKrBalance(prev => {
+        const next = typeof updater === 'function' ? updater(prev) : prev + updater;
+        return Math.max(0, Math.round(next));
+      });
+    }
+  }, [marketType]);
   const [holdings, setHoldings] = useState<Record<string, number>>({});
   const [avgPrices, setAvgPrices] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem('sleek_avg_prices') || '{}'); } catch { return {}; }
@@ -3610,7 +3647,7 @@ export default function App() {
     if (order.isSimulated) {
       const priceInKrw = marketType === 'US' ? order.orderPrice * exchangeRate : order.orderPrice;
       const refundAmount = priceInKrw * order.quantity;
-      setBalance(prev => prev + refundAmount);
+      updateActiveBalance(refundAmount, order.symbol);
       addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[가상 매수취소] 수동 취소`);
     } else {
       try {
@@ -3713,7 +3750,7 @@ export default function App() {
       if (order.isSimulated) {
         const priceInKrw = marketType === 'US' ? order.orderPrice * exchangeRate : order.orderPrice;
         const refundAmount = priceInKrw * order.quantity;
-        setBalance(prev => prev + refundAmount);
+        updateActiveBalance(refundAmount, order.symbol);
         addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[가상 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
       } else {
         try {
@@ -3801,7 +3838,7 @@ export default function App() {
             // Refund simulated balance
             const priceInKrw = marketType === 'US' ? orderPrice * exchangeRate : orderPrice;
             const refundAmount = priceInKrw * (order.quantity || 1);
-            setBalance(prev => prev + refundAmount);
+            updateActiveBalance(refundAmount, order.symbol);
             
             addLog(order.symbol, '매수', orderPrice, order.quantity || 1, `[가상 자동취소] ${cancelReason}`);
             showNotification(`${currentStock.name} 가상 매수 자동 취소 (${isDropCancel ? '낙폭 과대' : '상승 이탈'})`, "info");
@@ -4029,7 +4066,7 @@ export default function App() {
           if (currentStock.price >= order.orderPrice || isTargetProfitHit) {
             updated = true;
             const priceInKrw = marketType === 'US' ? currentStock.price * exchangeRate : currentStock.price;
-            setBalance(prev => prev + priceInKrw * order.quantity);
+            updateActiveBalance(priceInKrw * order.quantity, order.symbol);
 
             // Update profit stats if buyPrice is available
             if (order.buyPrice) {
@@ -4422,7 +4459,7 @@ export default function App() {
           if (existingPending) {
             if (existingPending.isSimulated && profitRatio >= (scalpingTargetProfit / 100) - 0.00001) {
               const priceInKrw = marketType === 'US' ? currentPrice * exchangeRate : currentPrice;
-              setBalance(prev => prev + priceInKrw * buyQty);
+              updateActiveBalance(priceInKrw * buyQty, selectedStock.symbol);
 
               const profit = (currentPrice - buyPrice) * buyQty * (marketType === 'US' ? exchangeRate : 1);
               setGapTradingProfit(prev => prev + profit);
@@ -4735,7 +4772,7 @@ export default function App() {
         // Simulated Mode: Place as pending buy order instead of instant fill!
         const simOrderId = `SIM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         
-        setBalance(prev => Math.max(0, prev - cost)); // Reserve balance
+        updateActiveBalance(-cost, stock.symbol); // Reserve balance
         
         const newPending: PendingBuyOrder = {
           id: simOrderId,
@@ -4754,7 +4791,7 @@ export default function App() {
         return 0; // Return 0 so it's not added to gapInventory immediately!
       }
 
-      setBalance(prev => Math.max(0, prev - cost));
+      updateActiveBalance(-cost, stock.symbol);
       const oldQty = holdings[stock.symbol] || 0;
       const oldAvg = avgPrices[stock.symbol] || tradePrice;
       const newQty = oldQty + finalAmount;
@@ -4855,7 +4892,7 @@ export default function App() {
           }
 
           // 시장가 혹은 즉시 체결되는 가상 매도인 경우
-          setBalance(prev => prev + priceInKrw * sellAmount);
+          updateActiveBalance(priceInKrw * sellAmount, stock.symbol);
           const newHoldings = { ...holdings, [stock.symbol]: Number(Math.max(0, currentHoldings - sellAmount).toFixed(4)) };
           setHoldings(newHoldings);
           if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
