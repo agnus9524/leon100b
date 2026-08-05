@@ -62,8 +62,7 @@ import {
   Calculator,
   Coins,
   HelpCircle,
-  LogOut,
-  ExternalLink
+  LogOut
 } from 'lucide-react';
 import { 
   XAxis, 
@@ -101,7 +100,6 @@ import {
   getAllAuthKeys,
   loginWithKey,
   saveUserKISConfig,
-  deleteUserKISConfig,
   getUserSettings,
   saveUserHoldings,
   saveUserKISToken,
@@ -495,7 +493,6 @@ interface TradeLog {
   price: number;
   amount: number;
   reason: string;
-  market?: 'KR' | 'US';
 }
 
 interface NewsItem {
@@ -829,43 +826,6 @@ const USAFlag = () => (
   </svg>
 );
 
-// Market hours helper functions (Timezone-aware)
-// Korean Stock Market (KR): Mon-Fri 09:00 ~ 15:30 KST (Asia/Seoul)
-function isKRMarketClosed(): boolean {
-  try {
-    const kstString = new Date().toLocaleString("en-US", { timeZone: "Asia/Seoul" });
-    const kstDate = new Date(kstString);
-    const day = kstDate.getDay();
-    if (day === 0 || day === 6) return true; // Weekend
-
-    const currentMin = kstDate.getHours() * 60 + kstDate.getMinutes();
-    const startMin = 9 * 60; // 09:00
-    const endMin = 15 * 60 + 30; // 15:30
-
-    return currentMin < startMin || currentMin >= endMin;
-  } catch (e) {
-    return false;
-  }
-}
-
-// US Stock Market (US): Mon-Fri 09:30 ~ 16:00 EST/EDT (America/New_York)
-function isUSMarketClosed(): boolean {
-  try {
-    const nyString = new Date().toLocaleString("en-US", { timeZone: "America/New_York" });
-    const nyDate = new Date(nyString);
-    const day = nyDate.getDay();
-    if (day === 0 || day === 6) return true; // Weekend
-
-    const currentMin = nyDate.getHours() * 60 + nyDate.getMinutes();
-    const startMin = 9 * 60 + 30; // 09:30
-    const endMin = 16 * 60; // 16:00
-
-    return currentMin < startMin || currentMin >= endMin;
-  } catch (e) {
-    return false;
-  }
-}
-
 export default function App() {
   const [marketType, setMarketType] = useState<'KR' | 'US'>(() => {
     return (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
@@ -907,54 +867,8 @@ export default function App() {
     }
     return localStorage.getItem('sleek_last_symbol_KR') || '073240';
   });
-  const [krBalance, setKrBalance] = useState<number>(() => {
-    const saved = localStorage.getItem('sleek_kr_balance');
-    return saved ? Number(saved) : 10000000;
-  });
-  const [usBalance, setUsBalance] = useState<number>(() => {
-    const saved = localStorage.getItem('sleek_us_balance');
-    return saved ? Number(saved) : 49874;
-  });
-  const [krPrincipal, setKrPrincipal] = useState<number>(() => {
-    const saved = localStorage.getItem('sleek_kr_principal');
-    return saved ? Number(saved) : 10000000;
-  });
-  const [usPrincipal, setUsPrincipal] = useState<number>(() => {
-    const saved = localStorage.getItem('sleek_us_principal');
-    return saved ? Number(saved) : 49874;
-  });
-  const [balance, setBalance] = useState<number>(() => marketType === 'KR' ? krBalance : usBalance);
-  const [principal, setPrincipal] = useState<number>(() => marketType === 'KR' ? krPrincipal : usPrincipal);
-
-  useEffect(() => {
-    setBalance(marketType === 'KR' ? krBalance : usBalance);
-    setPrincipal(marketType === 'KR' ? krPrincipal : usPrincipal);
-  }, [marketType, krBalance, usBalance, krPrincipal, usPrincipal]);
-
-  useEffect(() => {
-    localStorage.setItem('sleek_kr_balance', krBalance.toString());
-    localStorage.setItem('sleek_kr_principal', krPrincipal.toString());
-  }, [krBalance, krPrincipal]);
-
-  useEffect(() => {
-    localStorage.setItem('sleek_us_balance', usBalance.toString());
-    localStorage.setItem('sleek_us_principal', usPrincipal.toString());
-  }, [usBalance, usPrincipal]);
-
-  const updateActiveBalance = useCallback((updater: number | ((prev: number) => number), symbol?: string) => {
-    const isUS = symbol ? /^[A-Z]/.test(symbol) && symbol !== 'SYSTEM' : marketType === 'US';
-    if (isUS) {
-      setUsBalance(prev => {
-        const next = typeof updater === 'function' ? updater(prev) : prev + updater;
-        return Math.max(0, Math.round(next));
-      });
-    } else {
-      setKrBalance(prev => {
-        const next = typeof updater === 'function' ? updater(prev) : prev + updater;
-        return Math.max(0, Math.round(next));
-      });
-    }
-  }, [marketType]);
+  const [balance, setBalance] = useState(0); // User's money (will be synced via KIS)
+  const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
   const [holdings, setHoldings] = useState<Record<string, number>>({});
   const [avgPrices, setAvgPrices] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem('sleek_avg_prices') || '{}'); } catch { return {}; }
@@ -985,7 +899,7 @@ export default function App() {
   }, [selectedSymbol, marketType]);
   const [sellableHoldings, setSellableHoldings] = useState<Record<string, number>>({});
   const [isBotActive, setIsBotActive] = useState(false);
-  const [marketTradeLogs, setMarketTradeLogs] = useState<Record<'KR' | 'US', TradeLog[]>>({ KR: [], US: [] });
+  const [tradeLogs, setTradeLogs] = useState<TradeLog[]>([]);
   const [time, setTime] = useState(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
   const [botStatus, setBotStatus] = useState<string>("대기 중...");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -1132,7 +1046,6 @@ export default function App() {
   };
 
   const formatCurrency = (val: number, forceKRW: boolean = false) => {
-    if (typeof val !== 'number' || isNaN(val)) return '-';
     const isUSD = marketType === 'US' && !forceKRW;
     if (isUSD) {
       return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
@@ -1141,8 +1054,7 @@ export default function App() {
   };
 
   const formatQuantity = (val: number) => {
-    if (typeof val !== 'number' || isNaN(val)) return '0주';
-    return `${val.toLocaleString()}주`;
+    return `${val.toLocaleString()} ${marketType === 'US' ? '주' : '주'}`; // '주' is standard for both in KR context usually, but can be customized
   };
   const [showKisModal, setShowKisModal] = useState(false);
   const [showKisPassword, setShowKisPassword] = useState(false);
@@ -1170,38 +1082,20 @@ export default function App() {
 
   // Multi-Tab Scalper Trading State
   const [scalperTabs, setScalperTabs] = useState<ScalperTab[]>(() => {
-    try {
-      const saved = localStorage.getItem('sleek_scalper_tabs_v2');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
-        }
-      }
-    } catch (e) {
-      console.error("Error parsing saved scalperTabs:", e);
-    }
+    const lastMarket = localStorage.getItem('sleek_market_type') || 'KR';
+    const initSymbol = localStorage.getItem('sleek_last_symbol') || (lastMarket === 'US' ? 'SNDL' : '073240');
+    const defaults = lastMarket === 'US' ? INITIAL_STOCKS : INITIAL_STOCKS_KR;
+    const initStock = defaults.find(s => s.symbol === initSymbol) || defaults[0];
+    const price = initStock?.price || 1000;
+    const tickSize = lastMarket === 'US' ? 0.01 : (price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5);
 
-    const lastMarket = (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
-    const krSymbol = localStorage.getItem('sleek_last_symbol_KR') || '073240';
-    const usSymbol = localStorage.getItem('sleek_last_symbol_US') || 'NVDA';
-
-    const krStock = INITIAL_STOCKS_KR.find(s => s.symbol === krSymbol) || INITIAL_STOCKS_KR[0];
-    const usStock = INITIAL_STOCKS.find(s => s.symbol === usSymbol) || INITIAL_STOCKS[0];
-
-    const krPrice = krStock?.price || 1000;
-    const usPrice = usStock?.price || 100;
-
-    const krTick = krPrice >= 500000 ? 1000 : krPrice >= 100000 ? 500 : krPrice >= 50000 ? 100 : krPrice >= 10000 ? 50 : krPrice >= 5000 ? 10 : 5;
-    const usTick = 0.01;
-
-    const defaultKRTab: ScalperTab = {
-      id: krStock.symbol,
-      symbol: krStock.symbol,
-      name: krStock.name || krStock.symbol,
+    return [{
+      id: initStock.symbol,
+      symbol: initStock.symbol,
+      name: initStock.name || initStock.symbol,
       isBotActive: false,
-      gapBuyPrice: Math.max(10, krPrice - krTick * 2),
-      gapSellPrice: krPrice + krTick * 2,
+      gapBuyPrice: Math.max(10, price - tickSize * 2),
+      gapSellPrice: price + tickSize * 2,
       tradeQuantity: 1,
       maxSlots: 3,
       gapInventory: [],
@@ -1212,45 +1106,12 @@ export default function App() {
       entryPriceMode: 'BID2',
       autoCancelThreshold: 0.2,
       tradeLogs: []
-    };
-
-    const defaultUSTab: ScalperTab = {
-      id: usStock.symbol,
-      symbol: usStock.symbol,
-      name: usStock.name || usStock.symbol,
-      isBotActive: false,
-      gapBuyPrice: Math.max(0.01, Number((usPrice - usTick * 2).toFixed(2))),
-      gapSellPrice: Number((usPrice + usTick * 2).toFixed(2)),
-      tradeQuantity: 1,
-      maxSlots: 3,
-      gapInventory: [],
-      gapTradingProfit: 0,
-      gapTradeCount: 0,
-      lastTradeType: null,
-      scalperMessage: "대기 중...",
-      entryPriceMode: 'BID2',
-      autoCancelThreshold: 0.2,
-      tradeLogs: []
-    };
-
-    return [defaultKRTab, defaultUSTab];
+    }];
   });
 
   const [activeTabId, setActiveTabId] = useState<string>(() => {
-    const lastMarket = (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
-    const saved = localStorage.getItem('sleek_scalper_tabs_v2');
-    if (saved) {
-      try {
-        const parsed = JSON.parse(saved);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const matching = parsed.find((t: ScalperTab) => lastMarket === 'US' ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol));
-          if (matching) return matching.id;
-          return parsed[0].id;
-        }
-      } catch (e) {}
-    }
-    const lastSymbol = lastMarket === 'US' ? (localStorage.getItem('sleek_last_symbol_US') || 'NVDA') : (localStorage.getItem('sleek_last_symbol_KR') || '073240');
-    return lastSymbol;
+    const lastMarket = localStorage.getItem('sleek_market_type') || 'KR';
+    return scalperTabs[0]?.id || (lastMarket === 'US' ? 'SNDL' : '073240');
   });
   const scalperTabsRef = React.useRef<ScalperTab[]>(scalperTabs);
   useEffect(() => {
@@ -1274,6 +1135,7 @@ export default function App() {
     setScalperMessage(targetTab.scalperMessage || "대기 중...");
     setEntryPriceMode(targetTab.entryPriceMode || 'BID2');
     setAutoCancelThreshold(targetTab.autoCancelThreshold || 0.2);
+    setTradeLogs(targetTab.tradeLogs || []);
   };
 
   const openOrSwitchScalperTab = (symbol: string, customName?: string) => {
@@ -1319,6 +1181,7 @@ export default function App() {
     setGapTradeCount(0);
     setLastTradeType(null);
     setScalperMessage("대기 중...");
+    setTradeLogs([]);
   };
 
   const closeScalperTab = (tabId: string, e: React.MouseEvent) => {
@@ -1389,82 +1252,11 @@ export default function App() {
         lastTradeType,
         scalperMessage,
         entryPriceMode,
-        autoCancelThreshold
+        autoCancelThreshold,
+        tradeLogs
       };
     }));
-  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, activeTabId]);
-
-  // Initial Sync for Active Tab State on App Load
-  useEffect(() => {
-    const activeTab = scalperTabs.find(t => t.id === activeTabId) || scalperTabs[0];
-    if (activeTab) {
-      setSelectedSymbol(activeTab.symbol);
-      setIsGapBotActive(activeTab.isBotActive || false);
-      setGapBuyPrice(activeTab.gapBuyPrice || 0);
-      setGapSellPrice(activeTab.gapSellPrice || 0);
-      setTradeQuantity(activeTab.tradeQuantity || 1);
-      setMaxSlots(activeTab.maxSlots || 3);
-      setGapInventory(activeTab.gapInventory || []);
-      setGapTradingProfit(activeTab.gapTradingProfit || 0);
-      setGapTradeCount(activeTab.gapTradeCount || 0);
-      setLastTradeType(activeTab.lastTradeType || null);
-      setScalperMessage(activeTab.scalperMessage || "대기 중...");
-      setEntryPriceMode(activeTab.entryPriceMode || 'BID2');
-      setAutoCancelThreshold(activeTab.autoCancelThreshold || 0.2);
-    }
-  }, []);
-
-  // Save scalperTabs to localStorage whenever updated
-  useEffect(() => {
-    if (scalperTabs && scalperTabs.length > 0) {
-      try {
-        localStorage.setItem('sleek_scalper_tabs_v2', JSON.stringify(scalperTabs));
-      } catch (e) {
-        console.error("Error saving scalperTabs to localStorage:", e);
-      }
-    }
-  }, [scalperTabs]);
-
-  // Market Hours Status Check Effect (Pre-Market Analysis Mode when Market is Closed)
-  useEffect(() => {
-    const checkMarketStatus = () => {
-      const krClosed = isKRMarketClosed();
-      const usClosed = isUSMarketClosed();
-
-      setScalperTabs(prevTabs => {
-        let changed = false;
-        const updated = prevTabs.map(tab => {
-          const isUS = /^[A-Z]/.test(tab.symbol);
-          const isClosed = isUS ? usClosed : krClosed;
-          if (isClosed && tab.isBotActive) {
-            const preMsg = isUS 
-              ? "[개장 대기] 미국 장 개장 전 매수 타점 사전 분석 중... (09:30 EST 자동 주문)"
-              : "[개장 대기] 한국 장 개장 전 매수 타점 사전 분석 중... (09:00 개장 시 자동 주문)";
-            if (tab.scalperMessage !== preMsg) {
-              changed = true;
-              return {
-                ...tab,
-                scalperMessage: preMsg
-              };
-            }
-          }
-          return tab;
-        });
-
-        if (changed) {
-          const currentActive = updated.find(t => t.id === activeTabId);
-          if (currentActive && currentActive.scalperMessage) {
-            setScalperMessage(currentActive.scalperMessage);
-          }
-        }
-        return changed ? updated : prevTabs;
-      });
-    };
-
-    checkMarketStatus();
-    const closeInterval = setInterval(checkMarketStatus, 10000);
-    return () => clearInterval(closeInterval);
-  }, [activeTabId]);
+  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, tradeLogs, activeTabId]);
 
   // Helper for tick-aware target sell price calculation to guarantee positive profit above tick size
   const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number, currentMarketPrice?: number) => {
@@ -1604,20 +1396,19 @@ export default function App() {
   });
 
   const selectedStock = useMemo(() => {
-    if (!selectedSymbol) return stocks[0] || INITIAL_STOCKS_KR[0];
-    const found = stocks.find(s => s.symbol === selectedSymbol) || 
-                  (stocksCache?.KR || []).find(s => s.symbol === selectedSymbol) ||
-                  (stocksCache?.US || []).find(s => s.symbol === selectedSymbol) ||
+    const found = stocks.find(s => s.symbol === selectedSymbol) ||
+                  stocksCache.KR?.find(s => s.symbol === selectedSymbol) ||
+                  stocksCache.US?.find(s => s.symbol === selectedSymbol) ||
                   INITIAL_STOCKS_KR.find(s => s.symbol === selectedSymbol) ||
                   INITIAL_STOCKS.find(s => s.symbol === selectedSymbol);
-    
     if (found) {
       return {
         ...found,
         name: getResolvedStockName(selectedSymbol, found)
       };
     }
-    return stocks[0] || INITIAL_STOCKS_KR[0];
+    if (stocks.length > 0) return stocks[0];
+    return null;
   }, [stocks, stocksCache, selectedSymbol, getResolvedStockName]);
 
   // Auto-set Upper/Lower Price Limits (당일 상/하한가) when selectedStock changes
@@ -1636,25 +1427,19 @@ export default function App() {
     return Math.min(100, Math.max(0, pct));
   }, [gapBuyPrice, gapSellPrice, selectedStock?.price]);
   const totalValue = useMemo(() => {
-    // Total Asset Valuation = Cash Balance + Current Market Value of Stock Holdings + Pending Order Reserves (filtered by active market)
+    // Total Asset Valuation = Cash Balance + Current Market Value of Stock Holdings + Pending Order Reserves
     let stockValue = 0;
-    const rate = exchangeRate || 1350;
     Object.entries(holdings).forEach(([sym, rawQty]) => {
       const qty = Number(rawQty);
       if (qty <= 0) return;
 
-      const isUS = /^[A-Z]/.test(sym);
-      if (marketType === 'US' && !isUS) return;
-      if (marketType === 'KR' && isUS) return;
-
       const st = stocks.find(s => s.symbol === sym) ||
-                 stocksCache.KR?.find(s => s.symbol === sym) ||
-                 stocksCache.US?.find(s => s.symbol === sym) ||
                  INITIAL_STOCKS_KR.find(s => s.symbol === sym) ||
                  INITIAL_STOCKS.find(s => s.symbol === sym);
 
       const currentPrice = st ? st.price : (avgPrices[sym] || 0);
-      const priceInKRW = isUS ? currentPrice * rate : currentPrice;
+      const isUS = /^[A-Z]/.test(sym);
+      const priceInKRW = isUS ? currentPrice * exchangeRate : currentPrice;
 
       stockValue += qty * priceInKRW;
     });
@@ -1663,35 +1448,28 @@ export default function App() {
     const pendingReserve = pendingBuyOrders.reduce((acc, order) => {
       if (!order.isSimulated) return acc;
       const isOrderUS = /^[A-Z]/.test(order.symbol);
-      if (marketType === 'US' && !isOrderUS) return acc;
-      if (marketType === 'KR' && isOrderUS) return acc;
-
-      const priceKRW = isOrderUS ? order.orderPrice * rate : order.orderPrice;
+      const priceKRW = isOrderUS ? order.orderPrice * exchangeRate : order.orderPrice;
       return acc + order.quantity * priceKRW;
     }, 0);
 
-    const activeBal = marketType === 'KR' ? krBalance : usBalance;
-    return Math.floor(activeBal + stockValue + pendingReserve);
-  }, [balance, krBalance, usBalance, holdings, stocks, stocksCache, avgPrices, exchangeRate, pendingBuyOrders, marketType]);
+    return Math.floor(balance + stockValue + pendingReserve);
+  }, [balance, holdings, stocks, avgPrices, exchangeRate, pendingBuyOrders]);
 
-  const convertedValue = displayCurrency === 'USD' ? Math.round(totalValue / (exchangeRate || 1350)) : Math.round(totalValue);
-  const convertedBalance = displayCurrency === 'USD' ? Math.round(balance / (exchangeRate || 1350)) : Math.round(balance);
+  const convertedValue = displayCurrency === 'USD' ? Math.round(totalValue / exchangeRate) : Math.round(totalValue);
+  const convertedBalance = displayCurrency === 'USD' ? Math.round(balance / exchangeRate) : Math.round(balance);
   
-  const activePrincipal = marketType === 'KR' ? krPrincipal : usPrincipal;
-  const pnl = Math.round(totalValue - (activePrincipal > 0 ? activePrincipal : totalValue));
-  const pnlPercent = (activePrincipal > 0 && activePrincipal !== totalValue) ? (pnl / activePrincipal) * 100 : 0;
+  const pnl = Math.round(totalValue - principal);
+  const pnlPercent = principal > 0 ? (pnl / principal) * 100 : 0;
 
   const convertedPnl = displayCurrency === 'USD' ? Math.round(pnl / exchangeRate) : Math.round(pnl);
-  const convertedPrincipal = displayCurrency === 'USD' ? Math.round(activePrincipal / exchangeRate) : Math.round(activePrincipal);
+  const convertedPrincipal = displayCurrency === 'USD' ? Math.round(principal / exchangeRate) : Math.round(principal);
   const curPrefix = displayCurrency === 'USD' ? '$' : '₩';
 
   const [isAssetAnalysisModalOpen, setIsAssetAnalysisModalOpen] = useState<boolean>(false);
 
   const assetAnalysis = useMemo(() => {
     const isUSD = displayCurrency === 'USD';
-    const conv = (krwVal: number) => isUSD ? krwVal / (exchangeRate || 1350) : krwVal;
-    const activeBal = marketType === 'KR' ? krBalance : usBalance;
-    const activePrin = marketType === 'KR' ? krPrincipal : usPrincipal;
+    const conv = (krwVal: number) => isUSD ? krwVal / exchangeRate : krwVal;
 
     let totalStockValue = 0;
     let totalStockInvested = 0;
@@ -1722,7 +1500,7 @@ export default function App() {
                  stocksCache.US?.find(s => s.symbol === sym) ||
                  INITIAL_STOCKS_KR.find(s => s.symbol === sym) ||
                  INITIAL_STOCKS.find(s => s.symbol === sym) ||
-                 { name: sym, symbol: sym, price: avgPrices[sym] || (isStockUS ? 10 : 1000) };
+                 { name: sym, symbol: sym, price: 0 };
 
       const resolvedStockName = getResolvedStockName(sym, st);
 
@@ -1760,6 +1538,8 @@ export default function App() {
     });
 
     stockList.forEach(item => {
+      // portfolioShare should be based on totalValue (which is converted in convertedValue)
+      // but let's just keep it relative to its own category if filtered, or keep total
       item.portfolioShare = totalValue > 0 ? ((item.evaluatedAmount * (isUSD ? exchangeRate : 1)) / totalValue) * 100 : 0;
     });
 
@@ -1773,23 +1553,26 @@ export default function App() {
       return acc + order.quantity * priceKRW;
     }, 0);
 
-    const currentViewTotal = conv(activeBal) + conv(totalStockValue) + conv(pendingOrderReserve);
+    const filteredTotalValue = (marketType === 'US' ? balance : balance) + totalStockValue; // simplified for now
+
+    // Let's make shares relative to the filtered total for a consistent sub-view
+    const currentViewTotal = conv(balance) + totalStockValue + conv(pendingOrderReserve);
 
     return {
-      cashBalance: conv(activeBal),
-      stockValue: conv(totalStockValue),
-      stockInvested: conv(totalStockInvested),
+      cashBalance: conv(balance),
+      stockValue: totalStockValue,
+      stockInvested: totalStockInvested,
       pendingReserve: conv(pendingOrderReserve),
       totalCalculatedAsset: currentViewTotal, // Reflecting total valuation including reserves
-      principal: conv(activePrin),
-      totalPnL: conv(totalStockValue - totalStockInvested),
+      principal: conv(principal),
+      totalPnL: totalStockValue - totalStockInvested,
       totalPnLPercent: totalStockInvested > 0 ? ((totalStockValue - totalStockInvested) / totalStockInvested) * 100 : 0,
-      cashShare: currentViewTotal > 0 ? (conv(activeBal) / currentViewTotal) * 100 : 0,
-      stockShare: currentViewTotal > 0 ? (conv(totalStockValue) / currentViewTotal) * 100 : 0,
+      cashShare: currentViewTotal > 0 ? (conv(balance) / currentViewTotal) * 100 : 0,
+      stockShare: currentViewTotal > 0 ? (totalStockValue / currentViewTotal) * 100 : 0,
       pendingShare: currentViewTotal > 0 ? (conv(pendingOrderReserve) / currentViewTotal) * 100 : 0,
       stockList
     };
-  }, [krBalance, usBalance, krPrincipal, usPrincipal, holdings, stocks, stocksCache, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, marketType, displayCurrency]);
+  }, [balance, holdings, stocks, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, principal, pnl, pnlPercent, marketType, displayCurrency]);
 
   // Stable symbol ordering for TOP 5 Scalper Optimal Stocks:
   // Priority: Real-time Rising Momentum + 1-Year Upward Trend + AI Recommended Optimal Candidates (No Price Limit)
@@ -1921,7 +1704,7 @@ export default function App() {
     return stableTop5Symbols.map((sym) => {
       const stock = stocks.find(s => s.symbol === sym) ||
                     (marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS).find(s => s.symbol === sym) ||
-                    { name: sym, symbol: sym, price: avgPrices[sym] || (marketType === 'US' ? (INITIAL_STOCKS.find(x => x.symbol === sym)?.price || 10) : (INITIAL_STOCKS_KR.find(x => x.symbol === sym)?.price || 1000)), changePercent: 0, volume: '0', history: [], market: marketType };
+                    { name: sym, symbol: sym, price: 0, changePercent: 0, volume: '0', history: [], market: marketType };
 
       const qty = holdings[sym] || 0;
       const isHeld = Number(qty) > 0;
@@ -2020,8 +1803,7 @@ export default function App() {
 
       if (realRate) {
         setExchangeRate(prev => {
-          const oldRate = typeof prev === 'number' && prev > 0 ? prev : 1350;
-          setExchangeRateTrend(realRate >= oldRate ? 'UP' : 'DOWN');
+          setExchangeRateTrend(realRate >= prev ? 'UP' : 'DOWN');
           return realRate;
         });
         setExchangeData(prev => {
@@ -2039,11 +1821,11 @@ export default function App() {
             history: newHistory
           };
         });
+        setIsRateLoading(false);
       }
     } catch (error: any) {
       console.error("Failed to fetch real exchange rate:", error);
-    } finally {
-      setIsRateLoading(false);
+      showNotification("환율 정보를 가져오는 데 실패했습니다.", "error");
     }
   }, [kisConfig.isConnected]);
 
@@ -2222,11 +2004,11 @@ export default function App() {
 
     // 1. Save current stocks to cache & custom names
     const currentMarket = marketType;
-    const currentStocks = Array.isArray(stocks) ? [...stocks] : [];
+    const currentStocks = stocksRef.current;
 
     const newNamesFromCurrent: Record<string, string> = {};
     currentStocks.forEach(s => {
-      if (s && s.symbol && s.name && s.name !== s.symbol) {
+      if (s.symbol && s.name && s.name !== s.symbol) {
         newNamesFromCurrent[s.symbol] = s.name;
       }
     });
@@ -2236,30 +2018,29 @@ export default function App() {
 
     const nextCache = {
       ...stocksCache,
-      [currentMarket]: currentStocks.filter(s => s && s.market === currentMarket)
+      [currentMarket]: currentStocks.filter(s => s.market === currentMarket)
     };
     setStocksCache(nextCache);
 
     // 2. Set new market states
     setMarketType(newMarket);
     setDisplayCurrency(newMarket === 'KR' ? 'KRW' : 'USD');
-    setHoldingsViewTab(newMarket);
     
     const cachedStocks = nextCache[newMarket] && nextCache[newMarket].length > 0
       ? nextCache[newMarket]
       : (newMarket === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS);
-    setStocks([...cachedStocks]); // Spread to force reference change
+    setStocks(cachedStocks);
 
     // 3. Sync symbol
     let sym = newMarket === 'US' ? lastSelectedUS : lastSelectedKR;
-    const isUS = sym ? /^[A-Z]/.test(sym) : false;
+    const isUS = /^[A-Z]/.test(sym);
     if (newMarket === 'US') {
       if (!isUS || !cachedStocks.some(s => s.symbol === sym)) {
-        sym = cachedStocks.find(s => /^[A-Z]/.test(s.symbol))?.symbol || (cachedStocks[0]?.symbol) || 'NVDA';
+        sym = cachedStocks.find(s => /^[A-Z]/.test(s.symbol))?.symbol || 'NVDA';
       }
     } else {
       if (isUS || !cachedStocks.some(s => s.symbol === sym)) {
-        sym = cachedStocks.find(s => !/^[A-Z]/.test(s.symbol))?.symbol || (cachedStocks[0]?.symbol) || '073240';
+        sym = cachedStocks.find(s => !/^[A-Z]/.test(s.symbol))?.symbol || '073240';
       }
     }
     setSelectedSymbol(sym);
@@ -2268,34 +2049,21 @@ export default function App() {
     const stock = cachedStocks.find(s => s.symbol === sym) || cachedStocks[0];
     if (stock) {
       const price = stock.price || (newMarket === 'KR' ? 1000 : 1);
-      const isStockUS = /^[A-Z]/.test(stock.symbol);
-      const tickSize = isStockUS 
-        ? 0.01 
-        : (price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5);
+      const tickSize = newMarket === 'KR' 
+        ? (price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5)
+        : 0.01;
       
       const validTabs = scalperTabs.filter(t => {
-        const tIsUS = t.symbol ? /^[A-Z]/.test(t.symbol) : false;
+        const tIsUS = /^[A-Z]/.test(t.symbol);
         return newMarket === 'US' ? tIsUS : !tIsUS;
       });
 
       if (validTabs.length > 0) {
-        const tabToSwitch = validTabs.find(t => t.symbol === sym) || validTabs[0];
-        setActiveTabId(tabToSwitch.id);
-        setSelectedSymbol(tabToSwitch.symbol);
-        setIsGapBotActive(tabToSwitch.isBotActive || false);
-        setGapBuyPrice(tabToSwitch.gapBuyPrice || 0);
-        setGapSellPrice(tabToSwitch.gapSellPrice || 0);
-        setTradeQuantity(tabToSwitch.tradeQuantity || 1);
-        setMaxSlots(tabToSwitch.maxSlots || 3);
-        setGapInventory(tabToSwitch.gapInventory || []);
-        setGapTradingProfit(tabToSwitch.gapTradingProfit || 0);
-        setGapTradeCount(tabToSwitch.gapTradeCount || 0);
-        setLastTradeType(tabToSwitch.lastTradeType || null);
-        setScalperMessage(tabToSwitch.scalperMessage || "대기 중...");
-        setEntryPriceMode(tabToSwitch.entryPriceMode || 'BID2');
-        setAutoCancelThreshold(tabToSwitch.autoCancelThreshold || 0.2);
+        if (!validTabs.some(t => t.id === activeTabId)) {
+          handleSwitchTab(validTabs[0].id);
+        }
       } else {
-        const newTab: ScalperTab = {
+        const newTabs: ScalperTab[] = [{
           id: stock.symbol,
           symbol: stock.symbol,
           name: stock.name || stock.symbol,
@@ -2312,22 +2080,9 @@ export default function App() {
           entryPriceMode: 'BID2',
           autoCancelThreshold: 0.2,
           tradeLogs: []
-        };
-        setScalperTabs(prev => [...prev, newTab]);
-        setActiveTabId(newTab.id);
-        setSelectedSymbol(newTab.symbol);
-        setIsGapBotActive(false);
-        setGapBuyPrice(newTab.gapBuyPrice);
-        setGapSellPrice(newTab.gapSellPrice);
-        setTradeQuantity(1);
-        setMaxSlots(3);
-        setGapInventory([]);
-        setGapTradingProfit(0);
-        setGapTradeCount(0);
-        setLastTradeType(null);
-        setScalperMessage("대기 중...");
-        setEntryPriceMode('BID2');
-        setAutoCancelThreshold(0.2);
+        }];
+        setScalperTabs(newTabs);
+        setActiveTabId(stock.symbol);
       }
     }
   };
@@ -2932,24 +2687,20 @@ export default function App() {
           if (marketType === 'KR') setSellableHoldings(prev => ({ ...prev, ...newSellable }));
         }
 
-        const out2 = Array.isArray(domesticBalanceData?.output2) 
-          ? domesticBalanceData.output2[0] 
-          : domesticBalanceData?.output2;
-
-        if (domesticBalanceData?.rt_cd === '0' && out2 && typeof out2 === 'object') {
+        if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output2?.[0]) {
           foundAnyData = true;
-          const dnclAmt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.prsm_dncl_amt || out2.n2_dncl_amt || 0);
+          const out2 = domesticBalanceData.output2[0];
+          const dnclAmt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.prsm_dncl_amt || 0);
           const ordPsblCash = Number(out2.ord_psbl_cash || out2.ord_psbl_amt || 0);
-          const domesticPurchase = Number(out2.pchs_amt_smtl_amt || out2.pchs_amt_smtl || 0);
+          const domesticPurchase = Number(out2.pchs_amt_smtl_amt || 0);
           const actualPurchaseCost = Math.max(domesticPurchase, totalStockPurchaseCost);
 
           // Direct deposit/cash balance in account
-          const domesticCash = Math.max(0, Math.round(dnclAmt > 0 ? dnclAmt : (ordPsblCash >= 0 ? ordPsblCash : 0)));
-          setKrBalance(domesticCash);
+          const domesticCash = dnclAmt > 0 ? dnclAmt : (ordPsblCash > 0 ? ordPsblCash : 0);
           
           if (marketType === 'KR') {
-            totalConvertedBalance = domesticCash;
-            totalConvertedPrincipal = Math.round(domesticCash + actualPurchaseCost);
+            totalConvertedBalance += Math.round(domesticCash);
+            totalConvertedPrincipal += Math.round(domesticCash + actualPurchaseCost);
           }
         }
       } catch (err: any) {
@@ -2983,18 +2734,12 @@ export default function App() {
         if (overseasBalanceData?.rt_cd === '0' && overseasBalanceData.output2) {
           foundAnyData = true;
           const out2 = overseasBalanceData.output2;
-          const rawFrcr = Number(out2.frcr_dncl_amt || out2.frcr_use_psbl_amt || out2.frcr_drwg_psbl_amt || 0);
+          const frcr_dncl_amt = Number(out2.frcr_dncl_amt || 0); // Foreign currency deposit
           const ovrs_tot_pchs_amt = Number(out2.ovrs_tot_pchs_amt || totalOverseasPurchaseCostUSD);
           
-          let foreignCashKRW = 49874;
-          if (rawFrcr > 0) {
-            foreignCashKRW = rawFrcr < 10000 ? Math.round(rawFrcr * currentExRate) : Math.round(rawFrcr);
-          }
-          setUsBalance(foreignCashKRW);
-          
           if (marketType === 'US') {
-            totalConvertedBalance = foreignCashKRW;
-            totalConvertedPrincipal = foreignCashKRW + Math.round(ovrs_tot_pchs_amt * currentExRate);
+            totalConvertedBalance += frcr_dncl_amt;
+            totalConvertedPrincipal += (frcr_dncl_amt + ovrs_tot_pchs_amt);
           }
         }
       } catch (err: any) {
@@ -3050,31 +2795,30 @@ export default function App() {
             const resolvedName = (p && p.name && p.name !== sym) 
               ? p.name 
               : getResolvedStockName(sym, newStockNames[sym] ? { name: newStockNames[sym] } : undefined);
-            
-            const realP = (p && p.current > 0) ? p.current : (newAvgPrices[sym] || (stockMarket === 'US' ? (INITIAL_STOCKS.find(x => x.symbol === sym)?.price || 10) : (INITIAL_STOCKS_KR.find(x => x.symbol === sym)?.price || 1000)));
-
-            return {
-              symbol: sym,
-              name: resolvedName,
-              price: realP,
-              change: p?.change || 0,
-              changePercent: p?.changePercent || 0,
-              volume: p?.volume || '0',
-              history: [{ time: '09:00', price: realP }],
-              market: stockMarket,
-              isAI: false
-            };
+            if (p) {
+              return {
+                symbol: sym,
+                name: resolvedName,
+                price: p.current,
+                change: p.change,
+                changePercent: p.changePercent,
+                volume: p.volume,
+                history: [{ time: '09:00', price: p.current }],
+                market: stockMarket,
+                isAI: false
+              };
+            }
+            throw new Error("No price data");
           } catch (e) {
             const resolvedName = getResolvedStockName(sym, newStockNames[sym] ? { name: newStockNames[sym] } : undefined);
-            const fallbackP = newAvgPrices[sym] || (stockMarket === 'US' ? (INITIAL_STOCKS.find(x => x.symbol === sym)?.price || 10) : (INITIAL_STOCKS_KR.find(x => x.symbol === sym)?.price || 1000));
             return {
               symbol: sym,
               name: resolvedName,
-              price: fallbackP,
+              price: 0,
               change: 0,
               changePercent: 0,
               volume: '0',
-              history: [{ time: '09:00', price: fallbackP }],
+              history: [],
               market: stockMarket,
               isAI: false
             };
@@ -3206,7 +2950,7 @@ export default function App() {
           const updatedStocks = await Promise.all(currentStocks.map(async (s) => {
             try {
               const priceData = await kisService.getPrice(s.symbol);
-              if (priceData && priceData.current > 0) {
+              if (priceData) {
                 const realPrice = priceData.current;
                 
                 return {
@@ -3240,7 +2984,7 @@ export default function App() {
         if (!selectedSymbol) return;
         try {
           const priceData = await kisService.getPrice(selectedSymbol);
-          if (priceData && priceData.current > 0) {
+          if (priceData) {
             const realPrice = priceData.current;
             setStocks(prev => prev.map(s => {
               if (s.symbol !== selectedSymbol) return s;
@@ -3421,13 +3165,10 @@ export default function App() {
     }
 
     setBotStatus("AI 엔진 최적화 완료. 분석 시작...");
-    setMarketTradeLogs(prev => ({
-      ...prev,
-      [marketType]: [{
-        time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
-        symbol: 'SYSTEM', type: 'BUY', price: 0, amount: 0, reason: 'AI 트레이딩 엔진이 기동되었습니다. (소수점 매매 활성화)', market: marketType
-      }, ...(prev[marketType] || [])].slice(0, 100)
-    }));
+    setTradeLogs(prev => [{
+      time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
+      symbol: 'SYSTEM', type: 'BUY', price: 0, amount: 0, reason: 'AI 트레이딩 엔진이 기동되었습니다. (소수점 매매 활성화)'
+    } as any, ...prev].slice(0, 50));
 
     const botInterval = setInterval(async () => {
       // In Manual mode, focus analysis on the selected stock more often (70%)
@@ -3648,7 +3389,7 @@ export default function App() {
     if (order.isSimulated) {
       const priceInKrw = marketType === 'US' ? order.orderPrice * exchangeRate : order.orderPrice;
       const refundAmount = priceInKrw * order.quantity;
-      updateActiveBalance(refundAmount, order.symbol);
+      setBalance(prev => prev + refundAmount);
       addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[가상 매수취소] 수동 취소`);
     } else {
       try {
@@ -3657,7 +3398,7 @@ export default function App() {
           order.id,
           order.quantity.toString(),
           "0",
-          '02'
+          '01'
         );
         addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 매수취소] 수동 취소`);
       } catch (e) {
@@ -3680,7 +3421,7 @@ export default function App() {
           order.id,
           order.quantity.toString(),
           "0",
-          '02'
+          '01'
         );
         addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소] 수동 취소`);
       } catch (e) {
@@ -3751,7 +3492,7 @@ export default function App() {
       if (order.isSimulated) {
         const priceInKrw = marketType === 'US' ? order.orderPrice * exchangeRate : order.orderPrice;
         const refundAmount = priceInKrw * order.quantity;
-        updateActiveBalance(refundAmount, order.symbol);
+        setBalance(prev => prev + refundAmount);
         addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[가상 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
       } else {
         try {
@@ -3760,7 +3501,7 @@ export default function App() {
             order.id,
             order.quantity.toString(),
             "0",
-            '02'
+            '01'
           );
           addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
         } catch (e) {
@@ -3777,7 +3518,7 @@ export default function App() {
             order.id,
             order.quantity.toString(),
             "0",
-            '02'
+            '01'
           );
           addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매도 주문 일괄 취소`);
         } catch (e) {
@@ -3839,7 +3580,7 @@ export default function App() {
             // Refund simulated balance
             const priceInKrw = marketType === 'US' ? orderPrice * exchangeRate : orderPrice;
             const refundAmount = priceInKrw * (order.quantity || 1);
-            updateActiveBalance(refundAmount, order.symbol);
+            setBalance(prev => prev + refundAmount);
             
             addLog(order.symbol, '매수', orderPrice, order.quantity || 1, `[가상 자동취소] ${cancelReason}`);
             showNotification(`${currentStock.name} 가상 매수 자동 취소 (${isDropCancel ? '낙폭 과대' : '상승 이탈'})`, "info");
@@ -3853,7 +3594,7 @@ export default function App() {
                 order.id,
                 (order.quantity || 1).toString(),
                 "0",
-                '02' // 02 is Cancel
+                '01' // 01 is Cancel
               );
               
               if (cancelRes && cancelRes.rt_cd === '0') {
@@ -4067,7 +3808,7 @@ export default function App() {
           if (currentStock.price >= order.orderPrice || isTargetProfitHit) {
             updated = true;
             const priceInKrw = marketType === 'US' ? currentStock.price * exchangeRate : currentStock.price;
-            updateActiveBalance(priceInKrw * order.quantity, order.symbol);
+            setBalance(prev => prev + priceInKrw * order.quantity);
 
             // Update profit stats if buyPrice is available
             if (order.buyPrice) {
@@ -4282,25 +4023,6 @@ export default function App() {
 
       if (gapBuyPrice <= 0 || gapSellPrice <= 0) return;
 
-      // Check if market is currently closed
-      const isUS = /^[A-Z]/.test(selectedStock.symbol);
-      const isClosedNow = isUS ? isUSMarketClosed() : isKRMarketClosed();
-
-      if (isClosedNow) {
-        const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
-        const rawTargetBuyPrice = entryPriceMode === 'BID4' 
-          ? (currentPrice - 4 * tickSize) 
-          : entryPriceMode === 'BID2' 
-          ? (currentPrice - 2 * tickSize) 
-          : currentPrice;
-        const targetBuyPrice = Math.round(rawTargetBuyPrice / tickSize) * tickSize;
-        const targetSellPrice = calculateTargetSellPrice(targetBuyPrice, scalpingTargetProfit, currentPrice);
-
-        setScalperMessage(`[개장 전 분석 완료] 매수가: ${formatCurrency(targetBuyPrice)} / 목표가: ${formatCurrency(targetSellPrice)} (${isUS ? '09:30 EST' : '09:00'} 개장 시 자동 주문)`);
-        setBotStatus(`[개장 대기] ${selectedStock.name} 타점 분석 완료 (매수가: ${formatCurrency(targetBuyPrice)})`);
-        return;
-      }
-
       // 1. Calculate Indicators for Precise Entry/Exit
       const rsi = calculateRSI(historyPrices, 14);
       const bb = calculateBollingerBands(historyPrices, 20, 2);
@@ -4460,7 +4182,7 @@ export default function App() {
           if (existingPending) {
             if (existingPending.isSimulated && profitRatio >= (scalpingTargetProfit / 100) - 0.00001) {
               const priceInKrw = marketType === 'US' ? currentPrice * exchangeRate : currentPrice;
-              updateActiveBalance(priceInKrw * buyQty, selectedStock.symbol);
+              setBalance(prev => prev + priceInKrw * buyQty);
 
               const profit = (currentPrice - buyPrice) * buyQty * (marketType === 'US' ? exchangeRate : 1);
               setGapTradingProfit(prev => prev + profit);
@@ -4773,7 +4495,7 @@ export default function App() {
         // Simulated Mode: Place as pending buy order instead of instant fill!
         const simOrderId = `SIM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
         
-        updateActiveBalance(-cost, stock.symbol); // Reserve balance
+        setBalance(prev => Math.max(0, prev - cost)); // Reserve balance
         
         const newPending: PendingBuyOrder = {
           id: simOrderId,
@@ -4792,7 +4514,7 @@ export default function App() {
         return 0; // Return 0 so it's not added to gapInventory immediately!
       }
 
-      updateActiveBalance(-cost, stock.symbol);
+      setBalance(prev => Math.max(0, prev - cost));
       const oldQty = holdings[stock.symbol] || 0;
       const oldAvg = avgPrices[stock.symbol] || tradePrice;
       const newQty = oldQty + finalAmount;
@@ -4893,7 +4615,7 @@ export default function App() {
           }
 
           // 시장가 혹은 즉시 체결되는 가상 매도인 경우
-          updateActiveBalance(priceInKrw * sellAmount, stock.symbol);
+          setBalance(prev => prev + priceInKrw * sellAmount);
           const newHoldings = { ...holdings, [stock.symbol]: Number(Math.max(0, currentHoldings - sellAmount).toFixed(4)) };
           setHoldings(newHoldings);
           if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
@@ -4922,18 +4644,11 @@ export default function App() {
   };
 
   const addLog = (symbol: string, type: 'BUY' | 'SELL' | '매수' | '매도', price: number, amount: number, reason: string) => {
-    const isUS = /^[A-Z]/.test(symbol) && symbol !== 'SYSTEM';
-    const isKR = /^[0-9]/.test(symbol) && symbol !== 'SYSTEM';
-    const logMarket: 'KR' | 'US' = isUS ? 'US' : (isKR ? 'KR' : marketType);
-
     const newLog: TradeLog = {
       time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
-      symbol, type, price, amount, reason, market: logMarket
+      symbol, type, price, amount, reason
     };
-    setMarketTradeLogs(prev => ({
-      ...prev,
-      [logMarket]: [newLog, ...(prev[logMarket] || [])].slice(0, 100)
-    }));
+    setTradeLogs(prev => [newLog, ...prev].slice(0, 50));
     setScalperTabs(prev => prev.map(tab => {
       if (tab.symbol === symbol || tab.id === symbol || (symbol === 'SYSTEM' && tab.id === activeTabId)) {
         const existing = tab.tradeLogs || [];
@@ -4968,20 +4683,13 @@ export default function App() {
       return;
     }
 
-    // Instantly close modal so UI responds immediately
-    setManualSellModalOpen(false);
+    const currentPrice = selectedStock.price;
 
-    try {
-      showNotification(`${selectedStock.name} ${formatCurrency(manualSellPrice)} 지정가 매도 주문 전송 중...`, "info");
-      await executeTrade('SELL', selectedStock, manualSellQty, `[수동 지정가 매도] 희망가 ${formatCurrency(manualSellPrice)}`, manualSellPrice, avgPrices[selectedStock.symbol]);
-      showNotification(`${selectedStock.name} ${formatCurrency(manualSellPrice)} 지정가 매도 주문이 접수되었습니다.`, "success");
-      playScalpingSound('SELL');
-    } catch (err: any) {
-      console.error("Manual sell error:", err);
-      showNotification(`지정가 매도 주문 전송 오류: ${err?.message || '처리 중 문제 발생'}`, "error");
-    } finally {
-      setManualSellModalOpen(false);
-    }
+    showNotification(`${selectedStock.name} ${formatCurrency(manualSellPrice)} 지정가 매도 주문 전송 중...`, "info");
+    await executeTrade('SELL', selectedStock, manualSellQty, `[수동 지정가 매도] 희망가 ${formatCurrency(manualSellPrice)}`, manualSellPrice, avgPrices[selectedStock.symbol]);
+    showNotification(`${selectedStock.name} ${formatCurrency(manualSellPrice)} 지정가 매도 주문이 접수되었습니다.`, "success");
+    playScalpingSound('SELL');
+    setManualSellModalOpen(false);
   };
 
   const handleExecuteXtxSignal = (sig: MarketSignal) => {
@@ -5078,44 +4786,10 @@ export default function App() {
       handleSyncKIS();
     }, 1000);
 
-    setMarketTradeLogs(prev => ({
-      ...prev,
-      KR: [{
-        time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
-        symbol: 'SYSTEM', type: '매수', price: 0, amount: 0, reason: "한국투자증권 계좌가 연결되었습니다. 데이터 동기화를 시작합니다.", market: 'KR'
-      }, ...(prev.KR || [])].slice(0, 100)
-    }));
-  };
-
-  const handleResetKisInfo = async () => {
-    if (!window.confirm("정말로 모든 API 키와 개인 정보를 초기화하시겠습니까?\n이 작업은 되돌릴 수 없습니다.")) {
-      return;
-    }
-
-    try {
-      const resetConfig = {
-        appKey: '',
-        appSecret: '',
-        accountNo: '',
-        accountCode: '01',
-        accountPw: '',
-        isConnected: false,
-        domesticOrderType: '00',
-        isRealOrderEnabled: true
-      };
-
-      if (currentUser) {
-        await deleteUserKISConfig(currentUser.uid);
-      }
-
-      setKisConfig(resetConfig);
-      kisService.init(getActiveKisConfig(resetConfig));
-      showNotification("모든 개인 정보 및 API 설정이 초기화되었습니다.", "info");
-      setShowKisModal(false);
-    } catch (err: any) {
-      console.error("Reset info error:", err);
-      showNotification("초기화 중 오류가 발생했습니다: " + err.message, "error");
-    }
+    setTradeLogs(prev => [{
+      time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
+      symbol: 'SYSTEM', type: '매수', price: 0, amount: 0, reason: "한국투자증권 계좌가 연결되었습니다. 데이터 동기화를 시작합니다."
+    } as any, ...prev].slice(0, 50));
   };
 
   if (isAuthLoading || isRateLoading) {
@@ -5369,16 +5043,6 @@ export default function App() {
                   접근 토큰은 24시간 유효하며, 보안을 위해 토큰 발급 시 한국투자증권에서 LMS 알림이 발송됩니다. 
                   본 앱은 토큰을 저장하여 알림 발송 횟수를 최소화합니다.
                 </p>
-              </div>
-
-              <div className="mt-6 pt-4 border-t border-white/5">
-                <button 
-                  onClick={handleResetKisInfo}
-                  className="w-full py-2.5 rounded-xl text-[10px] font-bold text-rose-400 hover:text-white bg-rose-500/10 hover:bg-rose-500/80 border border-rose-500/20 transition-all flex items-center justify-center gap-2"
-                >
-                  <Trash2 className="w-3 h-3" />
-                  API 키 및 모든 개인정보 초기화 (영구 삭제)
-                </button>
               </div>
             </motion.div>
           </motion.div>
@@ -5854,15 +5518,6 @@ export default function App() {
                 <Settings className="w-4 h-4" /> {kisConfig.isConnected ? "KIS 연동 설정 변경" : "KIS 연동 설정하기"}
               </button>
 
-              <a 
-                href="https://securities.koreainvestment.com/main/member/login/login.jsp?returnUrl=%2Fmain%2Fcustomer%2Fsystemdown%2FRestAPIService.jsp&isXecurePass=Y"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="w-full py-3.5 bg-amber-500/10 border border-amber-500/30 text-amber-300 hover:bg-amber-500/20 hover:text-amber-200 rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-2"
-              >
-                <ExternalLink className="w-4 h-4 text-amber-400" /> 한국투자증권 KIS API 키 발급 바로가기
-              </a>
-
               <button 
                 onClick={handleLogout}
                 className="w-full py-3.5 bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-2"
@@ -5928,62 +5583,70 @@ export default function App() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-center gap-3 md:gap-4">
-        {/* User Account & KIS Connection side-by-side */}
-        <div className="flex items-center gap-2 md:gap-3 bg-black/40 p-1.5 rounded-2xl border border-white/10 text-xs font-mono">
-          {/* User Account */}
-          <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
-            <div className="flex flex-col">
-              <span className="text-[9px] text-sleek-text-secondary uppercase font-bold tracking-wider">User Account</span>
-              <span className="text-white font-extrabold text-xs truncate max-w-[100px] md:max-w-[140px]">
-                {currentUser?.email ? currentUser.email.split('@')[0] : 'LOGGED IN'}
-              </span>
+      <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6">
+          <div className="flex items-center gap-4 text-[11px] md:text-[13px] font-mono border-r border-sleek-border pr-4 md:pr-6">
+            <div className="flex flex-col items-end">
+              <span className="text-[9px] md:text-[10px] text-sleek-text-secondary uppercase">User Account</span>
+              <div className="flex items-center gap-2">
+                {currentUser?.email === "agnus9524@gmail.com" && (
+                  <button 
+                    onClick={() => { setShowAdminPanel(true); handleFetchAllLicenses(); }}
+                    className="text-sleek-blue hover:text-white transition-colors flex items-center gap-1 text-[10px]"
+                  >
+                    <Settings className="w-3 h-3" /> ADMIN
+                  </button>
+                )}
+                <button 
+                  onClick={handleLogout}
+                  className="text-sleek-text-secondary hover:text-white transition-colors"
+                  title="로그아웃"
+                >
+                  LOGOUT
+                </button>
+              </div>
             </div>
-            {currentUser?.email === "agnus9524@gmail.com" && (
-              <button 
-                onClick={() => { setShowAdminPanel(true); handleFetchAllLicenses(); }}
-                className="text-sleek-blue hover:text-white transition-colors flex items-center gap-1 text-[10px] bg-sleek-blue/20 px-1.5 py-0.5 rounded border border-sleek-blue/30 font-bold cursor-pointer"
-              >
-                <Settings className="w-3 h-3" /> ADMIN
-              </button>
-            )}
+            <div className="flex flex-col items-end">
+              <span className="text-[9px] md:text-[10px] text-sleek-text-secondary uppercase">KIS Connection</span>
+              <div className="flex items-center gap-2">
+                {kisConfig.isConnected && (
+                  <button 
+                    onClick={handleSyncKIS}
+                    className="text-[10px] text-sleek-blue hover:text-white flex items-center gap-1"
+                    title="잔고 동기화"
+                  >
+                    <RefreshCw className="w-3 h-3" /> SYNC
+                  </button>
+                )}
+                <button 
+                  onClick={() => setShowKisModal(true)}
+                  className={cn(
+                    "flex items-center gap-2 font-black text-sm", 
+                    kisConfig.isConnected ? "text-emerald-400" : "text-rose-500 animate-pulse"
+                  )}
+                >
+                  <div className={cn("w-2 h-2 rounded-full", kisConfig.isConnected ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,1)]" : "bg-rose-500")} />
+                  {kisConfig.isConnected 
+                    ? "연동 중" 
+                    : "계좌 연결 필요"}
+                </button>
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
             <button 
-              onClick={handleLogout}
-              className="text-rose-400 hover:text-rose-200 bg-rose-500/10 hover:bg-rose-500/20 px-2 py-1 rounded text-[10px] font-bold border border-rose-500/30 transition-all flex items-center gap-1 cursor-pointer"
-              title="로그아웃"
+              onClick={() => setIsGapBotActive(!isGapBotActive)}
+              className={cn(
+                "flex items-center gap-2 px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-bold text-[10px] md:text-xs transition-all",
+                isGapBotActive 
+                  ? "bg-sleek-red/20 text-sleek-red border border-sleek-red/30 hover:bg-sleek-red hover:text-white" 
+                  : "bg-sleek-blue/20 text-sleek-blue border border-sleek-blue/30 hover:bg-sleek-blue hover:text-white"
+              )}
             >
-              <LogOut className="w-3 h-3" /> LOGOUT
+              {isGapBotActive ? <Square className="w-2.5 h-2.5 fill-current" /> : <Play className="w-2.5 h-2.5 fill-current" />}
+              {isGapBotActive ? "정지" : "자동 스캘핑 시작"}
             </button>
           </div>
-
-          {/* KIS Connection */}
-          <div className="flex items-center gap-2 px-2.5 py-1 rounded-xl bg-white/5 border border-white/5">
-            <div className="flex flex-col">
-              <span className="text-[9px] text-sleek-text-secondary uppercase font-bold tracking-wider">KIS Connection</span>
-              <button 
-                onClick={() => setShowKisModal(true)}
-                className={cn(
-                  "flex items-center gap-1.5 font-black text-xs transition-colors cursor-pointer", 
-                  kisConfig.isConnected ? "text-emerald-400 hover:text-emerald-300" : "text-rose-400 hover:text-rose-300 animate-pulse"
-                )}
-              >
-                <div className={cn("w-2 h-2 rounded-full shrink-0", kisConfig.isConnected ? "bg-emerald-400 shadow-[0_0_8px_rgba(16,185,129,0.8)]" : "bg-rose-500")} />
-                {kisConfig.isConnected ? "연동 중" : "계좌 연결 필요"}
-              </button>
-            </div>
-          </div>
         </div>
-
-        {/* Far Right SYNC Button */}
-        <button 
-          onClick={handleSyncKIS}
-          className="flex items-center gap-1.5 px-3.5 md:px-4 py-2 rounded-xl font-black text-xs md:text-sm bg-gradient-to-r from-sleek-blue to-blue-600 text-white shadow-lg hover:shadow-sleek-blue/30 hover:scale-[1.02] active:scale-95 transition-all border border-sleek-blue/50 cursor-pointer shrink-0"
-          title="실시간 계좌/잔고/시세 동기화"
-        >
-          <RefreshCw className="w-4 h-4 text-white" />
-          <span>SYNC</span>
-        </button>
-      </div>
       </header>
       
       {/* Exchange Rate Ribbon */}
@@ -6002,7 +5665,7 @@ export default function App() {
                   "text-[11px] font-mono font-black",
                   exchangeRateTrend === 'UP' ? "text-sleek-red" : "text-sleek-green"
                 )}>
-                  {(exchangeRate || 1350).toLocaleString()}
+                  {exchangeRate.toLocaleString()}
                 </span>
                 {exchangeRateTrend === 'UP' ? <TrendingUp className="w-3 h-3 text-sleek-red" /> : <TrendingDown className="w-3 h-3 text-sleek-green" />}
               </div>
@@ -6078,8 +5741,39 @@ export default function App() {
               </div>
             </div>
 
+            {selectedStock && (
+              <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-2xl p-5 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-sm font-black text-white">{selectedStock.name}</h3>
+                    <p className="text-[10px] font-mono text-sleek-text-secondary">{selectedStock.symbol}</p>
+                  </div>
+                  <div className={cn(
+                    "text-xs font-black",
+                    selectedStock.change >= 0 ? "text-sleek-green" : "text-sleek-red"
+                  )}>
+                    {selectedStock.changePercent.toFixed(2)}%
+                  </div>
+                </div>
+                <div className="pt-4 border-t border-white/5 space-y-2">
+                  <div className="flex justify-between text-[10px] uppercase">
+                    <span className="text-sleek-text-secondary">현재 보유</span>
+                    <span className="text-white font-bold">{formatQuantity(holdings[selectedStock.symbol] || 0)}</span>
+                  </div>
+                  <div className="flex justify-between text-[10px] uppercase">
+                    <span className="text-sleek-text-secondary">매수 가능</span>
+                    <span className="text-sleek-blue font-bold">
+                      {kisConfig.isConnected && kisConfig.isRealOrderEnabled && kisBuyableQty !== null 
+                        ? `${formatQuantity(kisBuyableQty)} (실계좌)` 
+                        : `${formatQuantity(Math.floor(balance / (selectedStock && /^[A-Z]/.test(selectedStock.symbol) ? selectedStock.price * exchangeRate : (selectedStock.price || 1))))} (로컬)`}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* 스캘퍼 엔진 최적 추천 종목 TOP 5 Ranking Widget */}
-            <div className="space-y-3 pt-2">
+            <div className="space-y-3 pt-4 border-t border-white/10">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-1.5">
                   <div className="p-1 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-400">
@@ -6115,7 +5809,7 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="space-y-2">
+              <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1 custom-scrollbar">
                 {scalperTop5Stocks.map((st, idx) => {
                   const isSelected = selectedSymbol === st.symbol;
                   const isUS = /^[A-Z]/.test(st.symbol);
@@ -6212,36 +5906,28 @@ export default function App() {
             <div className="bg-sleek-card border border-sleek-border p-3.5 rounded-2xl shadow-lg lg:col-span-4 flex items-center justify-between">
               <div className="w-full">
                 <div className="flex items-center justify-between gap-2 mb-1">
-                  {/* Left: Stock Name */}
-                  <div className="flex items-center gap-1.5 text-left min-w-0">
-                    <span className="text-base font-black text-white truncate">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-base font-black text-white">
                       {selectedStock?.name || '종목 미선택'}
                     </span>
-                    {selectedStock?.symbol && (
-                      <span className="text-[10px] font-mono text-sleek-text-secondary bg-white/5 px-1.5 py-0.5 rounded border border-white/5 shrink-0">
-                        {selectedStock.symbol}
-                      </span>
+                    {selectedStock && (
+                      <div className="flex items-center gap-1.5 font-mono text-sm">
+                        <span className="text-white/90">{formatCurrency(selectedStock.price)}</span>
+                        <span className={cn(
+                          "font-bold",
+                          selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400"
+                        )}>
+                          {selectedStock.change >= 0 ? '+' : ''}{formatCurrency(Math.abs(selectedStock.change))}
+                        </span>
+                        <span className={cn(
+                          "font-bold",
+                          selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400"
+                        )}>
+                          ({selectedStock.change >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%)
+                        </span>
+                      </div>
                     )}
                   </div>
-
-                  {/* Right: Current Price, Change Price, Change % */}
-                  {selectedStock && (
-                    <div className="flex items-center gap-1.5 font-mono text-sm text-right shrink-0">
-                      <span className="text-white/90 font-bold">{formatCurrency(selectedStock.price)}</span>
-                      <span className={cn(
-                        "font-bold text-xs",
-                        selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400"
-                      )}>
-                        {selectedStock.change >= 0 ? '+' : ''}{formatCurrency(Math.abs(selectedStock.change))}
-                      </span>
-                      <span className={cn(
-                        "font-bold text-xs",
-                        selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400"
-                      )}>
-                        ({selectedStock.change >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%)
-                      </span>
-                    </div>
-                  )}
                 </div>
                 <div className="flex items-center justify-between text-xs font-mono pt-1.5 border-t border-white/5">
                   <span className="text-sleek-text-secondary">현재 보유: <strong className="text-white font-bold">{holdings[selectedStock?.symbol || ''] || 0}주</strong></span>
@@ -7250,7 +6936,7 @@ export default function App() {
                                              stocksCache.US?.find(s => s.symbol === sym) ||
                                              INITIAL_STOCKS_KR.find(s => s.symbol === sym) || 
                                              INITIAL_STOCKS.find(s => s.symbol === sym) || 
-                                             { name: sym, symbol: sym, price: avgPrices[sym] || (/^[A-Z]/.test(sym) ? (INITIAL_STOCKS.find(x => x.symbol === sym)?.price || 10) : (INITIAL_STOCKS_KR.find(x => x.symbol === sym)?.price || 1000)), changePercent: 0 };
+                                             { name: sym, symbol: sym, price: 0, changePercent: 0 };
 
                                   const stockDisplayName = getResolvedStockName(sym, st);
                                   
@@ -7348,7 +7034,7 @@ export default function App() {
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
               <div className="bg-white/5 p-2 rounded-xl border border-white/5">
                 <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">예수금 (44431721-01)</span>
-                <span className="text-sm font-black text-white italic mt-0.5 block truncate">{formatCurrency(balance, true)}</span>
+                <span className="text-sm font-black text-white italic mt-0.5 block truncate">{formatCurrency(balance)}</span>
               </div>
               
               <div 
@@ -7362,7 +7048,7 @@ export default function App() {
                   </span>
                 </div>
                 <div className="flex items-baseline justify-between mt-0.5">
-                  <span className="text-sm font-black text-sleek-blue italic truncate">{formatCurrency(totalValue, true)}</span>
+                  <span className="text-sm font-black text-sleek-blue italic truncate">{formatCurrency(totalValue)}</span>
                   <span className={cn("text-[10px] font-bold shrink-0 ml-1", pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
                     {pnl >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
                   </span>
@@ -7372,7 +7058,7 @@ export default function App() {
               <div className="bg-white/5 p-2 rounded-xl border border-white/5">
                 <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">스캘핑 총 수익</span>
                 <span className={cn("text-sm font-black italic mt-0.5 block truncate", gapTradingProfit >= 0 ? "text-rose-400" : "text-sky-400")}>
-                  {formatCurrency(gapTradingProfit, true)}
+                  {formatCurrency(gapTradingProfit)}
                 </span>
               </div>
 
@@ -7390,235 +7076,274 @@ export default function App() {
         <aside className="w-[340px] border-l border-white/5 bg-black/30 flex flex-col p-6 gap-6 overflow-hidden hidden xl:flex">
             
             {/* 1. Trade Logs / Active Slot Monitor (Top Right) */}
-            {(() => {
-              const currentMarketPendingBuys = pendingBuyOrders.filter(order => {
-                const isUS = /^[A-Z]/.test(order.symbol);
-                return marketType === 'US' ? isUS : !isUS;
-              });
-              const currentMarketPendingSells = pendingSellOrders.filter(order => {
-                const isUS = /^[A-Z]/.test(order.symbol);
-                return marketType === 'US' ? isUS : !isUS;
-              });
-              const totalPendingCount = currentMarketPendingBuys.length + currentMarketPendingSells.length;
+            <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-[480px] overflow-hidden shadow-2xl">
+              <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
+                <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-sleek-blue" /> Trade Logs (실시간 체결 현황)
+                </h3>
+                <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">
+                  {enableCombinedAvgProfitExit 
+                    ? (gapInventory.length > 0 ? "통합 (1/1)" : "통합 (대기)") 
+                    : `체결 (${gapInventory.length} / ${maxSlots})`
+                  }
+                </span>
+              </div>
+              
+              <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+                {enableCombinedAvgProfitExit ? (
+                  /* Combined Average Profit Exit Mode (통합평단가 익절) */
+                  gapInventory.length === 0 ? (
+                    <div className="bg-black/20 border border-dashed border-white/10 rounded-2xl p-6 flex flex-col items-center justify-center text-center gap-2">
+                      <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-sleek-text-secondary">
+                        <Layers className="w-5 h-5 opacity-40" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-bold text-white block">[통합] 대기 중</span>
+                        <span className="text-[11px] text-sleek-text-secondary mt-1 block">
+                          매수가 체결되면 수량 및 통합 평단가가 자동 업데이트됩니다
+                        </span>
+                      </div>
+                    </div>
+                  ) : (() => {
+                    const totalCost = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
+                    const totalQty = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
+                    const avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
+                    const avgProfitPct = avgPrice > 0 ? ((selectedStock.price - avgPrice) / avgPrice) * 100 : 0;
+                    const targetSellPrice = calculateTargetSellPrice(avgPrice, scalpingTargetProfit, selectedStock?.price);
 
-              const rawMarketLogs = (marketTradeLogs[marketType] || []).filter(log => {
-                const isUS = /^[A-Z]/.test(log.symbol) && log.symbol !== 'SYSTEM';
-                const isKR = /^[0-9]/.test(log.symbol) && log.symbol !== 'SYSTEM';
-                if (marketType === 'US') {
-                  if (isKR) return false;
-                  if (log.market) return log.market === 'US';
-                  return true;
-                } else {
-                  if (isUS) return false;
-                  if (log.market) return log.market === 'KR';
-                  return true;
-                }
-              });
-
-              // Strict filter: only actual completed fills in "실시간 체결 로그"
-              const currentMarketLogs = rawMarketLogs.filter(log => {
-                const r = log.reason || '';
-                if (r.includes('미체결') || r.includes('주문접수') || r.includes('주문대기') || r.includes('진입차단') || r.includes('주문건너뜀') || r.includes('시도')) {
-                  return false;
-                }
-                if (r.includes('자동 매도 주문') && !r.includes('체결')) {
-                  return false;
-                }
-                return true;
-              });
-
-              return (
-                <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-[480px] overflow-hidden shadow-2xl">
-                  <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
-                    <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-sleek-blue" /> Trade Logs ({marketType === 'US' ? '미국주식' : '한국주식'} 실시간 체결 현황)
-                    </h3>
-                    <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">
-                      체결 ({currentMarketLogs.length}건)
-                    </span>
-                  </div>
-                  
-                  <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
-                    <div className="space-y-3">
-                      {/* Active Order Signals Section */}
-                      {totalPendingCount > 0 && (
-                        <div className="space-y-2">
-                          <span className="text-[10px] font-bold text-amber-400 uppercase tracking-wider block px-1">
-                            ⚡ 현재 진입 시도 중인 종목 ({totalPendingCount}건)
+                    return (
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.98 }}
+                        animate={{ opacity: 1, scale: 1 }}
+                        className="bg-gradient-to-r from-sleek-blue/20 via-indigo-950/40 to-slate-900/80 border border-sleek-blue/40 rounded-2xl p-4.5 space-y-3 shadow-xl"
+                      >
+                        <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                          <div className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse"></span>
+                            <span className="text-sm font-black text-white">{selectedStock.name}</span>
+                            <span className="text-xs font-mono text-sleek-text-secondary">({selectedStock.symbol})</span>
+                          </div>
+                          <span className="bg-sleek-blue/20 text-sleek-blue border border-sleek-blue/30 px-2 py-0.5 rounded text-[10px] font-bold">
+                            통합 (보유 중)
                           </span>
-
-                          {/* Active Pending Buy Orders */}
-                          {currentMarketPendingBuys.map((pendingBuy, pIdx) => {
-                            const pStock = stocks.find(s => s.symbol === pendingBuy.symbol) || 
-                                           INITIAL_STOCKS_KR.find(s => s.symbol === pendingBuy.symbol) || 
-                                           INITIAL_STOCKS.find(s => s.symbol === pendingBuy.symbol) || 
-                                           { name: pendingBuy.symbol, symbol: pendingBuy.symbol, price: pendingBuy.orderPrice };
-                            const targetSellPrice = calculateTargetSellPrice(pendingBuy.orderPrice, scalpingTargetProfit, pStock.price);
-
-                            return (
-                              <motion.div 
-                                key={`pending-buy-${pendingBuy.id || pIdx}`}
-                                initial={{ opacity: 0, y: 8 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="bg-amber-950/30 border border-amber-500/50 rounded-2xl p-3 space-y-2 text-xs font-mono shadow-lg transition-all"
-                              >
-                                <div className="flex items-center justify-between border-b border-amber-500/20 pb-1.5">
-                                  <div className="flex items-center gap-2 truncate">
-                                    <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
-                                    <span className="font-extrabold text-white text-xs truncate">{pStock.name}</span>
-                                    <span className="text-[9px] font-black text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/30 shrink-0">
-                                      매수진입 시도
-                                    </span>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => cancelPendingBuyOrder(pendingBuy.id)}
-                                    className="text-[10px] font-bold text-amber-400 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/40 px-2 py-0.5 rounded transition-all shrink-0 cursor-pointer"
-                                  >
-                                    취소
-                                  </button>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-2 bg-black/50 p-2 rounded-xl border border-white/5 text-[10px] tabular-nums">
-                                  <div>
-                                    <span className="text-gray-400 block font-bold">주문가 ({pendingBuy.quantity}주)</span>
-                                    <span className="text-amber-300 font-extrabold text-xs block mt-0.5">{formatCurrency(pendingBuy.orderPrice)}</span>
-                                  </div>
-                                  <div className="text-right">
-                                    <span className="text-gray-400 block font-bold">목표가 (+{scalpingTargetProfit}%)</span>
-                                    <span className="text-rose-400 font-extrabold text-xs block mt-0.5">{formatCurrency(targetSellPrice)}</span>
-                                  </div>
-                                </div>
-                              </motion.div>
-                            );
-                          })}
-
-                          {/* Active Pending Sell Orders */}
-                          {currentMarketPendingSells.map((pendingSell, sIdx) => {
-                            const pStock = stocks.find(s => s.symbol === pendingSell.symbol) || 
-                                           INITIAL_STOCKS_KR.find(s => s.symbol === pendingSell.symbol) || 
-                                           INITIAL_STOCKS.find(s => s.symbol === pendingSell.symbol) || 
-                                           { name: pendingSell.symbol, symbol: pendingSell.symbol, price: pendingSell.targetPrice };
-
-                            return (
-                              <motion.div 
-                                key={`pending-sell-${pendingSell.id || sIdx}`}
-                                initial={{ opacity: 0, y: 8 }}
-                                animate={{ opacity: 1, y: 0 }}
-                                className="bg-sky-950/30 border border-sky-500/50 rounded-2xl p-3 space-y-2 text-xs font-mono shadow-lg transition-all"
-                              >
-                                <div className="flex items-center justify-between border-b border-sky-500/20 pb-1.5">
-                                  <div className="flex items-center gap-2 truncate">
-                                    <Loader2 className="w-3.5 h-3.5 text-sky-400 animate-spin shrink-0" />
-                                    <span className="font-extrabold text-white text-xs truncate">{pStock.name}</span>
-                                    <span className="text-[9px] font-black text-sky-300 bg-sky-500/20 px-1.5 py-0.5 rounded border border-sky-500/30 shrink-0">
-                                      매도진입 시도
-                                    </span>
-                                  </div>
-                                  <button
-                                    type="button"
-                                    onClick={() => cancelPendingSellOrder(pendingSell.id)}
-                                    className="text-[10px] font-bold text-sky-400 hover:text-sky-200 bg-sky-500/20 hover:bg-sky-500/40 px-2 py-0.5 rounded transition-all shrink-0 cursor-pointer"
-                                  >
-                                    취소
-                                  </button>
-                                </div>
-
-                                <div className="grid grid-cols-2 gap-2 bg-black/50 p-2 rounded-xl border border-white/5 text-[10px] tabular-nums">
-                                  <div>
-                                    <span className="text-gray-400 block font-bold">주문가 ({pendingSell.quantity}주)</span>
-                                    <span className="text-sky-300 font-extrabold text-xs block mt-0.5">{formatCurrency(pendingSell.orderPrice || pendingSell.targetPrice)}</span>
-                                  </div>
-                                  <div className="text-right">
-                                    <span className="text-gray-400 block font-bold">진입 매수가</span>
-                                    <span className="text-white font-extrabold text-xs block mt-0.5">{formatCurrency(pendingSell.buyPrice || 0)}</span>
-                                  </div>
-                                </div>
-                              </motion.div>
-                            );
-                          })}
                         </div>
-                      )}
 
-                      {/* Chronological Trade Logs Feed Across ALL Stocks in active market */}
-                      {currentMarketLogs.length > 0 ? (
-                        <div className="space-y-2 pt-1">
-                          <span className="text-[10px] font-bold text-sleek-text-secondary uppercase tracking-wider block px-1">
-                            {marketType === 'US' ? '미국주식' : '한국주식'} 실시간 체결 로그 ({currentMarketLogs.length}건)
-                          </span>
+                        <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-black/40 p-2.5 rounded-xl border border-white/5">
+                          <div>
+                            <span className="text-[10px] text-sleek-text-secondary block uppercase">체결 매수 수량</span>
+                            <span className="text-base font-black text-amber-300">{formatQuantity(totalQty)}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-sleek-text-secondary block uppercase">통합 매수 평단가</span>
+                            <span className="text-sm font-bold text-white">{formatCurrency(avgPrice)}</span>
+                          </div>
+                        </div>
 
-                          <div className="max-h-[220px] overflow-y-auto space-y-2 pr-1 custom-scrollbar">
-                            {currentMarketLogs.map((log, lIdx) => {
+                        <div className="grid grid-cols-2 gap-2 text-xs font-mono">
+                          <div>
+                            <span className="text-[10px] text-sleek-text-secondary block font-bold">매도예상가 (+{scalpingTargetProfit}%)</span>
+                            <span className="text-sm font-bold text-rose-400">{formatCurrency(targetSellPrice)}</span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-sleek-text-secondary block font-bold">평단 대비 손익률</span>
+                            <span className={cn("text-sm font-black", avgProfitPct >= 0 ? "text-rose-400" : "text-sky-400")}>
+                              {avgProfitPct >= 0 ? "+" : ""}{avgProfitPct.toFixed(2)}%
+                            </span>
+                          </div>
+                        </div>
+                      </motion.div>
+                    );
+                  })()
+                ) : (
+                  /* Individual Slot Mode (개별 모드 - 매수진입/체결 및 매도싸인만 표시) */
+                  (() => {
+                    const currentStock = selectedStock;
+                    const stockPendingBuys = pendingBuyOrders.filter(p => p.symbol === currentStock?.symbol);
+
+                    // Collect active slots (Filled Inventory & Pending Buy Orders)
+                    const activeSlots: React.ReactNode[] = [];
+
+                    // 1. Filled Inventory Slots (매수체결 완료 - 매도감시 중)
+                    gapInventory.forEach((filledSlot, slotIdx) => {
+                      if (!filledSlot) return;
+                      const slotNum = slotIdx + 1;
+                      const buyPrice = typeof filledSlot === 'number' ? filledSlot : (filledSlot.price || 0);
+                      const buyQty = typeof filledSlot === 'number' ? tradeQuantity : (filledSlot.quantity || 1);
+                      const profitPct = buyPrice > 0 ? ((currentStock.price - buyPrice) / buyPrice) * 100 : 0;
+                      const targetSellPrice = calculateTargetSellPrice(buyPrice, scalpingTargetProfit, currentStock?.price);
+
+                      const samePriceCount = gapInventory.filter(s => (typeof s === 'number' ? s : s.price) === buyPrice).length;
+                      const samePriceTotalQty = gapInventory
+                        .filter(s => (typeof s === 'number' ? s : s.price) === buyPrice)
+                        .reduce((acc, s) => acc + (typeof s === 'number' ? tradeQuantity : s.quantity), 0);
+
+                      activeSlots.push(
+                        <motion.div 
+                          key={`filled-slot-${slotIdx}`}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-emerald-950/30 border border-emerald-500/50 rounded-2xl p-4 min-h-[130px] flex flex-col justify-between space-y-2 text-xs font-mono shadow-lg transition-all"
+                        >
+                          <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2">
+                            <div className="flex items-center gap-2 truncate">
+                              <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse shrink-0"></span>
+                              <span className="font-extrabold text-white text-sm truncate">{currentStock.name}</span>
+                              <span className="text-[10px] font-bold text-emerald-300 bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/30 shrink-0">
+                                매수체결 #{slotNum}
+                              </span>
+                            </div>
+                            <span className={cn("font-extrabold text-xs tabular-nums px-2 py-0.5 rounded bg-black/40 border border-white/5 shrink-0", profitPct >= 0 ? "text-rose-400 border-rose-500/30" : "text-sky-400 border-sky-500/30")}>
+                              {profitPct >= 0 ? "+" : ""}{profitPct.toFixed(2)}%
+                            </span>
+                          </div>
+
+                          {samePriceCount > 1 && (
+                            <div className="text-[10px] text-amber-300 bg-amber-500/10 border border-amber-500/20 px-2 py-0.5 rounded flex items-center gap-1 font-sans">
+                              <Layers className="w-3 h-3 text-amber-400" />
+                              <span>동일 매수가 중복 체결: {samePriceCount}건 (총 {samePriceTotalQty}주)</span>
+                            </div>
+                          )}
+
+                          <div className="grid grid-cols-2 gap-2 bg-black/50 p-2.5 rounded-xl border border-white/5 text-[11px] tabular-nums">
+                            <div>
+                              <span className="text-sleek-text-secondary text-[10px] block font-bold">진입가 ({formatQuantity(buyQty)})</span>
+                              <span className="text-emerald-400 font-extrabold text-xs block mt-0.5">{formatCurrency(buyPrice)}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-sleek-text-secondary text-[10px] block font-bold">목표가 (+{scalpingTargetProfit}%)</span>
+                              <span className="text-rose-400 font-extrabold text-xs block mt-0.5">{formatCurrency(targetSellPrice)}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-1.5 text-[10px] text-emerald-300 pt-1 border-t border-emerald-500/20 font-bold">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                            <span>⚡ 매도 싸인 감시 중 (목표가 도달 시 자동 매도)</span>
+                          </div>
+                        </motion.div>
+                      );
+                    });
+
+                    // 2. Pending Buy Order Slots (매수 진입 시도 중)
+                    stockPendingBuys.forEach((pendingBuy, pIdx) => {
+                      const orderPrice = pendingBuy.orderPrice;
+                      const orderQty = pendingBuy.quantity;
+                      const targetSellPrice = calculateTargetSellPrice(orderPrice, scalpingTargetProfit, currentStock?.price);
+
+                      activeSlots.push(
+                        <motion.div 
+                          key={`pending-slot-${pendingBuy.id || pIdx}`}
+                          initial={{ opacity: 0, y: 8 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-amber-950/30 border border-amber-500/50 rounded-2xl p-4 min-h-[130px] flex flex-col justify-between space-y-2 text-xs font-mono shadow-lg transition-all"
+                        >
+                          <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
+                            <div className="flex items-center gap-2 truncate">
+                              <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
+                              <span className="font-extrabold text-white text-sm truncate">{currentStock.name}</span>
+                              <span className="text-[10px] font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/30 shrink-0">
+                                매수진입 시도 중
+                              </span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => cancelPendingBuyOrder(pendingBuy.id)}
+                              className="text-[10px] font-bold text-amber-400 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/40 px-2 py-0.5 rounded transition-all shrink-0"
+                            >
+                              취소
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-2 bg-black/50 p-2.5 rounded-xl border border-white/5 text-[11px] tabular-nums">
+                            <div>
+                              <span className="text-sleek-text-secondary text-[10px] block font-bold">진입 예상가 ({orderQty}주)</span>
+                              <span className="text-amber-300 font-extrabold text-xs block mt-0.5">{formatCurrency(orderPrice)}</span>
+                            </div>
+                            <div className="text-right">
+                              <span className="text-sleek-text-secondary text-[10px] block font-bold">목표가 (+{scalpingTargetProfit}%)</span>
+                              <span className="text-rose-400/90 font-extrabold text-xs block mt-0.5">{formatCurrency(targetSellPrice)}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-between items-center text-[10px] text-amber-300/90 pt-1 border-t border-amber-500/20 font-bold">
+                            <span>⏳ 매수 주문 체결 대기 중 (체결 즉시 매도 전환)</span>
+                          </div>
+                        </motion.div>
+                      );
+                    });
+
+                    // 3. Render active slots or empty clean view + trade logs list
+                    if (activeSlots.length > 0) {
+                      return activeSlots;
+                    }
+
+                    // Filter logs strictly for current selected stock (zero cross-contamination)
+                    const filteredLogs = tradeLogs.filter(log => log.symbol === currentStock.symbol);
+                    const logsToShow = filteredLogs;
+
+                    return (
+                      <div className="space-y-3">
+                        <div className="bg-black/20 border border-dashed border-white/10 rounded-2xl p-4 text-center space-y-1">
+                          <div className="flex items-center justify-center gap-1.5 text-xs text-white font-bold">
+                            <Activity className="w-3.5 h-3.5 text-sleek-blue" />
+                            <span>[{currentStock.name}] 매수/매도 대기 중</span>
+                          </div>
+                          <p className="text-[11px] text-sleek-text-secondary font-mono">
+                            매수진입 및 매도싸인 발생 시 진입 예상가와 목표가가 여기에 즉시 표시됩니다.
+                          </p>
+                        </div>
+
+                        {/* Recent Trade / Order Signal History for current stock only */}
+                        {logsToShow.length > 0 ? (
+                          <div className="space-y-2 pt-1">
+                            <span className="text-[10px] font-bold text-sleek-text-secondary uppercase tracking-wider block px-1">
+                              최근 체결 및 주문 현황 ({logsToShow.length}건)
+                            </span>
+                            {logsToShow.slice(0, 8).map((log, lIdx) => {
                               const logStock = stocks.find(s => s.symbol === log.symbol) || 
                                                INITIAL_STOCKS_KR.find(s => s.symbol === log.symbol) || 
-                                               INITIAL_STOCKS.find(s => s.symbol === log.symbol) || 
-                                               { name: log.symbol, symbol: log.symbol, price: log.price };
-
-                              const isBuyType = log.type === 'BUY' || log.type === '매수';
-                              const rawReason = log.reason || '';
-                              
-                              // Determine if log is an order/cancel/pending log vs confirmed execution fill
-                              const isOrderLog = (rawReason.includes('주문') || rawReason.includes('취소') || rawReason.includes('정리') || rawReason.includes('대기') || rawReason.includes('접수') || rawReason.includes('미체결') || rawReason.includes('실패') || rawReason.includes('차단')) && 
-                                                 !rawReason.includes('실제체결') && !rawReason.includes('전량 체결') && !rawReason.includes('일부체결') && !rawReason.includes('체결완료') && !rawReason.includes('체결 완료');
-
-                              const badgeText = isOrderLog ? (isBuyType ? "매수주문" : "매도주문") : (isBuyType ? "매수체결" : "매도체결");
-                              const priceLabel = isOrderLog ? "주문가" : "체결가";
-
-                              // Clean up reason for succinct display
-                              let cleanReason = rawReason.replace(/\[.*?\]/g, '').trim();
-                              if (!cleanReason || cleanReason.includes('목표') || cleanReason.includes('익절')) {
-                                cleanReason = isBuyType ? 'AI 스캘퍼 타점 매수' : '목표 익절 달성';
-                              } else if (cleanReason.includes('손절') || cleanReason.includes('리스크')) {
-                                cleanReason = '손절 대응 매도';
-                              } else if (cleanReason.includes('수동')) {
-                                cleanReason = '수동 지정가 매도';
-                              }
+                                               INITIAL_STOCKS.find(s => s.symbol === log.symbol) || currentStock;
+                              const isBuy = log.type === 'BUY' || log.type === '매수';
+                              const targetPrice = isBuy && log.price > 0 ? calculateTargetSellPrice(log.price, scalpingTargetProfit, logStock.price) : 0;
 
                               return (
-                                <div key={`log-${lIdx}`} className="bg-black/40 border border-white/5 hover:border-white/10 rounded-xl p-3 text-xs font-mono space-y-1 transition-all">
-                                  <div className="font-extrabold text-white text-xs flex items-center gap-1.5">
-                                    <span className={cn(
-                                      "px-1.5 py-0.5 rounded text-[10px] font-black border shrink-0",
-                                      isBuyType 
-                                        ? "bg-rose-500/20 text-rose-400 border-rose-500/40" 
-                                        : "bg-emerald-500/20 text-emerald-400 border-emerald-500/40"
-                                    )}>
-                                      {badgeText}
-                                    </span>
-                                    <span className="truncate">{logStock.name}({log.symbol})</span>
+                                <div key={`log-${lIdx}`} className="bg-black/40 border border-white/5 hover:border-white/10 rounded-xl p-3 text-xs font-mono space-y-1.5 transition-all">
+                                  <div className="flex items-center justify-between text-[11px]">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={cn("px-1.5 py-0.2 rounded text-[9px] font-black", isBuy ? "bg-rose-500/20 text-rose-400 border border-rose-500/30" : "bg-sky-500/20 text-sky-400 border border-sky-500/30")}>
+                                        {isBuy ? "매수진입" : "매도싸인"}
+                                      </span>
+                                      <span className="font-bold text-white">{logStock.name}</span>
+                                    </div>
+                                    <span className="text-[10px] text-gray-500">{log.time}</span>
                                   </div>
 
-                                  <div className="text-[11px] text-gray-300 flex items-center justify-between pt-1 tabular-nums font-mono">
-                                    <span>
-                                      {priceLabel}({log.amount}주) <strong className="text-white font-black">{formatCurrency(log.price)}</strong>
-                                    </span>
-                                    <span className="text-slate-400 text-right">
-                                      사유 <strong className={cn("font-bold", isBuyType ? "text-rose-400" : "text-emerald-400")}>{cleanReason}</strong>
-                                    </span>
+                                  <div className="grid grid-cols-2 gap-1 bg-black/30 p-1.5 rounded text-[10px]">
+                                    <div>
+                                      <span className="text-gray-400 block">{isBuy ? "진입가" : "체결가"}</span>
+                                      <span className="font-bold text-white">{formatCurrency(log.price)}</span>
+                                    </div>
+                                    <div className="text-right">
+                                      <span className="text-gray-400 block">{isBuy ? `목표가 (+${scalpingTargetProfit}%)` : "사유"}</span>
+                                      <span className={cn("font-bold", isBuy ? "text-rose-400" : "text-emerald-400")}>
+                                        {isBuy && targetPrice > 0 ? formatCurrency(targetPrice) : log.reason}
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
                               );
                             })}
                           </div>
-                        </div>
-                      ) : (
-                        totalPendingCount === 0 && (
-                          <div className="bg-black/20 border border-dashed border-white/10 rounded-2xl p-6 flex flex-col items-center justify-center text-center gap-2">
-                            <Activity className="w-6 h-6 text-sleek-blue/50 animate-pulse" />
-                            <div>
-                              <span className="text-xs font-bold text-white block">AI 스캘퍼 실시간 체결 현황 대기 중</span>
-                              <span className="text-[11px] text-sleek-text-secondary mt-1 block leading-relaxed">
-                                AI 스캘퍼가 각 종목의 매수/매도 진입 및 체결을 진행하면 시간순 로그가 이곳에 즉시 출력됩니다.
-                              </span>
-                            </div>
+                        ) : (
+                          <div className="text-[10px] text-gray-500 text-center py-2 font-mono">
+                            {currentStock.name} 종목의 최근 체결/주문 기록이 없습니다.
                           </div>
-                        )
-                      )}
-                    </div>
-                  </div>
-                </div>
-              );
-            })()}
+                        )}
+                      </div>
+                    );
+                  })()
+                )}
+              </div>
+            </div>
 
             {/* 2. Real-time Gap Monitor Gauge */}
             {isGapBotActive && selectedStock && gapBuyPrice > 0 && gapSellPrice > 0 && (
@@ -7929,14 +7654,14 @@ export default function App() {
                         <Calculator className="w-4 h-4 text-sleek-blue" />
                       </div>
                       <div className="text-3xl md:text-4xl font-black text-white tracking-tight">
-                        {formatCurrency(assetAnalysis.totalCalculatedAsset, true)}
+                        {formatCurrency(assetAnalysis.totalCalculatedAsset)}
                       </div>
                     </div>
                     
                     <div className="bg-white/5 border border-white/10 rounded-xl p-3.5 flex items-center gap-5 shrink-0">
                       <div>
                         <div className="text-xs text-slate-400 font-bold">투자 원금</div>
-                        <div className="text-sm md:text-base font-mono font-extrabold text-white">{formatCurrency(assetAnalysis.principal, true)}</div>
+                        <div className="text-sm md:text-base font-mono font-extrabold text-white">{formatCurrency(assetAnalysis.principal)}</div>
                       </div>
                       <div className="h-8 w-px bg-white/10" />
                       <div>
@@ -7946,7 +7671,7 @@ export default function App() {
                           assetAnalysis.totalPnL >= 0 ? "text-rose-400" : "text-sky-400"
                         )}>
                           {assetAnalysis.totalPnL >= 0 ? <TrendingUp className="w-4 h-4 text-rose-400" /> : <TrendingDown className="w-4 h-4 text-sky-400" />}
-                          <span>{assetAnalysis.totalPnL >= 0 ? '+' : ''}{formatCurrency(Math.round(assetAnalysis.totalPnL), true)}</span>
+                          <span>{assetAnalysis.totalPnL >= 0 ? '+' : ''}{formatCurrency(Math.round(assetAnalysis.totalPnL))}</span>
                           <span className="text-xs font-bold">({assetAnalysis.totalPnLPercent >= 0 ? '+' : ''}{assetAnalysis.totalPnLPercent.toFixed(2)}%)</span>
                         </div>
                       </div>
@@ -7988,7 +7713,7 @@ export default function App() {
                       <span className="text-sleek-blue font-mono font-bold text-xs">{assetAnalysis.cashShare.toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
-                      {formatCurrency(assetAnalysis.cashBalance, true)}
+                      {formatCurrency(assetAnalysis.cashBalance)}
                     </div>
                     <p className="text-xs text-slate-400">즉시 주문에 사용 가능한 예수금</p>
                   </div>
@@ -8000,7 +7725,7 @@ export default function App() {
                       <span className="text-emerald-400 font-mono font-bold text-xs">{assetAnalysis.stockShare.toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
-                      {formatCurrency(Math.round(assetAnalysis.stockValue), true)}
+                      {formatCurrency(Math.round(assetAnalysis.stockValue))}
                     </div>
                     <p className="text-xs text-slate-400">현재 시장가 × 보유 주식 수의 합산</p>
                   </div>
@@ -8012,7 +7737,7 @@ export default function App() {
                       <span className="text-amber-400 font-mono font-bold text-xs">{assetAnalysis.pendingShare.toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
-                      {formatCurrency(Math.round(assetAnalysis.pendingReserve), true)}
+                      {formatCurrency(Math.round(assetAnalysis.pendingReserve))}
                     </div>
                     <p className="text-xs text-slate-400">가상/지정가 매수 대기 중 잠긴 예수금</p>
                   </div>
