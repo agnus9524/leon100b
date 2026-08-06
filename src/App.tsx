@@ -62,6 +62,7 @@ import {
   Calculator,
   Coins,
   HelpCircle,
+  BookOpen,
   LogOut
 } from 'lucide-react';
 import { 
@@ -86,6 +87,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import axios from 'axios';
 import { kisService } from './services/kisService';
+import ScalperGuide from './components/ScalperGuide';
 import { 
   auth, 
   googleProvider, 
@@ -1046,9 +1048,16 @@ export default function App() {
   };
 
   const formatCurrency = (val: number, forceKRW: boolean = false) => {
+    if (val === undefined || val === null || isNaN(val)) return '-';
     const isUSD = marketType === 'US' && !forceKRW;
     if (isUSD) {
-      return `$${val.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+      const absVal = Math.abs(val);
+      // Use 2 decimals normally, but 4 decimals for very low prices (penny stocks)
+      const decimals = absVal > 0 && absVal < 1 ? 4 : 2;
+      return `${val < 0 ? '-' : ''}$${Math.abs(val).toLocaleString(undefined, { 
+        minimumFractionDigits: decimals, 
+        maximumFractionDigits: decimals 
+      })}`;
     }
     return `₩${Math.round(val).toLocaleString()}`;
   };
@@ -1466,6 +1475,7 @@ export default function App() {
   const curPrefix = displayCurrency === 'USD' ? '$' : '₩';
 
   const [isAssetAnalysisModalOpen, setIsAssetAnalysisModalOpen] = useState<boolean>(false);
+  const [showScalperGuide, setShowScalperGuide] = useState<boolean>(false);
 
   const assetAnalysis = useMemo(() => {
     const isUSD = displayCurrency === 'USD';
@@ -5707,6 +5717,13 @@ export default function App() {
                   </button>
                 )}
                 <button 
+                  onClick={() => setShowScalperGuide(true)}
+                  className="text-[10px] text-amber-400 hover:text-white flex items-center gap-1"
+                  title="스캘핑 매매 가이드"
+                >
+                  <BookOpen className="w-3 h-3" /> GUIDE
+                </button>
+                <button 
                   onClick={() => setShowKisModal(true)}
                   className={cn(
                     "flex items-center gap-2 font-black text-sm", 
@@ -5722,6 +5739,12 @@ export default function App() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button 
+              onClick={() => setShowScalperGuide(true)}
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 transition-all text-[10px] font-bold"
+            >
+              <HelpCircle className="w-3 h-3" /> 매매 가이드
+            </button>
             <button 
               onClick={() => setIsGapBotActive(!isGapBotActive)}
               className={cn(
@@ -5915,7 +5938,7 @@ export default function App() {
                                 "text-[10px] font-mono font-bold",
                                 st.change >= 0 ? "text-rose-400" : "text-sky-400"
                               )}>
-                                {st.change >= 0 ? '+' : ''}{formatCurrency(Math.abs(st.change))}
+                                {st.change >= 0 ? '+' : ''}{formatCurrency(st.change)}
                               </span>
                               <span className={cn(
                                 "text-[10px] font-mono font-bold",
@@ -5974,7 +5997,7 @@ export default function App() {
                         "font-bold",
                         selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400"
                       )}>
-                        {selectedStock.change >= 0 ? '+' : ''}{formatCurrency(Math.abs(selectedStock.change))}
+                        {selectedStock.change >= 0 ? '+' : ''}{formatCurrency(selectedStock.change)}
                       </span>
                       <span className={cn(
                         "font-bold",
@@ -6599,7 +6622,7 @@ export default function App() {
                                 "text-xs font-black italic font-mono px-1.5 py-0.5 rounded flex items-center gap-1",
                                 selectedStock.change >= 0 ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400"
                               )}>
-                                <span>{selectedStock.change >= 0 ? '▲ +' : '▼ '}{formatCurrency(Math.abs(selectedStock.change))}</span>
+                                <span>{selectedStock.change >= 0 ? '▲ +' : '▼ '}{formatCurrency(selectedStock.change)}</span>
                                 <span>({selectedStock.change >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%)</span>
                               </span>
                             </div>
@@ -7521,9 +7544,9 @@ export default function App() {
                     <span className="text-xs font-mono font-bold text-sleek-blue">현재가: {formatCurrency(selectedStock.price || 0)}</span>
                   </div>
                   <div className="flex justify-between items-center text-xs text-sleek-text-secondary pt-2 border-t border-white/5">
-                    <span>평단가: <strong className="text-amber-300 font-mono">{formatCurrency(Math.round(avgPrices[selectedStock.symbol] || selectedStock.price || 0))}</strong></span>
+                    <span>평단가: <strong className="text-amber-300 font-mono">{formatCurrency(avgPrices[selectedStock.symbol] || selectedStock.price || 0)}</strong></span>
                     <span>보유수량: <strong className="text-white font-mono">{holdings[selectedStock.symbol] || 0} 주</strong></span>
-                    <span>평가금액: <strong className="text-white font-mono">{formatCurrency(Math.round((holdings[selectedStock.symbol] || 0) * (selectedStock.price || 0)))}</strong></span>
+                    <span>평가금액: <strong className="text-white font-mono">{formatCurrency((holdings[selectedStock.symbol] || 0) * (selectedStock.price || 0))}</strong></span>
                   </div>
                 </div>
               ) : (
@@ -7637,7 +7660,7 @@ export default function App() {
                   <div className="bg-rose-500/10 border border-rose-500/20 rounded-2xl p-4 flex justify-between items-center">
                     <span className="text-xs text-rose-300 font-bold">총 매도 예상 금액</span>
                     <span className="text-lg font-black font-mono text-rose-400">
-                      {formatCurrency(Math.round(manualSellPrice * manualSellQty))}
+                      {formatCurrency(manualSellPrice * manualSellQty)}
                     </span>
                   </div>
                 )}
@@ -7728,7 +7751,7 @@ export default function App() {
                           assetAnalysis.totalPnL >= 0 ? "text-rose-400" : "text-sky-400"
                         )}>
                           {assetAnalysis.totalPnL >= 0 ? <TrendingUp className="w-4 h-4 text-rose-400" /> : <TrendingDown className="w-4 h-4 text-sky-400" />}
-                          <span>{assetAnalysis.totalPnL >= 0 ? '+' : ''}{formatCurrency(Math.round(assetAnalysis.totalPnL))}</span>
+                          <span>{assetAnalysis.totalPnL >= 0 ? '+' : ''}{formatCurrency(assetAnalysis.totalPnL)}</span>
                           <span className="text-xs font-bold">({assetAnalysis.totalPnLPercent >= 0 ? '+' : ''}{assetAnalysis.totalPnLPercent.toFixed(2)}%)</span>
                         </div>
                       </div>
@@ -7782,7 +7805,7 @@ export default function App() {
                       <span className="text-emerald-400 font-mono font-bold text-xs">{assetAnalysis.stockShare.toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
-                      {formatCurrency(Math.round(assetAnalysis.stockValue))}
+                      {formatCurrency(assetAnalysis.stockValue)}
                     </div>
                     <p className="text-xs text-slate-400">현재 시장가 × 보유 주식 수의 합산</p>
                   </div>
@@ -7794,7 +7817,7 @@ export default function App() {
                       <span className="text-amber-400 font-mono font-bold text-xs">{assetAnalysis.pendingShare.toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
-                      {formatCurrency(Math.round(assetAnalysis.pendingReserve))}
+                      {formatCurrency(assetAnalysis.pendingReserve)}
                     </div>
                     <p className="text-xs text-slate-400">가상/지정가 매수 대기 중 잠긴 예수금</p>
                   </div>
@@ -7849,11 +7872,11 @@ export default function App() {
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-[10px] md:text-xs text-slate-300 font-mono font-bold">
-                        {holdingsViewTab === 'KR' ? '국내' : '미국'} 총 매수가: {formatCurrency(Math.round(assetAnalysis.stockList.filter(item => {
+                        {holdingsViewTab === 'KR' ? '국내' : '미국'} 총 매수가: {formatCurrency(assetAnalysis.stockList.filter(item => {
                           const isUS = /^[A-Za-z]/.test(item.symbol) && !/^\d+$/.test(item.symbol);
                           const isKR = !isUS;
                           return holdingsViewTab === 'KR' ? isKR : !isKR;
-                        }).reduce((acc, curr) => acc + curr.invested, 0)))}
+                        }).reduce((acc, curr) => acc + curr.invested, 0))}
                       </span>
                     </div>
                   </div>
@@ -7907,26 +7930,22 @@ export default function App() {
                                 ? "text-rose-400 bg-rose-500/10 border-rose-500/30" 
                                 : "text-sky-400 bg-sky-500/10 border-sky-500/30"
                             )}>
-                              {item.pnlAmount >= 0 ? '+' : ''}{formatCurrency(Math.round(item.pnlAmount))} ({item.pnlPercent >= 0 ? '+' : ''}{item.pnlPercent.toFixed(2)}%)
+                              {item.pnlAmount >= 0 ? '+' : ''}{formatCurrency(item.pnlAmount)} ({item.pnlPercent >= 0 ? '+' : ''}{item.pnlPercent.toFixed(2)}%)
                             </div>
                           </div>
 
                           <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs pt-2.5 border-t border-white/10 text-slate-300 font-mono">
                             <div>
-                              <span>보유수량: </span>
-                              <strong className="text-white font-bold">{item.qty.toLocaleString()} 주</strong>
-                            </div>
-                            <div>
                               <span>매수평단: </span>
-                              <strong className="text-amber-300 font-bold">{formatCurrency(Math.floor(item.avgPrice))}</strong>
+                              <strong className="text-amber-300 font-bold">{formatCurrency(item.avgPrice)}</strong>
                             </div>
                             <div>
                               <span>실시간현재가: </span>
-                              <strong className="text-white font-bold">{formatCurrency(Math.round(item.currentPrice))}</strong>
+                              <strong className="text-white font-bold">{formatCurrency(item.currentPrice)}</strong>
                             </div>
                             <div>
                               <span>현재평가금: </span>
-                              <strong className="text-sleek-blue font-black">{formatCurrency(Math.round(item.evaluatedAmount))}</strong>
+                              <strong className="text-sleek-blue font-black">{formatCurrency(item.evaluatedAmount)}</strong>
                             </div>
                           </div>
                         </div>
@@ -7967,6 +7986,49 @@ export default function App() {
       </AnimatePresence>
         </>
       )}
+      <AnimatePresence>
+        {showScalperGuide && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowScalperGuide(false)}
+              className="absolute inset-0 bg-black/80 backdrop-blur-md"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              className="relative w-full max-w-4xl max-h-[90vh] bg-sleek-bg border border-sleek-border rounded-[2rem] shadow-2xl overflow-hidden flex flex-col"
+            >
+              {/* Header */}
+              <div className="p-6 md:p-8 border-b border-sleek-border flex items-center justify-between bg-sleek-bg/50 backdrop-blur-md sticky top-0 z-10">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-sleek-blue/20 rounded-2xl flex items-center justify-center">
+                    <Zap className="w-6 h-6 text-sleek-blue" />
+                  </div>
+                  <div>
+                    <h2 className="text-xl md:text-2xl font-black text-white tracking-tight">스캘퍼(Scalper) 실전 매매 가이드</h2>
+                    <p className="text-xs text-sleek-text-secondary font-bold uppercase tracking-widest mt-1">Trading Strategy & Core Principles</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowScalperGuide(false)}
+                  className="p-3 hover:bg-white/5 rounded-2xl transition-colors text-slate-400 hover:text-white"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+              </div>
+
+              {/* Content Area */}
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-6 md:p-8">
+                <ScalperGuide onClose={() => setShowScalperGuide(false)} />
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
