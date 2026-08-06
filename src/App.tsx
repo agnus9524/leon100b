@@ -6831,10 +6831,32 @@ export default function App() {
                   isUSStock ? Number((currentPrice - (i + 1) * tickSize).toFixed(2)) : currentPrice - (i + 1) * tickSize
                 );
                 const getLevelVolume = (priceLevel: number) => {
-                  const base = Math.abs((priceLevel * 17) % 850) + 120;
-                  const wiggle = Math.floor(Math.sin((Date.now() / 2500) + priceLevel) * 45) + 45;
-                  return base + wiggle;
+                  const intPrice = isUSStock ? Math.round(priceLevel * 100) : Math.round(priceLevel);
+                  const symHash = (selectedStock?.symbol || '').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+                  
+                  let scale = 1;
+                  if (isUSStock) {
+                    scale = currentPrice < 10 ? 50 : currentPrice < 100 ? 10 : currentPrice < 500 ? 3 : 1;
+                  } else {
+                    scale = currentPrice < 10000 ? 50 : currentPrice < 100000 ? 10 : 2;
+                  }
+
+                  const base = (Math.abs((intPrice * 37 + symHash * 13) % 800) + 120) * scale;
+                  const timeStep = Math.floor(Date.now() / 2500);
+                  const wiggle = Math.floor(Math.sin(timeStep + intPrice) * 35 * scale) + (35 * scale);
+                  
+                  return Math.max(10 * scale, Math.floor(base + wiggle));
                 };
+
+                const askVolumes = askLevels.map(p => getLevelVolume(p));
+                const bidVolumes = bidLevels.map(p => getLevelVolume(p));
+                const maxLevelVol = Math.max(...askVolumes, ...bidVolumes, 1);
+
+                const totalAskVolume = askVolumes.reduce((a, b) => a + b, 0);
+                const totalBidVolume = bidVolumes.reduce((a, b) => a + b, 0);
+                const totalDepthVolume = (totalAskVolume + totalBidVolume) || 1;
+                const askPctVal = ((totalAskVolume / totalDepthVolume) * 100).toFixed(1);
+                const bidPctVal = ((totalBidVolume / totalDepthVolume) * 100).toFixed(1);
 
                 // Prepare Chart Candle & Moving Averages (5, 20, 60, 120) Data
                 const groupSize = selectedTimeframeBar === '1m' ? 1 : selectedTimeframeBar === '3m' ? 2 : selectedTimeframeBar === '5m' ? 3 : 4;
@@ -7138,12 +7160,13 @@ export default function App() {
                             {/* Ask Levels (매도 4~1단계) */}
                             <div className="space-y-0.5">
                               {askLevels.map((lvlPrice, idx) => {
-                                const vol = getLevelVolume(lvlPrice);
+                                const vol = askVolumes[idx];
                                 const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
+                                const barPct = Math.min(100, Math.round((vol / maxLevelVol) * 100));
                                 return (
                                   <div key={`ask-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
                                     {/* Brighter volume bar */}
-                                    <div className="absolute right-0 top-0 bottom-0 bg-sky-500/30 border-l border-sky-400/60 pointer-events-none transition-all duration-300" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
+                                    <div className="absolute right-0 top-0 bottom-0 bg-sky-500/30 border-l border-sky-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
                                     <span className="w-12 shrink-0 text-[9px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}단계</span>
                                     <span className={cn(
                                       "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
@@ -7151,7 +7174,7 @@ export default function App() {
                                     )}>
                                       {formatCurrency(lvlPrice)}
                                     </span>
-                                    <span className="w-10 shrink-0 text-right text-sky-100 font-bold font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
+                                    <span className="w-14 shrink-0 text-right text-sky-100 font-bold font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
                                   </div>
                                 );
                               })}
@@ -7171,12 +7194,13 @@ export default function App() {
                             {/* Bid Levels (매수 1~4단계) */}
                             <div className="space-y-0.5">
                               {bidLevels.map((lvlPrice, idx) => {
-                                const vol = getLevelVolume(lvlPrice);
+                                const vol = bidVolumes[idx];
                                 const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
+                                const barPct = Math.min(100, Math.round((vol / maxLevelVol) * 100));
                                 return (
                                   <div key={`bid-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
                                     {/* Brighter volume bar */}
-                                    <div className="absolute right-0 top-0 bottom-0 bg-rose-500/30 border-l border-rose-400/60 pointer-events-none transition-all duration-300" style={{ width: `${Math.min(100, (vol / 1100) * 100)}%` }} />
+                                    <div className="absolute right-0 top-0 bottom-0 bg-rose-500/30 border-l border-rose-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
                                     <span className="w-12 shrink-0 text-[9px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}단계</span>
                                     <span className={cn(
                                       "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
@@ -7184,7 +7208,7 @@ export default function App() {
                                     )}>
                                       {formatCurrency(lvlPrice)}
                                     </span>
-                                    <span className="w-10 shrink-0 text-right text-rose-100 font-bold font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{vol.toLocaleString()}주</span>
+                                    <span className="w-14 shrink-0 text-right text-rose-100 font-bold font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
                                   </div>
                                 );
                               })}
@@ -7192,14 +7216,14 @@ export default function App() {
                           </div>
 
                           {/* Order Book Pressure Gauge */}
-                          <div className="pt-1 border-t border-white/5 space-y-0.5 mt-1">
+                          <div className="pt-1.5 border-t border-white/5 space-y-1 mt-1">
                             <div className="flex justify-between text-[9px] text-sleek-text-secondary font-bold font-sans">
-                              <span className="text-sky-400">매도잔량 47.8%</span>
-                              <span className="text-rose-400">매수잔량 52.2%</span>
+                              <span className="text-sky-400">매도잔량 {formatQuantity(totalAskVolume)} ({askPctVal}%)</span>
+                              <span className="text-rose-400">매수잔량 {formatQuantity(totalBidVolume)} ({bidPctVal}%)</span>
                             </div>
-                            <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex">
-                              <div className="h-full bg-sky-400" style={{ width: '47.8%' }} />
-                              <div className="h-full bg-rose-400" style={{ width: '52.2%' }} />
+                            <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden flex">
+                              <div className="h-full bg-sky-400 transition-all duration-300" style={{ width: `${askPctVal}%` }} />
+                              <div className="h-full bg-rose-400 transition-all duration-300" style={{ width: `${bidPctVal}%` }} />
                             </div>
                           </div>
                         </div>
