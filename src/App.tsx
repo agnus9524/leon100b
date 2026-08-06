@@ -1048,12 +1048,13 @@ export default function App() {
     };
   };
 
-  const formatCurrency = (val: number, forceKRW: boolean = false) => {
+  const formatCurrency = (val: number, forceKRW: boolean = false, customMarket?: 'KR' | 'US') => {
     if (val === undefined || val === null || isNaN(val)) return '-';
-    const isUSD = marketType === 'US' && !forceKRW;
+    const effectiveMarket = customMarket || (selectedStock && (/^[A-Za-z]/.test(selectedStock.symbol) || selectedStock.market === 'US') ? 'US' : marketType);
+    const isUSD = effectiveMarket === 'US' && !forceKRW;
     if (isUSD) {
       const absVal = Math.abs(val);
-      // Use 2 decimals normally, but 4 decimals for very low prices (penny stocks)
+      // Use 2 decimals normally (e.g. $7.24)
       const decimals = absVal > 0 && absVal < 1 ? 4 : 2;
       return `${val < 0 ? '-' : ''}$${Math.abs(val).toLocaleString(undefined, { 
         minimumFractionDigits: decimals, 
@@ -1096,16 +1097,17 @@ export default function App() {
     const initSymbol = localStorage.getItem('sleek_last_symbol') || (lastMarket === 'US' ? 'SNDL' : '073240');
     const defaults = lastMarket === 'US' ? INITIAL_STOCKS : INITIAL_STOCKS_KR;
     const initStock = defaults.find(s => s.symbol === initSymbol) || defaults[0];
-    const price = initStock?.price || 1000;
-    const tickSize = lastMarket === 'US' ? 0.01 : (price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5);
+    const isUS = lastMarket === 'US' || /^[A-Za-z]/.test(initStock.symbol);
+    const price = initStock?.price || (isUS ? 10 : 1000);
+    const tickSize = getTickSize(price, isUS ? 'US' : 'KR');
 
     return [{
       id: initStock.symbol,
       symbol: initStock.symbol,
       name: initStock.name || initStock.symbol,
       isBotActive: false,
-      gapBuyPrice: Math.max(10, price - tickSize * 2),
-      gapSellPrice: price + tickSize * 2,
+      gapBuyPrice: Math.max(isUS ? 0.01 : 10, isUS ? Number((price - tickSize * 2).toFixed(2)) : price - tickSize * 2),
+      gapSellPrice: isUS ? Number((price + tickSize * 2).toFixed(2)) : price + tickSize * 2,
       tradeQuantity: 1,
       maxSlots: 3,
       gapInventory: [],
@@ -1157,17 +1159,18 @@ export default function App() {
     const stock = stocksRef.current.find(s => s.symbol === symbol) ||
                   INITIAL_STOCKS_KR.find(s => s.symbol === symbol) ||
                   INITIAL_STOCKS.find(s => s.symbol === symbol);
+    const isUS = stock?.market === 'US' || /^[A-Za-z]/.test(symbol) || marketType === 'US';
     const name = customName || stock?.name || symbol;
-    const price = stock?.price || 1000;
-    const tickSize = price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5;
+    const price = stock?.price || (isUS ? 10 : 1000);
+    const tickSize = getTickSize(price, isUS ? 'US' : 'KR');
 
     const newTab: ScalperTab = {
       id: symbol,
       symbol,
       name,
       isBotActive: false,
-      gapBuyPrice: Math.max(10, price - tickSize * 2),
-      gapSellPrice: price + tickSize * 2,
+      gapBuyPrice: Math.max(isUS ? 0.01 : 10, isUS ? Number((price - tickSize * 2).toFixed(2)) : price - tickSize * 2),
+      gapSellPrice: isUS ? Number((price + tickSize * 2).toFixed(2)) : price + tickSize * 2,
       tradeQuantity: 1,
       maxSlots: 3,
       gapInventory: [],
@@ -1410,11 +1413,20 @@ export default function App() {
   // Auto-set Upper/Lower Price Limits (당일 상/하한가) when selectedStock changes
   useEffect(() => {
     if (selectedStock && selectedStock.price > 0) {
-      const basePrice = selectedStock.price / (1 + (selectedStock.changePercent || 0) / 100);
-      const autoUpperLimit = Math.round(basePrice * 1.30); // 당일 상한가 (+30%)
-      const autoLowerLimit = Math.round(basePrice * 0.70); // 당일 하한가 (-30%)
-      setGapSellPrice(autoUpperLimit);
-      setGapBuyPrice(autoLowerLimit);
+      const isUS = selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US';
+      const basePrice = selectedStock.basePrice || (selectedStock.price / (1 + (selectedStock.changePercent || 0) / 100));
+      if (isUS) {
+        // 미국 주식: 소수점 둘째자리까지 정확히 유지
+        const autoUpperLimit = Number((basePrice * 1.30).toFixed(2));
+        const autoLowerLimit = Math.max(0.01, Number((basePrice * 0.70).toFixed(2)));
+        setGapSellPrice(autoUpperLimit);
+        setGapBuyPrice(autoLowerLimit);
+      } else {
+        const autoUpperLimit = Math.round(basePrice * 1.30);
+        const autoLowerLimit = Math.round(basePrice * 0.70);
+        setGapSellPrice(autoUpperLimit);
+        setGapBuyPrice(autoLowerLimit);
+      }
     }
   }, [selectedStock?.symbol]);
   const rangePercentage = useMemo(() => {
@@ -2062,8 +2074,8 @@ export default function App() {
           symbol: stock.symbol,
           name: stock.name || stock.symbol,
           isBotActive: false,
-          gapBuyPrice: Math.max(newMarket === 'KR' ? 10 : 0.01, price - tickSize * 2),
-          gapSellPrice: price + tickSize * 2,
+          gapBuyPrice: Math.max(newMarket === 'KR' ? 10 : 0.01, newMarket === 'US' ? Number((price - tickSize * 2).toFixed(2)) : price - tickSize * 2),
+          gapSellPrice: newMarket === 'US' ? Number((price + tickSize * 2).toFixed(2)) : price + tickSize * 2,
           tradeQuantity: 1,
           maxSlots: 3,
           gapInventory: [],
@@ -4147,13 +4159,16 @@ export default function App() {
             }
           }
           
-          const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
+          const isUSStock = selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US';
+          const tickSize = getTickSize(currentPrice, isUSStock ? 'US' : 'KR');
           const rawTargetBuyPrice = entryPriceMode === 'BID4' 
             ? (currentPrice - 4 * tickSize) 
             : entryPriceMode === 'BID2' 
             ? (currentPrice - 2 * tickSize) 
             : currentPrice;
-          const targetBuyPrice = Math.round(rawTargetBuyPrice / tickSize) * tickSize;
+          const targetBuyPrice = isUSStock 
+            ? Number(rawTargetBuyPrice.toFixed(2)) 
+            : Math.round(rawTargetBuyPrice / tickSize) * tickSize;
 
           const currentInventory = gapInventoryRef.current;
           
@@ -4163,7 +4178,7 @@ export default function App() {
           if (currentWeightedAvg <= 0 && currentInventory.length > 0) {
             const totalCost = currentInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
             const totalQty = currentInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
-            currentWeightedAvg = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
+            currentWeightedAvg = totalQty > 0 ? (isUSStock ? Number((totalCost / totalQty).toFixed(2)) : Math.round(totalCost / totalQty)) : 0;
           }
           const isPositionInProfit = currentWeightedAvg > 0 && currentPrice >= currentWeightedAvg;
           
@@ -4171,11 +4186,11 @@ export default function App() {
 
           // Check if an active slot or pending order already exists
           const isSamePriceBlocked = (
-            currentInventory.some(slot => Math.abs(Math.round(slot.price) - targetBuyPrice) < tickSize * 0.95) ||
-            pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(Math.round(p.orderPrice) - targetBuyPrice) < tickSize * 0.95)
+            currentInventory.some(slot => Math.abs(slot.price - targetBuyPrice) < tickSize * 0.95) ||
+            pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.orderPrice - targetBuyPrice) < tickSize * 0.95)
           );
           
-          const isLockActive = buyingLockPricesRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(Math.round(p.price) - targetBuyPrice) < tickSize * 0.95);
+          const isLockActive = buyingLockPricesRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.price - targetBuyPrice) < tickSize * 0.95);
 
           const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
 
@@ -4609,7 +4624,8 @@ export default function App() {
 
       if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
         // Prevent duplicate buy order at same pending price level
-        const tickSize = tradePrice >= 500000 ? 1000 : tradePrice >= 100000 ? 500 : tradePrice >= 50000 ? 100 : tradePrice >= 10000 ? 50 : tradePrice >= 5000 ? 10 : 5;
+        const isUSStock = stock.market === 'US' || /^[A-Za-z]/.test(stock.symbol) || marketType === 'US';
+        const tickSize = getTickSize(tradePrice, isUSStock ? 'US' : 'KR');
         const isDuplicateAtPrice = pendingBuyOrdersRef.current.some(
           p => p.symbol === stock.symbol && Math.abs(p.orderPrice - tradePrice) < tickSize * 0.95
         ) || gapInventoryRef.current.some(
@@ -6291,6 +6307,7 @@ export default function App() {
                 </div>
                 <input 
                   type="number" 
+                  step="any"
                   value={gapSellPrice || ''}
                   onChange={(e) => setGapSellPrice(Number(e.target.value))}
                   className="w-full bg-black/40 border border-sleek-border rounded-lg p-1 text-xs font-bold focus:border-sleek-green outline-none text-white font-mono"
@@ -6304,6 +6321,7 @@ export default function App() {
                 </div>
                 <input 
                   type="number" 
+                  step="any"
                   value={gapBuyPrice || ''}
                   onChange={(e) => setGapBuyPrice(Number(e.target.value))}
                   className="w-full bg-black/40 border border-sleek-border rounded-lg p-1 text-xs font-bold focus:border-sleek-red outline-none text-white font-mono"
@@ -6718,10 +6736,15 @@ export default function App() {
 
             {selectedStock ? (
               (() => {
+                const isUSStock = selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US';
                 const currentPrice = selectedStock.price;
-                const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
-                const askLevels = Array.from({ length: 4 }, (_, i) => currentPrice + (4 - i) * tickSize);
-                const bidLevels = Array.from({ length: 4 }, (_, i) => currentPrice - (i + 1) * tickSize);
+                const tickSize = getTickSize(currentPrice, isUSStock ? 'US' : 'KR');
+                const askLevels = Array.from({ length: 4 }, (_, i) => 
+                  isUSStock ? Number((currentPrice + (4 - i) * tickSize).toFixed(2)) : currentPrice + (4 - i) * tickSize
+                );
+                const bidLevels = Array.from({ length: 4 }, (_, i) => 
+                  isUSStock ? Number((currentPrice - (i + 1) * tickSize).toFixed(2)) : currentPrice - (i + 1) * tickSize
+                );
                 const getLevelVolume = (priceLevel: number) => {
                   const base = Math.abs((priceLevel * 17) % 850) + 120;
                   const wiggle = Math.floor(Math.sin((Date.now() / 2500) + priceLevel) * 45) + 45;
