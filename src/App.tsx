@@ -829,6 +829,30 @@ const USAFlag = () => (
   </svg>
 );
 
+export function calculateStockLimits(price: number, changePercent: number = 0, isUS: boolean, basePriceInput?: number) {
+  if (!price || price <= 0 || isNaN(price)) {
+    return { upperLimit: isUS ? 13.00 : 1300, lowerLimit: isUS ? 7.00 : 700, basePrice: price || 0 };
+  }
+  const cp = (typeof changePercent === 'number' && !isNaN(changePercent)) ? changePercent : 0;
+  let basePrice = basePriceInput;
+  if (!basePrice || basePrice <= 0 || isNaN(basePrice)) {
+    basePrice = cp !== -100 ? price / (1 + cp / 100) : price;
+  }
+  if (!basePrice || basePrice <= 0 || !isFinite(basePrice)) {
+    basePrice = price;
+  }
+
+  if (isUS) {
+    const upperLimit = Number((basePrice * 1.30).toFixed(2));
+    const lowerLimit = Math.max(0.01, Number((basePrice * 0.70).toFixed(2)));
+    return { upperLimit, lowerLimit, basePrice: Number(basePrice.toFixed(2)) };
+  } else {
+    const upperLimit = Math.round(basePrice * 1.30);
+    const lowerLimit = Math.round(basePrice * 0.70);
+    return { upperLimit, lowerLimit, basePrice: Math.round(basePrice) };
+  }
+}
+
 export default function App() {
   const [marketType, setMarketType] = useState<'KR' | 'US'>(() => {
     return (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
@@ -1080,6 +1104,7 @@ export default function App() {
   const timeframes = ['1m', '5m', '15m', '30m', '60m', '120m', '240m'];
 
   // Gap Trading States
+  const [isFetchingMarketPrices, setIsFetchingMarketPrices] = useState<boolean>(false);
   const [gapBuyPrice, setGapBuyPrice] = useState<number>(0);
   const [gapSellPrice, setGapSellPrice] = useState<number>(0);
   const [tradeQuantity, setTradeQuantity] = useState<number>(1);
@@ -1099,15 +1124,15 @@ export default function App() {
     const initStock = defaults.find(s => s.symbol === initSymbol) || defaults[0];
     const isUS = lastMarket === 'US' || /^[A-Za-z]/.test(initStock.symbol);
     const price = initStock?.price || (isUS ? 10 : 1000);
-    const tickSize = getTickSize(price, isUS ? 'US' : 'KR');
+    const limits = calculateStockLimits(price, initStock?.changePercent || 0, isUS, initStock?.basePrice);
 
     return [{
       id: initStock.symbol,
       symbol: initStock.symbol,
       name: initStock.name || initStock.symbol,
       isBotActive: false,
-      gapBuyPrice: Math.max(isUS ? 0.01 : 10, isUS ? Number((price - tickSize * 2).toFixed(2)) : price - tickSize * 2),
-      gapSellPrice: isUS ? Number((price + tickSize * 2).toFixed(2)) : price + tickSize * 2,
+      gapBuyPrice: limits.lowerLimit,
+      gapSellPrice: limits.upperLimit,
       tradeQuantity: 1,
       maxSlots: 3,
       gapInventory: [],
@@ -1162,15 +1187,15 @@ export default function App() {
     const isUS = stock?.market === 'US' || /^[A-Za-z]/.test(symbol) || marketType === 'US';
     const name = customName || stock?.name || symbol;
     const price = stock?.price || (isUS ? 10 : 1000);
-    const tickSize = getTickSize(price, isUS ? 'US' : 'KR');
+    const limits = calculateStockLimits(price, stock?.changePercent || 0, isUS, stock?.basePrice);
 
     const newTab: ScalperTab = {
       id: symbol,
       symbol,
       name,
       isBotActive: false,
-      gapBuyPrice: Math.max(isUS ? 0.01 : 10, isUS ? Number((price - tickSize * 2).toFixed(2)) : price - tickSize * 2),
-      gapSellPrice: isUS ? Number((price + tickSize * 2).toFixed(2)) : price + tickSize * 2,
+      gapBuyPrice: limits.lowerLimit,
+      gapSellPrice: limits.upperLimit,
       tradeQuantity: 1,
       maxSlots: 3,
       gapInventory: [],
@@ -1410,25 +1435,15 @@ export default function App() {
     return null;
   }, [stocks, stocksCache, selectedSymbol, getResolvedStockName]);
 
-  // Auto-set Upper/Lower Price Limits (당일 상/하한가) when selectedStock changes
+  // Auto-set Upper/Lower Price Limits (당일 상/하한가) when selectedStock, price, or market changes
   useEffect(() => {
     if (selectedStock && selectedStock.price > 0) {
       const isUS = selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US';
-      const basePrice = selectedStock.basePrice || (selectedStock.price / (1 + (selectedStock.changePercent || 0) / 100));
-      if (isUS) {
-        // 미국 주식: 소수점 둘째자리까지 정확히 유지
-        const autoUpperLimit = Number((basePrice * 1.30).toFixed(2));
-        const autoLowerLimit = Math.max(0.01, Number((basePrice * 0.70).toFixed(2)));
-        setGapSellPrice(autoUpperLimit);
-        setGapBuyPrice(autoLowerLimit);
-      } else {
-        const autoUpperLimit = Math.round(basePrice * 1.30);
-        const autoLowerLimit = Math.round(basePrice * 0.70);
-        setGapSellPrice(autoUpperLimit);
-        setGapBuyPrice(autoLowerLimit);
-      }
+      const limits = calculateStockLimits(selectedStock.price, selectedStock.changePercent || 0, isUS, selectedStock.basePrice);
+      setGapSellPrice(limits.upperLimit);
+      setGapBuyPrice(limits.lowerLimit);
     }
-  }, [selectedStock?.symbol]);
+  }, [selectedSymbol, selectedStock?.price, selectedStock?.changePercent, selectedStock?.basePrice, marketType]);
   const rangePercentage = useMemo(() => {
     if (!gapBuyPrice || !gapSellPrice || gapBuyPrice >= gapSellPrice || !selectedStock) return 0;
     const pct = ((selectedStock.price - gapBuyPrice) / (gapSellPrice - gapBuyPrice)) * 100;
@@ -2005,7 +2020,7 @@ export default function App() {
     }
   };
 
-  const handleMarketSwitch = (newMarket: 'KR' | 'US') => {
+  const handleMarketSwitch = async (newMarket: 'KR' | 'US') => {
     if (marketType === newMarket) return;
 
     // 1. Save current stocks to cache & custom names
@@ -2054,28 +2069,26 @@ export default function App() {
     // 4. Sync Tabs
     const stock = cachedStocks.find(s => s.symbol === sym) || cachedStocks[0];
     if (stock) {
-      const price = stock.price || (newMarket === 'KR' ? 1000 : 1);
-      const tickSize = newMarket === 'KR' 
-        ? (price >= 500000 ? 1000 : price >= 100000 ? 500 : price >= 50000 ? 100 : price >= 10000 ? 50 : price >= 5000 ? 10 : 5)
-        : 0.01;
+      const isUSStock = newMarket === 'US' || /^[A-Za-z]/.test(stock.symbol);
+      const price = stock.price || (newMarket === 'KR' ? 1000 : 10);
+      const limits = calculateStockLimits(price, stock.changePercent || 0, isUSStock, stock.basePrice);
       
-      const validTabs = scalperTabs.filter(t => {
+      const validTabs = scalperTabsRef.current.filter(t => {
         const tIsUS = /^[A-Z]/.test(t.symbol);
         return newMarket === 'US' ? tIsUS : !tIsUS;
       });
 
       if (validTabs.length > 0) {
-        if (!validTabs.some(t => t.id === activeTabId)) {
-          handleSwitchTab(validTabs[0].id);
-        }
+        const targetTab = validTabs.find(t => t.id === sym || t.symbol === sym) || validTabs[0];
+        handleSwitchTab(targetTab.id);
       } else {
         const newTabs: ScalperTab[] = [{
           id: stock.symbol,
           symbol: stock.symbol,
           name: stock.name || stock.symbol,
           isBotActive: false,
-          gapBuyPrice: Math.max(newMarket === 'KR' ? 10 : 0.01, newMarket === 'US' ? Number((price - tickSize * 2).toFixed(2)) : price - tickSize * 2),
-          gapSellPrice: newMarket === 'US' ? Number((price + tickSize * 2).toFixed(2)) : price + tickSize * 2,
+          gapBuyPrice: limits.lowerLimit,
+          gapSellPrice: limits.upperLimit,
           tradeQuantity: 1,
           maxSlots: 3,
           gapInventory: [],
@@ -2089,7 +2102,73 @@ export default function App() {
         }];
         setScalperTabs(newTabs);
         setActiveTabId(stock.symbol);
+        setGapBuyPrice(limits.lowerLimit);
+        setGapSellPrice(limits.upperLimit);
       }
+    }
+
+    // 5. Fetch fresh live price data immediately on market switch
+    setIsFetchingMarketPrices(true);
+    try {
+      let livePriceData = await kisService.getPrice(sym);
+      
+      if (!livePriceData && newMarket === 'US') {
+        try {
+          const prompt = `미국 주식 ${sym}의 현재 실시간 주가와 전일 대비 변동률(changePercent)을 알려주세요. 반드시 JSON 형식으로만 응답: {"price": 숫자, "changePercent": 숫자}`;
+          const res = await axios.post('/api/ai/bot-decision', { prompt });
+          const parsed = JSON.parse(res.data.text);
+          if (parsed && parsed.price > 0) {
+            livePriceData = {
+              current: parsed.price,
+              prevClose: parsed.price / (1 + (parsed.changePercent || 0) / 100),
+              change: parsed.price - (parsed.price / (1 + (parsed.changePercent || 0) / 100)),
+              changePercent: parsed.changePercent || 0,
+              volume: '10M',
+              name: sym
+            };
+          }
+        } catch (e) {
+          console.warn("[Market Switch] Gemini price fallback failed:", e);
+        }
+      }
+
+      if (livePriceData && livePriceData.current > 0) {
+        const realPrice = livePriceData.current;
+        const changePercent = livePriceData.changePercent || 0;
+        const isUSStock = newMarket === 'US';
+        const limits = calculateStockLimits(realPrice, changePercent, isUSStock, livePriceData.prevClose);
+
+        setStocks(prev => prev.map(s => {
+          if (s.symbol !== sym) return s;
+          return {
+            ...s,
+            price: realPrice,
+            change: livePriceData.change,
+            changePercent: changePercent,
+            basePrice: livePriceData.prevClose || (realPrice / (1 + changePercent / 100)),
+            isRealTime: true,
+            lastUpdated: new Date().toLocaleTimeString()
+          };
+        }));
+
+        setGapSellPrice(limits.upperLimit);
+        setGapBuyPrice(limits.lowerLimit);
+
+        setScalperTabs(prev => prev.map(t => {
+          if (t.symbol === sym || t.id === sym) {
+            return {
+              ...t,
+              gapBuyPrice: limits.lowerLimit,
+              gapSellPrice: limits.upperLimit
+            };
+          }
+          return t;
+        }));
+      }
+    } catch (err) {
+      console.warn("Live market fetch on switch failed:", err);
+    } finally {
+      setIsFetchingMarketPrices(false);
     }
   };
 
@@ -5768,6 +5847,12 @@ export default function App() {
               <USAFlag /> US
             </button>
           </div>
+          {isFetchingMarketPrices && (
+            <div className="flex items-center gap-1.5 px-2.5 py-1 bg-sleek-blue/10 border border-sleek-blue/30 rounded-xl text-[10px] font-bold text-sleek-blue animate-pulse">
+              <RefreshCw className="w-3 h-3 animate-spin" />
+              <span>실시간 시세 동기화 중...</span>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <div className="w-6 h-6 bg-sleek-blue rounded-md flex items-center justify-center">
               <Bot className="w-4 h-4 text-white" />
