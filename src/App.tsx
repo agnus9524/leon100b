@@ -6581,7 +6581,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 5. Speed (Max Slots hidden, default 3) */}
+              {/* 5. Speed & Immediate Entry */}
               <div className="bg-white/5 p-2.5 rounded-2xl border border-white/5 flex flex-col justify-between space-y-1.5">
                 <div>
                   <span className="text-[10px] font-bold text-sleek-text-secondary uppercase block mb-1">실행 속도</span>
@@ -6596,7 +6596,7 @@ export default function App() {
                         type="button"
                         onClick={() => setScalpingSpeed(opt.value)}
                         className={cn(
-                          "py-1 rounded text-[10px] font-mono font-bold transition-all text-center",
+                          "py-1 rounded text-[10px] font-mono font-bold transition-all text-center cursor-pointer",
                           scalpingSpeed === opt.value
                             ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
                             : "bg-white/5 text-sleek-text-secondary hover:bg-white/10"
@@ -6606,6 +6606,23 @@ export default function App() {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                <div className="pt-1 border-t border-white/5">
+                  <button
+                    type="button"
+                    onClick={() => setImmediateEntry(!immediateEntry)}
+                    className={cn(
+                      "w-full py-1 px-1.5 rounded text-[10px] font-bold border flex items-center justify-center gap-1 transition-all cursor-pointer",
+                      immediateEntry 
+                        ? "bg-rose-500/25 border-rose-500/50 text-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.3)] animate-pulse" 
+                        : "bg-black/30 border-white/10 text-gray-400 hover:text-white"
+                    )}
+                    title="전략 조건 충족을 기다리지 않고 즉시 매수 진입합니다."
+                  >
+                    <Zap className="w-3 h-3 text-amber-400" />
+                    <span>{immediateEntry ? "⚡ 즉시 강제 진입 ON" : "조건포착 후 매수 (기본)"}</span>
+                  </button>
                 </div>
               </div>
 
