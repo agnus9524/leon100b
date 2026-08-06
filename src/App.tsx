@@ -1241,7 +1241,7 @@ export default function App() {
   const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(false); 
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
-  const [scalperStrategyMode, setScalperStrategyMode] = useState<'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT'>('PULLBACK');
+  const [scalperStrategyMode, setScalperStrategyMode] = useState<'AUTO' | 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT'>('AUTO');
   const [minGapBetweenSlots, setMinGapBetweenSlots] = useState<number>(0.3); // 0.3% gap
   const [useFixedQuantity, setUseFixedQuantity] = useState<boolean>(true); 
   const [top3RefreshNonce, setTop3RefreshNonce] = useState<number>(0);
@@ -4036,6 +4036,38 @@ export default function App() {
     };
   };
 
+  // 실시간 3대 스캘핑 전략 조건 감지 센서 (선택된 종목 기반)
+  const activeStrategyDetection = useMemo(() => {
+    if (!selectedStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, activeCount: 0 };
+
+    const historyPrices = selectedStock.history ? selectedStock.history.map(h => h.price) : [selectedStock.price];
+    const currentPrice = selectedStock.price;
+    const rsi = calculateRSI(historyPrices, 14);
+    const bb = calculateBollingerBands(historyPrices, 20, 2);
+    const sma5 = calculateSMA(historyPrices, 5);
+    const sma20 = calculateSMA(historyPrices, 20);
+    const vwap = historyPrices.length > 0 ? (historyPrices.reduce((a, b) => a + b, 0) / historyPrices.length) : currentPrice;
+
+    const momentumPositive = sma5 >= sma20;
+    const isNearLowerBand = currentPrice <= bb.lower * 1.005;
+    const lastPrice = historyPrices.length >= 2 ? historyPrices[historyPrices.length - 2] : currentPrice;
+    const hasVolumeMomentum = currentPrice >= lastPrice || rsi >= 25;
+
+    // ① 상승 추세 눌림목
+    const isPullback = momentumPositive && (rsi < 40 || isNearLowerBand) && currentPrice >= sma5 && hasVolumeMomentum;
+
+    // ② 거래량/전고점 돌파
+    const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
+    const isBreakout = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
+
+    // ③ VWAP 지지반등
+    const isVwapSupport = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
+
+    const activeCount = (isPullback ? 1 : 0) + (isBreakout ? 1 : 0) + (isVwapSupport ? 1 : 0);
+
+    return { isPullback, isBreakout, isVwapSupport, activeCount, rsi, sma5, sma20, vwap };
+  }, [selectedStock]);
+
   // Trailing Stop Loss State to track the peak price after each buy
   const [highWaterMark, setHighWaterMark] = useState<{ [price: number]: number }>({});
 
@@ -4078,22 +4110,41 @@ export default function App() {
       if (currentPrice >= minPrice && currentPrice <= maxPrice) {
         if (lastPrice > 0) {
           // Principle 3 & 2 Strategy Rules Execution
+          const isPullbackCond = momentumPositive && (rsi < 40 || isNearLowerBand) && currentPrice >= sma5 && hasVolumeMomentum;
+          const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
+          const isBreakoutCond = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
+          const isVwapSupportCond = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
+
           let meetsBuyCriteria = false;
+          let strategyLabel = "AI 스캘퍼";
+
           if (scalperStrategyMode === 'PULLBACK') {
-            // ① 상승 추세 눌림목 매수 (기본 원칙): 상승 추세(SMA5>=SMA20) 중 짧은 눌림목(RSI < 40 또는 BB 하한) 후 SMA5 재탈환
-            meetsBuyCriteria = momentumPositive && (rsi < 40 || isNearLowerBand) && currentPrice >= sma5 && hasVolumeMomentum;
+            meetsBuyCriteria = isPullbackCond;
+            strategyLabel = "① 상승추세 눌림목";
           } else if (scalperStrategyMode === 'BREAKOUT') {
-            // ② 거래량 돌파 매수: 최근 전고점 돌파 시 체결 강도 동반 매수
-            const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
-            meetsBuyCriteria = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
+            meetsBuyCriteria = isBreakoutCond;
+            strategyLabel = "② 거래량 돌파";
           } else if (scalperStrategyMode === 'VWAP_SUPPORT') {
-            // ③ VWAP 지지 매수: VWAP 지지선 상회 및 반등
-            meetsBuyCriteria = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
+            meetsBuyCriteria = isVwapSupportCond;
+            strategyLabel = "③ VWAP 지지반등";
           } else {
-            // Default Smart Mode: Stricter trend + oversold rebound
-            meetsBuyCriteria = isSmartScalperMode 
-              ? momentumPositive && (rsi < 35 || isNearLowerBand) && currentPrice >= sma5
-              : (isOverSold || isNearLowerBand) && (currentPrice >= sma5);
+            // 'AUTO' 모드 (기본값): 프로그램이 3가지 전략을 종합 파악 후 조건 충족 시 자동 매수
+            if (isPullbackCond) {
+              meetsBuyCriteria = true;
+              strategyLabel = "AI포착: ①상승추세 눌림목";
+            } else if (isBreakoutCond) {
+              meetsBuyCriteria = true;
+              strategyLabel = "AI포착: ②거래량 돌파";
+            } else if (isVwapSupportCond) {
+              meetsBuyCriteria = true;
+              strategyLabel = "AI포착: ③VWAP 지지반등";
+            } else if (isSmartScalperMode) {
+              meetsBuyCriteria = momentumPositive && (rsi < 35 || isNearLowerBand) && currentPrice >= sma5;
+              if (meetsBuyCriteria) strategyLabel = "AI포착: 스마트 반등";
+            } else {
+              meetsBuyCriteria = (isOverSold || isNearLowerBand) && (currentPrice >= sma5);
+              if (meetsBuyCriteria) strategyLabel = "AI포착: 과매도 반등";
+            }
           }
           
           const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
@@ -4146,22 +4197,22 @@ export default function App() {
               if (balance < scaledCost) {
                 setScalperMessage(`[매수 차단] 예수금 부족 (필요: ${formatCurrency(scaledCost)})`);
               } else {
-                setScalperMessage(`[슬롯#${currentStep} 진입] ${formatCurrency(targetBuyPrice)} (${formatQuantity(scaledQuantity)})...`);
+                setScalperMessage(`[슬롯#${currentStep} 진입] ${formatCurrency(targetBuyPrice)} (${strategyLabel})...`);
                 
                 const lockEntry = { symbol: selectedStock.symbol, price: targetBuyPrice };
                 buyingLockPricesRef.current.push(lockEntry);
 
                 try {
                   const currentSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                  const executedQty = await executeTrade('BUY', selectedStock, scaledQuantity, `Scalper Slot #${currentStep} (${scalperStrategyMode}): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId);
+                  const executedQty = await executeTrade('BUY', selectedStock, scaledQuantity, `Scalper Slot #${currentStep} (${strategyLabel}): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId);
                   
                   if (executedQty > 0) {
-                    setScalperMessage(`[매수 완료] 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} (${formatQuantity(executedQty)})`);
-                    setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} ${formatQuantity(executedQty)} 진입 완료 (${scalperStrategyMode})`);
+                    setScalperMessage(`[매수 완료] 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} (${strategyLabel})`);
+                    setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} ${formatQuantity(executedQty)} 진입 완료 (${strategyLabel})`);
                     setHighWaterMark(prev => ({ ...prev, [targetBuyPrice]: targetBuyPrice }));
                     setLastTradeType('BUY');
                     setGapTradeCount(prev => prev + 1);
-                    showNotification(`${selectedStock.name} 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} (${formatQuantity(executedQty)}) 매수 완료`, "success");
+                    showNotification(`${selectedStock.name} 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} (${strategyLabel}) 매수 완료`, "success");
                     playScalpingSound('BUY');
                   }
                 } finally {
@@ -4170,10 +4221,25 @@ export default function App() {
               }
             }
           } else {
-            if (!momentumPositive && scalperStrategyMode === 'PULLBACK') setScalperMessage(`하락 추세 감지 (SMA5<SMA20). 원칙 3에 따라 관망 중`);
-            else if (isOverSold) setScalperMessage(`과매도 포착 (RSI: ${Math.round(rsi)}). 수급 반등 확인 중...`);
-            else if (isNearLowerBand) setScalperMessage(`지지선(BB Lower) 도달. 매수 타점 분석 중...`);
-            else setScalperMessage(`관망 중 (RSI: ${Math.round(rsi)}, 보유 슬롯: ${currentInventory.length}/${maxSlots})`);
+            if (scalperStrategyMode === 'AUTO') {
+              if (isPullbackCond || isBreakoutCond || isVwapSupportCond) {
+                const activeNames = [
+                  isPullbackCond && '①눌림목',
+                  isBreakoutCond && '②돌파',
+                  isVwapSupportCond && '③VWAP'
+                ].filter(Boolean).join(', ');
+                setScalperMessage(`[AI전략 포착] ${activeNames} 감지! 진입 모니터링 중...`);
+              } else if (!momentumPositive) {
+                setScalperMessage(`[AI관망] 하락 추세 (SMA5<SMA20). 추세 전환 대기 중...`);
+              } else {
+                setScalperMessage(`[AI모니터링] 수급/지지선 감시 중 (RSI: ${Math.round(rsi)}, 보유 슬롯: ${currentInventory.length}/${maxSlots})`);
+              }
+            } else {
+              if (!momentumPositive && scalperStrategyMode === 'PULLBACK') setScalperMessage(`하락 추세 감지 (SMA5<SMA20). 원칙 3에 따라 관망 중`);
+              else if (isOverSold) setScalperMessage(`과매도 포착 (RSI: ${Math.round(rsi)}). 수급 반등 확인 중...`);
+              else if (isNearLowerBand) setScalperMessage(`지지선(BB Lower) 도달. 매수 타점 분석 중...`);
+              else setScalperMessage(`관망 중 (RSI: ${Math.round(rsi)}, 보유 슬롯: ${currentInventory.length}/${maxSlots})`);
+            }
           }
         }
       } else {
@@ -6121,49 +6187,95 @@ export default function App() {
             </div>
 
             {/* Strategy Selection Mode Bar (Scalper Rules 2 & 3) */}
-            <div className="bg-black/40 p-2 rounded-2xl border border-white/5 flex flex-col sm:flex-row items-center justify-between gap-2">
-              <span className="text-[11px] font-black text-slate-300 flex items-center gap-1 shrink-0">
-                <Sparkles className="w-3.5 h-3.5 text-amber-400" /> 스캘퍼 전략 모드:
-              </span>
-              <div className="grid grid-cols-3 gap-1.5 w-full sm:w-auto">
+            <div className="bg-black/40 p-2.5 rounded-2xl border border-white/5 flex flex-col md:flex-row items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-[11px] font-black text-slate-300 flex items-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-spin" /> 스캘퍼 AI 전략 센서:
+                </span>
+                {activeStrategyDetection.activeCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                    실시간 {activeStrategyDetection.activeCount}개 전략 조건 포착!
+                  </span>
+                )}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 w-full md:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setScalperStrategyMode('AUTO')}
+                  className={cn(
+                    "px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    scalperStrategyMode === 'AUTO'
+                      ? "bg-gradient-to-r from-amber-500/30 to-amber-600/30 text-amber-200 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
+                  )}
+                  title="프로그램이 실시간 차트 지표를 종합 분석하여 3가지 스캘핑 전략을 모두 자동 포착 및 적용 (추천)"
+                >
+                  <Bot className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                  <span>AI 종합 자동분석★</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setScalperStrategyMode('PULLBACK')}
                   className={cn(
-                    "px-3 py-1 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer",
-                    scalperStrategyMode === 'PULLBACK'
+                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    activeStrategyDetection.isPullback
+                      ? "bg-emerald-500/30 text-emerald-200 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)] animate-pulse"
+                      : scalperStrategyMode === 'PULLBACK'
                       ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-md"
                       : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
                   )}
                   title="상승 추세(SMA5>=SMA20) 눌림목 후 반등 진입 (원칙 1,3)"
                 >
-                  ① 상승추세 눌림목★
+                  {activeStrategyDetection.isPullback && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+                  )}
+                  <span>① 상승추세 눌림목</span>
+                  {activeStrategyDetection.isPullback && (
+                    <span className="ml-0.5 px-1 py-0.2 text-[8px] bg-emerald-500 text-black font-black rounded-full">포착!</span>
+                  )}
                 </button>
                 <button
                   type="button"
                   onClick={() => setScalperStrategyMode('BREAKOUT')}
                   className={cn(
-                    "px-3 py-1 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer",
-                    scalperStrategyMode === 'BREAKOUT'
+                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    activeStrategyDetection.isBreakout
+                      ? "bg-amber-500/30 text-amber-200 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.5)] animate-pulse"
+                      : scalperStrategyMode === 'BREAKOUT'
                       ? "bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-md"
                       : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
                   )}
                   title="거래량 급증 및 전고점 돌파 진입 (원칙 2)"
                 >
-                  ② 거래량 돌파
+                  {activeStrategyDetection.isBreakout && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
+                  )}
+                  <span>② 거래량 돌파</span>
+                  {activeStrategyDetection.isBreakout && (
+                    <span className="ml-0.5 px-1 py-0.2 text-[8px] bg-amber-500 text-black font-black rounded-full">포착!</span>
+                  )}
                 </button>
                 <button
                   type="button"
                   onClick={() => setScalperStrategyMode('VWAP_SUPPORT')}
                   className={cn(
-                    "px-3 py-1 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer",
-                    scalperStrategyMode === 'VWAP_SUPPORT'
+                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    activeStrategyDetection.isVwapSupport
+                      ? "bg-indigo-500/30 text-indigo-200 border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.5)] animate-pulse"
+                      : scalperStrategyMode === 'VWAP_SUPPORT'
                       ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/50 shadow-md"
                       : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
                   )}
                   title="VWAP 평균가격 지지 및 지지선 반등 진입"
                 >
-                  ③ VWAP 지지반등
+                  {activeStrategyDetection.isVwapSupport && (
+                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
+                  )}
+                  <span>③ VWAP 지지반등</span>
+                  {activeStrategyDetection.isVwapSupport && (
+                    <span className="ml-0.5 px-1 py-0.2 text-[8px] bg-indigo-500 text-white font-black rounded-full">포착!</span>
+                  )}
                 </button>
               </div>
             </div>
@@ -7475,6 +7587,67 @@ export default function App() {
                 )}
               </div>
             </div>
+
+            {/* AI Real-time Strategy Sensor Status */}
+            {isGapBotActive && selectedStock && (
+              <div className="bg-gradient-to-br from-amber-500/10 via-emerald-500/10 to-indigo-500/10 border border-amber-500/30 rounded-3xl p-4 space-y-3 shrink-0 shadow-lg">
+                <div className="flex items-center justify-between border-b border-white/5 pb-2">
+                  <h3 className="text-xs font-black text-amber-300 uppercase tracking-widest flex items-center gap-1.5">
+                    <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-spin" /> AI 실시간 전략 감지 센서
+                  </h3>
+                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-black/60 text-slate-300 border border-white/10">
+                    {scalperStrategyMode === 'AUTO' ? 'AI 종합 자동분석' : `전용: ${scalperStrategyMode}`}
+                  </span>
+                </div>
+                
+                <div className="grid grid-cols-3 gap-1.5 text-center">
+                  <div className={cn(
+                    "p-2 rounded-2xl border text-[10px] font-bold transition-all flex flex-col items-center justify-center gap-1 min-h-[50px]",
+                    activeStrategyDetection.isPullback
+                      ? "bg-emerald-500/25 border-emerald-400 text-emerald-200 animate-pulse shadow-[0_0_12px_rgba(16,185,129,0.4)]"
+                      : "bg-black/40 border-white/5 text-slate-500"
+                  )}>
+                    <span className="flex items-center gap-1 text-[9px] leading-tight">
+                      {activeStrategyDetection.isPullback && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />}
+                      ① 눌림목
+                    </span>
+                    <span className="text-[9px] font-black">
+                      {activeStrategyDetection.isPullback ? '🔥 포착 완료' : '대기 중'}
+                    </span>
+                  </div>
+
+                  <div className={cn(
+                    "p-2 rounded-2xl border text-[10px] font-bold transition-all flex flex-col items-center justify-center gap-1 min-h-[50px]",
+                    activeStrategyDetection.isBreakout
+                      ? "bg-amber-500/25 border-amber-400 text-amber-200 animate-pulse shadow-[0_0_12px_rgba(245,158,11,0.4)]"
+                      : "bg-black/40 border-white/5 text-slate-500"
+                  )}>
+                    <span className="flex items-center gap-1 text-[9px] leading-tight">
+                      {activeStrategyDetection.isBreakout && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />}
+                      ② 거래량돌파
+                    </span>
+                    <span className="text-[9px] font-black">
+                      {activeStrategyDetection.isBreakout ? '🔥 포착 완료' : '대기 중'}
+                    </span>
+                  </div>
+
+                  <div className={cn(
+                    "p-2 rounded-2xl border text-[10px] font-bold transition-all flex flex-col items-center justify-center gap-1 min-h-[50px]",
+                    activeStrategyDetection.isVwapSupport
+                      ? "bg-indigo-500/25 border-indigo-400 text-indigo-200 animate-pulse shadow-[0_0_12px_rgba(99,102,241,0.4)]"
+                      : "bg-black/40 border-white/5 text-slate-500"
+                  )}>
+                    <span className="flex items-center gap-1 text-[9px] leading-tight">
+                      {activeStrategyDetection.isVwapSupport && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />}
+                      ③ VWAP지부
+                    </span>
+                    <span className="text-[9px] font-black">
+                      {activeStrategyDetection.isVwapSupport ? '🔥 포착 완료' : '대기 중'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* 2. Real-time Gap Monitor Gauge */}
             {isGapBotActive && selectedStock && gapBuyPrice > 0 && gapSellPrice > 0 && (
