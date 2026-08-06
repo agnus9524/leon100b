@@ -884,8 +884,25 @@ export default function App() {
   const [exchangeRateTrend, setExchangeRateTrend] = useState<'UP' | 'DOWN'>('UP');
   const [selectionMode, setSelectionMode] = useState<'RECOMMENDED' | 'MANUAL'>('RECOMMENDED');
   const [stocks, setStocks] = useState<Stock[]>(() => {
-    const lastMarket = localStorage.getItem('sleek_last_market') || 'KR';
-    return lastMarket === 'US' ? INITIAL_STOCKS : INITIAL_STOCKS_KR;
+    const lastMarket = (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
+    const lastUS = localStorage.getItem('sleek_last_symbol_US') || 'NVDA';
+    const lastKR = localStorage.getItem('sleek_last_symbol_KR') || '073240';
+    const base = lastMarket === 'US' ? INITIAL_STOCKS : INITIAL_STOCKS_KR;
+    const targetSym = lastMarket === 'US' ? lastUS : lastKR;
+    if (!base.some(s => s.symbol === targetSym)) {
+      const extra = POPULAR_STOCKS.find(s => s.symbol === targetSym) || {
+        symbol: targetSym,
+        name: targetSym,
+        price: lastMarket === 'US' ? 10 : 1000,
+        change: 0,
+        changePercent: 0,
+        volume: '0',
+        history: [],
+        market: lastMarket
+      };
+      return [extra as Stock, ...base];
+    }
+    return base;
   });
   const [selectedSymbol, setSelectedSymbol] = useState(() => {
     const lastMarket = localStorage.getItem('sleek_last_market') || 'KR';
@@ -1118,46 +1135,160 @@ export default function App() {
 
   // Multi-Tab Scalper Trading State
   const [scalperTabs, setScalperTabs] = useState<ScalperTab[]>(() => {
-    const lastMarket = localStorage.getItem('sleek_market_type') || 'KR';
-    const initSymbol = localStorage.getItem('sleek_last_symbol') || (lastMarket === 'US' ? 'SNDL' : '073240');
-    const defaults = lastMarket === 'US' ? INITIAL_STOCKS : INITIAL_STOCKS_KR;
-    const initStock = defaults.find(s => s.symbol === initSymbol) || defaults[0];
-    const isUS = lastMarket === 'US' || /^[A-Za-z]/.test(initStock.symbol);
-    const price = initStock?.price || (isUS ? 10 : 1000);
-    const limits = calculateStockLimits(price, initStock?.changePercent || 0, isUS, initStock?.basePrice);
+    const lastMarket = (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
+    const lastUS = localStorage.getItem('sleek_last_symbol_US') || 'NVDA';
+    const lastKR = localStorage.getItem('sleek_last_symbol_KR') || '073240';
 
-    return [{
-      id: initStock.symbol,
-      symbol: initStock.symbol,
-      name: initStock.name || initStock.symbol,
-      isBotActive: false,
-      gapBuyPrice: limits.lowerLimit,
-      gapSellPrice: limits.upperLimit,
-      tradeQuantity: 1,
-      maxSlots: 3,
-      gapInventory: [],
-      gapTradingProfit: 0,
-      gapTradeCount: 0,
-      lastTradeType: null,
-      scalperMessage: "대기 중...",
-      entryPriceMode: 'BID2',
-      autoCancelThreshold: 0.2,
-      tradeLogs: []
-    }];
+    let saved: ScalperTab[] = [];
+    try {
+      const parsed = JSON.parse(localStorage.getItem('sleek_scalper_tabs') || '[]');
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        saved = parsed;
+      }
+    } catch (e) {
+      console.error("Failed to parse saved scalperTabs", e);
+    }
+
+    if (saved.length === 0) {
+      const krStock = INITIAL_STOCKS_KR.find(s => s.symbol === lastKR) || INITIAL_STOCKS_KR[0];
+      const krLimits = calculateStockLimits(krStock.price || 1000, krStock.changePercent || 0, false, krStock.basePrice);
+      
+      const usStock = INITIAL_STOCKS.find(s => s.symbol === lastUS) || INITIAL_STOCKS[0];
+      const usLimits = calculateStockLimits(usStock.price || 10, usStock.changePercent || 0, true, usStock.basePrice);
+
+      saved = [
+        {
+          id: krStock.symbol,
+          symbol: krStock.symbol,
+          name: krStock.name || krStock.symbol,
+          isBotActive: false,
+          gapBuyPrice: krLimits.lowerLimit,
+          gapSellPrice: krLimits.upperLimit,
+          tradeQuantity: 1,
+          maxSlots: 3,
+          gapInventory: [],
+          gapTradingProfit: 0,
+          gapTradeCount: 0,
+          lastTradeType: null,
+          scalperMessage: "대기 중...",
+          entryPriceMode: 'BID2',
+          autoCancelThreshold: 0.2,
+          tradeLogs: []
+        },
+        {
+          id: usStock.symbol,
+          symbol: usStock.symbol,
+          name: usStock.name || usStock.symbol,
+          isBotActive: false,
+          gapBuyPrice: usLimits.lowerLimit,
+          gapSellPrice: usLimits.upperLimit,
+          tradeQuantity: 1,
+          maxSlots: 3,
+          gapInventory: [],
+          gapTradingProfit: 0,
+          gapTradeCount: 0,
+          lastTradeType: null,
+          scalperMessage: "대기 중...",
+          entryPriceMode: 'BID2',
+          autoCancelThreshold: 0.2,
+          tradeLogs: []
+        }
+      ];
+    }
+
+    let usTabs = saved.filter(t => /^[A-Z]/.test(t.symbol));
+    let krTabs = saved.filter(t => !/^[A-Z]/.test(t.symbol));
+
+    // Ensure lastUS is in usTabs and at position 0
+    let usTargetTab = usTabs.find(t => t.symbol === lastUS || t.id === lastUS);
+    if (!usTargetTab) {
+      const usStock = INITIAL_STOCKS.find(s => s.symbol === lastUS) || POPULAR_STOCKS.find(s => s.symbol === lastUS) || { symbol: lastUS, name: lastUS, price: 10, changePercent: 0 };
+      const changePct = 'changePercent' in usStock ? (usStock.changePercent || 0) : 0;
+      const usLimits = calculateStockLimits(usStock.price || 10, changePct, true);
+      usTargetTab = {
+        id: lastUS,
+        symbol: lastUS,
+        name: usStock.name || lastUS,
+        isBotActive: false,
+        gapBuyPrice: usLimits.lowerLimit,
+        gapSellPrice: usLimits.upperLimit,
+        tradeQuantity: 1,
+        maxSlots: 3,
+        gapInventory: [],
+        gapTradingProfit: 0,
+        gapTradeCount: 0,
+        lastTradeType: null,
+        scalperMessage: "대기 중...",
+        entryPriceMode: 'BID2',
+        autoCancelThreshold: 0.2,
+        tradeLogs: []
+      };
+      usTabs = [usTargetTab, ...usTabs];
+    } else {
+      usTabs = [usTargetTab, ...usTabs.filter(t => t.id !== usTargetTab!.id)];
+    }
+
+    // Ensure lastKR is in krTabs and at position 0
+    let krTargetTab = krTabs.find(t => t.symbol === lastKR || t.id === lastKR);
+    if (!krTargetTab) {
+      const krStock = INITIAL_STOCKS_KR.find(s => s.symbol === lastKR) || { symbol: lastKR, name: lastKR, price: 1000, changePercent: 0 };
+      const krLimits = calculateStockLimits(krStock.price || 1000, krStock.changePercent || 0, false);
+      krTargetTab = {
+        id: lastKR,
+        symbol: lastKR,
+        name: krStock.name || lastKR,
+        isBotActive: false,
+        gapBuyPrice: krLimits.lowerLimit,
+        gapSellPrice: krLimits.upperLimit,
+        tradeQuantity: 1,
+        maxSlots: 3,
+        gapInventory: [],
+        gapTradingProfit: 0,
+        gapTradeCount: 0,
+        lastTradeType: null,
+        scalperMessage: "대기 중...",
+        entryPriceMode: 'BID2',
+        autoCancelThreshold: 0.2,
+        tradeLogs: []
+      };
+      krTabs = [krTargetTab, ...krTabs];
+    } else {
+      krTabs = [krTargetTab, ...krTabs.filter(t => t.id !== krTargetTab!.id)];
+    }
+
+    return [...krTabs, ...usTabs];
   });
 
   const [activeTabId, setActiveTabId] = useState<string>(() => {
-    const lastMarket = localStorage.getItem('sleek_market_type') || 'KR';
-    return scalperTabs[0]?.id || (lastMarket === 'US' ? 'SNDL' : '073240');
+    const lastMarket = (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
+    const lastUS = localStorage.getItem('sleek_last_symbol_US') || 'NVDA';
+    const lastKR = localStorage.getItem('sleek_last_symbol_KR') || '073240';
+    return lastMarket === 'US' ? lastUS : lastKR;
   });
   const scalperTabsRef = React.useRef<ScalperTab[]>(scalperTabs);
   useEffect(() => {
     scalperTabsRef.current = scalperTabs;
+    try {
+      localStorage.setItem('sleek_scalper_tabs', JSON.stringify(scalperTabs));
+    } catch (e) {
+      console.error("Failed to persist scalperTabs", e);
+    }
   }, [scalperTabs]);
 
   const handleSwitchTab = (tabId: string) => {
     const targetTab = scalperTabsRef.current.find(t => t.id === tabId);
     if (!targetTab) return;
+
+    const isUS = /^[A-Z]/.test(targetTab.symbol);
+    setScalperTabs(prev => {
+      const matching = prev.find(t => t.id === tabId);
+      if (!matching) return prev;
+      const rest = prev.filter(t => t.id !== tabId);
+      const sameMarketBefore = rest.filter(t => isUS ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol));
+      const diffMarket = rest.filter(t => isUS ? !/^[A-Z]/.test(t.symbol) : /^[A-Z]/.test(t.symbol));
+      return isUS ? [...diffMarket, matching, ...sameMarketBefore] : [matching, ...sameMarketBefore, ...diffMarket];
+    });
+
     setActiveTabId(tabId);
     setSelectedSymbol(targetTab.symbol);
     setIsGapBotActive(targetTab.isBotActive);
@@ -1208,7 +1339,11 @@ export default function App() {
       tradeLogs: []
     };
 
-    setScalperTabs(prev => [...prev, newTab]);
+    setScalperTabs(prev => {
+      const sameMarket = prev.filter(t => isUS ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol));
+      const diffMarket = prev.filter(t => isUS ? !/^[A-Z]/.test(t.symbol) : /^[A-Z]/.test(t.symbol));
+      return isUS ? [...diffMarket, newTab, ...sameMarket] : [newTab, ...sameMarket, ...diffMarket];
+    });
     setActiveTabId(symbol);
     setSelectedSymbol(symbol);
     setIsGapBotActive(false);
@@ -2082,7 +2217,7 @@ export default function App() {
         const targetTab = validTabs.find(t => t.id === sym || t.symbol === sym) || validTabs[0];
         handleSwitchTab(targetTab.id);
       } else {
-        const newTabs: ScalperTab[] = [{
+        const createdTab: ScalperTab = {
           id: stock.symbol,
           symbol: stock.symbol,
           name: stock.name || stock.symbol,
@@ -2099,9 +2234,10 @@ export default function App() {
           entryPriceMode: 'BID2',
           autoCancelThreshold: 0.2,
           tradeLogs: []
-        }];
-        setScalperTabs(newTabs);
+        };
+        setScalperTabs(prev => [createdTab, ...prev]);
         setActiveTabId(stock.symbol);
+        setSelectedSymbol(stock.symbol);
         setGapBuyPrice(limits.lowerLimit);
         setGapSellPrice(limits.upperLimit);
       }
@@ -7352,7 +7488,7 @@ export default function App() {
                                   return (
                                     <div 
                                       key={`${sym}-${idx}`}
-                                      onClick={() => setSelectedSymbol(sym)}
+                                      onClick={() => openOrSwitchScalperTab(sym)}
                                       className={cn(
                                         "p-1.5 rounded-xl border flex items-center justify-between text-[11px] font-mono cursor-pointer transition-all group",
                                         isSelected
@@ -8277,7 +8413,7 @@ export default function App() {
                             <div 
                               key={item.symbol} 
                               onClick={() => {
-                                setSelectedSymbol(item.symbol);
+                                openOrSwitchScalperTab(item.symbol);
                                 const configEl = document.getElementById('ai-scalping-config-panel');
                                 if (configEl) {
                                   configEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
