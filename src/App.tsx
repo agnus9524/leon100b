@@ -1199,7 +1199,7 @@ export default function App() {
     let usTabs = saved.filter(t => /^[A-Z]/.test(t.symbol));
     let krTabs = saved.filter(t => !/^[A-Z]/.test(t.symbol));
 
-    // Ensure lastUS is in usTabs and at position 0
+    // Ensure lastUS is present in usTabs
     let usTargetTab = usTabs.find(t => t.symbol === lastUS || t.id === lastUS);
     if (!usTargetTab) {
       const usStock = INITIAL_STOCKS.find(s => s.symbol === lastUS) || POPULAR_STOCKS.find(s => s.symbol === lastUS) || { symbol: lastUS, name: lastUS, price: 10, changePercent: 0 };
@@ -1223,12 +1223,10 @@ export default function App() {
         autoCancelThreshold: 0.2,
         tradeLogs: []
       };
-      usTabs = [usTargetTab, ...usTabs];
-    } else {
-      usTabs = [usTargetTab, ...usTabs.filter(t => t.id !== usTargetTab!.id)];
+      usTabs = [...usTabs, usTargetTab];
     }
 
-    // Ensure lastKR is in krTabs and at position 0
+    // Ensure lastKR is present in krTabs
     let krTargetTab = krTabs.find(t => t.symbol === lastKR || t.id === lastKR);
     if (!krTargetTab) {
       const krStock = INITIAL_STOCKS_KR.find(s => s.symbol === lastKR) || { symbol: lastKR, name: lastKR, price: 1000, changePercent: 0 };
@@ -1251,9 +1249,7 @@ export default function App() {
         autoCancelThreshold: 0.2,
         tradeLogs: []
       };
-      krTabs = [krTargetTab, ...krTabs];
-    } else {
-      krTabs = [krTargetTab, ...krTabs.filter(t => t.id !== krTargetTab!.id)];
+      krTabs = [...krTabs, krTargetTab];
     }
 
     return [...krTabs, ...usTabs];
@@ -1278,16 +1274,6 @@ export default function App() {
   const handleSwitchTab = (tabId: string) => {
     const targetTab = scalperTabsRef.current.find(t => t.id === tabId);
     if (!targetTab) return;
-
-    const isUS = /^[A-Z]/.test(targetTab.symbol);
-    setScalperTabs(prev => {
-      const matching = prev.find(t => t.id === tabId);
-      if (!matching) return prev;
-      const rest = prev.filter(t => t.id !== tabId);
-      const sameMarketBefore = rest.filter(t => isUS ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol));
-      const diffMarket = rest.filter(t => isUS ? !/^[A-Z]/.test(t.symbol) : /^[A-Z]/.test(t.symbol));
-      return isUS ? [...diffMarket, matching, ...sameMarketBefore] : [matching, ...sameMarketBefore, ...diffMarket];
-    });
 
     setActiveTabId(tabId);
     setSelectedSymbol(targetTab.symbol);
@@ -1397,7 +1383,7 @@ export default function App() {
   const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.3); // Scalping net target profit (+0.3% tight default)
   const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-1.0); // -1.0% standard stop loss
   const [scalpingSpeed, setScalpingSpeed] = useState<number>(300); // 300ms (0.3s) fast execution speed
-  const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(true);
+  const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(false);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
   const [maxSlots, setMaxSlots] = useState<number>(3);
