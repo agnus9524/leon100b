@@ -37,6 +37,7 @@ import {
   Copy,
   Check,
   CheckCircle2,
+  PauseCircle,
   Info,
   Globe,
   Landmark,
@@ -1269,7 +1270,7 @@ export default function App() {
   }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, tradeLogs, activeTabId]);
 
   // Helper for tick-aware target sell price calculation to guarantee positive profit above tick size
-  const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number, currentMarketPrice?: number) => {
+  const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number) => {
     if (basePrice <= 0) return 0;
     
     let tickSize;
@@ -1288,21 +1289,6 @@ export default function App() {
       rounded = marketType === 'US' ? Number((basePrice + 0.01).toFixed(2)) : basePrice + tickSize;
     }
 
-    if (currentMarketPrice && currentMarketPrice > 0) {
-      let marketTick;
-      if (marketType === 'US') {
-        marketTick = 0.01;
-      } else {
-        marketTick = currentMarketPrice >= 500000 ? 1000 : currentMarketPrice >= 100000 ? 500 : currentMarketPrice >= 50000 ? 100 : currentMarketPrice >= 10000 ? 50 : currentMarketPrice >= 5000 ? 10 : 5;
-      }
-      const roundedMarket = marketType === 'US'
-        ? Number(currentMarketPrice.toFixed(2))
-        : Math.round(currentMarketPrice / marketTick) * marketTick;
-        
-      if (roundedMarket > rounded) {
-        return roundedMarket;
-      }
-    }
     return rounded;
   }, [marketType]); 
 
@@ -3496,7 +3482,7 @@ export default function App() {
       
       if (totalQty <= 0) return;
       
-      const targetSellPrice = calculateTargetSellPrice(newAvg, scalpingTargetProfit, currentStock?.price);
+      const targetSellPrice = calculateTargetSellPrice(newAvg, scalpingTargetProfit);
 
       // 기존 해당 종목 대기 매도 주문이 있으면 취소 후 갱신
       setPendingSellOrders(prev => prev.filter(o => o.symbol !== stockSymbol));
@@ -3513,7 +3499,7 @@ export default function App() {
       }, 300);
     } else {
       // 개별 슬롯 익절 모드: 각 슬롯별 매수가 기준 개별 매도 주문 등록
-      const targetSellPrice = calculateTargetSellPrice(buyPrice, scalpingTargetProfit, currentStock?.price);
+      const targetSellPrice = calculateTargetSellPrice(buyPrice, scalpingTargetProfit);
       setTimeout(() => {
         executeTrade(
           'SELL', 
@@ -3960,7 +3946,7 @@ export default function App() {
 
   // Auto-Sell Order Enforcer for Held Stocks (e.g. 동양 1주): Ensures all held stocks automatically register a target profit limit sell order
   useEffect(() => {
-    if (scalpingTargetProfit <= 0) return;
+    if (!isGapBotActive || scalpingTargetProfit <= 0) return;
 
     Object.entries(holdings).forEach(([symbol, qtyVal]) => {
       const numQty = Number(qtyVal) || 0;
@@ -3977,7 +3963,7 @@ export default function App() {
           const avgP = avgPrices[symbol] || stockObj.price;
           if (avgP <= 0) return;
 
-          const targetSellPrice = calculateTargetSellPrice(avgP, scalpingTargetProfit, stockObj?.price);
+          const targetSellPrice = calculateTargetSellPrice(avgP, scalpingTargetProfit);
 
           const autoOrderId = `AUTO-SELL-${symbol}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
           const newPendingSell: PendingSellOrder = {
@@ -4010,7 +3996,7 @@ export default function App() {
         }
       }
     });
-  }, [holdings, avgPrices, scalpingTargetProfit, kisConfig.isConnected, kisConfig.isRealOrderEnabled, stocks]);
+  }, [holdings, avgPrices, scalpingTargetProfit, kisConfig.isConnected, kisConfig.isRealOrderEnabled, stocks, isGapBotActive]);
 
   // Technical Indicators Utility Functions
   const calculateSMA = (data: number[], period: number) => {
@@ -7254,7 +7240,7 @@ export default function App() {
                     const totalQty = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
                     const avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
                     const avgProfitPct = avgPrice > 0 ? ((selectedStock.price - avgPrice) / avgPrice) * 100 : 0;
-                    const targetSellPrice = calculateTargetSellPrice(avgPrice, scalpingTargetProfit, selectedStock?.price);
+                    const targetSellPrice = calculateTargetSellPrice(avgPrice, scalpingTargetProfit);
 
                     return (
                       <motion.div 
@@ -7315,7 +7301,7 @@ export default function App() {
                       const buyPrice = typeof filledSlot === 'number' ? filledSlot : (filledSlot.price || 0);
                       const buyQty = typeof filledSlot === 'number' ? tradeQuantity : (filledSlot.quantity || 1);
                       const profitPct = buyPrice > 0 ? ((currentStock.price - buyPrice) / buyPrice) * 100 : 0;
-                      const targetSellPrice = calculateTargetSellPrice(buyPrice, scalpingTargetProfit, currentStock?.price);
+                      const targetSellPrice = calculateTargetSellPrice(buyPrice, scalpingTargetProfit);
 
                       const samePriceCount = gapInventory.filter(s => (typeof s === 'number' ? s : s.price) === buyPrice).length;
                       const samePriceTotalQty = gapInventory
@@ -7372,7 +7358,7 @@ export default function App() {
                     stockPendingBuys.forEach((pendingBuy, pIdx) => {
                       const orderPrice = pendingBuy.orderPrice;
                       const orderQty = pendingBuy.quantity;
-                      const targetSellPrice = calculateTargetSellPrice(orderPrice, scalpingTargetProfit, currentStock?.price);
+                      const targetSellPrice = calculateTargetSellPrice(orderPrice, scalpingTargetProfit);
 
                       activeSlots.push(
                         <motion.div 
@@ -7448,7 +7434,7 @@ export default function App() {
                                                INITIAL_STOCKS_KR.find(s => s.symbol === log.symbol) || 
                                                INITIAL_STOCKS.find(s => s.symbol === log.symbol) || currentStock;
                               const isBuy = log.type === 'BUY' || log.type === '매수';
-                              const targetPrice = isBuy && log.price > 0 ? calculateTargetSellPrice(log.price, scalpingTargetProfit, logStock.price) : 0;
+                              const targetPrice = isBuy && log.price > 0 ? calculateTargetSellPrice(log.price, scalpingTargetProfit) : 0;
 
                               return (
                                 <div key={`log-${lIdx}`} className="bg-black/40 border border-white/5 hover:border-white/10 rounded-xl p-3 text-xs font-mono space-y-1.5 transition-all">
