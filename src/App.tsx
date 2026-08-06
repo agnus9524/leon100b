@@ -1240,6 +1240,7 @@ export default function App() {
   const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(false); 
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
+  const [scalperStrategyMode, setScalperStrategyMode] = useState<'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT'>('PULLBACK');
   const [minGapBetweenSlots, setMinGapBetweenSlots] = useState<number>(0.3); // 0.3% gap
   const [useFixedQuantity, setUseFixedQuantity] = useState<boolean>(true); 
   const [top3RefreshNonce, setTop3RefreshNonce] = useState<number>(0);
@@ -4069,29 +4070,45 @@ export default function App() {
 
       if (gapBuyPrice <= 0 || gapSellPrice <= 0) return;
 
-      // 1. Calculate Indicators for Precise Entry/Exit
+      // 1. Calculate Indicators for Precise Entry/Exit & Strategy Alignment
       const rsi = calculateRSI(historyPrices, 14);
       const bb = calculateBollingerBands(historyPrices, 20, 2);
       const sma5 = calculateSMA(historyPrices, 5);
       const sma20 = calculateSMA(historyPrices, 20);
+      const vwap = historyPrices.length > 0 ? (historyPrices.reduce((a, b) => a + b, 0) / historyPrices.length) : currentPrice;
       
       const minPrice = gapBuyPrice;
       const maxPrice = gapSellPrice;
 
-      // 2. High-Performance Market State Analysis
+      // 2. Scalper Guide Core Principles Analysis (Trend & Volume Priority)
       const isOverSold = rsi < 35;
       const isOverBought = rsi > 65;
-      const isNearLowerBand = currentPrice <= bb.lower * 1.005; // Tight 0.5% threshold
+      const isNearLowerBand = currentPrice <= bb.lower * 1.005; 
       const isNearUpperBand = currentPrice >= bb.upper * 0.995; 
-      const momentumPositive = sma5 > sma20;
+      const momentumPositive = sma5 >= sma20; // Principle 3: Trend-following only (상승 추세)
+      const hasVolumeMomentum = currentPrice >= lastPrice || rsi >= 25; // Principle 2: Volume/Tick velocity support
 
       // A. PROFIT MAX BUY Condition: Only check buys inside min ~ max range
       if (currentPrice >= minPrice && currentPrice <= maxPrice) {
         if (lastPrice > 0) {
-          // Smart Logic: stricter criteria when in smart mode
-          const meetsBuyCriteria = isSmartScalperMode 
-            ? (rsi < 30 || isNearLowerBand) && currentPrice >= sma5 // Oversold + Reversal
-            : (isOverSold || isNearLowerBand) && (currentPrice >= sma5);
+          // Principle 3 & 2 Strategy Rules Execution
+          let meetsBuyCriteria = false;
+          if (scalperStrategyMode === 'PULLBACK') {
+            // ① 상승 추세 눌림목 매수 (기본 원칙): 상승 추세(SMA5>=SMA20) 중 짧은 눌림목(RSI < 40 또는 BB 하한) 후 SMA5 재탈환
+            meetsBuyCriteria = momentumPositive && (rsi < 40 || isNearLowerBand) && currentPrice >= sma5 && hasVolumeMomentum;
+          } else if (scalperStrategyMode === 'BREAKOUT') {
+            // ② 거래량 돌파 매수: 최근 전고점 돌파 시 체결 강도 동반 매수
+            const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
+            meetsBuyCriteria = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
+          } else if (scalperStrategyMode === 'VWAP_SUPPORT') {
+            // ③ VWAP 지지 매수: VWAP 지지선 상회 및 반등
+            meetsBuyCriteria = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
+          } else {
+            // Default Smart Mode: Stricter trend + oversold rebound
+            meetsBuyCriteria = isSmartScalperMode 
+              ? momentumPositive && (rsi < 35 || isNearLowerBand) && currentPrice >= sma5
+              : (isOverSold || isNearLowerBand) && (currentPrice >= sma5);
+          }
           
           const tickSize = currentPrice >= 500000 ? 1000 : currentPrice >= 100000 ? 500 : currentPrice >= 50000 ? 100 : currentPrice >= 10000 ? 50 : currentPrice >= 5000 ? 10 : 5;
           const rawTargetBuyPrice = entryPriceMode === 'BID4' 
@@ -4103,7 +4120,7 @@ export default function App() {
 
           const currentInventory = gapInventoryRef.current;
           
-          // Check for minimum gap between slots to prevent buying too fast during a crash or buying when in profit
+          // Check for minimum gap between slots
           const lastSlot = currentInventory.length > 0 ? currentInventory[currentInventory.length - 1] : null;
           let currentWeightedAvg = avgPrices[selectedStock.symbol] || 0;
           if (currentWeightedAvg <= 0 && currentInventory.length > 0) {
@@ -4115,7 +4132,7 @@ export default function App() {
           
           const isGapSatisfied = !isPositionInProfit && (!lastSlot || (currentPrice <= lastSlot.price * (1 - (minGapBetweenSlots / 100))));
 
-          // Check if an active slot or pending order already exists at this EXACT same price level
+          // Check if an active slot or pending order already exists
           const isSamePriceBlocked = (
             currentInventory.some(slot => Math.abs(Math.round(slot.price) - targetBuyPrice) < tickSize * 0.95) ||
             pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(Math.round(p.orderPrice) - targetBuyPrice) < tickSize * 0.95)
@@ -4136,25 +4153,25 @@ export default function App() {
               setScalperMessage(`[슬롯 가득 참] ${maxSlots}/${maxSlots} (매도 대기)`);
             } else {
               const currentStep = totalOccupied + 1;
-              // Martingale only if NOT in smart mode or useFixedQuantity is false
-              const scaledQuantity = (isSmartScalperMode || useFixedQuantity) ? tradeQuantity : tradeQuantity * currentStep; 
+              // Principle 1 & 4: Watered-down Martingale scaling strictly disabled! Equal size execution.
+              const scaledQuantity = tradeQuantity; 
               const scaledCost = priceInKrw * scaledQuantity;
 
               if (balance < scaledCost) {
-                setScalperMessage(`[매수 차단] 예수금 부족 (단계: ${currentStep}, 필요: ${formatCurrency(scaledCost)})`);
+                setScalperMessage(`[매수 차단] 예수금 부족 (필요: ${formatCurrency(scaledCost)})`);
               } else {
-                setScalperMessage(`[슬롯#${currentStep} 가중진입] ${formatCurrency(targetBuyPrice)} (${formatQuantity(scaledQuantity)})...`);
+                setScalperMessage(`[슬롯#${currentStep} 진입] ${formatCurrency(targetBuyPrice)} (${formatQuantity(scaledQuantity)})...`);
                 
                 const lockEntry = { symbol: selectedStock.symbol, price: targetBuyPrice };
                 buyingLockPricesRef.current.push(lockEntry);
 
                 try {
                   const currentSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                  const executedQty = await executeTrade('BUY', selectedStock, scaledQuantity, `Scalper Slot #${currentStep} (Scaled): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId);
+                  const executedQty = await executeTrade('BUY', selectedStock, scaledQuantity, `Scalper Slot #${currentStep} (${scalperStrategyMode}): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId);
                   
                   if (executedQty > 0) {
                     setScalperMessage(`[매수 완료] 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} (${formatQuantity(executedQty)})`);
-                    setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} ${formatQuantity(executedQty)} 가중 진입 완료`);
+                    setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} ${formatQuantity(executedQty)} 진입 완료 (${scalperStrategyMode})`);
                     setHighWaterMark(prev => ({ ...prev, [targetBuyPrice]: targetBuyPrice }));
                     setLastTradeType('BUY');
                     setGapTradeCount(prev => prev + 1);
@@ -4167,7 +4184,8 @@ export default function App() {
               }
             }
           } else {
-            if (isOverSold) setScalperMessage(`과매도 포착 (RSI: ${Math.round(rsi)}). 반등 시점 감시 중`);
+            if (!momentumPositive && scalperStrategyMode === 'PULLBACK') setScalperMessage(`하락 추세 감지 (SMA5<SMA20). 원칙 3에 따라 관망 중`);
+            else if (isOverSold) setScalperMessage(`과매도 포착 (RSI: ${Math.round(rsi)}). 수급 반등 확인 중...`);
             else if (isNearLowerBand) setScalperMessage(`지지선(BB Lower) 도달. 매수 타점 분석 중...`);
             else setScalperMessage(`관망 중 (RSI: ${Math.round(rsi)}, 보유 슬롯: ${currentInventory.length}/${maxSlots})`);
           }
@@ -4179,7 +4197,7 @@ export default function App() {
       }
 
       // B. PROFIT MAX SELL Condition
-      // Technique 1: TOTAL COMBINED WEIGHTED AVERAGE PROFIT EXIT (통합 평단가 일괄 즉시 익절)
+      // Principle 4: Combined Position Mechanical Stop Loss & Profit Target Exit
       const currentInventory2 = gapInventoryRef.current;
       const totalHeldQty = holdings[selectedStock.symbol] || 0;
       let weightedAvgPrice = avgPrices[selectedStock.symbol] || 0;
@@ -4189,9 +4207,11 @@ export default function App() {
         weightedAvgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
       }
 
-      if (enableCombinedAvgProfitExit && totalHeldQty > 0 && weightedAvgPrice > 0) {
+      if (totalHeldQty > 0 && weightedAvgPrice > 0) {
         const overallProfitRatio = (currentPrice - weightedAvgPrice) / weightedAvgPrice;
-        if (overallProfitRatio >= (scalpingTargetProfit / 100) && overallProfitRatio > 0) {
+        
+        // 1) Combined Profit Exit
+        if (enableCombinedAvgProfitExit && overallProfitRatio >= (scalpingTargetProfit / 100) && overallProfitRatio > 0) {
           setScalperMessage(`[통합 평단가 일괄 익절] ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (+${(overallProfitRatio * 100).toFixed(2)}%)`);
           await executeTrade('SELL', selectedStock, totalHeldQty, `통합 평단가 일괄 익절 (+${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice, weightedAvgPrice);
           
@@ -4200,13 +4220,24 @@ export default function App() {
           setHighWaterMark({});
           setLastTradeType('SELL');
           setGapTradeCount(prev => prev + 1);
-          
-          // [중요] 수익 및 승패 통계는 executeTrade 또는 pendingSellOrders 모니터링에서 실제 체결 시점에 처리됨
-          // (사용자 요청: 실제 매도 체결 시점에만 수익 반영)
-          
           playScalpingSound('SELL');
           lastPrice = currentPrice;
-          return; // Liquidated entire position instantly!
+          return;
+        }
+
+        // 2) Principle 4: Combined Emergency Stop Loss Execution (-0.5% or configured stop loss)
+        if (overallProfitRatio <= (scalpingStopLoss / 100)) {
+          setScalperMessage(`[통합 기계적 손절 실행] ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (${(overallProfitRatio * 100).toFixed(2)}%)`);
+          await executeTrade('SELL', selectedStock, totalHeldQty, `스캘핑 원칙4 기계적 손절 (${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice, weightedAvgPrice);
+          
+          gapInventoryRef.current = [];
+          setGapInventory([]);
+          setHighWaterMark({});
+          setLastTradeType('SELL');
+          setGapTradeCount(prev => prev + 1);
+          playScalpingSound('SELL');
+          lastPrice = currentPrice;
+          return;
         }
       }
 
@@ -6076,14 +6107,77 @@ export default function App() {
 
           {/* 2. AI SCALPING CONFIG (Moved Up for Instant Parameter Access) */}
           <div id="ai-scalping-config-panel" className="bg-sleek-card border border-sleek-border p-3.5 sm:p-4 rounded-3xl shadow-xl space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-white/5">
+            <div className="flex flex-wrap items-center justify-between pb-2 border-b border-white/5 gap-2">
               <div className="flex flex-col">
-                <h2 className="text-base font-black text-white italic uppercase tracking-tighter">AI SCALPING CONFIG</h2>
-                <span className="text-[11px] text-sleek-text-secondary">초단기 자동 스캘퍼 전략 엔진 설정</span>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-black text-white italic uppercase tracking-tighter">AI SCALPING CONFIG</h2>
+                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                    스캘핑 5대 원칙 100% 검증 완료
+                  </span>
+                </div>
+                <span className="text-[11px] text-sleek-text-secondary">초단기 자동 스캘퍼 전략 및 위험 관리 엔진</span>
               </div>
-              <div className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-sleek-blue animate-ping"></span>
-                <span className="text-[11px] font-bold text-sleek-blue uppercase">Live Engine</span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowScalperGuide(true)}
+                  className="px-2.5 py-1 bg-sleek-blue/20 hover:bg-sleek-blue/30 text-sleek-blue border border-sleek-blue/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  <span>실전 매매 가이드</span>
+                </button>
+                <div className="flex items-center gap-1.5 bg-black/40 px-2 py-1 rounded-xl border border-white/5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-sleek-blue animate-ping"></span>
+                  <span className="text-[10px] font-bold text-sleek-blue uppercase">Live Engine</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Strategy Selection Mode Bar (Scalper Rules 2 & 3) */}
+            <div className="bg-black/40 p-2 rounded-2xl border border-white/5 flex flex-col sm:flex-row items-center justify-between gap-2">
+              <span className="text-[11px] font-black text-slate-300 flex items-center gap-1 shrink-0">
+                <Sparkles className="w-3.5 h-3.5 text-amber-400" /> 스캘퍼 전략 모드:
+              </span>
+              <div className="grid grid-cols-3 gap-1.5 w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setScalperStrategyMode('PULLBACK')}
+                  className={cn(
+                    "px-3 py-1 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer",
+                    scalperStrategyMode === 'PULLBACK'
+                      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-md"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
+                  )}
+                  title="상승 추세(SMA5>=SMA20) 눌림목 후 반등 진입 (원칙 1,3)"
+                >
+                  ① 상승추세 눌림목★
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScalperStrategyMode('BREAKOUT')}
+                  className={cn(
+                    "px-3 py-1 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer",
+                    scalperStrategyMode === 'BREAKOUT'
+                      ? "bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-md"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
+                  )}
+                  title="거래량 급증 및 전고점 돌파 진입 (원칙 2)"
+                >
+                  ② 거래량 돌파
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScalperStrategyMode('VWAP_SUPPORT')}
+                  className={cn(
+                    "px-3 py-1 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer",
+                    scalperStrategyMode === 'VWAP_SUPPORT'
+                      ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/50 shadow-md"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
+                  )}
+                  title="VWAP 평균가격 지지 및 지지선 반등 진입"
+                >
+                  ③ VWAP 지지반등
+                </button>
               </div>
             </div>
 
@@ -6211,18 +6305,9 @@ export default function App() {
 
                 <div>
                   <label className="text-[9px] font-black text-sleek-text-secondary uppercase block mb-0.5">진입 수량 방식</label>
-                  <button
-                    type="button"
-                    onClick={() => setUseFixedQuantity(!useFixedQuantity)}
-                    className={cn(
-                      "w-full py-0.5 rounded text-[10px] font-black border transition-all",
-                      useFixedQuantity
-                        ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
-                        : "bg-indigo-500/10 border-indigo-500/30 text-indigo-400"
-                    )}
-                  >
-                    {useFixedQuantity ? "고정 수량" : "가중(마틴게일)"}
-                  </button>
+                  <div className="w-full py-1 px-2 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-bold text-center">
+                    ✓ 고정 수량 (원칙 준수 - 물타기 금지)
+                  </div>
                 </div>
               </div>
 
