@@ -4938,8 +4938,8 @@ export default function App() {
           </div>
 
           <div className="flex flex-col items-center justify-center text-center">
-            <h1 className="text-2xl font-black text-white mb-2 uppercase italic tracking-tighter">LEO 100B AI BOT</h1>
-            <p className="text-sleek-text-secondary text-sm mb-8 leading-relaxed">
+            <h1 className="text-lg sm:text-xl font-black text-white mb-2 uppercase italic tracking-tighter">LEO 100B AI BOT</h1>
+            <p className="text-sleek-text-secondary text-xs sm:text-sm mb-8 leading-relaxed">
               레오의 100억 주식매매 프로그램에 오신 것을 환영합니다.<br/>
               서비스 이용을 위해 로그인이 필요합니다.
             </p>
@@ -5609,7 +5609,7 @@ export default function App() {
               <Bot className="w-10 h-10 sm:w-12 sm:h-12 text-sleek-blue drop-shadow-[0_0_10px_rgba(30,144,255,0.5)]" />
             </div>
             
-            <h1 className="text-xl xs:text-2xl sm:text-3xl md:text-3xl lg:text-4xl font-black text-white mb-4 tracking-tight leading-none whitespace-nowrap">
+            <h1 className="text-base xs:text-lg sm:text-xl md:text-2xl font-black text-white mb-4 tracking-tight leading-snug break-keep max-w-full overflow-hidden text-ellipsis">
               <span className="text-sleek-blue">LEO 100B AI 봇</span>에 오신 것을 환영합니다
             </h1>
             
@@ -5716,7 +5716,9 @@ export default function App() {
       <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6">
           <div className="flex items-center gap-4 text-[11px] md:text-[13px] font-mono border-r border-sleek-border pr-4 md:pr-6">
             <div className="flex flex-col items-end">
-              <span className="text-[9px] md:text-[10px] text-sleek-text-secondary uppercase">User Account</span>
+              <span className="text-[10px] md:text-[11px] font-bold text-amber-300 truncate max-w-[160px] tracking-tight" title={currentUser?.email || undefined}>
+                {currentUser?.displayName || currentUser?.email || '아이디'}
+              </span>
               <div className="flex items-center gap-2">
                 {currentUser?.email === "agnus9524@gmail.com" && (
                   <button 
@@ -5912,8 +5914,7 @@ export default function App() {
                     className="flex items-center gap-1 text-[10px] font-bold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 active:scale-95 px-2 py-0.5 rounded-lg border border-amber-500/30 transition-all cursor-pointer disabled:opacity-50"
                     title="스캘퍼 최적 종목 갱신"
                   >
-                    <RefreshCw className={cn("w-3 h-3 text-amber-400", isRefreshingTop3 && "animate-spin")} />
-                    <span>갱신</span>
+                    <RefreshCw className={cn("w-3.5 h-3.5 text-amber-400", isRefreshingTop3 && "animate-spin")} />
                   </button>
                   <span className="text-[9px] font-mono text-amber-300 font-bold px-2 py-0.5 bg-amber-500/10 rounded-full border border-amber-500/20">
                     {marketType === 'KR' ? '국내' : '미국'}
@@ -7046,30 +7047,9 @@ export default function App() {
                           <div className="flex items-center gap-1.5">
                             <Briefcase className="w-3.5 h-3.5 text-amber-400" />
                             <h4 className="text-xs font-black text-white uppercase tracking-wider">보유 주식 현황</h4>
-                          </div>
-                          <div className="flex items-center gap-1">
-                            <button
-                              onClick={() => setHoldingsViewTab('KR')}
-                              className={cn(
-                                "text-[9px] font-bold px-2 py-0.5 rounded-full border transition-all",
-                                holdingsViewTab === 'KR'
-                                  ? "bg-sleek-blue/20 border-sleek-blue text-white"
-                                  : "bg-white/5 border-white/5 text-slate-400 hover:text-white"
-                              )}
-                            >
-                              국내
-                            </button>
-                            <button
-                              onClick={() => setHoldingsViewTab('US')}
-                              className={cn(
-                                "text-[9px] font-bold px-2 py-0.5 rounded-full border transition-all",
-                                holdingsViewTab === 'US'
-                                  ? "bg-sleek-blue/20 border-sleek-blue text-white"
-                                  : "bg-white/5 border-white/5 text-slate-400 hover:text-white"
-                              )}
-                            >
-                              미국
-                            </button>
+                            <span className="text-[9px] font-mono text-amber-300 font-bold px-1.5 py-0.5 bg-amber-500/10 rounded-md border border-amber-500/20">
+                              {marketType === 'KR' ? '국내' : '미국'}
+                            </span>
                           </div>
                         </div>
 
@@ -7079,14 +7059,14 @@ export default function App() {
                               if (Number(qty) <= 0) return false;
                               const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
                               const isKR = !isUS;
-                              return holdingsViewTab === 'KR' ? isKR : !isKR;
+                              return marketType === 'KR' ? isKR : isUS;
                             });
 
                             if (filteredHoldings.length === 0) {
                               return (
                                 <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center flex items-center justify-center">
                                   <p className="text-[11px] text-sleek-text-secondary">
-                                    {holdingsViewTab === 'KR' ? '보유 중인 국내 주식이 없습니다.' : '보유 중인 미국 주식이 없습니다.'}
+                                    {marketType === 'KR' ? '보유 중인 국내 주식이 없습니다.' : '보유 중인 미국 주식이 없습니다.'}
                                   </p>
                                 </div>
                               );
