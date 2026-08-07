@@ -4385,28 +4385,32 @@ export default function App() {
           
           const isGapSatisfied = !isPositionInProfit && (!lastSlot || (currentPrice <= lastSlot.price * (1 - (minGapBetweenSlots / 100))));
 
-          // Check if an active slot or pending order already exists
-          const isSamePriceBlocked = (
+          const inFlightBuyCount = buyingLockPricesRef.current.filter(p => p.symbol === selectedStock.symbol).length;
+          const pendingBuyCount = pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length;
+          const totalOccupied = currentInventory.length + pendingBuyCount + inFlightBuyCount;
+
+          // Check if an active slot, pending order, or in-flight lock already exists
+          const isSamePriceBlocked = !allowSamePriceEntry && (
             currentInventory.some(slot => Math.abs(slot.price - targetBuyPrice) < tickSize * 0.95) ||
-            pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.orderPrice - targetBuyPrice) < tickSize * 0.95)
+            pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.orderPrice - targetBuyPrice) < tickSize * 0.95) ||
+            buyingLockPricesRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.price - targetBuyPrice) < tickSize * 0.95)
           );
           
-          const isLockActive = buyingLockPricesRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.price - targetBuyPrice) < tickSize * 0.95);
+          const isLockActive = inFlightBuyCount > 0;
 
           const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
 
           // Buy Trigger: Check gap and criteria
-          if (isGapSatisfied && (meetsBuyCriteria || (immediateEntry && (currentInventory.length + pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length) < maxSlots))) {
-            const totalOccupied = currentInventory.length + pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length;
+          if (isGapSatisfied && (meetsBuyCriteria || (immediateEntry && totalOccupied < maxSlots))) {
             if (isSamePriceBlocked) {
-              setScalperMessage(`[중복 차단] ${formatCurrency(targetBuyPrice)} 보유 중`);
-            } else if (isLockActive) {
-              setScalperMessage(`[처리 중] ${formatCurrency(targetBuyPrice)} 대기...`);
+              setScalperMessage(`[중복 차단] ${formatCurrency(targetBuyPrice)} 보유/주문 중`);
             } else if (totalOccupied >= maxSlots) {
-              setScalperMessage(`[슬롯 가득 참] ${maxSlots}/${maxSlots} (매도 대기)`);
+              setScalperMessage(`[슬롯 가득 참] ${totalOccupied}/${maxSlots} (매도 대기)`);
+            } else if (isLockActive) {
+              setScalperMessage(`[주문 처리 중] ${formatCurrency(targetBuyPrice)} API 통신 대기...`);
             } else {
               const currentStep = totalOccupied + 1;
-              // Principle 1 & 4: Watered-down Martingale scaling strictly disabled! Equal size execution.
+              // Principle 1 & 4: Equal size execution.
               const scaledQuantity = tradeQuantity; 
               const scaledCost = priceInKrw * scaledQuantity;
 
@@ -4432,7 +4436,7 @@ export default function App() {
                     playScalpingSound('BUY');
                   }
                 } finally {
-                  buyingLockPricesRef.current = buyingLockPricesRef.current.filter(p => !(p.symbol === selectedStock.symbol && Math.abs(Math.round(p.price) - targetBuyPrice) < 0.1));
+                  buyingLockPricesRef.current = buyingLockPricesRef.current.filter(p => p !== lockEntry);
                 }
               }
             }
