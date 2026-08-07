@@ -1361,6 +1361,7 @@ export default function App() {
   const [pendingSellOrders, setPendingSellOrders] = useState<PendingSellOrder[]>([]);
   const pendingSellOrdersRef = React.useRef<PendingSellOrder[]>([]);
   const buyingLockPricesRef = React.useRef<{ symbol: string; price: number }[]>([]);
+  const autoSellInFlightRef = React.useRef<Set<string>>(new Set());
   useEffect(() => {
     pendingBuyOrdersRef.current = pendingBuyOrders;
   }, [pendingBuyOrders]);
@@ -4161,11 +4162,15 @@ export default function App() {
   useEffect(() => {
     if (!isGapBotActive || scalpingTargetProfit <= 0) return;
 
-    Object.entries(holdings).forEach(([symbol, qtyVal]) => {
-      const numQty = Number(qtyVal) || 0;
-      if (numQty > 0) {
+    const runAutoSell = async () => {
+      for (const [symbol, qtyVal] of Object.entries(holdings)) {
+        const numQty = Number(qtyVal) || 0;
+        if (numQty <= 0) continue;
+
+        if (autoSellInFlightRef.current.has(symbol)) continue;
+
         const stockObj = stocksRef.current.find(s => s.symbol === symbol) || stocks.find(s => s.symbol === symbol) || INITIAL_STOCKS_KR.find(s => s.symbol === symbol);
-        if (!stockObj) return;
+        if (!stockObj) continue;
 
         const currentPendingSellQty = pendingSellOrdersRef.current
           .filter(o => o.symbol === symbol)
@@ -4174,41 +4179,55 @@ export default function App() {
         if (currentPendingSellQty < numQty) {
           const missingQty = numQty - currentPendingSellQty;
           const avgP = avgPrices[symbol] || stockObj.price;
-          if (avgP <= 0) return;
+          if (avgP <= 0) continue;
 
           const targetSellPrice = calculateTargetSellPrice(avgP, scalpingTargetProfit);
 
-          const autoOrderId = `AUTO-SELL-${symbol}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-          const newPendingSell: PendingSellOrder = {
-            id: autoOrderId,
-            symbol: symbol,
-            orderPrice: targetSellPrice,
-            quantity: missingQty,
-            createdAt: Date.now(),
-            isSimulated: !kisConfig.isConnected || !kisConfig.isRealOrderEnabled,
-            type: 'LIMIT_SELL',
-            reason: `[체결 즉시 자동 매도] 보유 주식 (${missingQty}주) +${scalpingTargetProfit}% 익절 지정가 매도 주문`,
-            buyPrice: avgP
-          };
+          if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
+            // Real KIS Mode: Transmit actual limit sell order to Korea Investment & Securities
+            autoSellInFlightRef.current.add(symbol);
+            try {
+              await executeTrade('SELL', stockObj, missingQty, `[자동 매도] 평단가 대비 +${scalpingTargetProfit}% 익절 지정가 매도`, targetSellPrice, avgP);
+            } catch (err) {
+              console.error("Auto-sell executeTrade error:", err);
+            } finally {
+              autoSellInFlightRef.current.delete(symbol);
+            }
+          } else {
+            // Simulated Mode: Register as simulated pending sell order
+            const autoOrderId = `AUTO-SELL-${symbol}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+            const newPendingSell: PendingSellOrder = {
+              id: autoOrderId,
+              symbol: symbol,
+              orderPrice: targetSellPrice,
+              quantity: missingQty,
+              createdAt: Date.now(),
+              isSimulated: true,
+              type: 'LIMIT_SELL',
+              reason: `[체결 즉시 자동 매도] 보유 주식 (${missingQty}주) +${scalpingTargetProfit}% 익절 지정가 매도 주문`,
+              buyPrice: avgP
+            };
 
-          setPendingSellOrders(prev => {
-            const currentQtyInPrev = prev.filter(o => o.symbol === symbol).reduce((a, b) => a + b.quantity, 0);
-            if (currentQtyInPrev >= numQty) return prev;
-            return [...prev, newPendingSell];
-          });
+            setPendingSellOrders(prev => {
+              const currentQtyInPrev = prev.filter(o => o.symbol === symbol).reduce((a, b) => a + b.quantity, 0);
+              if (currentQtyInPrev >= numQty) return prev;
+              return [...prev, newPendingSell];
+            });
 
-          // Ensure slot inventory has the slot representation so it shows up in TRADE LOGS
-          if (gapInventoryRef.current.length === 0) {
-            const autoSlot = { id: `SLOT-HELD-${symbol}`, price: avgP, quantity: missingQty };
-            gapInventoryRef.current = [autoSlot];
-            setGapInventory([autoSlot]);
+            if (gapInventoryRef.current.length === 0) {
+              const autoSlot = { id: `SLOT-HELD-${symbol}`, price: avgP, quantity: missingQty };
+              gapInventoryRef.current = [autoSlot];
+              setGapInventory([autoSlot]);
+            }
+
+            addLog(symbol, '매도', targetSellPrice, missingQty, `[가상 자동 매도 주문] 평단가 ${formatCurrency(avgP)} 대비 +${scalpingTargetProfit}% (목표가: ${formatCurrency(targetSellPrice)})`);
+            showNotification(`${stockObj.name} 보유 ${formatQuantity(missingQty)}주 가상 매도 주문이 +${scalpingTargetProfit}% 목표가(${formatCurrency(targetSellPrice)})에 자동 등록되었습니다.`, "info");
           }
-
-          addLog(symbol, '매도', targetSellPrice, missingQty, `[자동 매도 주문] 평단가 ${formatCurrency(avgP)} 대비 +${scalpingTargetProfit}% (목표가: ${formatCurrency(targetSellPrice)})`);
-          showNotification(`${stockObj.name} 보유 ${formatQuantity(missingQty)} 매도 주문이 +${scalpingTargetProfit}% 목표가(${formatCurrency(targetSellPrice)})에 자동 등록되었습니다.`, "success");
         }
       }
-    });
+    };
+
+    runAutoSell();
   }, [holdings, avgPrices, scalpingTargetProfit, kisConfig.isConnected, kisConfig.isRealOrderEnabled, stocks, isGapBotActive]);
 
   // Technical Indicators Utility Functions
@@ -4909,7 +4928,6 @@ export default function App() {
                             if (actualSellable <= 0) {
                                 setBotStatus(`[매도 건너뜀] KIS 실제 매도 가능 수량 0주`);
                                 setScalperMessage("실제 보유 주식이 없거나 미체결 상태여서 매도 대기 (실거래 미체결 대기)");
-                                addLog(stock.symbol, '매도', tradePrice, finalAmount, `[주문건너뜀] KIS 실제 매도 가능 수량 0주 (미체결 대기)`);
                                 showNotification(`매도 대기: 실제 계좌에 보유 중인 ${stock.name} 매도 가능 수량이 0주입니다.`, "info");
                                 return 0;
                             }
