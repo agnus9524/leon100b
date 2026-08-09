@@ -3199,6 +3199,7 @@ export default function App() {
               const priceData = await kisService.getPrice(s.symbol);
               if (priceData) {
                 const realPrice = priceData.current;
+                const safeHist = Array.isArray(s.history) ? s.history : [];
                 
                 return {
                   ...s,
@@ -3208,7 +3209,7 @@ export default function App() {
                   volume: priceData.volume,
                   isRealTime: true,
                   lastUpdated: new Date().toLocaleTimeString(),
-                  history: [...s.history.slice(1), { 
+                  history: [...safeHist.slice(1), { 
                     time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }), 
                     price: realPrice 
                   }]
@@ -3235,7 +3236,7 @@ export default function App() {
             const realPrice = priceData.current;
             setStocks(prev => prev.map(s => {
               if (s.symbol !== selectedSymbol) return s;
-              const newHistory = [...s.history];
+              const newHistory = Array.isArray(s.history) ? [...s.history] : [];
               if (newHistory.length > 0) {
                 newHistory[newHistory.length - 1] = {
                   ...newHistory[newHistory.length - 1],
@@ -3312,7 +3313,8 @@ export default function App() {
         const basePrice = stock.basePrice || (stock.price - stock.change) || newPrice;
         const { change, changePercent } = calcStockChange(newPrice, basePrice, isUS ? 'US' : 'KR');
 
-        const newHistory = [...stock.history.slice(1), { time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }), price: newPrice }];
+        const safeHist = Array.isArray(stock.history) ? stock.history : [];
+        const newHistory = [...safeHist.slice(1), { time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }), price: newPrice }];
         return {
           ...stock,
           price: newPrice,
@@ -3435,7 +3437,8 @@ export default function App() {
         const currentNews = newsCache[stockToAnalyze.symbol]?.data || [];
         const newsContext = currentNews.map(n => `제목: ${n.title}, 요약: ${n.summary}`).join('\n');
 
-        const historyPrices = stockToAnalyze.history.map(h => h.price);
+        const safeStockHist = Array.isArray(stockToAnalyze.history) ? stockToAnalyze.history : [];
+        const historyPrices = safeStockHist.map(h => h.price);
         const rsi = calculateRSI(historyPrices, 14);
         const bb = calculateBollingerBands(historyPrices, 20, 2);
         const sma5 = calculateSMA(historyPrices, 5);
@@ -3447,7 +3450,7 @@ export default function App() {
         핵심 목표: 연 수익률 40% 이상의 공격적 자산 증식
         
         기술적 데이터:
-        - 현재가: $${stockToAnalyze.price} (최근 5봉: ${JSON.stringify(stockToAnalyze.history.slice(-5))})
+        - 현재가: $${stockToAnalyze.price} (최근 5봉: ${JSON.stringify(safeStockHist.slice(-5))})
         - RSI(14): ${rsi.toFixed(2)} (${rsi < 30 ? '과매도' : rsi > 70 ? '과매수' : '중립'})
         - 볼린저 밴드: 상단($${bb.upper.toFixed(2)}), 중단($${bb.middle.toFixed(2)}), 하단($${bb.lower.toFixed(2)})
         - 이동평균선: SMA5($${sma5.toFixed(2)}), SMA20($${sma20.toFixed(2)}) -> ${sma5 > sma20 ? '골든크로스/상승추세' : '데드크로스/하락추세'}
@@ -3607,7 +3610,7 @@ export default function App() {
         const basePrice = stock.basePrice || (stock.price - stock.change) || newPrice;
         const { change, changePercent } = calcStockChange(newPrice, basePrice, isUS ? 'US' : 'KR');
 
-        const newHistory = [...stock.history];
+        const newHistory = Array.isArray(stock.history) ? [...stock.history] : [];
         if (newHistory.length > 0) {
           newHistory[newHistory.length - 1] = {
             ...newHistory[newHistory.length - 1],
@@ -4316,7 +4319,7 @@ export default function App() {
       // Find the latest price in current stocks array
       const currentStock = stocksRef.current.find(s => s.symbol === selectedStock.symbol) || selectedStock;
       const currentPrice = currentStock.price;
-      const historyPrices = currentStock.history.map(h => h.price);
+      const historyPrices = Array.isArray(currentStock?.history) ? currentStock.history.map(h => h.price) : [currentPrice];
 
       if (gapBuyPrice <= 0 || gapSellPrice <= 0) return;
 

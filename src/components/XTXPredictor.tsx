@@ -26,7 +26,8 @@ export const XTXPredictor: React.FC<XTXPredictorProps> = ({ symbol, name, histor
     if (isAnalyzing) return;
     setIsAnalyzing(true);
     try {
-      const result = await aiTradingService.analyzeStock(symbol, history, name);
+      const safeHistory = Array.isArray(history) ? history : [];
+      const result = await aiTradingService.analyzeStock(symbol, safeHistory, name);
       setSignal(result);
       setLastAnalysis(Date.now());
     } catch (error) {
@@ -40,7 +41,7 @@ export const XTXPredictor: React.FC<XTXPredictorProps> = ({ symbol, name, histor
     performAnalysis();
     const interval = setInterval(performAnalysis, 300000);
     return () => clearInterval(interval);
-  }, [symbol, history.length]);
+  }, [symbol, (Array.isArray(history) ? history.length : 0)]);
 
   return (
     <div className="bg-[#0a0a0a] border-2 border-white/10 rounded-[32px] p-8 overflow-hidden relative shadow-2xl">

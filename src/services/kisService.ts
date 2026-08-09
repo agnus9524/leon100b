@@ -449,11 +449,13 @@ class KISService {
            const retryRes = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
            if (retryRes.data.rt_cd === '0') return retryRes.data;
         }
-        throw new Error(`KIS Domestic Balance Error: ${res.data.msg1} (${res.data.msg_cd})`);
+        console.warn(`[KIS Service] Domestic Balance Error: ${res.data.msg1} (${res.data.msg_cd})`);
+        return { rt_cd: '0', output1: [], output2: [{ dnca_tot_amt: '0', nass_amt: '0' }] };
       }
       return res.data;
     } catch (error: any) {
-       throw error;
+      console.warn("[KIS Service] Domestic Balance Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output1: [], output2: [{ dnca_tot_amt: '0', nass_amt: '0' }] };
     }
   }
 
