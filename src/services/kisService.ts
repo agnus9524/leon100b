@@ -460,152 +460,182 @@ class KISService {
   }
 
   public async getDomesticBuyableAmount(symbol: string, price: string = '0', ordDvsn: string = '01') {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/domestic-stock/v1/trading/inquire-psbl-order';
-    
-    const headers = {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': 'TTTC8908R',
-      'custtype': 'P',
-    };
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0' } };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/trading/inquire-psbl-order';
+      
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': 'TTTC8908R',
+        'custtype': 'P',
+      };
 
-    const params = {
-      CANO: this.config.accountNo,
-      ACNT_PRDT_CD: this.config.accountCode,
-      PDNO: symbol,
-      ORD_UNPR: ordDvsn === '00' ? price : '0',
-      ORD_DVSN: ordDvsn,
-      CMA_EVLU_AMT_ICLD_YN: 'N',
-      OVRS_ICLD_YN: 'N',
-      CANO_PWD: this.config.accountPw || ''
-    };
+      const params = {
+        CANO: this.config.accountNo,
+        ACNT_PRDT_CD: this.config.accountCode,
+        PDNO: symbol,
+        ORD_UNPR: ordDvsn === '00' ? price : '0',
+        ORD_DVSN: ordDvsn,
+        CMA_EVLU_AMT_ICLD_YN: 'N',
+        OVRS_ICLD_YN: 'N',
+        CANO_PWD: this.config.accountPw || ''
+      };
 
-    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-    return res.data;
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      if (res.data.rt_cd && res.data.rt_cd !== '0') {
+        console.warn(`[KIS Service] Domestic Buyable Amount Error: ${res.data.msg1} (${res.data.msg_cd})`);
+        return { rt_cd: '0', output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0' } };
+      }
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Domestic Buyable Amount Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0' } };
+    }
   }
 
   public async getOverseasBuyableAmount(symbol: string, price: string = '0', ovrsExchCd: string = 'NASD') {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/overseas-stock/v1/trading/inquire-psbl-order';
-    
-    const headers = {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': 'TTTS3007R',
-      'custtype': 'P',
-    };
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: { max_ord_psbl_qty: '0' } };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/overseas-stock/v1/trading/inquire-psbl-order';
+      
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': 'TTTS3007R',
+        'custtype': 'P',
+      };
 
-    const params = {
-      CANO: this.config.accountNo,
-      ACNT_PRDT_CD: this.config.accountCode,
-      OVRS_EXCH_CD: ovrsExchCd,
-      PDNO: symbol,
-      ORD_UNPR: price,
-      ITEM_DVSN: '01',
-      CANO_PWD: this.config.accountPw || ''
-    };
+      const params = {
+        CANO: this.config.accountNo,
+        ACNT_PRDT_CD: this.config.accountCode,
+        OVRS_EXCH_CD: ovrsExchCd,
+        PDNO: symbol,
+        ORD_UNPR: price,
+        ITEM_DVSN: '01',
+        CANO_PWD: this.config.accountPw || ''
+      };
 
-    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-    return res.data;
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      if (res.data.rt_cd && res.data.rt_cd !== '0') {
+        console.warn(`[KIS Service] Overseas Buyable Amount Error: ${res.data.msg1} (${res.data.msg_cd})`);
+        return { rt_cd: '0', output: { max_ord_psbl_qty: '0', ord_psbl_qty: '0' } };
+      }
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Overseas Buyable Amount Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output: { max_ord_psbl_qty: '0', ord_psbl_qty: '0' } };
+    }
   }
 
   public async getDomesticSellableQuantity(symbol: string) {
-    if (!this.config) throw new Error("KIS Config not initialized");
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: { ord_psbl_qty: '0' } };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/trading/inquire-psbl-sell';
+      
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': 'TTTC8408R',
+        'custtype': 'P',
+      };
 
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/domestic-stock/v1/trading/inquire-psbl-sell';
-    
-    const headers = {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': 'TTTC8408R',
-      'custtype': 'P',
-    };
+      const params = {
+        CANO: this.config.accountNo,
+        ACNT_PRDT_CD: this.config.accountCode,
+        PDNO: symbol,
+        CANO_PWD: this.config.accountPw || ''
+      };
 
-    const params = {
-      CANO: this.config.accountNo,
-      ACNT_PRDT_CD: this.config.accountCode,
-      PDNO: symbol,
-      CANO_PWD: this.config.accountPw || ''
-    };
-
-    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-    return res.data;
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Domestic Sellable Quantity Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output: { ord_psbl_qty: '0' } };
+    }
   }
 
   public async getPeriodTradeProfit(startDate: string, endDate: string, symbol: string = '', sortDvsn: string = '02') {
-    if (!this.config) throw new Error("KIS Config not initialized");
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output1: [], output2: [] };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/trading/inquire-period-trade-profit';
 
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/domestic-stock/v1/trading/inquire-period-trade-profit';
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': 'TTTC8715R',
+        'custtype': 'P',
+      };
 
-    const headers = {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': 'TTTC8715R',
-      'custtype': 'P',
-    };
+      const params = {
+        CANO: this.config.accountNo,
+        ACNT_PRDT_CD: this.config.accountCode,
+        SORT_DVSN: sortDvsn,
+        PDNO: symbol,
+        INQR_STRT_DT: startDate,
+        INQR_END_DT: endDate,
+        CTX_AREA_NK100: '',
+        CBLC_DVSN: '00',
+        CTX_AREA_FK100: ''
+      };
 
-    const params = {
-      CANO: this.config.accountNo,
-      ACNT_PRDT_CD: this.config.accountCode,
-      SORT_DVSN: sortDvsn,
-      PDNO: symbol,
-      INQR_STRT_DT: startDate,
-      INQR_END_DT: endDate,
-      CTX_AREA_NK100: '',
-      CBLC_DVSN: '00',
-      CTX_AREA_FK100: ''
-    };
-
-    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-    return res.data;
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Period Trade Profit Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output1: [], output2: [] };
+    }
   }
 
   public async getDomesticOrderExecutions(startDate: string, endDate: string, oderFg: '00' | '01' | '02' = '00', prcsDvsn: '00' | '01' | '02' = '00') {
-    if (!this.config) throw new Error("KIS Config not initialized");
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output1: [], output2: [] };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/trading/inquire-daily-ccnl';
+      
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': 'TTTC8001R',
+        'custtype': 'P',
+      };
 
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/domestic-stock/v1/trading/inquire-daily-ccnl';
-    
-    const headers = {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': 'TTTC8001R',
-      'custtype': 'P',
-    };
+      const params = {
+        CANO: this.config.accountNo,
+        ACNT_PRDT_CD: this.config.accountCode,
+        INQR_STRT_DT: startDate,
+        INQR_END_DT: endDate,
+        SND_CD: '',
+        SMRT_OTSN_YN: 'N',
+        SMRT_SND_CD: '',
+        ODER_FG_CD: oderFg,
+        CTX_AREA_FK100: '',
+        CTX_AREA_NK100: '',
+        INQR_DVSN: '00',
+        PRCS_DVSN: prcsDvsn,
+        CANO_PWD: this.config.accountPw || ''
+      };
 
-    const params = {
-      CANO: this.config.accountNo,
-      ACNT_PRDT_CD: this.config.accountCode,
-      INQR_STRT_DT: startDate,
-      INQR_END_DT: endDate,
-      SND_CD: '',
-      SMRT_OTSN_YN: 'N',
-      SMRT_SND_CD: '',
-      ODER_FG_CD: oderFg,
-      CTX_AREA_FK100: '',
-      CTX_AREA_NK100: '',
-      INQR_DVSN: '00',
-      PRCS_DVSN: prcsDvsn,
-      CANO_PWD: this.config.accountPw || ''
-    };
-
-    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-    return res.data;
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Domestic Order Executions Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output1: [], output2: [] };
+    }
   }
 
   public async checkOrderExecution(odno: string) {
@@ -721,32 +751,35 @@ class KISService {
   }
 
   public async getDomesticDailyPrice(symbol: string, periodCode: 'D' | 'W' | 'M' = 'D') {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/domestic-stock/v1/quotations/inquire-daily-price';
-    
-    // Daily Price: FHKST01010400
-    const trId = 'FHKST01010400';
-    console.log(`[KIS Service] Domestic Daily Price TR-ID: ${trId} for ${symbol}`);
-    
-    const headers = {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': trId,
-      'custtype': 'P',
-    };
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: [] };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/quotations/inquire-daily-price';
+      
+      const trId = 'FHKST01010400';
+      
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': trId,
+        'custtype': 'P',
+      };
 
-    const params = {
-      FID_COND_MRKT_DIV_CODE: 'J',
-      FID_INPUT_ISCD: symbol,
-      FID_PERIOD_DIV_CODE: periodCode,
-      FID_ORG_ADJ_PRC: '0000000001',
-    };
+      const params = {
+        FID_COND_MRKT_DIV_CODE: 'J',
+        FID_INPUT_ISCD: symbol,
+        FID_PERIOD_DIV_CODE: periodCode,
+        FID_ORG_ADJ_PRC: '0000000001',
+      };
 
-    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-    return res.data;
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Domestic Daily Price Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output: [] };
+    }
   }
 
   private lastRequestTime = 0;
@@ -813,8 +846,8 @@ class KISService {
           continue;
         }
 
-        console.warn(`[KIS Service] Domestic Price (${trId}) failed for ${symbol}: ${lastError}`);
-        break; // Non-retryable error, break attempt loop
+        console.warn(`[KIS Service] Domestic Price fetch failed for ${symbol}: ${lastError}`);
+        return null;
       } catch (error: any) {
         lastError = error.response?.data?.msg1 || error.message;
         const status = error.response?.status;
@@ -827,107 +860,128 @@ class KISService {
       }
     }
     
-    throw new Error(`주가 조회 실패: ${lastError}`);
+    console.warn(`[KIS Service] Domestic Price (${trId}) reached max retries for ${symbol}: ${lastError}`);
+    return null;
   }
 
   public async getDomesticMinuteChart(symbol: string, time: string = '') {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice';
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output2: [] };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/quotations/inquire-time-itemchartprice';
 
-    const headers = {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': 'FHKST03010200', // Domestic Minute Chart
-      'custtype': 'P'
-    };
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': 'FHKST03010200', // Domestic Minute Chart
+        'custtype': 'P'
+      };
 
-    const params = {
-      FID_ETC_CLS_CODE: '',
-      FID_COND_MRKT_DIV_CODE: 'J',
-      FID_INPUT_ISCD: symbol,
-      FID_TERM_GUBUN_CODE: '1', // 1: Minute
-      FID_INPUT_HOUR_1: time // e.g. "153000" or empty for current
-    };
+      const params = {
+        FID_ETC_CLS_CODE: '',
+        FID_COND_MRKT_DIV_CODE: 'J',
+        FID_INPUT_ISCD: symbol,
+        FID_TERM_GUBUN_CODE: '1', // 1: Minute
+        FID_INPUT_HOUR_1: time // e.g. "153000" or empty for current
+      };
 
-    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-    return res.data;
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Domestic Minute Chart Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output2: [] };
+    }
   }
 
   public async getOverseasMinuteChart(symbol: string, excd: string = 'NAS', time: string = '') {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice';
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output2: [] };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice';
 
-    const headers = {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': 'HHDFS76010100', // US Minute Chart
-      'custtype': 'P'
-    };
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': 'HHDFS76010100', // US Minute Chart
+        'custtype': 'P'
+      };
 
-    const params = {
-      AUTH: '',
-      EXCD: excd,
-      SYMB: symbol,
-      NMIN: '1', // 1 minute
-      PINC: '0', // Include current
-      NEXT: '',
-      FILL: ''
-    };
+      const params = {
+        AUTH: '',
+        EXCD: excd,
+        SYMB: symbol,
+        NMIN: '1', // 1 minute
+        PINC: '0', // Include current
+        NEXT: '',
+        FILL: ''
+      };
 
-    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-    return res.data;
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Overseas Minute Chart Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output2: [] };
+    }
   }
 
   public async getDomesticOvertimePrice(symbol: string, marketCode: string = 'J') {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/domestic-stock/v1/quotations/inquire-overtime-price';
-    
-    const headers = {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': 'FHPST02300000',
-      'custtype': 'P'
-    };
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: {} };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/quotations/inquire-overtime-price';
+      
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': 'FHPST02300000',
+        'custtype': 'P'
+      };
 
-    const params = {
-      FID_COND_MRKT_DIV_CODE: marketCode,
-      FID_INPUT_ISCD: symbol
-    };
+      const params = {
+        FID_COND_MRKT_DIV_CODE: marketCode,
+        FID_INPUT_ISCD: symbol
+      };
 
-    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-    return res.data;
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Domestic Overtime Price Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output: {} };
+    }
   }
 
   public async getDomesticExecutionInfo(symbol: string, marketCode: string = 'J') {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/domestic-stock/v1/quotations/inquire-ccnl';
-    
-    const headers = {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': 'FHKST01010300',
-      'custtype': 'P'
-    };
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: [] };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/quotations/inquire-ccnl';
+      
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': 'FHKST01010300',
+        'custtype': 'P'
+      };
 
-    const params = {
-      FID_COND_MRKT_DIV_CODE: marketCode,
-      FID_INPUT_ISCD: symbol
-    };
+      const params = {
+        FID_COND_MRKT_DIV_CODE: marketCode,
+        FID_INPUT_ISCD: symbol
+      };
 
-    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-    return res.data;
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Domestic Execution Info Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output: [] };
+    }
   }
 
   public async getExchangeRate() {
