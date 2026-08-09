@@ -152,30 +152,37 @@ export const XTXPredictor: React.FC<XTXPredictorProps> = ({ symbol, name, histor
             </div>
 
             {/* Trading Levels */}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-rose-500/5 border border-rose-500/10 rounded-[20px] p-5">
-                <p className="text-xs text-rose-400 font-bold tracking-widest mb-2 flex justify-between">
-                  손절가 (Stop Loss)
-                  <span className="font-mono">
-                    {(((signal.stopLoss - history[history.length - 1].price) / history[history.length - 1].price) * 100).toFixed(2)}%
-                  </span>
-                </p>
-                <p className="text-2xl font-black text-white">
-                  {marketType === 'US' ? '$' : '₩'}{signal.stopLoss.toLocaleString()}
-                </p>
-              </div>
-              <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-[20px] p-5">
-                <p className="text-xs text-emerald-400 font-bold tracking-widest mb-2 flex justify-between">
-                  목표가 (Take Profit)
-                  <span className="font-mono">
-                    {(((signal.targetPrice - history[history.length - 1].price) / history[history.length - 1].price) * 100).toFixed(2)}%
-                  </span>
-                </p>
-                <p className="text-2xl font-black text-white">
-                  {marketType === 'US' ? '$' : '₩'}{signal.targetPrice.toLocaleString()}
-                </p>
-              </div>
-            </div>
+            {(() => {
+              const lastHistPrice = (history && history.length > 0) ? history[history.length - 1]?.price : 0;
+              const stopLossPct = (lastHistPrice && signal?.stopLoss) ? (((signal.stopLoss - lastHistPrice) / lastHistPrice) * 100).toFixed(2) : "0.00";
+              const targetPricePct = (lastHistPrice && signal?.targetPrice) ? (((signal.targetPrice - lastHistPrice) / lastHistPrice) * 100).toFixed(2) : "0.00";
+              return (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="bg-rose-500/5 border border-rose-500/10 rounded-[20px] p-5">
+                    <p className="text-xs text-rose-400 font-bold tracking-widest mb-2 flex justify-between">
+                      손절가 (Stop Loss)
+                      <span className="font-mono">
+                        {stopLossPct}%
+                      </span>
+                    </p>
+                    <p className="text-2xl font-black text-white">
+                      {marketType === 'US' ? '$' : '₩'}{(signal?.stopLoss || 0).toLocaleString()}
+                    </p>
+                  </div>
+                  <div className="bg-emerald-500/5 border border-emerald-500/10 rounded-[20px] p-5">
+                    <p className="text-xs text-emerald-400 font-bold tracking-widest mb-2 flex justify-between">
+                      목표가 (Take Profit)
+                      <span className="font-mono">
+                        {targetPricePct}%
+                      </span>
+                    </p>
+                    <p className="text-2xl font-black text-white">
+                      {marketType === 'US' ? '$' : '₩'}{(signal?.targetPrice || 0).toLocaleString()}
+                    </p>
+                  </div>
+                </div>
+              );
+            })()}
 
             <button
               onClick={() => onExecuteTrade?.(signal)}

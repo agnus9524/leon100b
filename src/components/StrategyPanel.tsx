@@ -176,13 +176,13 @@ export const StrategyPanel: React.FC = () => {
               <div className="grid grid-cols-3 gap-4">
                 <div className="bg-white/5 border border-white/5 rounded-2xl p-4">
                   <p className="text-[9px] text-sleek-text-secondary uppercase mb-1">Total Return</p>
-                  <p className={cn("text-lg font-black italic", backtestResult.totalReturn >= 0 ? "text-sleek-green" : "text-sleek-red")}>
-                    {backtestResult.totalReturn >= 0 ? '+' : ''}{backtestResult.totalReturn.toFixed(2)}%
+                  <p className={cn("text-lg font-black italic", (backtestResult?.totalReturn || 0) >= 0 ? "text-sleek-green" : "text-sleek-red")}>
+                    {(backtestResult?.totalReturn || 0) >= 0 ? '+' : ''}{(backtestResult?.totalReturn || 0).toFixed(2)}%
                   </p>
                 </div>
                 <div className="bg-white/5 border border-white/5 rounded-2xl p-4">
                   <p className="text-[9px] text-sleek-text-secondary uppercase mb-1">Win Rate</p>
-                  <p className="text-lg font-black italic text-white">{backtestResult.winRate.toFixed(1)}%</p>
+                  <p className="text-lg font-black italic text-white">{(backtestResult?.winRate || 0).toFixed(1)}%</p>
                 </div>
                 <div className="bg-white/5 border border-white/5 rounded-2xl p-4">
                   <p className="text-[9px] text-sleek-text-secondary uppercase mb-1">Total Trades</p>

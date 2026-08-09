@@ -1387,7 +1387,7 @@ export default function App() {
   const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(false);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
-  const [maxSlots, setMaxSlots] = useState<number>(3);
+  const [maxSlots, setMaxSlots] = useState<number>(10);
   const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(false); 
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
@@ -3476,7 +3476,7 @@ export default function App() {
           },
           "expectedAnnualReturn": number,
           "analysis": {
-            "rsi_status": "${rsi.toFixed(1)}",
+            "rsi_status": "${(rsi ?? 0).toFixed(1)}",
             "trend_strength": "강력" | "보통" | "약함",
             "risk_score": number (1-10)
           }
@@ -6267,13 +6267,13 @@ export default function App() {
                                 "text-[10px] font-mono font-bold",
                                 st.change >= 0 ? "text-rose-400" : "text-sky-400"
                               )}>
-                                {st.change >= 0 ? '+' : ''}{formatCurrency(st.change)}
+                                {(st.change || 0) >= 0 ? '+' : ''}{formatCurrency(st.change || 0)}
                               </span>
                               <span className={cn(
                                 "text-[10px] font-mono font-bold",
-                                st.change >= 0 ? "text-rose-400" : "text-sky-400"
+                                (st.change || 0) >= 0 ? "text-rose-400" : "text-sky-400"
                               )}>
-                                ({st.changePercent >= 0 ? '+' : ''}{st.changePercent.toFixed(1)}%)
+                                ({(st.changePercent || 0) >= 0 ? '+' : ''}{(st.changePercent || 0).toFixed(1)}%)
                               </span>
                             </div>
                             {/* Stock Symbol/Code below */}
@@ -6324,15 +6324,15 @@ export default function App() {
                       <span className="text-white font-black">{formatCurrency(selectedStock.price)}</span>
                       <span className={cn(
                         "font-bold",
-                        selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400"
+                        (selectedStock.change || 0) >= 0 ? "text-rose-400" : "text-sky-400"
                       )}>
-                        {selectedStock.change >= 0 ? '+' : ''}{formatCurrency(selectedStock.change)}
+                        {(selectedStock.change || 0) >= 0 ? '+' : ''}{formatCurrency(selectedStock.change || 0)}
                       </span>
                       <span className={cn(
                         "font-bold",
-                        selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400"
+                        (selectedStock.change || 0) >= 0 ? "text-rose-400" : "text-sky-400"
                       )}>
-                        ({selectedStock.change >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%)
+                        ({(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%)
                       </span>
                     </div>
                   )}
@@ -6416,14 +6416,6 @@ export default function App() {
                 <span className="text-[11px] text-sleek-text-secondary">초단기 자동 스캘퍼 전략 및 위험 관리 엔진</span>
               </div>
               <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setShowScalperGuide(true)}
-                  className="px-2.5 py-1 bg-sleek-blue/20 hover:bg-sleek-blue/30 text-sleek-blue border border-sleek-blue/40 rounded-xl text-xs font-bold transition-all flex items-center gap-1 cursor-pointer"
-                >
-                  <BookOpen className="w-3.5 h-3.5" />
-                  <span>실전 매매 가이드</span>
-                </button>
                 <div className="flex items-center gap-1.5 bg-black/40 px-2 py-1 rounded-xl border border-white/5">
                   <span className="w-1.5 h-1.5 rounded-full bg-sleek-blue animate-ping"></span>
                   <span className="text-[10px] font-bold text-sleek-blue uppercase">Live Engine</span>
@@ -7095,10 +7087,10 @@ export default function App() {
                               </span>
                               <span className={cn(
                                 "text-xs font-black italic font-mono px-1.5 py-0.5 rounded flex items-center gap-1",
-                                selectedStock.change >= 0 ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400"
+                                (selectedStock.change || 0) >= 0 ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400"
                               )}>
-                                <span>{selectedStock.change >= 0 ? '▲ +' : '▼ '}{formatCurrency(selectedStock.change)}</span>
-                                <span>({selectedStock.change >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%)</span>
+                                <span>{(selectedStock.change || 0) >= 0 ? '▲ +' : '▼ '}{formatCurrency(selectedStock.change || 0)}</span>
+                                <span>({(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%)</span>
                               </span>
                             </div>
                             
@@ -7221,7 +7213,7 @@ export default function App() {
                                     strokeWidth={1}
                                   >
                                     <Label 
-                                      value={`${formatCurrency(highCandle.high)} (${(((highCandle.high - selectedStock.price)/selectedStock.price)*100).toFixed(1)}%) ↓`} 
+                                      value={`${formatCurrency(highCandle.high)} (${(selectedStock?.price ? (((highCandle.high - selectedStock.price)/selectedStock.price)*100) : 0).toFixed(1)}%) ↓`} 
                                       position="top" 
                                       fill="#EF4444" 
                                       fontSize={9} 
@@ -7241,7 +7233,7 @@ export default function App() {
                                     strokeWidth={1}
                                   >
                                     <Label 
-                                      value={`${formatCurrency(lowCandle.low)} (${(((lowCandle.low - selectedStock.price)/selectedStock.price)*100).toFixed(1)}%) ↑`} 
+                                      value={`${formatCurrency(lowCandle.low)} (${(selectedStock?.price ? (((lowCandle.low - selectedStock.price)/selectedStock.price)*100) : 0).toFixed(1)}%) ↑`} 
                                       position="bottom" 
                                       fill="#3B82F6" 
                                       fontSize={9} 
@@ -7267,7 +7259,7 @@ export default function App() {
 
                           {/* Solid Red Current Price Badge on Right Axis */}
                           <div className="absolute right-0 top-1/2 -translate-y-1/2 bg-rose-600 text-white font-mono font-bold text-[10px] px-1.5 py-0.5 rounded-l shadow-lg border-l border-white/20 animate-pulse">
-                            {selectedStock.price.toLocaleString()} <span className="text-[8px] opacity-80">00:18</span>
+                            {(selectedStock?.price || 0).toLocaleString()} <span className="text-[8px] opacity-80">00:18</span>
                           </div>
                         </div>
 
@@ -7344,11 +7336,11 @@ export default function App() {
                             {/* Spread Line */}
                             <div className="my-1 h-4.5 px-1.5 bg-white/5 border-y border-white/10 flex items-center justify-between rounded font-mono tabular-nums">
                               <span className="text-[9px] font-black text-sleek-text-secondary uppercase shrink-0">현재 체결가</span>
-                              <span className={cn("font-black text-[11px] font-mono tabular-nums animate-pulse", selectedStock.change >= 0 ? "text-rose-400" : "text-sky-400")}>
+                              <span className={cn("font-black text-[11px] font-mono tabular-nums animate-pulse", (selectedStock.change || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
                                 {formatCurrency(currentPrice)}
                               </span>
-                              <span className={cn("text-[9px] font-mono tabular-nums font-bold shrink-0", selectedStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
-                                {selectedStock.changePercent >= 0 ? '+' : ''}{selectedStock.changePercent.toFixed(2)}%
+                              <span className={cn("text-[9px] font-mono tabular-nums font-bold shrink-0", (selectedStock.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
+                                {(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%
                               </span>
                             </div>
 
@@ -7509,7 +7501,7 @@ export default function App() {
                                           <span className="font-bold text-white">{stockDisplayName}({sym})</span>
                                           <span className="text-[10px] text-white/80">{formatCurrency(st.price || 0)}</span>
                                           <span className={cn("font-bold text-[10px]", profitRatio >= 0 ? "text-rose-400" : "text-sky-400")}>
-                                            {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(1)}%
+                                            {profitRatio >= 0 ? '+' : ''}{(profitRatio || 0).toFixed(1)}%
                                           </span>
                                         </div>
                                         <span className="text-amber-300 text-[9.5px]">평단 {formatCurrency(avgPrice)}</span>
@@ -7586,7 +7578,7 @@ export default function App() {
                 <div className="flex items-baseline justify-between mt-0.5">
                   <span className="text-sm font-black text-sleek-blue italic truncate">{formatCurrency(totalValue)}</span>
                   <span className={cn("text-[10px] font-bold shrink-0 ml-1", pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
-                    {pnl >= 0 ? '+' : ''}{pnlPercent.toFixed(1)}%
+                    {pnl >= 0 ? '+' : ''}{(pnlPercent || 0).toFixed(1)}%
                   </span>
                 </div>
               </div>
@@ -7644,7 +7636,7 @@ export default function App() {
                     const totalCost = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
                     const totalQty = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
                     const avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
-                    const avgProfitPct = avgPrice > 0 ? ((selectedStock.price - avgPrice) / avgPrice) * 100 : 0;
+                    const avgProfitPct = (avgPrice > 0 && selectedStock?.price) ? ((selectedStock.price - avgPrice) / avgPrice) * 100 : 0;
                     const targetSellPrice = calculateTargetSellPrice(avgPrice, scalpingTargetProfit);
 
                     return (
@@ -7705,7 +7697,7 @@ export default function App() {
                       const slotNum = slotIdx + 1;
                       const buyPrice = typeof filledSlot === 'number' ? filledSlot : (filledSlot.price || 0);
                       const buyQty = typeof filledSlot === 'number' ? tradeQuantity : (filledSlot.quantity || 1);
-                      const profitPct = buyPrice > 0 ? ((currentStock.price - buyPrice) / buyPrice) * 100 : 0;
+                      const profitPct = (buyPrice > 0 && currentStock?.price) ? ((currentStock.price - buyPrice) / buyPrice) * 100 : 0;
                       const targetSellPrice = calculateTargetSellPrice(buyPrice, scalpingTargetProfit);
 
                       const samePriceCount = gapInventory.filter(s => (typeof s === 'number' ? s : s.price) === buyPrice).length;
@@ -8078,7 +8070,7 @@ export default function App() {
                 <div className="space-y-2">
                   <div className="flex justify-between items-center text-xs font-bold text-sleek-text-secondary">
                     <span>매도 희망 단가 ({marketType === 'US' ? 'USD' : '원'})</span>
-                    {selectedStock && manualSellPrice > 0 && (
+                    {selectedStock && manualSellPrice > 0 && selectedStock.price > 0 && (
                       <span className={cn(
                         "font-mono text-[11px]",
                         manualSellPrice >= (selectedStock.price || 0) ? "text-emerald-400" : "text-rose-400"
@@ -8269,7 +8261,7 @@ export default function App() {
                         )}>
                           {assetAnalysis.totalPnL >= 0 ? <TrendingUp className="w-4 h-4 text-rose-400" /> : <TrendingDown className="w-4 h-4 text-sky-400" />}
                           <span>{assetAnalysis.totalPnL >= 0 ? '+' : ''}{formatCurrency(assetAnalysis.totalPnL)}</span>
-                          <span className="text-xs font-bold">({assetAnalysis.totalPnLPercent >= 0 ? '+' : ''}{assetAnalysis.totalPnLPercent.toFixed(2)}%)</span>
+                          <span className="text-xs font-bold">({assetAnalysis.totalPnLPercent >= 0 ? '+' : ''}{(assetAnalysis.totalPnLPercent || 0).toFixed(2)}%)</span>
                         </div>
                       </div>
                     </div>
@@ -8280,22 +8272,22 @@ export default function App() {
                     <div className="flex justify-between text-xs md:text-sm font-bold text-slate-300">
                       <span>자산 구성 비중</span>
                       <div className="flex items-center gap-3 text-xs">
-                        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-sleek-blue inline-block" /> 현금 {assetAnalysis.cashShare.toFixed(1)}%</span>
-                        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" /> 주식 {assetAnalysis.stockShare.toFixed(1)}%</span>
+                        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-sleek-blue inline-block" /> 현금 {(assetAnalysis.cashShare || 0).toFixed(1)}%</span>
+                        <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-emerald-400 inline-block" /> 주식 {(assetAnalysis.stockShare || 0).toFixed(1)}%</span>
                         {assetAnalysis.pendingReserve > 0 && (
-                          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" /> 예약금 {assetAnalysis.pendingShare.toFixed(1)}%</span>
+                          <span className="flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-full bg-amber-400 inline-block" /> 예약금 {(assetAnalysis.pendingShare || 0).toFixed(1)}%</span>
                         )}
                       </div>
                     </div>
                     <div className="h-3.5 w-full bg-white/5 rounded-full overflow-hidden flex gap-0.5 p-0.5 border border-white/10">
                       {assetAnalysis.cashShare > 0 && (
-                        <div style={{ width: `${assetAnalysis.cashShare}%` }} className="bg-sleek-blue rounded-full h-full transition-all" title={`현금: ${assetAnalysis.cashShare.toFixed(1)}%`} />
+                        <div style={{ width: `${assetAnalysis.cashShare}%` }} className="bg-sleek-blue rounded-full h-full transition-all" title={`현금: ${(assetAnalysis.cashShare || 0).toFixed(1)}%`} />
                       )}
                       {assetAnalysis.stockShare > 0 && (
-                        <div style={{ width: `${assetAnalysis.stockShare}%` }} className="bg-emerald-400 rounded-full h-full transition-all" title={`주식 평가: ${assetAnalysis.stockShare.toFixed(1)}%`} />
+                        <div style={{ width: `${assetAnalysis.stockShare}%` }} className="bg-emerald-400 rounded-full h-full transition-all" title={`주식 평가: ${(assetAnalysis.stockShare || 0).toFixed(1)}%`} />
                       )}
                       {assetAnalysis.pendingShare > 0 && (
-                        <div style={{ width: `${assetAnalysis.pendingShare}%` }} className="bg-amber-400 rounded-full h-full transition-all" title={`예약금: ${assetAnalysis.pendingShare.toFixed(1)}%`} />
+                        <div style={{ width: `${assetAnalysis.pendingShare}%` }} className="bg-amber-400 rounded-full h-full transition-all" title={`예약금: ${(assetAnalysis.pendingShare || 0).toFixed(1)}%`} />
                       )}
                     </div>
                   </div>
@@ -8307,7 +8299,7 @@ export default function App() {
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-1.5">
                     <div className="text-xs text-slate-300 font-bold flex items-center justify-between">
                       <span className="flex items-center gap-1.5"><Wallet className="w-4 h-4 text-sleek-blue" /> 예수금</span>
-                      <span className="text-sleek-blue font-mono font-bold text-xs">{assetAnalysis.cashShare.toFixed(1)}%</span>
+                      <span className="text-sleek-blue font-mono font-bold text-xs">{(assetAnalysis.cashShare || 0).toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
                       {formatCurrency(assetAnalysis.cashBalance)}
@@ -8319,7 +8311,7 @@ export default function App() {
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-1.5">
                     <div className="text-xs text-slate-300 font-bold flex items-center justify-between">
                       <span className="flex items-center gap-1.5"><Briefcase className="w-4 h-4 text-emerald-400" /> 보유 주식 평가액</span>
-                      <span className="text-emerald-400 font-mono font-bold text-xs">{assetAnalysis.stockShare.toFixed(1)}%</span>
+                      <span className="text-emerald-400 font-mono font-bold text-xs">{(assetAnalysis.stockShare || 0).toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
                       {formatCurrency(assetAnalysis.stockValue)}
@@ -8331,7 +8323,7 @@ export default function App() {
                   <div className="bg-white/5 border border-white/10 rounded-2xl p-4 space-y-1.5">
                     <div className="text-xs text-slate-300 font-bold flex items-center justify-between">
                       <span className="flex items-center gap-1.5"><Coins className="w-4 h-4 text-amber-400" /> 미체결 매수 예약금</span>
-                      <span className="text-amber-400 font-mono font-bold text-xs">{assetAnalysis.pendingShare.toFixed(1)}%</span>
+                      <span className="text-amber-400 font-mono font-bold text-xs">{(assetAnalysis.pendingShare || 0).toFixed(1)}%</span>
                     </div>
                     <div className="text-lg md:text-xl font-black font-mono text-white">
                       {formatCurrency(assetAnalysis.pendingReserve)}
@@ -8438,7 +8430,7 @@ export default function App() {
                             <div className="flex items-center gap-2.5">
                               <span className="font-extrabold text-white text-base md:text-lg">{getResolvedStockName(item.symbol, { name: item.name })}({item.symbol})</span>
                               <span className="text-xs font-mono font-bold px-2 py-0.5 bg-white/10 text-slate-200 rounded-md">
-                                포트폴리오 {item.portfolioShare.toFixed(1)}%
+                                포트폴리오 {(item.portfolioShare || 0).toFixed(1)}%
                               </span>
                             </div>
                             <div className={cn(
@@ -8447,7 +8439,7 @@ export default function App() {
                                 ? "text-rose-400 bg-rose-500/10 border-rose-500/30" 
                                 : "text-sky-400 bg-sky-500/10 border-sky-500/30"
                             )}>
-                              {item.pnlAmount >= 0 ? '+' : ''}{formatCurrency(item.pnlAmount)} ({item.pnlPercent >= 0 ? '+' : ''}{item.pnlPercent.toFixed(2)}%)
+                              {item.pnlAmount >= 0 ? '+' : ''}{formatCurrency(item.pnlAmount)} ({item.pnlPercent >= 0 ? '+' : ''}{(item.pnlPercent || 0).toFixed(2)}%)
                             </div>
                           </div>
 
@@ -8478,11 +8470,11 @@ export default function App() {
                   <div className="text-xs md:text-sm space-y-1">
                     <div className="font-bold text-white">포트폴리오 평가 총평</div>
                     <p className="text-slate-300 text-xs md:text-sm leading-relaxed">
-                      {assetAnalysis.cashShare > 70 
-                        ? `예수금 비중이 ${assetAnalysis.cashShare.toFixed(1)}%로 안정적인 현금 유동성을 확보하고 있어, 추가 매수 타점 포착 시 즉각적인 대응이 가능합니다.`
-                        : assetAnalysis.stockShare > 70
-                        ? `주식 보유 비중이 ${assetAnalysis.stockShare.toFixed(1)}%로 주가 상승 시 높은 수익률을 기대할 수 있으나, 시장 변동성에 유의할 필요가 있습니다.`
-                        : `현금(${assetAnalysis.cashShare.toFixed(1)}%)과 주식(${assetAnalysis.stockShare.toFixed(1)}%)의 균형 잡힌 포트폴리오로 안정적인 리스크 관리가 이루어지고 있습니다.`}
+                      {(assetAnalysis.cashShare || 0) > 70 
+                        ? `예수금 비중이 ${(assetAnalysis.cashShare || 0).toFixed(1)}%로 안정적인 현금 유동성을 확보하고 있어, 추가 매수 타점 포착 시 즉각적인 대응이 가능합니다.`
+                        : (assetAnalysis.stockShare || 0) > 70
+                        ? `주식 보유 비중이 ${(assetAnalysis.stockShare || 0).toFixed(1)}%로 주가 상승 시 높은 수익률을 기대할 수 있으나, 시장 변동성에 유의할 필요가 있습니다.`
+                        : `현금(${(assetAnalysis.cashShare || 0).toFixed(1)}%)과 주식(${(assetAnalysis.stockShare || 0).toFixed(1)}%)의 균형 잡힌 포트폴리오로 안정적인 리스크 관리가 이루어지고 있습니다.`}
                     </p>
                   </div>
                 </div>
