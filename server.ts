@@ -67,12 +67,61 @@ async function fetchKrxStocks() {
 const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
 const genAI = GEMINI_KEY ? new GoogleGenerativeAI(GEMINI_KEY) : null;
 
+// In-Memory Revalidation & Edge Cache Store to minimize redundant requests
+const apiCache = new Map<string, { data: any; expiresAt: number }>();
+const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+
+function getCachedData(key: string) {
+  const item = apiCache.get(key);
+  if (item && item.expiresAt > Date.now()) {
+    return item.data;
+  }
+  if (item) apiCache.delete(key);
+  return null;
+}
+
+function setCachedData(key: string, data: any, ttlMs: number) {
+  apiCache.set(key, { data, expiresAt: Date.now() + ttlMs });
+}
+
+// Periodically clean up expired cache entries (every 5 minutes)
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, value] of apiCache.entries()) {
+    if (value.expiresAt <= now) apiCache.delete(key);
+  }
+  for (const [ip, value] of rateLimitMap.entries()) {
+    if (value.resetTime <= now) rateLimitMap.delete(ip);
+  }
+}, 5 * 60 * 1000);
+
 async function startServer() {
   // Populate the high-speed local KRX stock list cache immediately on boot
   fetchKrxStocks();
 
   const app = express();
   const PORT = 3000;
+
+  // 1. Fast-Path Static Asset Headers Middleware
+  app.use((req, res, next) => {
+    if (req.path.startsWith('/assets/') || req.path.match(/\.(js|css|png|jpg|jpeg|gif|ico|svg|woff2?|ttf)$/)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+    }
+    next();
+  });
+
+  // 2. Robots.txt and Sitemap.xml Route Handlers (Edge Crawler & Bot Control)
+  app.get('/robots.txt', (req, res) => {
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=86400, stale-while-revalidate=604800');
+    res.send(`User-agent: *\nDisallow: /api/\nAllow: /\n\nSitemap: https://${req.headers.host || 'localhost'}/sitemap.xml\n`);
+  });
+
+  app.get('/sitemap.xml', (req, res) => {
+    res.setHeader('Content-Type', 'application/xml');
+    res.setHeader('Cache-Control', 'public, max-age=86400, s-maxage=86400');
+    res.send(`<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n  <url><loc>https://${req.headers.host || 'localhost'}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>\n</urlset>`);
+  });
 
   app.use(express.json());
 
@@ -87,11 +136,44 @@ async function startServer() {
     next();
   });
 
-  // Gemini AI Routes with Fault-Tolerant Fallback
+  // 3. Lightweight Rate Limiter & Anti-Bot Middleware for API endpoints
+  app.use('/api/', (req, res, next) => {
+    const userAgent = req.headers['user-agent'] || '';
+    if (/Bytespider|GPTBot|ClaudeBot|CCBot|PerplexityBot|PetalBot|AhrefsBot|SemrushBot/i.test(userAgent)) {
+      return res.status(403).json({ error: "Access denied for automated crawler bot" });
+    }
+
+    const clientIp = (req.headers['x-forwarded-for'] as string || req.ip || '127.0.0.1').split(',')[0].trim();
+    const now = Date.now();
+    const windowMs = 60 * 1000;
+    const maxRequests = 180;
+
+    const record = rateLimitMap.get(clientIp);
+    if (!record || now > record.resetTime) {
+      rateLimitMap.set(clientIp, { count: 1, resetTime: now + windowMs });
+    } else {
+      record.count++;
+      if (record.count > maxRequests) {
+        res.setHeader('Retry-After', '60');
+        return res.status(429).json({ error: "Too many requests. Edge rate limit protection triggered." });
+      }
+    }
+    next();
+  });
+
+  // Gemini AI Routes with Fault-Tolerant Fallback and Revalidation Caching
   app.post('/api/ai/analyze-stock', async (req, res) => {
     const { symbol, chartData, name } = req.body;
     const currentPrice = chartData && chartData.length > 0 ? chartData[chartData.length - 1].price : 10000;
     
+    // Check in-memory cache to save Edge calls and Gemini API quota
+    const cacheKey = `ai_analyze_${symbol}_${currentPrice}`;
+    const cached = getCachedData(cacheKey);
+    if (cached) {
+      res.setHeader('Cache-Control', 'public, max-age=180, s-maxage=180, stale-while-revalidate=300');
+      return res.json(cached);
+    }
+
     const prompt = `
       You are an AI High-Frequency Trading (HFT) Engine inspired by XTX Markets (Alex Gerko). 
       Your goal is not a get-quick-rich scheme, but a "micro-arbitrage" and "probabilistic pattern recognition" engine.
@@ -130,13 +212,16 @@ async function startServer() {
         }
       });
 
-      return res.json(JSON.parse(result.response.text()));
+      const parsed = JSON.parse(result.response.text());
+      setCachedData(cacheKey, parsed, 3 * 60 * 1000); // 3 minutes cache
+      res.setHeader('Cache-Control', 'public, max-age=180, s-maxage=180, stale-while-revalidate=300');
+      return res.json(parsed);
     } catch (error: any) {
       console.warn("[Gemini AI Proxy Info] Falling back to algorithmic analysis:", error.message);
       const targetPrice = Math.round(currentPrice * 1.015);
       const stopLoss = Math.round(currentPrice * 0.99);
 
-      return res.json({
+      const fallbackData = {
         symbol: symbol || 'UNKNOWN',
         name: name || 'Stock',
         signal: "BUY",
@@ -147,7 +232,10 @@ async function startServer() {
         meanReversionProb: 78.4,
         invariantStatus: "PASSED",
         reasoning: "최근 30개 봉 수급 패턴 분석 결과 평균 회귀 및 상향 보조지표 추세 확인."
-      });
+      };
+      setCachedData(cacheKey, fallbackData, 2 * 60 * 1000);
+      res.setHeader('Cache-Control', 'public, max-age=120, s-maxage=120');
+      return res.json(fallbackData);
     }
   });
 
@@ -291,10 +379,22 @@ async function startServer() {
     }
   });
 
-  // KIS Proxy Routes
+  // KIS Proxy Routes with short-term quote caching & edge optimization
   app.all('/api/kis/*', async (req, res) => {
     const targetUrl = req.path.replace('/api/kis', '');
     
+    // For GET quote queries, check 2-second in-memory cache to deduplicate concurrent component bursts
+    const isGetQuote = req.method === 'GET' && (targetUrl.includes('inquire-price') || targetUrl.includes('inquire-daily-price') || targetUrl.includes('inquire-time-itemchartprice'));
+    const cacheKey = `kis_get_${targetUrl}_${JSON.stringify(req.query)}`;
+    
+    if (isGetQuote) {
+      const cached = getCachedData(cacheKey);
+      if (cached) {
+        res.setHeader('Cache-Control', 'public, max-age=2, s-maxage=2');
+        return res.json(cached);
+      }
+    }
+
     // Check if client specifies real or virtual server
     const isRealServer = req.headers['x-is-real-server'] !== 'false';
     const baseUrl = isRealServer 
@@ -347,6 +447,10 @@ async function startServer() {
       }
 
       const response = await axios(axiosConfig);
+      if (isGetQuote && response.status === 200) {
+        setCachedData(cacheKey, response.data, 2000); // 2 seconds cache
+        res.setHeader('Cache-Control', 'public, max-age=2, s-maxage=2');
+      }
       return res.status(response.status).json(response.data);
     } catch (error: any) {
       const errorData = error.response?.data;
@@ -366,7 +470,7 @@ async function startServer() {
     }
   });
 
-  // Hybrid Stock Search API (Local KRX Cache for KR + Yahoo Finance for US)
+  // Hybrid Stock Search API (Local KRX Cache for KR + Yahoo Finance for US) with Edge Revalidation
   app.get('/api/stocks/search', async (req, res) => {
     const { keyword, marketType } = req.query;
     
@@ -377,6 +481,13 @@ async function startServer() {
     const cleanKeyword = keyword.trim();
     if (!cleanKeyword) {
       return res.json([]);
+    }
+
+    const searchCacheKey = `stock_search_${cleanKeyword.toLowerCase()}_${marketType || 'ALL'}`;
+    const cachedSearch = getCachedData(searchCacheKey);
+    if (cachedSearch) {
+      res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300, stale-while-revalidate=600');
+      return res.json(cachedSearch);
     }
 
     const isUSRequested = marketType === 'US' || /^[a-zA-Z]/.test(cleanKeyword);
@@ -417,7 +528,10 @@ async function startServer() {
               return true;
             });
 
-            return res.json(unique.slice(0, 15));
+            const resultList = unique.slice(0, 15);
+            setCachedData(searchCacheKey, resultList, 5 * 60 * 1000);
+            res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300, stale-while-revalidate=600');
+            return res.json(resultList);
           }
         } catch (err: any) {
           console.error('[US Stock Search Error]:', err.message);
@@ -488,7 +602,10 @@ async function startServer() {
           return true;
         });
 
-        return res.json(uniqueMatched.slice(0, 15));
+        const finalResult = uniqueMatched.slice(0, 15);
+        setCachedData(searchCacheKey, finalResult, 10 * 60 * 1000); // 10 minutes
+        res.setHeader('Cache-Control', 'public, max-age=300, s-maxage=300, stale-while-revalidate=600');
+        return res.json(finalResult);
       }
     } catch (error: any) {
       console.error("Stock search failure:", error);

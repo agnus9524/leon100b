@@ -1,0 +1,7 @@
+# Block aggressive crawlers and bots to optimize edge bandwidth and request limits
+User-agent: *
+Disallow: /api/
+Allow: /
+
+# Sitemap
+Sitemap: https://service-100-221699414173.us-west1.run.app/sitemap.xml
