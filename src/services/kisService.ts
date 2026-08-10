@@ -271,12 +271,12 @@ class KISService {
             if (retryRes.data.rt_cd === '0') return retryRes.data;
          }
          console.warn(`[KIS Service] Overseas Balance Query Skipped/Failed: ${res.data.msg1}`);
-         return { rt_cd: '0', output1: [], output2: [] };
+         return { rt_cd: '1', msg1: res.data.msg1 || 'Overseas balance query failed', output1: [], output2: [] };
       }
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Overseas Balance Exception safely caught:", error?.response?.data || error?.message);
-      return { rt_cd: '0', output1: [], output2: [] };
+      return { rt_cd: '1', msg1: error?.response?.data?.msg1 || error?.message || 'Overseas balance exception', output1: [], output2: [] };
     }
   }
 
@@ -450,12 +450,12 @@ class KISService {
            if (retryRes.data.rt_cd === '0') return retryRes.data;
         }
         console.warn(`[KIS Service] Domestic Balance Error: ${res.data.msg1} (${res.data.msg_cd})`);
-        return { rt_cd: '0', output1: [], output2: [{ dnca_tot_amt: '0', nass_amt: '0' }] };
+        return { rt_cd: '1', msg1: res.data.msg1 || 'Domestic balance failed', output1: [], output2: [] };
       }
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Domestic Balance Exception safely caught:", error?.response?.data || error?.message);
-      return { rt_cd: '0', output1: [], output2: [{ dnca_tot_amt: '0', nass_amt: '0' }] };
+      return { rt_cd: '1', msg1: error?.response?.data?.msg1 || error?.message || 'Domestic balance exception', output1: [], output2: [] };
     }
   }
 

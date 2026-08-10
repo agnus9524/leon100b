@@ -913,7 +913,17 @@ export default function App() {
   });
   const [balance, setBalance] = useState(0); // User's money (will be synced via KIS)
   const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
-  const [holdings, setHoldings] = useState<Record<string, number>>({});
+  const [holdings, setHoldings] = useState<Record<string, number>>(() => {
+    try { return JSON.parse(localStorage.getItem('sleek_holdings') || '{}'); } catch { return {}; }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sleek_holdings', JSON.stringify(holdings));
+    } catch (e) {
+      console.error("Failed to persist holdings", e);
+    }
+  }, [holdings]);
   const [avgPrices, setAvgPrices] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem('sleek_avg_prices') || '{}'); } catch { return {}; }
   });
@@ -2048,8 +2058,14 @@ export default function App() {
                 );
               }
             }
-            if (settings.holdings) {
-              setHoldings(settings.holdings);
+            if (settings.holdings && typeof settings.holdings === 'object') {
+              setHoldings(prev => {
+                const merged = { ...settings.holdings, ...prev };
+                Object.keys(merged).forEach(k => {
+                  if (!merged[k] || Number(merged[k]) <= 0) delete merged[k];
+                });
+                return merged;
+              });
             }
           }
         });
@@ -3091,8 +3107,23 @@ export default function App() {
         
         // Add all newly fetched holdings
         Object.entries(newHoldings).forEach(([sym, qty]) => {
-          merged[sym] = qty;
+          if (qty > 0) {
+            merged[sym] = qty;
+          }
         });
+
+        // Ensure invalid or 0/negative quantities are removed
+        Object.keys(merged).forEach(sym => {
+          if (!merged[sym] || Number(merged[sym]) <= 0) {
+            delete merged[sym];
+          }
+        });
+
+        try {
+          localStorage.setItem('sleek_holdings', JSON.stringify(merged));
+        } catch (e) {
+          console.error("Failed to persist holdings to localStorage", e);
+        }
 
         if (currentUser) {
           saveUserHoldings(currentUser.uid, merged);
