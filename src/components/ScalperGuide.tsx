@@ -101,6 +101,41 @@ export default function ScalperGuide({ onClose }: ScalperGuideProps) {
             entry="가격이 VWAP 위로 올라올 때"
             exit="VWAP 아래로 꺾일 때"
           />
+          <PatternRow 
+            title="④ 볼륨프로파일 & CVD (하비어 발렌틴 전략)"
+            condition="POC(최대 거래가격대) 지지 + CVD(누적 거래량 차이) 유동성 흡수/불일치"
+            entry="POC 부근 지지반등 또는 가격-CVD 다이버전스 감지 시"
+            exit="POC 도달 시 목표가 설정 (손익비 1:3)"
+          />
+        </div>
+      </section>
+
+      {/* Advanced Orderflow Strategy: Volume Profile & CVD */}
+      <section className="bg-gradient-to-br from-purple-900/30 via-black/50 to-indigo-900/30 border border-purple-500/30 rounded-2xl p-5 space-y-3">
+        <div className="flex items-center gap-2">
+          <Activity className="w-5 h-5 text-purple-400" />
+          <h4 className="text-sm font-black text-purple-300 uppercase tracking-wider">심화: 볼륨 프로파일 & CVD 오더플로우 매매법</h4>
+        </div>
+        <p className="text-xs text-slate-300 leading-relaxed">
+          하비어 발렌틴(Javier Valentin) 스타일의 트레이딩은 오직 <span className="text-purple-300 font-bold">볼륨 프로파일(POC)</span>과 <span className="text-purple-300 font-bold">CVD(Cumulative Volume Delta)</span> 두 지표로 세력의 유동성 흡수(Liquidity Absorption)를 파악합니다.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+          <div className="bg-black/50 p-3 rounded-xl border border-white/5 space-y-1">
+            <span className="text-[11px] font-bold text-purple-300 flex items-center gap-1">
+              📊 볼륨 프로파일 (POC - Point of Control)
+            </span>
+            <p className="text-[10px] text-slate-400 leading-normal">
+              시간 기준이 아닌 <strong>가격축 기준 매수/매도 누적 거래량</strong>입니다. 가장 거래가 집중된 POC 구간은 강력한 지지/저항 및 자석(Target) 역할을 합니다.
+            </p>
+          </div>
+          <div className="bg-black/50 p-3 rounded-xl border border-white/5 space-y-1">
+            <span className="text-[11px] font-bold text-indigo-300 flex items-center gap-1">
+              ⚡ CVD (누적 거래량 차이) & 유동성 흡수
+            </span>
+            <p className="text-[10px] text-slate-400 leading-normal">
+              시장가 매수 - 시장가 매도 체결량 누적값입니다. 전고점 돌파 시 시장가 매수가 들어와도 세력 지정가 매도벽에 막혀 가격이 오르지 못하는 <strong>CVD 불일치(Divergence)</strong>를 포착합니다.
+            </p>
+          </div>
         </div>
       </section>
 
@@ -108,7 +143,7 @@ export default function ScalperGuide({ onClose }: ScalperGuideProps) {
       <section className="bg-white/5 border border-white/10 rounded-2xl p-5">
         <h4 className="text-xs font-black text-slate-400 uppercase tracking-[0.2em] mb-4">자주 사용하는 기술적 지표</h4>
         <div className="flex flex-wrap gap-2">
-          {['거래량(Volume)', '체결강도', '호가창 잔량', 'VWAP', '5일 이평선', '20일 이평선', 'RSI'].map(tag => (
+          {['거래량(Volume)', '볼륨프로파일(POC)', 'CVD(누적체결차)', '유동성흡수', 'VWAP', '체결강도', '5일 이평선', 'RSI'].map(tag => (
             <span key={tag} className="px-3 py-1.5 bg-black/40 border border-white/10 rounded-lg text-[11px] font-bold text-white italic">
               #{tag}
             </span>

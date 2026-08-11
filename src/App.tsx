@@ -1401,7 +1401,7 @@ export default function App() {
   const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(false); 
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
-  const [scalperStrategyMode, setScalperStrategyMode] = useState<'AUTO' | 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT'>('AUTO');
+  const [scalperStrategyMode, setScalperStrategyMode] = useState<'AUTO' | 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD'>('AUTO');
   const [minGapBetweenSlots, setMinGapBetweenSlots] = useState<number>(0.3); // 0.3% gap
   const [useFixedQuantity, setUseFixedQuantity] = useState<boolean>(true); 
   const [top3RefreshNonce, setTop3RefreshNonce] = useState<number>(0);
@@ -4311,9 +4311,9 @@ export default function App() {
     };
   };
 
-  // 실시간 3대 스캘핑 전략 조건 감지 센서 (선택된 종목 기반)
+  // 실시간 4대 스캘핑 전략 조건 감지 센서 (선택된 종목 기반)
   const activeStrategyDetection = useMemo(() => {
-    if (!selectedStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, activeCount: 0 };
+    if (!selectedStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isCvdDivergence: false };
 
     const historyPrices = selectedStock.history ? selectedStock.history.map(h => h.price) : [selectedStock.price];
     const currentPrice = selectedStock.price;
@@ -4322,6 +4322,37 @@ export default function App() {
     const sma5 = calculateSMA(historyPrices, 5);
     const sma20 = calculateSMA(historyPrices, 20);
     const vwap = historyPrices.length > 0 ? (historyPrices.reduce((a, b) => a + b, 0) / historyPrices.length) : currentPrice;
+
+    // Volume Profile (POC: Point of Control - 최대 매매 수평 거래량 발생 구간)
+    const priceBuckets: Record<string, number> = {};
+    historyPrices.forEach(p => {
+      const bucket = p.toFixed(2);
+      priceBuckets[bucket] = (priceBuckets[bucket] || 0) + 1;
+    });
+    let maxVolBucket = 0;
+    let poc = currentPrice;
+    Object.entries(priceBuckets).forEach(([pStr, count]) => {
+      if (count > maxVolBucket) {
+        maxVolBucket = count;
+        poc = Number(pStr);
+      }
+    });
+
+    // CVD (Cumulative Volume Delta - 누적 거래량 차이) & 유동성 흡수/불일치 감지
+    let cvd = 0;
+    let prevP = historyPrices[0] || currentPrice;
+    const cvdSeries: number[] = [];
+    historyPrices.forEach(p => {
+      const delta = p > prevP ? 1 : p < prevP ? -1 : 0;
+      cvd += delta;
+      cvdSeries.push(cvd);
+      prevP = p;
+    });
+
+    const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
+    const recentMaxCvd = cvdSeries.length >= 5 ? Math.max(...cvdSeries.slice(-10, -1)) : cvd;
+    // CVD Divergence (유동성 흡수): 가격은 전고점 부근 상승 시도하나 CVD는 꺾이거나 부진한 상태
+    const isCvdDivergence = (currentPrice >= recentPeak * 0.995) && (cvd < recentMaxCvd);
 
     const momentumPositive = sma5 >= sma20;
     const isNearLowerBand = currentPrice <= bb.lower * 1.005;
@@ -4332,15 +4363,18 @@ export default function App() {
     const isPullback = momentumPositive && (rsi < 40 || isNearLowerBand) && currentPrice >= sma5 && hasVolumeMomentum;
 
     // ② 거래량/전고점 돌파
-    const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
     const isBreakout = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
 
     // ③ VWAP 지지반등
     const isVwapSupport = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
 
-    const activeCount = (isPullback ? 1 : 0) + (isBreakout ? 1 : 0) + (isVwapSupport ? 1 : 0);
+    // ④ 볼륨 프로파일 POC 지지 및 CVD 유동성 반등
+    const isPocSupport = Math.abs(currentPrice - poc) / (poc || 1) < 0.01;
+    const isVolumeProfile = isPocSupport || isCvdDivergence;
 
-    return { isPullback, isBreakout, isVwapSupport, activeCount, rsi, sma5, sma20, vwap };
+    const activeCount = (isPullback ? 1 : 0) + (isBreakout ? 1 : 0) + (isVwapSupport ? 1 : 0) + (isVolumeProfile ? 1 : 0);
+
+    return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd, isCvdDivergence };
   }, [selectedStock]);
 
   // Trailing Stop Loss State to track the peak price after each buy
@@ -4389,6 +4423,9 @@ export default function App() {
           const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
           const isBreakoutCond = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
           const isVwapSupportCond = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
+          const { poc, cvd, isCvdDivergence } = activeStrategyDetection;
+          const isPocSupportCond = Math.abs(currentPrice - (poc || currentPrice)) / (poc || currentPrice) < 0.01;
+          const isVolumeProfileCond = isPocSupportCond || isCvdDivergence;
 
           let meetsBuyCriteria = false;
           let strategyLabel = "AI 스캘퍼";
@@ -4402,8 +4439,11 @@ export default function App() {
           } else if (scalperStrategyMode === 'VWAP_SUPPORT') {
             meetsBuyCriteria = isVwapSupportCond;
             strategyLabel = "③ VWAP 지지반등";
+          } else if (scalperStrategyMode === 'VOLUME_PROFILE_CVD') {
+            meetsBuyCriteria = isVolumeProfileCond;
+            strategyLabel = "④ VP/CVD 유동성포착";
           } else {
-            // 'AUTO' 모드 (기본값): 프로그램이 3가지 전략을 종합 파악 후 조건 충족 시 자동 매수
+            // 'AUTO' 모드 (기본값): 프로그램이 4가지 전략을 종합 파악 후 조건 충족 시 자동 매수
             if (isPullbackCond) {
               meetsBuyCriteria = true;
               strategyLabel = "AI포착: ①상승추세 눌림목";
@@ -4413,6 +4453,9 @@ export default function App() {
             } else if (isVwapSupportCond) {
               meetsBuyCriteria = true;
               strategyLabel = "AI포착: ③VWAP 지지반등";
+            } else if (isVolumeProfileCond) {
+              meetsBuyCriteria = true;
+              strategyLabel = "AI포착: ④VP/CVD 유동성포착";
             } else if (isSmartScalperMode) {
               meetsBuyCriteria = momentumPositive && (rsi < 35 || isNearLowerBand) && currentPrice >= sma5;
               if (meetsBuyCriteria) strategyLabel = "AI포착: 스마트 반등";
@@ -6482,7 +6525,7 @@ export default function App() {
                   실시간 {activeStrategyDetection.activeCount}개 전략 조건 포착!
                 </span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 w-full md:w-auto">
+              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 w-full md:w-auto">
                 <button
                   type="button"
                   onClick={() => setScalperStrategyMode('AUTO')}
@@ -6492,10 +6535,10 @@ export default function App() {
                       ? "bg-gradient-to-r from-amber-500/30 to-amber-600/30 text-amber-200 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
                       : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
                   )}
-                  title="프로그램이 실시간 차트 지표를 종합 분석하여 3가지 스캘핑 전략을 모두 자동 포착 및 적용 (추천)"
+                  title="프로그램이 실시간 차트 지표를 종합 분석하여 4가지 스캘핑 전략을 모두 자동 포착 및 적용 (추천)"
                 >
                   <Bot className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                  <span>AI 종합 자동분석★</span>
+                  <span>AI 종합★</span>
                 </button>
                 <button
                   type="button"
@@ -6516,7 +6559,7 @@ export default function App() {
                       ? "bg-emerald-400 shadow-[0_0_10px_#10b981] animate-pulse"
                       : "bg-slate-600/60 border border-slate-700"
                   )} />
-                  <span>① 상승추세 눌림목</span>
+                  <span>① 눌림목</span>
                 </button>
                 <button
                   type="button"
@@ -6537,7 +6580,7 @@ export default function App() {
                       ? "bg-amber-400 shadow-[0_0_10px_#f59e0b] animate-pulse"
                       : "bg-slate-600/60 border border-slate-700"
                   )} />
-                  <span>② 거래량 돌파</span>
+                  <span>② 돌파</span>
                 </button>
                 <button
                   type="button"
@@ -6558,7 +6601,28 @@ export default function App() {
                       ? "bg-indigo-400 shadow-[0_0_10px_#6366f1] animate-pulse"
                       : "bg-slate-600/60 border border-slate-700"
                   )} />
-                  <span>③ VWAP 지지반등</span>
+                  <span>③ VWAP</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScalperStrategyMode('VOLUME_PROFILE_CVD')}
+                  className={cn(
+                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
+                    activeStrategyDetection.isVolumeProfile
+                      ? "bg-purple-500/30 text-purple-200 border-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.5)]"
+                      : scalperStrategyMode === 'VOLUME_PROFILE_CVD'
+                      ? "bg-purple-500/20 text-purple-300 border-purple-500/50 shadow-md"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
+                  )}
+                  title="볼륨 프로파일(POC) 최대 수평거래선 지지 & CVD 누적 거래량 다이버전스/유동성 흡수 진입 (하비어 발렌틴 전략)"
+                >
+                  <span className={cn(
+                    "w-2 h-2 rounded-full transition-all shrink-0",
+                    activeStrategyDetection.isVolumeProfile
+                      ? "bg-purple-400 shadow-[0_0_10px_#a855f7] animate-pulse"
+                      : "bg-slate-600/60 border border-slate-700"
+                  )} />
+                  <span>④ VP/CVD</span>
                 </button>
               </div>
             </div>
