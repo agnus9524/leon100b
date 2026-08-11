@@ -4394,9 +4394,15 @@ export default function App() {
     });
 
     const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
+    const recentLow = historyPrices.length >= 5 ? Math.min(...historyPrices.slice(-10, -1)) : currentPrice;
     const recentMaxCvd = cvdSeries.length >= 5 ? Math.max(...cvdSeries.slice(-10, -1)) : cvd;
-    // CVD Divergence (유동성 흡수): 가격은 전고점 부근 상승 시도하나 CVD는 꺾이거나 부진한 상태
-    const isCvdDivergence = (currentPrice >= recentPeak * 0.995) && (cvd < recentMaxCvd);
+    const recentMinCvd = cvdSeries.length >= 5 ? Math.min(...cvdSeries.slice(-10, -1)) : cvd;
+
+    // CVD Divergence/Absorption (유동성 분석)
+    // 1. 하락 유동성 흡수 (Bullish): 가격은 저점 부근이나 CVD가 바닥을 찍고 상승 혹은 가격보다 강세 (매수 타점)
+    const isBullishAbsorption = (currentPrice <= recentLow * 1.01) && (cvd > recentMinCvd);
+    // 2. 상승 유동성 흡수 (Bearish): 가격은 고점 부근이나 CVD가 꺾임 (매도/관망 타점)
+    const isBearishAbsorption = (currentPrice >= recentPeak * 0.995) && (cvd < recentMaxCvd);
 
     const momentumPositive = sma5 >= sma20;
     const isNearLowerBand = currentPrice <= bb.lower * 1.005;
@@ -4413,12 +4419,12 @@ export default function App() {
     const isVwapSupport = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
 
     // ④ 볼륨 프로파일 POC 지지 및 CVD 유동성 반등
-    const isPocSupport = Math.abs(currentPrice - poc) / (poc || 1) < 0.01;
-    const isVolumeProfile = isPocSupport || isCvdDivergence;
+    const isPocSupport = Math.abs(currentPrice - poc) / (poc || 1) < 0.008; // 0.8% 이내 근접
+    const isVolumeProfile = isPocSupport || isBullishAbsorption;
 
     const activeCount = (isPullback ? 1 : 0) + (isBreakout ? 1 : 0) + (isVwapSupport ? 1 : 0) + (isVolumeProfile ? 1 : 0);
 
-    return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd, isCvdDivergence };
+    return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd, isBullishAbsorption, isBearishAbsorption };
   }, [selectedStock]);
 
   // Trailing Stop Loss State to track the peak price after each buy
@@ -4467,9 +4473,9 @@ export default function App() {
           const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
           const isBreakoutCond = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
           const isVwapSupportCond = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
-          const { poc, cvd, isCvdDivergence } = activeStrategyDetection;
-          const isPocSupportCond = Math.abs(currentPrice - (poc || currentPrice)) / (poc || currentPrice) < 0.01;
-          const isVolumeProfileCond = isPocSupportCond || isCvdDivergence;
+          const { poc, cvd, isBullishAbsorption } = activeStrategyDetection;
+          const isPocSupportCond = Math.abs(currentPrice - (poc || currentPrice)) / (poc || currentPrice) < 0.008;
+          const isVolumeProfileCond = isPocSupportCond || isBullishAbsorption;
 
           let meetsBuyCriteria = false;
           let strategyLabel = "AI 스캘퍼";
