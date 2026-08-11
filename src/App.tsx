@@ -1357,12 +1357,29 @@ export default function App() {
     e.stopPropagation();
     if (scalperTabs.length <= 1) return;
 
+    const targetTab = scalperTabs.find(t => t.id === tabId);
+    const targetIsUS = targetTab ? /^[A-Z]/.test(targetTab.symbol) : marketType === 'US';
+
     const remaining = scalperTabs.filter(t => t.id !== tabId);
     setScalperTabs(remaining);
 
     if (activeTabId === tabId) {
-      const nextTab = remaining[remaining.length - 1];
-      handleSwitchTab(nextTab.id);
+      // Find remaining tabs that belong to the SAME market as current active market
+      const sameMarketTabs = remaining.filter(t => {
+        const isUS = /^[A-Z]/.test(t.symbol);
+        return marketType === 'US' ? isUS : !isUS;
+      });
+
+      if (sameMarketTabs.length > 0) {
+        // Switch to adjacent/last tab in the same market
+        const nextTab = sameMarketTabs[sameMarketTabs.length - 1];
+        handleSwitchTab(nextTab.id);
+      } else {
+        // If all tabs in current market were closed, open default stock tab for current market
+        const pool = marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS;
+        const defaultStock = pool[0];
+        openOrSwitchScalperTab(defaultStock.symbol, defaultStock.name);
+      }
     }
   };
 
@@ -1412,6 +1429,10 @@ export default function App() {
     let cleaned = scalperMessage
       .replace(/^\[AI전략 포착\]\s*.*?(감지!?|포착!?)\s*/g, '')
       .replace(/\[AI전략 포착\]\s*[^!]*감지!?\s*/g, '')
+      .replace(/^\[AI모니터링\]\s*/g, '')
+      .replace(/\[AI모니터링\]\s*/g, '')
+      .replace(/^\[AI관망\]\s*/g, '')
+      .replace(/\[AI관망\]\s*/g, '')
       .trim();
     return cleaned || "진입 모니터링 중...";
   }, [scalperMessage]);
@@ -1561,20 +1582,34 @@ export default function App() {
   });
 
   const selectedStock = useMemo(() => {
-    const found = stocks.find(s => s.symbol === selectedSymbol) ||
-                  stocksCache.KR?.find(s => s.symbol === selectedSymbol) ||
-                  stocksCache.US?.find(s => s.symbol === selectedSymbol) ||
-                  INITIAL_STOCKS_KR.find(s => s.symbol === selectedSymbol) ||
-                  INITIAL_STOCKS.find(s => s.symbol === selectedSymbol);
+    const isCurrentUS = marketType === 'US';
+    const matchesMarket = (s: { symbol: string; market?: string }) => {
+      const isUS = s.market === 'US' || /^[A-Z]/.test(s.symbol);
+      return isCurrentUS ? isUS : !isUS;
+    };
+
+    let found = stocks.find(s => s.symbol === selectedSymbol && matchesMarket(s)) ||
+                (isCurrentUS ? stocksCache.US : stocksCache.KR)?.find(s => s.symbol === selectedSymbol) ||
+                (isCurrentUS ? INITIAL_STOCKS.find(s => s.symbol === selectedSymbol) : INITIAL_STOCKS_KR.find(s => s.symbol === selectedSymbol));
+
+    if (!found) {
+      found = stocks.find(s => s.symbol === selectedSymbol) ||
+              stocksCache.KR?.find(s => s.symbol === selectedSymbol) ||
+              stocksCache.US?.find(s => s.symbol === selectedSymbol) ||
+              INITIAL_STOCKS_KR.find(s => s.symbol === selectedSymbol) ||
+              INITIAL_STOCKS.find(s => s.symbol === selectedSymbol);
+    }
+
     if (found) {
       return {
         ...found,
         name: getResolvedStockName(selectedSymbol, found)
       };
     }
-    if (stocks.length > 0) return stocks[0];
-    return null;
-  }, [stocks, stocksCache, selectedSymbol, getResolvedStockName]);
+
+    const fallback = stocks.find(matchesMarket) || (isCurrentUS ? INITIAL_STOCKS[0] : INITIAL_STOCKS_KR[0]);
+    return fallback ? { ...fallback, name: getResolvedStockName(fallback.symbol, fallback) } : null;
+  }, [stocks, stocksCache, selectedSymbol, marketType, getResolvedStockName]);
 
   // Auto-set Upper/Lower Price Limits (당일 상/하한가) when selectedStock, price, or market changes
   useEffect(() => {
@@ -4561,7 +4596,7 @@ export default function App() {
               } else if (!momentumPositive) {
                 setScalperMessage(`[AI관망] 하락 추세 (SMA5<SMA20). 추세 전환 대기 중...`);
               } else {
-                setScalperMessage(`[AI모니터링] 수급/지지선 감시 중 (RSI: ${Math.round(rsi)}, 보유 슬롯: ${currentInventory.length}/${maxSlots})`);
+                setScalperMessage(`수급/지지선 감시 중 (RSI: ${Math.round(rsi)}, 보유 슬롯: ${currentInventory.length}/${maxSlots})`);
               }
             } else {
               if (!momentumPositive && scalperStrategyMode === 'PULLBACK') setScalperMessage(`하락 추세 감지 (SMA5<SMA20). 원칙 3에 따라 관망 중`);
