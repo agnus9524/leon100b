@@ -1104,12 +1104,9 @@ export default function App() {
     const effectiveMarket = customMarket || (selectedStock && (/^[A-Za-z]/.test(selectedStock.symbol) || selectedStock.market === 'US') ? 'US' : marketType);
     const isUSD = effectiveMarket === 'US' && !forceKRW;
     if (isUSD) {
-      const absVal = Math.abs(val);
-      // Use 2 decimals normally (e.g. $7.24)
-      const decimals = absVal > 0 && absVal < 1 ? 4 : 2;
       return `${val < 0 ? '-' : ''}$${Math.abs(val).toLocaleString(undefined, { 
-        minimumFractionDigits: decimals, 
-        maximumFractionDigits: decimals 
+        minimumFractionDigits: 2, 
+        maximumFractionDigits: 4 
       })}`;
     }
     return `₩${Math.round(val).toLocaleString()}`;
@@ -4367,10 +4364,12 @@ export default function App() {
     const sma20 = calculateSMA(historyPrices, 20);
     const vwap = historyPrices.length > 0 ? (historyPrices.reduce((a, b) => a + b, 0) / historyPrices.length) : currentPrice;
 
+    const isUSStock = selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US';
+
     // Volume Profile (POC: Point of Control - 최대 매매 수평 거래량 발생 구간)
     const priceBuckets: Record<string, number> = {};
     historyPrices.forEach(p => {
-      const bucket = p.toFixed(2);
+      const bucket = isUSStock ? p.toFixed(4) : p.toFixed(0);
       priceBuckets[bucket] = (priceBuckets[bucket] || 0) + 1;
     });
     let maxVolBucket = 0;
@@ -4532,7 +4531,7 @@ export default function App() {
             ? (currentPrice - 2 * tickSize) 
             : currentPrice;
           const targetBuyPrice = isUSStock 
-            ? Number(rawTargetBuyPrice.toFixed(2)) 
+            ? Number(rawTargetBuyPrice.toFixed(4)) 
             : Math.round(rawTargetBuyPrice / tickSize) * tickSize;
 
           const currentInventory = gapInventoryRef.current;
@@ -4543,7 +4542,7 @@ export default function App() {
           if (currentWeightedAvg <= 0 && currentInventory.length > 0) {
             const totalCost = currentInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
             const totalQty = currentInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
-            currentWeightedAvg = totalQty > 0 ? (isUSStock ? Number((totalCost / totalQty).toFixed(2)) : Math.round(totalCost / totalQty)) : 0;
+            currentWeightedAvg = totalQty > 0 ? (isUSStock ? Number((totalCost / totalQty).toFixed(4)) : Math.round(totalCost / totalQty)) : 0;
           }
           const isPositionInProfit = currentWeightedAvg > 0 && currentPrice >= currentWeightedAvg;
           
@@ -6325,7 +6324,7 @@ export default function App() {
                               <div className="text-xs font-bold text-white">{s.name}</div>
                               {s.price !== undefined && (
                                 <span className="text-[10px] text-sleek-blue font-black font-mono">
-                                  {s.market === 'US' ? `$${s.price.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : `₩${Math.round(s.price).toLocaleString()}`}
+                                  {formatCurrency(s.price)}
                                 </span>
                               )}
                             </div>
@@ -6418,13 +6417,13 @@ export default function App() {
                             <div className="text-xs font-bold text-white whitespace-normal break-words leading-snug flex items-center gap-1.5 flex-wrap">
                               <span>{st.name}</span>
                               <span className="text-[11px] font-mono text-white/90">
-                                {formatCurrency(st.price)}
+                                {formatCurrency(st.price, false, st.market === 'US' ? 'US' : 'KR')}
                               </span>
                               <span className={cn(
                                 "text-[10px] font-mono font-bold",
                                 st.change >= 0 ? "text-rose-400" : "text-sky-400"
                               )}>
-                                {(st.change || 0) >= 0 ? '+' : ''}{formatCurrency(st.change || 0)}
+                                {(st.change || 0) >= 0 ? '+' : ''}{formatCurrency(st.change || 0, false, st.market === 'US' ? 'US' : 'KR')}
                               </span>
                               <span className={cn(
                                 "text-[10px] font-mono font-bold",
@@ -7203,10 +7202,10 @@ export default function App() {
                 const currentPrice = selectedStock.price;
                 const tickSize = getTickSize(currentPrice, isUSStock ? 'US' : 'KR');
                 const askLevels = Array.from({ length: 4 }, (_, i) => 
-                  isUSStock ? Number((currentPrice + (4 - i) * tickSize).toFixed(2)) : currentPrice + (4 - i) * tickSize
+                  isUSStock ? Number((currentPrice + (4 - i) * tickSize).toFixed(4)) : currentPrice + (4 - i) * tickSize
                 );
                 const bidLevels = Array.from({ length: 4 }, (_, i) => 
-                  isUSStock ? Number((currentPrice - (i + 1) * tickSize).toFixed(2)) : currentPrice - (i + 1) * tickSize
+                  isUSStock ? Number((currentPrice - (i + 1) * tickSize).toFixed(4)) : currentPrice - (i + 1) * tickSize
                 );
                 const getLevelVolume = (priceLevel: number) => {
                   const intPrice = isUSStock ? Math.round(priceLevel * 100) : Math.round(priceLevel);
@@ -7484,7 +7483,7 @@ export default function App() {
 
                           {/* Solid Red Current Price Badge on Right Axis */}
                           <div className="absolute right-0 top-1/2 -translate-y-1/2 bg-rose-600 text-white font-mono font-bold text-[10px] px-1.5 py-0.5 rounded-l shadow-lg border-l border-white/20 animate-pulse">
-                            {(selectedStock?.price || 0).toLocaleString()} <span className="text-[8px] opacity-80">00:18</span>
+                            {isUSStock ? (selectedStock?.price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : (selectedStock?.price || 0).toLocaleString()} <span className="text-[8px] opacity-80">00:18</span>
                           </div>
                         </div>
 
@@ -8169,9 +8168,9 @@ export default function App() {
           {stocks.map((s, idx) => (
             <div key={`${s.symbol}-${idx}`} className="flex gap-2 whitespace-nowrap">
               <span className="text-white font-bold">{s.name}</span>
-              <span className="text-white/80">{formatCurrency(s.price || 0)}</span>
+              <span className="text-white/80">{formatCurrency(s.price || 0, false, s.market === 'US' ? 'US' : 'KR')}</span>
               <span className={cn("font-bold", (s.change || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
-                {(s.change || 0) >= 0 ? '+' : ''}{formatCurrency(Math.abs(s.change || 0))}
+                {(s.change || 0) >= 0 ? '+' : ''}{formatCurrency(Math.abs(s.change || 0), false, s.market === 'US' ? 'US' : 'KR')}
               </span>
               <span className={cn("font-bold", (s.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
                 ({(s.changePercent || 0) >= 0 ? '+' : ''}{(s.changePercent || 0).toFixed(1)}%)
