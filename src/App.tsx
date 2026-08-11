@@ -1418,7 +1418,7 @@ export default function App() {
   const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(false); 
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
-  const [scalperStrategyMode, setScalperStrategyMode] = useState<'AUTO' | 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD'>('AUTO');
+  const [scalperStrategyMode, setScalperStrategyMode] = useState<'AUTO' | 'ALL_SENSORS_4' | 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD'>('AUTO');
   const [minGapBetweenSlots, setMinGapBetweenSlots] = useState<number>(0.3); // 0.3% gap
   const [useFixedQuantity, setUseFixedQuantity] = useState<boolean>(true); 
   const [top3RefreshNonce, setTop3RefreshNonce] = useState<number>(0);
@@ -4477,10 +4477,16 @@ export default function App() {
           const isPocSupportCond = Math.abs(currentPrice - (poc || currentPrice)) / (poc || currentPrice) < 0.008;
           const isVolumeProfileCond = isPocSupportCond || isBullishAbsorption;
 
+          // 4개 실시간 전략 센서에 불이 모두 들어왔는지 확인 (activeCount === 4)
+          const isAll4SensorsOn = isPullbackCond && isBreakoutCond && isVwapSupportCond && isVolumeProfileCond;
+
           let meetsBuyCriteria = false;
           let strategyLabel = "AI 스캘퍼";
 
-          if (scalperStrategyMode === 'PULLBACK') {
+          if (scalperStrategyMode === 'ALL_SENSORS_4') {
+            meetsBuyCriteria = isAll4SensorsOn;
+            strategyLabel = "🎯 [4/4 올-그린] 4개 전략 동시포착";
+          } else if (scalperStrategyMode === 'PULLBACK') {
             meetsBuyCriteria = isPullbackCond;
             strategyLabel = "① 상승추세 눌림목";
           } else if (scalperStrategyMode === 'BREAKOUT') {
@@ -4493,8 +4499,11 @@ export default function App() {
             meetsBuyCriteria = isVolumeProfileCond;
             strategyLabel = "④ VP/CVD 유동성포착";
           } else {
-            // 'AUTO' 모드 (기본값): 프로그램이 4가지 전략을 종합 파악 후 조건 충족 시 자동 매수
-            if (isPullbackCond) {
+            // 'AUTO' 모드 (기본값): 4개 센서 동시 포착 시 최우선 발동
+            if (isAll4SensorsOn) {
+              meetsBuyCriteria = true;
+              strategyLabel = "🎯 [4/4 올-그린] 4개 전략 동시포착";
+            } else if (isPullbackCond) {
               meetsBuyCriteria = true;
               strategyLabel = "AI포착: ①상승추세 눌림목";
             } else if (isBreakoutCond) {
@@ -4544,8 +4553,11 @@ export default function App() {
           const pendingBuyCount = pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length;
           const totalOccupied = currentInventory.length + pendingBuyCount + inFlightBuyCount;
 
+          // 4개 센서에 불이 모두 켜지면 슬롯 개수만큼 미보유 슬롯 전체를 가득 채워서 즉시 진입
+          const isAll4SensorsFullEntry = isAll4SensorsOn && totalOccupied < maxSlots;
+
           // Check if an active slot, pending order, or in-flight lock already exists
-          const isSamePriceBlocked = !allowSamePriceEntry && (
+          const isSamePriceBlocked = !allowSamePriceEntry && !isAll4SensorsFullEntry && (
             currentInventory.some(slot => Math.abs(slot.price - targetBuyPrice) < tickSize * 0.95) ||
             pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.orderPrice - targetBuyPrice) < tickSize * 0.95) ||
             buyingLockPricesRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.price - targetBuyPrice) < tickSize * 0.95)
@@ -4555,8 +4567,8 @@ export default function App() {
 
           const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
 
-          // Buy Trigger: Check gap and criteria
-          if (isGapSatisfied && (meetsBuyCriteria || (immediateEntry && totalOccupied < maxSlots))) {
+          // Buy Trigger: Check gap and criteria (4개 센서 모두 켜지면 갭 무관 슬롯 가득 매수 진입)
+          if ((isGapSatisfied || isAll4SensorsFullEntry) && (meetsBuyCriteria || (immediateEntry && totalOccupied < maxSlots))) {
             if (isSamePriceBlocked) {
               setScalperMessage(`[중복 차단] ${formatCurrency(targetBuyPrice)} 보유/주문 중`);
             } else if (totalOccupied >= maxSlots) {
@@ -4564,30 +4576,42 @@ export default function App() {
             } else if (isLockActive) {
               setScalperMessage(`[주문 처리 중] ${formatCurrency(targetBuyPrice)} API 통신 대기...`);
             } else {
-              const currentStep = totalOccupied + 1;
-              // Principle 1 & 4: Equal size execution.
-              const scaledQuantity = tradeQuantity; 
-              const scaledCost = priceInKrw * scaledQuantity;
+              // 4개 센서 올-그린 포착 시 남은 슬롯 개수만큼 가득 진입
+              const slotsToBuy = isAll4SensorsFullEntry ? Math.max(1, maxSlots - totalOccupied) : 1;
 
-              if (balance < scaledCost) {
-                setScalperMessage(`[매수 차단] 예수금 부족 (필요: ${formatCurrency(scaledCost)})`);
-              } else {
-                setScalperMessage(`[슬롯#${currentStep} 진입] ${formatCurrency(targetBuyPrice)} (${strategyLabel})...`);
+              for (let i = 0; i < slotsToBuy; i++) {
+                const currentInventoryNow = gapInventoryRef.current;
+                const inFlightNow = buyingLockPricesRef.current.filter(p => p.symbol === selectedStock.symbol).length;
+                const pendingNow = pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length;
+                const currentTotalOccupied = currentInventoryNow.length + pendingNow + inFlightNow;
+
+                if (currentTotalOccupied >= maxSlots) break;
+
+                const currentStep = currentTotalOccupied + 1;
+                const scaledQuantity = tradeQuantity; 
+                const scaledCost = priceInKrw * scaledQuantity;
+
+                if (balance < scaledCost) {
+                  setScalperMessage(`[매수 차단] 예수금 부족 (필요: ${formatCurrency(scaledCost)})`);
+                  break;
+                }
+
+                setScalperMessage(`[슬롯#${currentStep}/${maxSlots} 진입] ${formatCurrency(targetBuyPrice)} (${strategyLabel})...`);
                 
                 const lockEntry = { symbol: selectedStock.symbol, price: targetBuyPrice };
                 buyingLockPricesRef.current.push(lockEntry);
 
                 try {
                   const currentSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                  const executedQty = await executeTrade('BUY', selectedStock, scaledQuantity, `Scalper Slot #${currentStep} (${strategyLabel}): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId);
+                  const executedQty = await executeTrade('BUY', selectedStock, scaledQuantity, `Scalper Slot #${currentStep}/${maxSlots} (${strategyLabel}): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId);
                   
                   if (executedQty > 0) {
-                    setScalperMessage(`[매수 완료] 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} (${strategyLabel})`);
-                    setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} ${formatQuantity(executedQty)} 진입 완료 (${strategyLabel})`);
+                    setScalperMessage(`[매수 완료] 슬롯#${currentStep}/${maxSlots} ${formatCurrency(targetBuyPrice)} (${strategyLabel})`);
+                    setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep}/${maxSlots} ${formatCurrency(targetBuyPrice)} ${formatQuantity(executedQty)} 진입 완료 (${strategyLabel})`);
                     setHighWaterMark(prev => ({ ...prev, [targetBuyPrice]: targetBuyPrice }));
                     setLastTradeType('BUY');
                     setGapTradeCount(prev => prev + 1);
-                    showNotification(`${selectedStock.name} 슬롯#${currentStep} ${formatCurrency(targetBuyPrice)} (${strategyLabel}) 매수 완료`, "success");
+                    showNotification(`${selectedStock.name} 슬롯#${currentStep}/${maxSlots} ${formatCurrency(targetBuyPrice)} (${strategyLabel}) 매수 완료`, "success");
                     playScalpingSound('BUY');
                   }
                 } finally {
@@ -6577,12 +6601,12 @@ export default function App() {
                   실시간 {activeStrategyDetection.activeCount}개 전략 조건 포착!
                 </span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-5 gap-1.5 w-full md:w-auto">
+              <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 w-full md:w-auto">
                 <button
                   type="button"
                   onClick={() => setScalperStrategyMode('AUTO')}
                   className={cn(
-                    "px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    "px-2 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
                     scalperStrategyMode === 'AUTO'
                       ? "bg-gradient-to-r from-amber-500/30 to-amber-600/30 text-amber-200 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
                       : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
@@ -6591,6 +6615,27 @@ export default function App() {
                 >
                   <Bot className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
                   <span>AI 종합★</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScalperStrategyMode('ALL_SENSORS_4')}
+                  className={cn(
+                    "relative px-2 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    activeStrategyDetection.activeCount === 4
+                      ? "bg-gradient-to-r from-emerald-500/40 via-cyan-500/40 to-blue-500/40 text-emerald-200 border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.6)] animate-pulse"
+                      : scalperStrategyMode === 'ALL_SENSORS_4'
+                      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-md"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-80"
+                  )}
+                  title="4개 실시간 전략 감지 센서가 모두 켜질 때만(4/4) 슬롯 전체를 가득 매수 진입하는 최고 신뢰도 전용 모드"
+                >
+                  <span className={cn(
+                    "w-2 h-2 rounded-full transition-all shrink-0",
+                    activeStrategyDetection.activeCount === 4
+                      ? "bg-emerald-400 shadow-[0_0_10px_#10b981] animate-ping"
+                      : "bg-slate-600/60 border border-slate-700"
+                  )} />
+                  <span>🎯 4/4 올-그린</span>
                 </button>
                 <button
                   type="button"
