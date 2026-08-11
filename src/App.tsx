@@ -1415,7 +1415,7 @@ export default function App() {
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
   const [maxSlots, setMaxSlots] = useState<number>(10);
-  const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(false); 
+  const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(true); // Default true: 중복/동일가 매수 차단 해제
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
   const [scalperStrategyMode, setScalperStrategyMode] = useState<'AUTO' | 'ALL_SENSORS_4' | 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD'>('AUTO');
@@ -5005,10 +5005,12 @@ export default function App() {
         // Prevent duplicate buy order at same pending price level
         const isUSStock = stock.market === 'US' || /^[A-Za-z]/.test(stock.symbol) || marketType === 'US';
         const tickSize = getTickSize(tradePrice, isUSStock ? 'US' : 'KR');
-        const isDuplicateAtPrice = pendingBuyOrdersRef.current.some(
-          p => p.symbol === stock.symbol && Math.abs(p.orderPrice - tradePrice) < tickSize * 0.95
-        ) || gapInventoryRef.current.some(
-          s => Math.abs(s.price - tradePrice) < tickSize * 0.95
+        const isDuplicateAtPrice = !allowSamePriceEntry && (
+          pendingBuyOrdersRef.current.some(
+            p => p.symbol === stock.symbol && Math.abs(p.orderPrice - tradePrice) < tickSize * 0.95
+          ) || gapInventoryRef.current.some(
+            s => Math.abs(s.price - tradePrice) < tickSize * 0.95
+          )
         );
 
         if (isDuplicateAtPrice) {
@@ -6846,6 +6848,22 @@ export default function App() {
                       <option key={gap} value={gap} className="bg-sleek-bg text-white">{gap}%</option>
                     ))}
                   </select>
+                </div>
+
+                <div>
+                  <label className="text-[9px] font-black text-sleek-text-secondary uppercase block mb-0.5">동일/중복가 매수 설정</label>
+                  <button
+                    type="button"
+                    onClick={() => setAllowSamePriceEntry(!allowSamePriceEntry)}
+                    className={cn(
+                      "w-full py-1 px-2 rounded text-[10px] font-bold border transition-all cursor-pointer flex items-center justify-center gap-1",
+                      allowSamePriceEntry
+                        ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
+                        : "bg-rose-500/20 border-rose-500/40 text-rose-300"
+                    )}
+                  >
+                    {allowSamePriceEntry ? "✓ 동일가 매수 허용 (차단해제)" : "✕ 동일가 중복 차단"}
+                  </button>
                 </div>
 
                 <div>
