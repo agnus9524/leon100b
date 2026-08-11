@@ -4359,8 +4359,8 @@ export default function App() {
   const activeStrategyDetection = useMemo(() => {
     if (!selectedStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isCvdDivergence: false };
 
-    const historyPrices = selectedStock.history ? selectedStock.history.map(h => h.price) : [selectedStock.price];
-    const currentPrice = selectedStock.price;
+    const historyPrices = (selectedStock.history ? selectedStock.history.map(h => h.price) : [selectedStock.price]).filter((p): p is number => typeof p === 'number');
+    const currentPrice = selectedStock.price || 0;
     const rsi = calculateRSI(historyPrices, 14);
     const bb = calculateBollingerBands(historyPrices, 20, 2);
     const sma5 = calculateSMA(historyPrices, 5);
