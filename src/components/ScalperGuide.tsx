@@ -110,6 +110,79 @@ export default function ScalperGuide({ onClose }: ScalperGuideProps) {
         </div>
       </section>
 
+      {/* Stock Selection Strategy & Tips */}
+      <section className="bg-gradient-to-br from-amber-500/10 via-yellow-500/5 to-amber-600/10 border border-amber-500/30 rounded-2xl p-5 space-y-4">
+        <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
+          <div className="flex items-center gap-2">
+            <Zap className="w-5 h-5 text-amber-400" />
+            <h4 className="text-sm font-black text-amber-300 uppercase tracking-wider">스캘핑 종목 선정 4대 기준 & 발굴 노하우</h4>
+          </div>
+          <span className="text-[10px] font-bold text-amber-400 bg-amber-500/20 px-2 py-0.5 rounded-full border border-amber-500/40">
+            실전 매매 필수
+          </span>
+        </div>
+
+        {/* 4 Core Criteria */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="bg-black/50 p-3.5 rounded-xl border border-white/5 space-y-1.5">
+            <span className="text-xs font-black text-amber-300 flex items-center gap-1.5">
+              💰 1. 거래대금 상위 종목
+            </span>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              시장의 돈과 관심이 집중되는 <strong>당일 대장주 & 거래대금 최상위 종목</strong>에만 집중합니다. 유동성이 적은 종목은 호가 공백으로 슬리피지가 발생합니다.
+            </p>
+          </div>
+
+          <div className="bg-black/50 p-3.5 rounded-xl border border-white/5 space-y-1.5">
+            <span className="text-xs font-black text-amber-300 flex items-center gap-1.5">
+              🚀 2. 거래량 폭증 종목
+            </span>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              장 시작 후 10분 기준 <strong>최소 100만 주 이상</strong> 폭발적인 거래량이 동반된 종목을 우선 타겟팅합니다.
+            </p>
+          </div>
+
+          <div className="bg-black/50 p-3.5 rounded-xl border border-white/5 space-y-1.5">
+            <span className="text-xs font-black text-amber-300 flex items-center gap-1.5">
+              📊 3. 변동성 & 호가창 체결속도
+            </span>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              매수/매도 잔량이 두껍고 <strong>체결 속도가 매우 빠른 탄력적인 종목</strong>에서만 스캘핑 승률이 극대화됩니다.
+            </p>
+          </div>
+
+          <div className="bg-black/50 p-3.5 rounded-xl border border-white/5 space-y-1.5">
+            <span className="text-xs font-black text-amber-300 flex items-center gap-1.5">
+              📰 4. 당일 주도 테마 & 뉴스
+            </span>
+            <p className="text-[11px] text-slate-300 leading-relaxed">
+              당일 시장을 관통하는 확실한 <strong>이슈/뉴스 재료가 살아있는 1등 주도주</strong> 및 AI 포착 종목을 진입합니다.
+            </p>
+          </div>
+        </div>
+
+        {/* 3 Practical Discovery Tips */}
+        <div className="bg-black/60 rounded-xl p-3.5 border border-white/10 space-y-2">
+          <h5 className="text-[11px] font-black text-slate-200 flex items-center gap-1.5 uppercase">
+            <Lightbulb className="w-3.5 h-3.5 text-amber-400" /> 종목 발굴 실전 노하우 & 활용 팁
+          </h5>
+          <ul className="space-y-1.5 text-[10px] text-slate-300">
+            <li className="flex items-start gap-1.5">
+              <span className="text-amber-400 font-bold shrink-0">· 조건검색기 활용:</span>
+              <span>HTS/MTS의 실시간 거래량 상위, 급등주, 당일 고가 돌파 조건검색식을 적극 활용하세요.</span>
+            </li>
+            <li className="flex items-start gap-1.5">
+              <span className="text-amber-400 font-bold shrink-0">· 오전장(09:00~10:00) 집중:</span>
+              <span>하루 중 변동성과 거래량이 가장 폭발하는 개장 직후 1시간에 집중 탐색 및 매매합니다.</span>
+            </li>
+            <li className="flex items-start gap-1.5">
+              <span className="text-amber-400 font-bold shrink-0">· 틱/분차트 & 돌파 확인:</span>
+              <span>전일 고가나 당일 고점을 거래량을 동반하여 강하게 돌파하는지 틱·분차트로 꼭 확인하세요.</span>
+            </li>
+          </ul>
+        </div>
+      </section>
+
       {/* Advanced Orderflow Strategy: Volume Profile & CVD */}
       <section className="bg-gradient-to-br from-purple-900/30 via-black/50 to-indigo-900/30 border border-purple-500/30 rounded-2xl p-5 space-y-3">
         <div className="flex items-center gap-2">

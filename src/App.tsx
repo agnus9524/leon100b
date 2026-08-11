@@ -1907,12 +1907,20 @@ export default function App() {
       if (isHeld) {
         reasonTag = `💼 보유 종목 (스캘핑 관리 대상)`;
       } else if (isAiRec) {
-        reasonTag = `🔥 AI 스캘퍼 최적 추천 · 실시간 상승기류 · 1년 우상향 (+${stock.changePercent.toFixed(1)}%)`;
+        reasonTag = `🔥 AI 스캘퍼 최적 추천 · 거래대금/거래량 폭증 (+${stock.changePercent.toFixed(1)}%)`;
       } else if (stock.changePercent > 0) {
-        reasonTag = `⚡ 실시간 상승기류 · 1년 우상향 추세 (+${stock.changePercent.toFixed(1)}%)`;
+        reasonTag = `⚡ 실시간 상승기류 · 당일 고가 돌파 (+${stock.changePercent.toFixed(1)}%)`;
       } else {
         reasonTag = `💧 AI 분석 유동성 우수 종목`;
       }
+
+      // 4대 스캘핑 종목 선정 기준 조건 태그 생성
+      const screenerBadges: string[] = [];
+      if (rawVol >= 300 || stock.price * rawVol > 5000) screenerBadges.push('💰 거래대금 상위');
+      if (oscillation >= 2.0 || rawVol >= 500) screenerBadges.push('🚀 거래량 폭증');
+      if (stock.changePercent >= 1.5) screenerBadges.push('🔥 당일 고가 돌파');
+      if (isAiRec || stock.changePercent >= 2.5) screenerBadges.push('📰 주도 테마/AI');
+      if (screenerBadges.length === 0) screenerBadges.push('⚡ 오전장 변동성');
 
       const resolvedStockName = getResolvedStockName(sym, stock);
 
@@ -1922,7 +1930,8 @@ export default function App() {
         isHeld,
         scalpScore,
         oscillation,
-        reasonTag
+        reasonTag,
+        screenerBadges
       };
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -6280,7 +6289,7 @@ export default function App() {
                       </span>
                     </h2>
                     <div className="text-[9px] font-semibold text-amber-400/90 tracking-tight mt-0.5">
-                      가격 상관없이 · 실시간 상승기류 · 1년 우상향 · AI 최적 종목 포착 5선
+                      거래대금 상위 · 거래량 폭증 · 당일 고가 돌파 · 주도 테마/AI 5선
                     </div>
                   </div>
                 </div>
@@ -6357,15 +6366,17 @@ export default function App() {
                                 ({(st.changePercent || 0) >= 0 ? '+' : ''}{(st.changePercent || 0).toFixed(1)}%)
                               </span>
                             </div>
-                            {/* Stock Symbol/Code below */}
-                            <div className="text-[10px] font-mono text-sleek-text-secondary mt-0.5 flex items-center gap-2">
+                            {/* Stock Symbol/Code & Selection Criteria Badges */}
+                            <div className="text-[10px] font-mono text-sleek-text-secondary mt-0.5 flex items-center gap-1.5 flex-wrap">
                               <span>{st.symbol}</span>
-                              <span className="text-[9px] text-emerald-400 bg-emerald-500/10 px-1 py-0.1 rounded border border-emerald-500/20 font-sans">
-                                📈 1년 우상향
-                              </span>
+                              {(st.screenerBadges || ['💰 거래대금 상위', '🚀 거래량 폭증']).map((badge, bIdx) => (
+                                <span key={bIdx} className="text-[9px] font-bold text-amber-300 bg-amber-500/15 px-1.5 py-0.2 rounded border border-amber-500/30">
+                                  {badge}
+                                </span>
+                              ))}
                             </div>
                             <div className="flex items-center gap-1.5 mt-1">
-                              <span className="text-[9px] font-bold text-amber-300 bg-amber-500/10 px-1.5 py-0.2 rounded border border-amber-500/20">
+                              <span className="text-[9px] font-bold text-emerald-300 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
                                 {st.reasonTag}
                               </span>
                             </div>
