@@ -24,6 +24,7 @@ import {
   Bot,
   Newspaper,
   ChevronRight,
+  ChevronDown,
   Loader2,
   Settings,
   Users,
@@ -1663,6 +1664,18 @@ export default function App() {
 
   const [isAssetAnalysisModalOpen, setIsAssetAnalysisModalOpen] = useState<boolean>(false);
   const [showScalperGuide, setShowScalperGuide] = useState<boolean>(false);
+  const [showAccountDropdown, setShowAccountDropdown] = useState<boolean>(false);
+  const [showPnlDetailsModal, setShowPnlDetailsModal] = useState<boolean>(false);
+  const [selectedAccountType, setSelectedAccountType] = useState<string>('위탁');
+
+  const accountStatusFormattedTime = useMemo(() => {
+    const d = new Date();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const date = String(d.getDate()).padStart(2, '0');
+    const hours = String(d.getHours()).padStart(2, '0');
+    const minutes = String(d.getMinutes()).padStart(2, '0');
+    return `${month}.${date}. ${hours}:${minutes}`;
+  }, [time]);
 
   const assetAnalysis = useMemo(() => {
     const isUSD = displayCurrency === 'USD';
@@ -7771,55 +7784,102 @@ export default function App() {
             )}
           </div>
 
-          {/* 4. ACCOUNT FINANCIALS BAR (Full Width Bottom Bar) */}
-          <div className="bg-black/30 border border-white/10 rounded-2xl p-3.5 flex flex-col justify-between space-y-2">
-            <div className="flex items-center justify-between pb-1.5 border-b border-white/5">
-              <div className="flex items-center gap-1.5">
-                <CircleDollarSign className="w-4 h-4 text-sleek-blue" />
-                <h4 className="text-xs font-black text-white uppercase tracking-wider">실시간 계좌 현황</h4>
+          {/* 4. Real-time Account Status Card (Matches Photo 1 Layout Exactly) */}
+          <div className="bg-slate-900/95 dark:bg-slate-900 md:bg-white text-slate-900 border border-slate-200/20 md:border-slate-200 rounded-3xl p-5 shadow-xl space-y-4 relative overflow-visible">
+            {/* Header: Account Tag & Time */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xl font-black text-white md:text-slate-900 tracking-tight">{selectedAccountType}</span>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowAccountDropdown(!showAccountDropdown)}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/20 md:bg-blue-50 text-blue-400 md:text-blue-600 font-bold text-xs hover:bg-blue-100/30 md:hover:bg-blue-100 transition-all border border-blue-400/30 md:border-blue-200 cursor-pointer"
+                  >
+                    <span>
+                      {kisConfig.isConnected && kisConfig.accountNo 
+                        ? `${kisConfig.accountNo.slice(0, 8)}-${kisConfig.accountNo.slice(8) || '01'}` 
+                        : '44431721-01'}
+                    </span>
+                    <ChevronDown className={cn("w-3.5 h-3.5 text-blue-500 transition-transform duration-200", showAccountDropdown && "rotate-180")} />
+                  </button>
+
+                  {showAccountDropdown && (
+                    <div className="absolute left-0 top-full mt-1.5 w-56 bg-slate-800 md:bg-white border border-slate-700 md:border-slate-200 rounded-2xl shadow-2xl z-50 p-2 space-y-1 animate-in fade-in zoom-in-95 duration-150">
+                      <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">계좌 선택</div>
+                      <button
+                        onClick={() => { setSelectedAccountType('위탁'); setShowAccountDropdown(false); }}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-left hover:bg-blue-500/20 md:hover:bg-blue-50 text-blue-400 md:text-blue-600 cursor-pointer"
+                      >
+                        <span>위탁 {kisConfig.accountNo ? `${kisConfig.accountNo.slice(0, 8)}-01` : '44431721-01'}</span>
+                        <span className="text-[10px] bg-blue-500/20 md:bg-blue-100 px-1.5 py-0.5 rounded">기본</span>
+                      </button>
+                      <button
+                        onClick={() => { setSelectedAccountType('ISA'); setShowAccountDropdown(false); }}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-left hover:bg-slate-700/50 md:hover:bg-slate-50 text-slate-300 md:text-slate-700 cursor-pointer"
+                      >
+                        <span>ISA 중개형</span>
+                        <span className="text-[10px] bg-slate-700 md:bg-slate-100 px-1.5 py-0.5 rounded text-slate-400">연동예정</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-              <span className="text-[10px] font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                ACCOUNT LIVE
-              </span>
+              <div className="text-xs font-medium text-slate-400 tracking-tight">
+                {accountStatusFormattedTime} 기준
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs font-mono">
-              <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">예수금 {kisConfig.isConnected && kisConfig.accountNo ? `(${kisConfig.accountNo})` : ''}</span>
-                <span className="text-sm font-black text-white italic mt-0.5 block truncate">{formatCurrency(balance)}</span>
+            {/* Main 2 Box Grid (KRW & USD Orderable Amount) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="bg-slate-800/80 md:bg-slate-50 p-4 rounded-2xl border border-slate-700/50 md:border-slate-100 flex flex-col justify-center transition-all hover:shadow-md">
+                <div className="text-2xl font-black text-white md:text-slate-900 tracking-tight font-mono">
+                  {Math.round(balance).toLocaleString()}원
+                </div>
+                <div className="text-xs font-bold text-slate-400 mt-1">
+                  주문가능원화
+                </div>
               </div>
-              
-              <div 
+
+              <div className="bg-slate-800/80 md:bg-slate-50 p-4 rounded-2xl border border-slate-700/50 md:border-slate-100 flex flex-col justify-center transition-all hover:shadow-md">
+                <div className="text-2xl font-black text-white md:text-slate-900 tracking-tight font-mono">
+                  {(balance / (exchangeRate || 1350)).toFixed(2)}달러
+                </div>
+                <div className="text-xs font-bold text-slate-400 mt-1">
+                  주문가능달러
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom 2 Action Buttons (Total Asset & Realized PnL) */}
+            <div className="grid grid-cols-2 gap-4 pt-1">
+              <button
+                type="button"
                 onClick={() => setIsAssetAnalysisModalOpen(true)}
-                className="bg-white/5 hover:bg-white/10 p-2 rounded-xl border border-white/10 hover:border-sleek-blue/50 transition-all cursor-pointer group"
-                title="클릭 시 총 자산 세부 산출 내역 팝업 보기"
+                className="flex flex-col items-center justify-center gap-1.5 py-1.5 group cursor-pointer"
+                title="클릭 시 총자산 상세 산출 내역 팝업 보기"
               >
-                <div className="flex items-center justify-between">
-                  <span className="text-[10px] text-sleek-text-secondary uppercase font-bold flex items-center gap-1 group-hover:text-sleek-blue transition-colors truncate">
-                    총 자산 <Calculator className="w-3 h-3 text-sleek-blue shrink-0" />
-                  </span>
+                <div className="w-12 h-12 rounded-full bg-emerald-500 text-white flex items-center justify-center font-mono font-black text-xl shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-all">
+                  ₩
                 </div>
-                <div className="flex items-baseline justify-between mt-0.5">
-                  <span className="text-sm font-black text-sleek-blue italic truncate">{formatCurrency(totalValue)}</span>
-                  <span className={cn("text-[10px] font-bold shrink-0 ml-1", pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
-                    {pnl >= 0 ? '+' : ''}{(pnlPercent || 0).toFixed(1)}%
-                  </span>
+                <span className="text-xs font-bold text-white md:text-slate-700 group-hover:text-emerald-500 transition-colors">
+                  총자산
+                </span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setShowPnlDetailsModal(true)}
+                className="flex flex-col items-center justify-center gap-1.5 py-1.5 group cursor-pointer"
+                title="클릭 시 실현손익 및 세부리포트 보기"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-rose-500/20 md:bg-rose-50 text-rose-500 flex items-center justify-center shadow-md group-hover:scale-105 transition-all">
+                  <TrendingUp className="w-6 h-6 text-rose-500" />
                 </div>
-              </div>
-
-              <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">스캘핑 총 수익</span>
-                <span className={cn("text-sm font-black italic mt-0.5 block truncate", gapTradingProfit >= 0 ? "text-rose-400" : "text-sky-400")}>
-                  {formatCurrency(gapTradingProfit)}
+                <span className="text-xs font-bold text-white md:text-slate-700 group-hover:text-rose-500 transition-colors">
+                  실현손익
                 </span>
-              </div>
-
-              <div className="bg-white/5 p-2 rounded-xl border border-white/5">
-                <span className="text-[10px] text-sleek-text-secondary uppercase block font-bold truncate">오늘 체결 횟수</span>
-                <span className="text-sm font-black text-white italic mt-0.5 block truncate">
-                  {gapTradeCount} <span className="text-[10px] font-normal text-sleek-text-secondary opacity-60">TRADES</span>
-                </span>
-              </div>
+              </button>
             </div>
           </div>
         </section>
@@ -8652,6 +8712,73 @@ export default function App() {
                   확인 (닫기)
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Realized PnL Details Modal (실현손익 세부내역 팝업) */}
+      <AnimatePresence>
+        {showPnlDetailsModal && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-slate-900 border border-slate-700 rounded-3xl max-w-md w-full p-6 space-y-5 shadow-2xl relative text-white"
+            >
+              <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center border border-rose-500/30">
+                    <TrendingUp className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-black tracking-tight text-white">실현손익 현황</h3>
+                    <p className="text-xs text-slate-400">당일 실시간 스캘핑 및 체결 손익 리포트</p>
+                  </div>
+                </div>
+                <button
+                  onClick={() => setShowPnlDetailsModal(false)}
+                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <div className="space-y-3">
+                <div className="bg-white/5 p-4 rounded-2xl border border-white/10 flex items-center justify-between">
+                  <span className="text-xs text-slate-300 font-bold">당일 실현손익</span>
+                  <span className={cn("text-xl font-black font-mono", gapTradingProfit >= 0 ? "text-rose-400" : "text-sky-400")}>
+                    {gapTradingProfit >= 0 ? '+' : ''}{formatCurrency(gapTradingProfit)}
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="bg-white/5 p-3.5 rounded-2xl border border-white/5">
+                    <span className="text-[11px] text-slate-400 font-bold block">오늘 체결 횟수</span>
+                    <span className="text-lg font-black text-white font-mono mt-0.5 block">{gapTradeCount}회</span>
+                  </div>
+                  <div className="bg-white/5 p-3.5 rounded-2xl border border-white/5">
+                    <span className="text-[11px] text-slate-400 font-bold block">주문 성공 상태</span>
+                    <span className="text-lg font-black text-emerald-400 font-mono mt-0.5 block">정상 연동</span>
+                  </div>
+                </div>
+
+                <div className="bg-blue-500/10 border border-blue-500/20 p-3.5 rounded-2xl text-xs text-blue-300 leading-relaxed flex items-start gap-2.5">
+                  <span className="shrink-0 text-base">💡</span>
+                  <div>
+                    <strong>세부 손익 리포트 확장 안내</strong>
+                    <p className="mt-0.5 text-blue-200/80">추후 제공해주실 상세 세부양식에 따라 일별/종목별 상세 실현손익 내역 페이지로 확장될 예정입니다.</p>
+                  </div>
+                </div>
+              </div>
+
+              <button
+                onClick={() => setShowPnlDetailsModal(false)}
+                className="w-full py-3 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-sm shadow-lg shadow-blue-600/30 transition-all cursor-pointer"
+              >
+                확인
+              </button>
             </motion.div>
           </div>
         )}
