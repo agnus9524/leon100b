@@ -914,6 +914,22 @@ export default function App() {
   });
   const [balance, setBalance] = useState(0); // User's money (will be synced via KIS)
   const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
+  const [orderableKrw, setOrderableKrw] = useState<number>(() => {
+    const saved = localStorage.getItem('sleek_orderable_krw');
+    return saved !== null ? Number(saved) : 154000;
+  });
+  const [orderableUsd, setOrderableUsd] = useState<number>(() => {
+    const saved = localStorage.getItem('sleek_orderable_usd');
+    return saved !== null ? Number(saved) : 34.68;
+  });
+
+  useEffect(() => {
+    localStorage.setItem('sleek_orderable_krw', String(orderableKrw));
+  }, [orderableKrw]);
+
+  useEffect(() => {
+    localStorage.setItem('sleek_orderable_usd', String(orderableUsd));
+  }, [orderableUsd]);
   const [holdings, setHoldings] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem('sleek_holdings') || '{}'); } catch { return {}; }
   });
@@ -2858,6 +2874,9 @@ export default function App() {
         );
 
         if (res && res.rt_cd === '0' && res.output) {
+          if (res.output.ord_psbl_cash && Number(res.output.ord_psbl_cash) > 0) {
+            setOrderableKrw(Number(res.output.ord_psbl_cash));
+          }
           const nrcyStr = res.output.nrcy_buy_qty || res.output.nrcy_ord_psbl_qty;
           const ordPsblStr = res.output.ord_psbl_qty || res.output.psbl_qty;
           const maxQtyStr = res.output.max_ord_qty || res.output.tot_ord_psbl_qty || res.output.max_buy_qty;
@@ -2883,6 +2902,8 @@ export default function App() {
         );
 
         if (res && res.rt_cd === '0' && res.output) {
+          const usdAmt = Number(res.output.frcr_ord_psbl_amt || res.output.ord_psbl_frcr_amt || res.output.ovrs_ord_psbl_amt || 0);
+          if (usdAmt > 0) setOrderableUsd(usdAmt);
           const buyableStr = res.output.nrcy_buy_qty || res.output.ord_psbl_qty || res.output.max_buy_qty;
           let qty = 0;
           if (buyableStr !== undefined && buyableStr !== null && buyableStr !== '') {
@@ -2988,6 +3009,7 @@ export default function App() {
 
           // Direct deposit/cash balance in account
           const domesticCash = dnclAmt > 0 ? dnclAmt : (ordPsblCash > 0 ? ordPsblCash : 0);
+          if (domesticCash > 0) setOrderableKrw(domesticCash);
           
           if (marketType === 'KR') {
             totalConvertedBalance += Math.round(domesticCash);
@@ -3028,6 +3050,7 @@ export default function App() {
           const out2 = overseasBalanceData.output2;
           const frcr_dncl_amt = Number(out2.frcr_dncl_amt || 0); // Foreign currency deposit
           const ovrs_tot_pchs_amt = Number(out2.ovrs_tot_pchs_amt || totalOverseasPurchaseCostUSD);
+          if (frcr_dncl_amt > 0) setOrderableUsd(frcr_dncl_amt);
           
           if (marketType === 'US') {
             totalConvertedBalance += frcr_dncl_amt;
@@ -7835,7 +7858,7 @@ export default function App() {
               {/* 1. 주문가능원화 */}
               <div className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 flex flex-col justify-center transition-all">
                 <div className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight font-mono truncate">
-                  {Math.round(balance).toLocaleString()}원
+                  {Math.round(orderableKrw).toLocaleString()}원
                 </div>
                 <div className="text-xs font-bold text-slate-400 mt-1">
                   주문가능원화
@@ -7845,7 +7868,7 @@ export default function App() {
               {/* 2. 주문가능달러 */}
               <div className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 flex flex-col justify-center transition-all">
                 <div className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight font-mono truncate">
-                  {(balance / (exchangeRate || 1350)).toFixed(2)}달러
+                  {Number(orderableUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}달러
                 </div>
                 <div className="text-xs font-bold text-slate-400 mt-1">
                   주문가능달러
