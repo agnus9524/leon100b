@@ -1407,6 +1407,15 @@ export default function App() {
   const [top3RefreshNonce, setTop3RefreshNonce] = useState<number>(0);
   const [isRefreshingTop3, setIsRefreshingTop3] = useState<boolean>(false);
 
+  const displayScalperMessage = useMemo(() => {
+    if (!scalperMessage) return "대기 중...";
+    let cleaned = scalperMessage
+      .replace(/^\[AI전략 포착\]\s*.*?(감지!?|포착!?)\s*/g, '')
+      .replace(/\[AI전략 포착\]\s*[^!]*감지!?\s*/g, '')
+      .trim();
+    return cleaned || "진입 모니터링 중...";
+  }, [scalperMessage]);
+
   useEffect(() => {
     setScalperTabs(prev => prev.map(tab => {
       if (tab.id !== activeTabId) return tab;
@@ -4496,12 +4505,7 @@ export default function App() {
           } else {
             if (scalperStrategyMode === 'AUTO') {
               if (isPullbackCond || isBreakoutCond || isVwapSupportCond) {
-                const activeNames = [
-                  isPullbackCond && '①눌림목',
-                  isBreakoutCond && '②돌파',
-                  isVwapSupportCond && '③VWAP'
-                ].filter(Boolean).join(', ');
-                setScalperMessage(`[AI전략 포착] ${activeNames} 감지! 진입 모니터링 중...`);
+                setScalperMessage("진입 모니터링 중...");
               } else if (!momentumPositive) {
                 setScalperMessage(`[AI관망] 하락 추세 (SMA5<SMA20). 추세 전환 대기 중...`);
               } else {
@@ -6426,11 +6430,11 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="pt-2 mt-1 border-t border-white/10 text-xs font-mono min-h-[2.75rem] h-[2.75rem] flex items-center overflow-hidden">
-                <div className="flex items-start gap-1.5 w-full my-auto">
-                  <span className="text-[11px] font-black text-sleek-text-secondary uppercase shrink-0 mt-0.5">상태 메시지:</span>
-                  <span className="font-bold text-sleek-blue text-xs leading-snug break-words line-clamp-2">
-                    {scalperMessage || "대기 중..."}
+              <div className="pt-2 mt-1 border-t border-white/10 text-xs font-mono min-h-[2.5rem] h-[2.5rem] flex items-center overflow-hidden shrink-0">
+                <div className="flex items-center gap-1.5 w-full my-auto overflow-hidden">
+                  <span className="text-[11px] font-black text-sleek-text-secondary uppercase shrink-0">상태 메시지:</span>
+                  <span className="font-bold text-sleek-blue text-xs leading-snug truncate">
+                    {displayScalperMessage}
                   </span>
                 </div>
               </div>
@@ -6461,14 +6465,22 @@ export default function App() {
             <div className="bg-black/40 p-2.5 rounded-2xl border border-white/5 flex flex-col md:flex-row items-center justify-between gap-2.5">
               <div className="flex items-center gap-2 shrink-0">
                 <span className="text-[11px] font-black text-slate-300 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-spin" /> 스캘퍼 AI 전략 센서:
+                  <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-spin" /> 스캘퍼 AI 실시간 전략 감지 센서:
                 </span>
-                {activeStrategyDetection.activeCount > 0 && (
-                  <span className="px-2 py-0.5 rounded-full text-[9px] font-extrabold bg-amber-500/20 text-amber-300 border border-amber-500/40 animate-pulse flex items-center gap-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                    실시간 {activeStrategyDetection.activeCount}개 전략 조건 포착!
-                  </span>
-                )}
+                <span className={cn(
+                  "px-2.5 py-0.5 rounded-full text-[9px] font-extrabold border transition-all flex items-center gap-1.5 shrink-0",
+                  activeStrategyDetection.activeCount > 0
+                    ? "bg-amber-500/25 text-amber-300 border-amber-400/80 shadow-[0_0_12px_rgba(245,158,11,0.5)]"
+                    : "bg-white/5 text-slate-500 border-white/5 opacity-60"
+                )}>
+                  <span className={cn(
+                    "w-1.5 h-1.5 rounded-full transition-all shrink-0",
+                    activeStrategyDetection.activeCount > 0
+                      ? "bg-amber-400 shadow-[0_0_8px_#f59e0b] animate-ping"
+                      : "bg-slate-600"
+                  )} />
+                  실시간 {activeStrategyDetection.activeCount}개 전략 조건 포착!
+                </span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5 w-full md:w-auto">
                 <button
@@ -6489,64 +6501,64 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('PULLBACK')}
                   className={cn(
-                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
                     activeStrategyDetection.isPullback
-                      ? "bg-emerald-500/30 text-emerald-200 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)] animate-pulse"
+                      ? "bg-emerald-500/30 text-emerald-200 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)]"
                       : scalperStrategyMode === 'PULLBACK'
                       ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-md"
-                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
                   )}
                   title="상승 추세(SMA5>=SMA20) 눌림목 후 반등 진입 (원칙 1,3)"
                 >
-                  {activeStrategyDetection.isPullback && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
-                  )}
+                  <span className={cn(
+                    "w-2 h-2 rounded-full transition-all shrink-0",
+                    activeStrategyDetection.isPullback
+                      ? "bg-emerald-400 shadow-[0_0_10px_#10b981] animate-pulse"
+                      : "bg-slate-600/60 border border-slate-700"
+                  )} />
                   <span>① 상승추세 눌림목</span>
-                  {activeStrategyDetection.isPullback && (
-                    <span className="ml-0.5 px-1 py-0.2 text-[8px] bg-emerald-500 text-black font-black rounded-full">포착!</span>
-                  )}
                 </button>
                 <button
                   type="button"
                   onClick={() => setScalperStrategyMode('BREAKOUT')}
                   className={cn(
-                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
                     activeStrategyDetection.isBreakout
-                      ? "bg-amber-500/30 text-amber-200 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.5)] animate-pulse"
+                      ? "bg-amber-500/30 text-amber-200 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.5)]"
                       : scalperStrategyMode === 'BREAKOUT'
                       ? "bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-md"
-                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
                   )}
                   title="거래량 급증 및 전고점 돌파 진입 (원칙 2)"
                 >
-                  {activeStrategyDetection.isBreakout && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                  )}
+                  <span className={cn(
+                    "w-2 h-2 rounded-full transition-all shrink-0",
+                    activeStrategyDetection.isBreakout
+                      ? "bg-amber-400 shadow-[0_0_10px_#f59e0b] animate-pulse"
+                      : "bg-slate-600/60 border border-slate-700"
+                  )} />
                   <span>② 거래량 돌파</span>
-                  {activeStrategyDetection.isBreakout && (
-                    <span className="ml-0.5 px-1 py-0.2 text-[8px] bg-amber-500 text-black font-black rounded-full">포착!</span>
-                  )}
                 </button>
                 <button
                   type="button"
                   onClick={() => setScalperStrategyMode('VWAP_SUPPORT')}
                   className={cn(
-                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
                     activeStrategyDetection.isVwapSupport
-                      ? "bg-indigo-500/30 text-indigo-200 border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.5)] animate-pulse"
+                      ? "bg-indigo-500/30 text-indigo-200 border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.5)]"
                       : scalperStrategyMode === 'VWAP_SUPPORT'
                       ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/50 shadow-md"
-                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
                   )}
                   title="VWAP 평균가격 지지 및 지지선 반등 진입"
                 >
-                  {activeStrategyDetection.isVwapSupport && (
-                    <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />
-                  )}
+                  <span className={cn(
+                    "w-2 h-2 rounded-full transition-all shrink-0",
+                    activeStrategyDetection.isVwapSupport
+                      ? "bg-indigo-400 shadow-[0_0_10px_#6366f1] animate-pulse"
+                      : "bg-slate-600/60 border border-slate-700"
+                  )} />
                   <span>③ VWAP 지지반등</span>
-                  {activeStrategyDetection.isVwapSupport && (
-                    <span className="ml-0.5 px-1 py-0.2 text-[8px] bg-indigo-500 text-white font-black rounded-full">포착!</span>
-                  )}
                 </button>
               </div>
             </div>
@@ -7906,67 +7918,6 @@ export default function App() {
                 )}
               </div>
             </div>
-
-            {/* AI Real-time Strategy Sensor Status */}
-            {isGapBotActive && selectedStock && (
-              <div className="bg-gradient-to-br from-amber-500/10 via-emerald-500/10 to-indigo-500/10 border border-amber-500/30 rounded-3xl p-4 space-y-3 shrink-0 shadow-lg">
-                <div className="flex items-center justify-between border-b border-white/5 pb-2">
-                  <h3 className="text-xs font-black text-amber-300 uppercase tracking-widest flex items-center gap-1.5">
-                    <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-spin" /> AI 실시간 전략 감지 센서
-                  </h3>
-                  <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-black/60 text-slate-300 border border-white/10">
-                    {scalperStrategyMode === 'AUTO' ? 'AI 종합 자동분석' : `전용: ${scalperStrategyMode}`}
-                  </span>
-                </div>
-                
-                <div className="grid grid-cols-3 gap-1.5 text-center">
-                  <div className={cn(
-                    "p-2 rounded-2xl border text-[10px] font-bold transition-all flex flex-col items-center justify-center gap-1 min-h-[50px]",
-                    activeStrategyDetection.isPullback
-                      ? "bg-emerald-500/25 border-emerald-400 text-emerald-200 animate-pulse shadow-[0_0_12px_rgba(16,185,129,0.4)]"
-                      : "bg-black/40 border-white/5 text-slate-500"
-                  )}>
-                    <span className="flex items-center gap-1 text-[9px] leading-tight">
-                      {activeStrategyDetection.isPullback && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />}
-                      ① 눌림목
-                    </span>
-                    <span className="text-[9px] font-black">
-                      {activeStrategyDetection.isPullback ? '🔥 포착 완료' : '대기 중'}
-                    </span>
-                  </div>
-
-                  <div className={cn(
-                    "p-2 rounded-2xl border text-[10px] font-bold transition-all flex flex-col items-center justify-center gap-1 min-h-[50px]",
-                    activeStrategyDetection.isBreakout
-                      ? "bg-amber-500/25 border-amber-400 text-amber-200 animate-pulse shadow-[0_0_12px_rgba(245,158,11,0.4)]"
-                      : "bg-black/40 border-white/5 text-slate-500"
-                  )}>
-                    <span className="flex items-center gap-1 text-[9px] leading-tight">
-                      {activeStrategyDetection.isBreakout && <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />}
-                      ② 거래량돌파
-                    </span>
-                    <span className="text-[9px] font-black">
-                      {activeStrategyDetection.isBreakout ? '🔥 포착 완료' : '대기 중'}
-                    </span>
-                  </div>
-
-                  <div className={cn(
-                    "p-2 rounded-2xl border text-[10px] font-bold transition-all flex flex-col items-center justify-center gap-1 min-h-[50px]",
-                    activeStrategyDetection.isVwapSupport
-                      ? "bg-indigo-500/25 border-indigo-400 text-indigo-200 animate-pulse shadow-[0_0_12px_rgba(99,102,241,0.4)]"
-                      : "bg-black/40 border-white/5 text-slate-500"
-                  )}>
-                    <span className="flex items-center gap-1 text-[9px] leading-tight">
-                      {activeStrategyDetection.isVwapSupport && <span className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-ping" />}
-                      ③ VWAP지부
-                    </span>
-                    <span className="text-[9px] font-black">
-                      {activeStrategyDetection.isVwapSupport ? '🔥 포착 완료' : '대기 중'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            )}
 
             {/* 2. Real-time Gap Monitor Gauge */}
             {isGapBotActive && selectedStock && gapBuyPrice > 0 && gapSellPrice > 0 && (
