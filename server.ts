@@ -528,9 +528,15 @@ async function startServer() {
       }
     });
 
-    // If virtual server, convert trade TR-IDs starting with T to V
-    if (!isRealServer && headers['tr_id'] && typeof headers['tr_id'] === 'string' && headers['tr_id'].startsWith('T')) {
-      headers['tr_id'] = 'V' + headers['tr_id'].substring(1);
+    // Ensure both tr_id and tr-id are populated and properly prefixed for real/virtual environments
+    const trIdVal = headers['tr_id'] || req.headers['tr-id'] || req.headers['tr_id'];
+    if (trIdVal && typeof trIdVal === 'string') {
+      let finalTrId = trIdVal;
+      if (!isRealServer && finalTrId.startsWith('T')) {
+        finalTrId = 'V' + finalTrId.substring(1);
+      }
+      headers['tr_id'] = finalTrId;
+      headers['tr-id'] = finalTrId;
     }
 
     try {

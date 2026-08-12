@@ -638,6 +638,7 @@ class KISService {
         'appkey': this.config.appKey,
         'appsecret': this.config.appSecret,
         'tr-id': trId,
+        'tr_id': trId,
         'custtype': 'P',
       };
 
@@ -676,6 +677,7 @@ class KISService {
         'appkey': this.config.appKey,
         'appsecret': this.config.appSecret,
         'tr-id': trId,
+        'tr_id': trId,
         'custtype': 'P',
       };
 
@@ -715,6 +717,7 @@ class KISService {
         'appkey': this.config.appKey,
         'appsecret': this.config.appSecret,
         'tr-id': trId,
+        'tr_id': trId,
         'custtype': 'P',
       };
 

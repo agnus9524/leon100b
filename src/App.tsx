@@ -1777,11 +1777,13 @@ export default function App() {
       if (kisConfig.isConnected) {
         const results = await Promise.allSettled([
           kisService.getDomesticPeriodRealizedPnL(startStr, endStr),
-          kisService.getPeriodTradeProfit(startStr, endStr, '', '02')
+          kisService.getPeriodTradeProfit(startStr, endStr, '', '02'),
+          kisService.getDomesticOrderExecutions(startStr, endStr)
         ]);
 
         const resPeriod = results[0].status === 'fulfilled' ? results[0].value : null;
         const resProfit = results[1].status === 'fulfilled' ? results[1].value : null;
+        const resExecutions = results[2].status === 'fulfilled' ? results[2].value : null;
 
         if (resPeriod && resPeriod.rt_cd === '0' && Array.isArray(resPeriod.output1) && resPeriod.output1.length > 0) {
           stockList = resPeriod.output1.map((item: any) => ({
@@ -1817,6 +1819,23 @@ export default function App() {
               erng_rt: Number(item.erng_rt || item.pnl_rat || 0),
             }));
           }
+        }
+
+        // 3rd Fallback: If stockList is still empty, parse order executions (TTTC8001R)
+        if (stockList.length === 0 && resExecutions && resExecutions.rt_cd === '0' && Array.isArray(resExecutions.output1)) {
+          const grouped: Record<string, any> = {};
+          resExecutions.output1.forEach((exec: any) => {
+            const sym = exec.pdno || exec.stck_shrn_iscd || 'STOCK';
+            const name = exec.prdt_name || exec.hts_kor_isnm || sym;
+            const qty = Number(exec.tot_ccld_qty || exec.ccld_qty || 0);
+            const amt = Number(exec.tot_ccld_amt || 0);
+            if (!grouped[sym]) {
+              grouped[sym] = { pdno: sym, prdt_name: name, sll_qty: 0, pchs_amt: 0, sll_amt: 0, rlzt_pnl: 0, erng_rt: 0 };
+            }
+            grouped[sym].sll_qty += qty;
+            grouped[sym].sll_amt += amt;
+          });
+          stockList = Object.values(grouped);
         }
 
         // Calculate total KIS realized PnL
@@ -1919,7 +1938,8 @@ export default function App() {
     if (showPnlDetailsModal) {
       loadRealizedPnL();
     }
-  }, [showPnlDetailsModal, loadRealizedPnL]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showPnlDetailsModal, pnlPeriodRange]);
   const [selectedAccountType, setSelectedAccountType] = useState<string>('위탁');
 
   const accountStatusFormattedTime = useMemo(() => {
