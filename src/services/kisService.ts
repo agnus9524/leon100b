@@ -40,7 +40,15 @@ class KISService {
   }
 
   public init(config: KISConfig, savedToken?: string, savedExpiresAt?: number) {
-    this.config = config;
+    // Sanitize config by trimming strings to eliminate accidental trailing whitespace
+    this.config = {
+      ...config,
+      appKey: (config.appKey || '').trim(),
+      appSecret: (config.appSecret || '').trim(),
+      accountNo: (config.accountNo || '').trim(),
+      accountCode: (config.accountCode || '01').trim(),
+      accountPw: (config.accountPw || '').trim()
+    };
     
     // Add request interceptor to append the isRealServer header dynamically
     if (!(axios as any)._kisInterceptorAdded) {
@@ -48,7 +56,6 @@ class KISService {
       axios.interceptors.request.use((reqConfig: any) => {
         if (reqConfig.url?.includes('/api/kis') && this.config) {
           reqConfig.headers = reqConfig.headers || {};
-          // Default to true (Real Server) as mock investment support is being removed
           reqConfig.headers['x-is-real-server'] = 'true';
         }
         return reqConfig;
@@ -84,15 +91,22 @@ class KISService {
       return this.pendingTokenPromise;
     }
 
-    if (!this.config) throw new Error("KIS Config not initialized");
+    if (!this.config) throw new Error("KIS 설정 정보(AppKey / AppSecret)가 초기화되지 않았습니다.");
 
     this.pendingTokenPromise = (async () => {
       try {
+        const cleanAppKey = (this.config!.appKey || '').trim();
+        const cleanAppSecret = (this.config!.appSecret || '').trim();
+
+        if (!cleanAppKey || !cleanAppSecret) {
+          throw new Error("App Key 또는 App Secret이 비어있습니다. KIS 연동 설정에서 확인 후 재입력해주세요.");
+        }
+
         const endpoint = '/oauth2/tokenP';
         const payload = {
           grant_type: 'client_credentials',
-          appkey: this.config!.appKey,
-          appsecret: this.config!.appSecret
+          appkey: cleanAppKey,
+          appsecret: cleanAppSecret
         };
 
         const res = await axios.post(`${this.baseUrl}${endpoint}`, payload, { 
@@ -102,13 +116,28 @@ class KISService {
           } 
         });
         
-        if (!res.data.access_token) {
-          throw new Error(`Token request failed: ${res.data.msg1 || 'Unknown error'}`);
+        // Handle potential KIS error responses or missing access token
+        if (!res.data || !res.data.access_token) {
+          const rawErr = res.data?.error_description 
+            || res.data?.msg1 
+            || res.data?.error_code 
+            || res.data?.msg_cd 
+            || '접근 토큰 발급 실패';
+
+          let friendlyMsg = rawErr;
+          if (rawErr.includes('EGW00201') || rawErr.includes('APPKEY')) {
+            friendlyMsg = "유효하지 않은 AppKey/AppSecret입니다. (공백 또는 오타 확인 필요)";
+          } else if (rawErr.includes('EGW00002')) {
+            friendlyMsg = "AppKey 또는 AppSecret 정보가 일치하지 않습니다.";
+          }
+
+          throw new Error(friendlyMsg);
         }
 
         const newAccessToken = res.data.access_token;
+        const expiresInSec = Number(res.data.expires_in || 86400);
         // Buffer for safety (1 hour before actual expiry or 23h since token lasts 24h)
-        const newExpireTime = Date.now() + (Number(res.data.expires_in || 86400) - 3600) * 1000;
+        const newExpireTime = Date.now() + (expiresInSec > 3600 ? expiresInSec - 3600 : expiresInSec - 60) * 1000;
         
         this.accessToken = newAccessToken;
         this.tokenExpireTime = newExpireTime;
@@ -118,6 +147,24 @@ class KISService {
         }
         
         return this.accessToken;
+      } catch (error: any) {
+        this.accessToken = null;
+        this.tokenExpireTime = 0;
+
+        const dataErr = error.response?.data;
+        const kisDetail = dataErr?.error_description 
+          || dataErr?.msg1 
+          || dataErr?.error_code 
+          || error.message;
+
+        let userFriendlyReason = kisDetail;
+        if (kisDetail.includes('EGW00201') || kisDetail.includes('APPKEY')) {
+          userFriendlyReason = "유효하지 않은 AppKey/AppSecret입니다. 한국투자증권 KIS Developers에서 발급된 키인지 확인해주세요.";
+        } else if (kisDetail.includes('400') || kisDetail.includes('401')) {
+          userFriendlyReason = "인증 실패: AppKey/AppSecret 복사 시 앞뒤 공백이 포함되었거나 모의투자/실전 계좌 키가 다를 수 있습니다.";
+        }
+
+        throw new Error(userFriendlyReason.startsWith('[토큰 발급 오류]') ? userFriendlyReason : `[토큰 발급 오류] ${userFriendlyReason}`);
       } finally {
         this.pendingTokenPromise = null;
       }
