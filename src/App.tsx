@@ -3944,7 +3944,6 @@ export default function App() {
       const priceInKrw = marketType === 'US' ? order.orderPrice * exchangeRate : order.orderPrice;
       const refundAmount = priceInKrw * order.quantity;
       setBalance(prev => prev + refundAmount);
-      addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[가상 매수취소] 수동 취소`);
     } else {
       try {
         const cancelRes = marketType === 'US'
@@ -4055,7 +4054,6 @@ export default function App() {
         const priceInKrw = marketType === 'US' ? order.orderPrice * exchangeRate : order.orderPrice;
         const refundAmount = priceInKrw * order.quantity;
         setBalance(prev => prev + refundAmount);
-        addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[가상 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
       } else {
         try {
           if (marketType === 'US') {
@@ -4082,8 +4080,6 @@ export default function App() {
         } catch (e) {
           console.error("Failed to cancel KIS pending sell order:", e);
         }
-      } else {
-        addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[가상 주문취소] 봇 종료로 인한 미체결 매도 주문 일괄 취소`);
       }
     }
 
@@ -4146,10 +4142,6 @@ export default function App() {
             const priceInKrw = marketType === 'US' ? orderPrice * exchangeRate : orderPrice;
             const refundAmount = priceInKrw * (order.quantity || 1);
             setBalance(prev => prev + refundAmount);
-            
-            addLog(order.symbol, '매수', orderPrice, order.quantity || 1, `[가상 자동취소] ${cancelReason}`);
-            showNotification(`${currentStock.name} 가상 매수 자동 취소 (${isDropCancel ? '낙폭 과대' : '상승 이탈'})`, "info");
-            setBotStatus(`[가상 취소] ${formatCurrency(orderPrice)} 주문 취소 완료`);
           } else {
             // Real KIS order cancel request!
             try {
@@ -4211,10 +4203,6 @@ export default function App() {
             setHoldings(newHoldings);
             setAvgPrices(prev => ({ ...prev, [order.symbol]: newAvg }));
             if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-            
-            addLog(order.symbol, '매수', orderPrice, order.quantity, `[가상 체결] 주문가 ${formatCurrency(orderPrice)} 체결 완료 (현재가: ${formatCurrency(currentPrice)})`);
-            showNotification(`${currentStock.name} 가상 매수 주문 체결 완료!`, "success");
-            setBotStatus(`[가상 체결] ${formatCurrency(orderPrice)} 완료`);
             
             // Add to gapInventory and update ref
             const newSlotId = order.slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -4378,10 +4366,7 @@ export default function App() {
             ? `목표가 대비 -${tickStr} 하향 이탈 (손절/슬롯 해제 자동 취소)`
             : `목표가 대비 +${tickStr} 상향 급등 이탈 (타점 재조정)`;
 
-          if (order.isSimulated) {
-            addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[가상 스마트 매도취소] ${cancelReason}`);
-            showNotification(`${currentStock.name} 가상 매도 대기 주문 자동 취소 (${cancelReason})`, "info");
-          } else {
+          if (!order.isSimulated) {
             try {
               setBotStatus(`[KIS API] 매도 주문(${order.id}) 취소 요청 중...`);
               const cancelRes = marketType === 'US'
@@ -4453,7 +4438,6 @@ export default function App() {
             setHoldings(newHoldings);
             if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
 
-            addLog(order.symbol, '매도', currentStock.price, order.quantity, `[가상 지정가 매도] 목표가 ${formatCurrency(order.orderPrice)} 도달`);
             playScalpingSound('SELL');
           } else {
             nextPending.push(order);
@@ -4550,35 +4534,6 @@ export default function App() {
             } finally {
               autoSellInFlightRef.current.delete(symbol);
             }
-          } else {
-            // Simulated Mode: Register as simulated pending sell order
-            const autoOrderId = `AUTO-SELL-${symbol}-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-            const newPendingSell: PendingSellOrder = {
-              id: autoOrderId,
-              symbol: symbol,
-              orderPrice: targetSellPrice,
-              quantity: missingQty,
-              createdAt: Date.now(),
-              isSimulated: true,
-              type: 'LIMIT_SELL',
-              reason: `[체결 즉시 자동 매도] 보유 주식 (${missingQty}주) +${scalpingTargetProfit}% 익절 지정가 매도 주문`,
-              buyPrice: avgP
-            };
-
-            setPendingSellOrders(prev => {
-              const currentQtyInPrev = prev.filter(o => o.symbol === symbol).reduce((a, b) => a + b.quantity, 0);
-              if (currentQtyInPrev >= numQty) return prev;
-              return [...prev, newPendingSell];
-            });
-
-            if (gapInventoryRef.current.length === 0) {
-              const autoSlot = { id: `SLOT-HELD-${symbol}`, price: avgP, quantity: missingQty };
-              gapInventoryRef.current = [autoSlot];
-              setGapInventory([autoSlot]);
-            }
-
-            addLog(symbol, '매도', targetSellPrice, missingQty, `[가상 자동 매도 주문] 평단가 ${formatCurrency(avgP)} 대비 +${scalpingTargetProfit}% (목표가: ${formatCurrency(targetSellPrice)})`);
-            showNotification(`${stockObj.name} 보유 ${formatQuantity(missingQty)}주 가상 매도 주문이 +${scalpingTargetProfit}% 목표가(${formatCurrency(targetSellPrice)})에 자동 등록되었습니다.`, "info");
           }
         }
       }
@@ -5043,6 +4998,13 @@ export default function App() {
     }
     let finalAmount = amount;
 
+    if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
+      setBotStatus("[실전매매 전용] KIS 연동 및 실제 주문 전송 옵션 미활성화");
+      setScalperMessage("[실전매매 전용] KIS 연동 및 실제 주문 전송 옵션을 활성화해주세요.");
+      showNotification("실전매매 전용: KIS API 연동 및 실제 주문 전송 옵션이 활성화되어 있어야 거래가 실행됩니다.", "info");
+      return 0;
+    }
+
     // KIS API가 연결되어 있고 실제 주문 전송이 활성화된 경우 실제 주문을 라이브 인터페이스를 통해 시도
     if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
         if (action === 'BUY') {
@@ -5241,45 +5203,6 @@ export default function App() {
 
       const createdSlotId = slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
-      if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
-        // Prevent duplicate buy order at same pending price level
-        const isUSStock = stock.market === 'US' || /^[A-Za-z]/.test(stock.symbol) || marketType === 'US';
-        const tickSize = getTickSize(tradePrice, isUSStock ? 'US' : 'KR');
-        const isDuplicateAtPrice = !allowSamePriceEntry && (
-          pendingBuyOrdersRef.current.some(
-            p => p.symbol === stock.symbol && Math.abs(p.orderPrice - tradePrice) < tickSize * 0.95
-          ) || gapInventoryRef.current.some(
-            s => Math.abs(s.price - tradePrice) < tickSize * 0.95
-          )
-        );
-
-        if (isDuplicateAtPrice) {
-          setScalperMessage(`[동일가 매수 중복 차단] ${formatCurrency(tradePrice)} 대기 중`);
-          return 0;
-        }
-
-        // Simulated Mode: Place as pending buy order instead of instant fill!
-        const simOrderId = `SIM-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-        
-        setBalance(prev => Math.max(0, prev - cost)); // Reserve balance
-        
-        const newPending: PendingBuyOrder = {
-          id: simOrderId,
-          symbol: stock.symbol,
-          orderPrice: tradePrice,
-          quantity: finalAmount,
-          createdAt: Date.now(),
-          isSimulated: true,
-          slotId: createdSlotId
-        };
-        
-        setPendingBuyOrders(prev => [...prev, newPending]);
-        addLog(stock.symbol, '매수', tradePrice, finalAmount, `[가상 주문접수] ${reason}`);
-        showNotification(`${stock.name} 가상 매수 주문 접수 완료 (체결 대기 중...)`, "info");
-        setBotStatus(`[가상 대기] 주문가 ${formatCurrency(tradePrice)} 체결 대기 중...`);
-        return 0; // Return 0 so it's not added to gapInventory immediately!
-      }
-
       setBalance(prev => Math.max(0, prev - cost));
       const oldQty = holdings[stock.symbol] || 0;
       const oldAvg = avgPrices[stock.symbol] || tradePrice;
@@ -5298,110 +5221,50 @@ export default function App() {
         return next;
       });
 
-      if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
-          addLog(stock.symbol, '매수', tradePrice, finalAmount, reason);
-      }
-
       // Trigger Auto-Sell for immediate simulated or real fills that reached this point
       triggerAutoSell(stock.symbol, tradePrice, finalAmount, newAvg, newQty, createdSlotId);
 
       // KIS API 연결 상태이고 실제 주문 전송이 활성화된 경우 실제 계좌 잔고를 비동기로 동기화
-      if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
+      setTimeout(() => {
+        handleSyncKIS();
+      }, 1000);
+      return finalAmount;
+    } else if (action === 'SELL') {
+      try {
+        const isKR = /^\d{6}$/.test(stock.symbol);
+        if (isKR) {
+          setBotStatus(`[KIS API] ${stock.symbol} 매도 가능 수량 조회 중...`);
+          const sellableRes = await kisService.getDomesticSellableQuantity(stock.symbol);
+          if (sellableRes && sellableRes.rt_cd === '0' && sellableRes.output) {
+            const actualSellable = sellableRes.output.nrc_psbl_qty ? parseInt(sellableRes.output.nrc_psbl_qty, 10) : 0;
+            if (!isNaN(actualSellable)) {
+              if (actualSellable <= 0) {
+                setBotStatus(`[매도 건너뜀] KIS 실제 매도 가능 수량 0주`);
+                setScalperMessage("실제 보유 주식이 없거나 미체결 상태여서 매도 대기 (실거래 미체결 대기)");
+                showNotification(`매도 대기: 실제 계좌에 보유 중인 ${stock.name} 매도 가능 수량이 0주입니다.`, "info");
+                return 0;
+              }
+              if (actualSellable < finalAmount) {
+                console.log(`[KIS Scalper Safety] Adjusting sell quantity from ${finalAmount} to ${actualSellable} due to KIS limits.`);
+                finalAmount = actualSellable;
+                showNotification(`매도 수량 자동 조정: 실제 매도 가능 수량에 맞춰 ${finalAmount}주로 조절하여 주문합니다.`, "info");
+              }
+            }
+          }
+        }
+      } catch (err: any) {
+        console.error("Failed to query domestic sellable quantity:", err);
+        setBotStatus("매도 가능 수량 조회 실패");
+        showNotification(`매도 가능 수량 조회 실패: ${err.message}`, "error");
+        return 0; // KIS API 오류 시 안전을 위해 매도하지 않음
+      }
+
+      if (finalAmount > 0) {
+        handleSyncKIS();
         setTimeout(() => {
           handleSyncKIS();
         }, 1000);
-      }
-      return finalAmount;
-    } else if (action === 'SELL') {
-        if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
-            try {
-                const isKR = /^\d{6}$/.test(stock.symbol);
-                if (isKR) {
-                    setBotStatus(`[KIS API] ${stock.symbol} 매도 가능 수량 조회 중...`);
-                    const sellableRes = await kisService.getDomesticSellableQuantity(stock.symbol);
-                    if (sellableRes && sellableRes.rt_cd === '0' && sellableRes.output) {
-                        const actualSellable = sellableRes.output.nrc_psbl_qty ? parseInt(sellableRes.output.nrc_psbl_qty, 10) : 0;
-                        if (!isNaN(actualSellable)) {
-                            if (actualSellable <= 0) {
-                                setBotStatus(`[매도 건너뜀] KIS 실제 매도 가능 수량 0주`);
-                                setScalperMessage("실제 보유 주식이 없거나 미체결 상태여서 매도 대기 (실거래 미체결 대기)");
-                                showNotification(`매도 대기: 실제 계좌에 보유 중인 ${stock.name} 매도 가능 수량이 0주입니다.`, "info");
-                                return 0;
-                            }
-                            if (actualSellable < finalAmount) {
-                                console.log(`[KIS Scalper Safety] Adjusting sell quantity from ${finalAmount} to ${actualSellable} due to KIS limits.`);
-                                finalAmount = actualSellable;
-                                showNotification(`매도 수량 자동 조정: 실제 매도 가능 수량에 맞춰 ${finalAmount}주로 조절하여 주문합니다.`, "info");
-                            }
-                        }
-                    }
-                }
-            } catch (err: any) {
-                console.error("Failed to query domestic sellable quantity:", err);
-                setBotStatus("매도 가능 수량 조회 실패");
-                showNotification(`매도 가능 수량 조회 실패: ${err.message}`, "error");
-                return 0; // KIS API 오류 시 안전을 위해 매도하지 않음
-            }
-        }
-
-      const currentHoldings = holdings[stock.symbol] || 0;
-      const effectiveHoldings = currentHoldings > 0 ? currentHoldings : finalAmount;
-      const sellAmount = kisConfig.isConnected && kisConfig.isRealOrderEnabled ? finalAmount : Math.min(finalAmount, effectiveHoldings);
-      if (sellAmount > 0) {
-        if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
-          // 실제 주문인 경우: 로컬 상태를 임의로 차감하지 않고 실제 계좌 잔고 데이터를 fetch하여 즉시 UI에 반영
-          handleSyncKIS();
-          
-          // 서버 응답 지연을 고려해 1초 뒤에 최종 동기화를 한 번 더 트리거
-          setTimeout(() => {
-            handleSyncKIS();
-          }, 1000);
-        } else {
-          // 가상 거래인 경우
-          if (customPrice !== undefined) {
-            // [중요] 지정가 매도 주문인 경우 즉시 반영하지 않고 대기 주문으로 등록 (수익/잔고는 실제 체결 시 반영)
-            const simOrderId = `SIM-SELL-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-            const newPendingSell: PendingSellOrder = {
-              id: simOrderId,
-              symbol: stock.symbol,
-              orderPrice: tradePrice,
-              quantity: sellAmount,
-              createdAt: Date.now(),
-              isSimulated: true,
-              type: 'LIMIT_SELL',
-              reason,
-              buyPrice: buyPrice, // Save buy price to calculate profit upon actual fill
-              slotId: slotId
-            };
-            setPendingSellOrders(prev => [...prev, newPendingSell]);
-            addLog(stock.symbol, '매도', tradePrice, sellAmount, `[가상 매도 주문접수] ${reason}`);
-            showNotification(`${stock.name} 가상 매도 주문 접수 완료 (체결 대기 중...)`, "info");
-            return 0;
-          }
-
-          // 시장가 혹은 즉시 체결되는 가상 매도인 경우
-          setBalance(prev => prev + priceInKrw * sellAmount);
-          const newHoldings = { ...holdings, [stock.symbol]: Number(Math.max(0, currentHoldings - sellAmount).toFixed(4)) };
-          setHoldings(newHoldings);
-          if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-          addLog(stock.symbol, '매도', tradePrice, sellAmount, reason);
-
-          // Clear slot if provided
-          if (slotId) {
-            const next = gapInventoryRef.current.filter(s => s.id !== slotId);
-            gapInventoryRef.current = next;
-            setGapInventory(next);
-          }
-
-          // Update profit stats for immediate simulated fills
-          if (buyPrice) {
-            const profit = (tradePrice - buyPrice) * sellAmount * (marketType === 'US' ? exchangeRate : 1);
-            setGapTradingProfit(prev => prev + profit);
-            if (profit > 0) setScalpingWins(prev => prev + 1);
-            else if (profit < 0) setScalpingLosses(prev => prev + 1);
-          }
-        }
-        return sellAmount;
+        return finalAmount;
       }
       return 0;
     }
