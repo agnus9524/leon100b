@@ -19,3 +19,14 @@ export const getMarketAnalysis = async (marketData: any) => {
     throw new Error(error.response?.data?.message || "분석 생성 중 오류가 발생했습니다.");
   }
 };
+
+export const generateGapDownReport = async (payload: { stockInfo: any; orderbook?: any; marketContext?: any }) => {
+  try {
+    const response = await axios.post('/api/ai/gapdown-report', payload);
+    return response.data;
+  } catch (error: any) {
+    console.error("Gemini Gapdown Report Error:", error);
+    throw new Error(error.response?.data?.message || "갭하락 분석 보고서 생성 중 오류가 발생했습니다.");
+  }
+};
+

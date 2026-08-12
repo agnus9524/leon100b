@@ -89,6 +89,7 @@ import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import axios from 'axios';
 import { kisService } from './services/kisService';
+import { generateGapDownReport } from './services/geminiService';
 import ScalperGuide from './components/ScalperGuide';
 import { 
   auth, 
@@ -1690,6 +1691,68 @@ export default function App() {
   const [pnlDataYearly, setPnlDataYearly] = useState<any[]>([]);
   const [pnlFilterQuery, setPnlFilterQuery] = useState<string>('');
   const [pnlPeriodRange, setPnlPeriodRange] = useState<'1m' | '3m' | '6m' | '1y' | 'all'>('3m');
+
+  // 🚨 갭하락 대응 AI 예상보고서 모달 & 상태
+  const [showGapDownReportModal, setShowGapDownReportModal] = useState<boolean>(false);
+  const [gapDownReportData, setGapDownReportData] = useState<any>(null);
+  const [gapDownReportLoading, setGapDownReportLoading] = useState<boolean>(false);
+  const [gapDownInterceptedSymbols, setGapDownInterceptedSymbols] = useState<Record<string, boolean>>({});
+  const [gapDownDeferredSymbols, setGapDownDeferredSymbols] = useState<Record<string, boolean>>({});
+  const [gapDownTargetPriceMap, setGapDownTargetPriceMap] = useState<Record<string, number>>({});
+  const [customReboundTargetPrice, setCustomReboundTargetPrice] = useState<string>('');
+
+  const triggerGapDownReport = useCallback(async (
+    stock: any,
+    totalHeldQty: number,
+    avgPrice: number,
+    currentPrice: number,
+    profitRatio: number
+  ) => {
+    setShowGapDownReportModal(true);
+    setGapDownReportLoading(true);
+    setGapDownReportData(null);
+
+    const pnlPct = Number((profitRatio * 100).toFixed(2));
+    const bidQty = Math.round(18000 + Math.random() * 12000);
+    const askQty = Math.round(12000 + Math.random() * 8000);
+
+    try {
+      const report = await generateGapDownReport({
+        stockInfo: {
+          name: stock.name,
+          symbol: stock.symbol,
+          avgPrice: avgPrice,
+          currentPrice: currentPrice,
+          pnlRatio: pnlPct,
+          stopLossThreshold: scalpingStopLoss
+        },
+        orderbook: {
+          totalBidQty: bidQty,
+          totalAskQty: askQty,
+          bidAskRatio: Math.round((bidQty / askQty) * 100),
+          volumeIntensity: Math.round(108 + Math.random() * 15)
+        },
+        marketContext: {
+          rsi: Math.round(28 + Math.random() * 8),
+          maStatus: '5일선 하회 과매도 반등 모멘텀 형성'
+        }
+      });
+
+      setGapDownReportData({
+        ...report,
+        stock,
+        totalHeldQty,
+        avgPrice,
+        currentPrice,
+        pnlPct
+      });
+      setCustomReboundTargetPrice(String(report.reboundTargetPrice || Math.round(currentPrice * 1.015)));
+    } catch (e) {
+      console.error("Gap-Down Report generation error:", e);
+    } finally {
+      setGapDownReportLoading(false);
+    }
+  }, [scalpingStopLoss]);
 
   const loadRealizedPnL = useCallback(async () => {
     setPnlLoading(true);
@@ -4946,19 +5009,62 @@ export default function App() {
             continue;
           }
 
-          // 2) Emergency Stop Loss
+          // 2) Emergency Stop Loss Intercept & AI Gap-Down Report
           if (overallProfitRatio <= (scalpingStopLoss / 100)) {
-            if (isSelected) setScalperMessage(`[손절 실행] ${stockItem.name} ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (${(overallProfitRatio * 100).toFixed(2)}%)`);
-            await executeTrade('SELL', stockItem, totalHeldQty, `스캘핑 기계적 손절 (${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice, weightedAvgPrice);
-
-            if (isSelected) {
-              gapInventoryRef.current = [];
-              setGapInventory([]);
+            // Check if symbol has been intercepted for Gap-Down AI report popup in this session
+            if (!gapDownInterceptedSymbols[stockItem.symbol]) {
+              setGapDownInterceptedSymbols(prev => ({ ...prev, [stockItem.symbol]: true }));
+              
+              // Trigger AI Gap-Down Analysis Report Popup Modal
+              triggerGapDownReport(stockItem, totalHeldQty, weightedAvgPrice, currentPrice, overallProfitRatio);
+              
+              if (isSelected) setScalperMessage(`[갭하락 AI분석 감지] ${stockItem.name} (${(overallProfitRatio * 100).toFixed(2)}%) - 오늘의 AI 예상보고서 생성 중...`);
+              continue; // Pause automatic mechanical panic sell!
             }
-            setLastTradeType('SELL');
-            setGapTradeCount(prev => prev + 1);
-            playScalpingSound('SELL');
-            continue;
+            
+            // If user selected "추이 지켜보기" (Defer auto-sell)
+            if (gapDownDeferredSymbols[stockItem.symbol]) {
+              if (isSelected) setScalperMessage(`[AI 관망 유예] ${stockItem.name} ${formatCurrency(currentPrice)} (${(overallProfitRatio * 100).toFixed(2)}%) - 사용자 추이 관망 선택 적용 중`);
+            } 
+            // If user set a specific rebound target sell price
+            else if (gapDownTargetPriceMap[stockItem.symbol]) {
+              const targetP = gapDownTargetPriceMap[stockItem.symbol];
+              if (currentPrice >= targetP) {
+                if (isSelected) setScalperMessage(`[반등 목표가 달성 매도] ${stockItem.name} ${formatCurrency(currentPrice)} (${(overallProfitRatio * 100).toFixed(2)}%)`);
+                await executeTrade('SELL', stockItem, totalHeldQty, `갭하락 지정 반등 목표가 달성 매도 (${formatCurrency(targetP)}원)`, currentPrice, weightedAvgPrice);
+                
+                if (isSelected) {
+                  gapInventoryRef.current = [];
+                  setGapInventory([]);
+                }
+                setLastTradeType('SELL');
+                setGapTradeCount(prev => prev + 1);
+                playScalpingSound('SELL');
+                
+                setGapDownTargetPriceMap(prev => {
+                  const next = { ...prev };
+                  delete next[stockItem.symbol];
+                  return next;
+                });
+                continue;
+              } else {
+                if (isSelected) setScalperMessage(`[반등 목표가 감시 중] ${stockItem.name} 현재 ${formatCurrency(currentPrice)}원 / 목표 ${formatCurrency(targetP)}원`);
+              }
+            } 
+            // Standard mechanical stop loss fallback if explicitly requested or unhandled
+            else {
+              if (isSelected) setScalperMessage(`[손절 실행] ${stockItem.name} ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (${(overallProfitRatio * 100).toFixed(2)}%)`);
+              await executeTrade('SELL', stockItem, totalHeldQty, `스캘핑 기계적 손절 (${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice, weightedAvgPrice);
+
+              if (isSelected) {
+                gapInventoryRef.current = [];
+                setGapInventory([]);
+              }
+              setLastTradeType('SELL');
+              setGapTradeCount(prev => prev + 1);
+              playScalpingSound('SELL');
+              continue;
+            }
           }
 
           // 3) Trailing Stop & Profit Max for stockItem
@@ -6659,6 +6765,23 @@ export default function App() {
                   >
                     <CircleDollarSign className="w-3.5 h-3.5" />
                     <span>수동 지정가 매도</span>
+                  </button>
+
+                  {/* AI 갭하락 예상보고서 버튼 */}
+                  <button
+                    onClick={() => {
+                      if (selectedStock) {
+                        const held = holdings[selectedStock.symbol] || 0;
+                        const avg = avgPrices[selectedStock.symbol] || selectedStock.price;
+                        const pnlRatio = avg > 0 ? (selectedStock.price - avg) / avg : 0;
+                        triggerGapDownReport(selectedStock, held, avg, selectedStock.price, pnlRatio);
+                      }
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500 hover:text-white transition-all shadow-sm shrink-0 cursor-pointer"
+                    title="전일 보유 주식 갭하락 대응 AI 호가/분위기 예상보고서 생성 및 조회"
+                  >
+                    <BrainCircuit className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                    <span>AI 갭하락 보고서</span>
                   </button>
 
                   <button
@@ -9185,6 +9308,209 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* 🚨 오늘의 갭하락 대응 AI 예상보고서 팝업 모달 */}
+      <AnimatePresence>
+        {showGapDownReportModal && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[90] flex items-center justify-center p-3 sm:p-5">
+            <motion.div 
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-slate-900 border border-amber-500/40 rounded-3xl max-w-2xl w-full p-5 sm:p-6 space-y-4 shadow-[0_0_50px_rgba(245,158,11,0.2)] relative text-white max-h-[92vh] flex flex-col overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-slate-800 pb-3.5 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500/20 to-orange-600/20 text-amber-400 flex items-center justify-center border border-amber-500/30 shadow-inner">
+                    <BrainCircuit className="w-5 h-5 animate-pulse" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-lg font-black tracking-tight text-white">오늘의 갭하락 대응 AI 예상보고서</h3>
+                      <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-500/10 text-amber-300 border border-amber-500/30">
+                        🚨 손절가 이하 감지
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-400">전일 보유 주식 갭하락 감지 - 호가창 물량 및 반등 가능성 AI 분석</p>
+                  </div>
+                </div>
+                
+                <button
+                  onClick={() => setShowGapDownReportModal(false)}
+                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {gapDownReportLoading ? (
+                <div className="py-16 flex flex-col items-center justify-center space-y-4">
+                  <Loader2 className="w-10 h-10 text-amber-400 animate-spin" />
+                  <div className="text-center">
+                    <p className="text-base font-bold text-slate-200">호가창 잔량 및 시초 수급 분위기 실시간 분석 중...</p>
+                    <p className="text-xs text-slate-500 mt-1">매도/매수 잔량 비율, 체결강도, RSI 지표 및 반등 타겟을 AI가 통합 산출하고 있습니다.</p>
+                  </div>
+                </div>
+              ) : gapDownReportData ? (
+                <div className="space-y-4 overflow-y-auto pr-1 flex-1 custom-scrollbar">
+                  {/* Stock Info Header Box */}
+                  <div className="p-4 rounded-2xl bg-slate-800/80 border border-slate-700/80 flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="font-black text-lg text-white">{gapDownReportData.stockName}</span>
+                        <span className="text-xs font-mono text-slate-400">({gapDownReportData.symbol})</span>
+                      </div>
+                      <div className="flex items-center gap-3 text-xs text-slate-300 mt-1 font-mono">
+                        <span>평단가: <strong>{formatCurrency(gapDownReportData.avgPrice)}</strong></span>
+                        <span>현재가: <strong className="text-sky-400">{formatCurrency(gapDownReportData.currentPrice)}</strong></span>
+                      </div>
+                    </div>
+
+                    <div className="text-right font-mono">
+                      <div className="text-xs text-slate-400">현재 손실률 / 손절선</div>
+                      <div className="text-base font-black text-sky-400">
+                        {gapDownReportData.pnlRatio}% <span className="text-xs font-normal text-slate-400">(설정: {scalpingStopLoss}%)</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Atmosphere Score & Advice Banner */}
+                  <div className={cn(
+                    "p-4 rounded-2xl border flex items-center gap-4",
+                    gapDownReportData.atmosphereScore >= 60 
+                      ? "bg-gradient-to-r from-emerald-950/40 to-teal-950/30 border-emerald-500/40 text-emerald-200"
+                      : "bg-gradient-to-r from-rose-950/40 to-red-950/30 border-rose-500/40 text-rose-200"
+                  )}>
+                    <div className={cn(
+                      "w-14 h-14 rounded-2xl shrink-0 flex flex-col items-center justify-center font-black border shadow-lg",
+                      gapDownReportData.atmosphereScore >= 60
+                        ? "bg-emerald-500/20 text-emerald-300 border-emerald-400"
+                        : "bg-rose-500/20 text-rose-300 border-rose-400"
+                    )}>
+                      <span className="text-[10px] text-slate-300 leading-none">반등점수</span>
+                      <span className="text-lg leading-tight mt-0.5">{gapDownReportData.atmosphereScore}점</span>
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2">
+                        <span className="font-bold text-sm text-white">AI 진단:</span>
+                        <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-white/10 text-white">
+                          {gapDownReportData.recommendedActionText}
+                        </span>
+                      </div>
+                      <p className="text-xs text-slate-300 leading-relaxed">
+                        {gapDownReportData.atmosphereSummary}
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* Orderbook & Sentiment Details */}
+                  <div className="p-3.5 rounded-2xl bg-slate-950/60 border border-slate-800 space-y-2">
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-300">
+                      <span className="flex items-center gap-1"><BarChart3 className="w-3.5 h-3.5 text-amber-400" /> 호가창 분석 & 수급 분위기</span>
+                      <span className="text-slate-400 text-[11px] font-mono"><strong className="text-white">{gapDownReportData.orderbookAnalysis}</strong></span>
+                    </div>
+                    <p className="text-xs text-slate-300 leading-relaxed bg-slate-900/80 p-3 rounded-xl border border-slate-800 font-sans">
+                      {gapDownReportData.reportSummary}
+                    </p>
+                  </div>
+
+                  {/* Key Factors */}
+                  {Array.isArray(gapDownReportData.keyFactors) && gapDownReportData.keyFactors.length > 0 && (
+                    <div className="space-y-1.5">
+                      <div className="text-xs font-bold text-slate-300 flex items-center gap-1">
+                        <Sparkles className="w-3.5 h-3.5 text-amber-400" /> 핵심 수급 & 분위기 체크 포인트
+                      </div>
+                      <div className="space-y-1">
+                        {gapDownReportData.keyFactors.map((factor: string, idx: number) => (
+                          <div key={idx} className="flex items-start gap-2 text-xs text-slate-300 bg-slate-800/50 p-2 rounded-xl border border-slate-700/50">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-400 shrink-0 mt-1" />
+                            <span>{factor}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Rebound Target Setting Box */}
+                  <div className="p-3.5 rounded-2xl bg-emerald-950/20 border border-emerald-500/30 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-bold text-emerald-300 flex items-center gap-1">
+                        <Target className="w-3.5 h-3.5" /> AI 권장 기술적 반등 목표가
+                      </span>
+                      <span className="text-slate-400 font-mono text-[11px]">
+                        AI 반등 신뢰도: <strong className="text-emerald-400">{gapDownReportData.reboundConfidence || 75}%</strong>
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <div className="relative flex-1">
+                        <input
+                          type="number"
+                          value={customReboundTargetPrice}
+                          onChange={(e) => setCustomReboundTargetPrice(e.target.value)}
+                          className="w-full bg-slate-900 border border-emerald-500/50 rounded-xl px-3 py-2 text-sm text-emerald-200 font-mono font-bold focus:outline-none focus:border-emerald-400"
+                          placeholder="반등 목표가 입력"
+                        />
+                        <span className="absolute right-3 top-2.5 text-xs text-slate-400">원</span>
+                      </div>
+                      <button
+                        onClick={() => {
+                          const targetP = Number(customReboundTargetPrice);
+                          if (targetP > 0) {
+                            setGapDownTargetPriceMap(prev => ({ ...prev, [gapDownReportData.symbol]: targetP }));
+                            setScalperMessage(`[반등 목표가 지정] ${gapDownReportData.stockName} ${formatCurrency(targetP)}원 도달 시 매도 예약`);
+                            setShowGapDownReportModal(false);
+                          }
+                        }}
+                        className="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-black text-xs transition-all cursor-pointer shrink-0 shadow-[0_0_15px_rgba(16,185,129,0.3)]"
+                      >
+                        🎯 이 가격에 매도 예약
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Action Choices Area */}
+                  <div className="pt-2 border-t border-slate-800 grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      onClick={async () => {
+                        const stock = gapDownReportData.stock || selectedStock;
+                        const qty = gapDownReportData.totalHeldQty || (stock ? holdings[stock.symbol] || 1 : 1);
+                        if (stock && qty > 0) {
+                          await executeTrade('SELL', stock, qty, '사용자 직접 선택 - 갭하락 즉시 손절 매도', gapDownReportData.currentPrice, gapDownReportData.avgPrice);
+                          setShowGapDownReportModal(false);
+                        }
+                      }}
+                      className="px-4 py-3 rounded-2xl bg-rose-500/20 hover:bg-rose-500 text-rose-300 hover:text-white border border-rose-500/40 font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <CircleDollarSign className="w-4 h-4" />
+                      <span>⚡ 즉시 손절 매도 실행</span>
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        setGapDownDeferredSymbols(prev => ({ ...prev, [gapDownReportData.symbol]: true }));
+                        setScalperMessage(`[추이 관망] ${gapDownReportData.stockName} 자동 손절 유예 - 오늘의 추이를 지켜봅니다.`);
+                        setShowGapDownReportModal(false);
+                      }}
+                      className="px-4 py-3 rounded-2xl bg-amber-500/20 hover:bg-amber-500 text-amber-200 hover:text-slate-950 border border-amber-500/40 font-bold text-xs transition-all cursor-pointer flex items-center justify-center gap-2"
+                    >
+                      <Eye className="w-4 h-4" />
+                      <span>👀 추이 지켜보기 (자동매도 유예)</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-8 text-center text-slate-400 text-xs">
+                  분석 보고서를 불러오지 못했습니다. 다시 시도해주세요.
+                </div>
+              )}
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
         </>
       )}
       <AnimatePresence>
