@@ -136,7 +136,7 @@ export interface ScalperTab {
   gapTradeCount: number;
   lastTradeType: 'BUY' | 'SELL' | null;
   scalperMessage: string;
-  entryPriceMode: 'CURRENT' | 'BID2' | 'BID4';
+  entryPriceMode: 'CURRENT' | 'BID1' | 'BID2' | 'BID4';
   autoCancelThreshold: number;
   tradeLogs?: TradeLog[];
 }
@@ -1412,7 +1412,7 @@ export default function App() {
 
   const [autoCancelThreshold, setAutoCancelThreshold] = useState<number>(0.2); // 0.2%
   const [immediateEntry, setImmediateEntry] = useState<boolean>(false);
-  const [entryPriceMode, setEntryPriceMode] = useState<'CURRENT' | 'BID2' | 'BID4'>('BID2'); // 매수 2단계 기본 (최적 체결+안정성)
+  const [entryPriceMode, setEntryPriceMode] = useState<'CURRENT' | 'BID1' | 'BID2' | 'BID4'>('BID2'); // 매수 2호가 기본 (최적 체결+안정성)
   const lowestBidOnlyMode = entryPriceMode === 'BID4'; // Backward compatibility ref
   const [scalperMessage, setScalperMessage] = useState<string>("대기 중...");
   const [selectedTimeframeBar, setSelectedTimeframeBar] = useState<'1m' | '3m' | '5m' | '10m'>('1m');
@@ -3760,13 +3760,11 @@ export default function App() {
       addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[가상 매수취소] 수동 취소`);
     } else {
       try {
-        await kisService.reviseDomestic(
-          order.orgNo || "",
-          order.id,
-          order.quantity.toString(),
-          "0",
-          '01'
-        );
+        if (marketType === 'US') {
+          await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString());
+        } else {
+          await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+        }
         addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 매수취소] 수동 취소`);
       } catch (e) {
         console.error("Failed to cancel KIS pending buy order:", e);
@@ -3783,13 +3781,11 @@ export default function App() {
 
     if (!order.isSimulated && kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
       try {
-        await kisService.reviseDomestic(
-          order.orgNo || "",
-          order.id,
-          order.quantity.toString(),
-          "0",
-          '01'
-        );
+        if (marketType === 'US') {
+          await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString());
+        } else {
+          await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+        }
         addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소] 수동 취소`);
       } catch (e) {
         console.error("Failed to cancel KIS pending sell order:", e);
@@ -3863,13 +3859,11 @@ export default function App() {
         addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[가상 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
       } else {
         try {
-          await kisService.reviseDomestic(
-            order.orgNo || "",
-            order.id,
-            order.quantity.toString(),
-            "0",
-            '01'
-          );
+          if (marketType === 'US') {
+            await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString());
+          } else {
+            await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+          }
           addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
         } catch (e) {
           console.error("Failed to cancel KIS pending order:", e);
@@ -3880,13 +3874,11 @@ export default function App() {
     for (const order of sellOrdersToCancel) {
       if (!order.isSimulated) {
         try {
-          await kisService.reviseDomestic(
-            order.orgNo || "",
-            order.id,
-            order.quantity.toString(),
-            "0",
-            '01'
-          );
+          if (marketType === 'US') {
+            await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString());
+          } else {
+            await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+          }
           addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매도 주문 일괄 취소`);
         } catch (e) {
           console.error("Failed to cancel KIS pending sell order:", e);
@@ -3956,13 +3948,9 @@ export default function App() {
             // Real KIS order cancel request!
             try {
               setBotStatus(`[KIS API] 주문 번호(${order.id}) 취소 요청 중...`);
-              const cancelRes = await kisService.reviseDomestic(
-                order.orgNo || "",
-                order.id,
-                (order.quantity || 1).toString(),
-                "0",
-                '01' // 01 is Cancel
-              );
+              const cancelRes = marketType === 'US' 
+                ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, (order.quantity || 1).toString())
+                : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, (order.quantity || 1).toString());
               
               if (cancelRes && cancelRes.rt_cd === '0') {
                 addLog(order.symbol, '매수', orderPrice, order.quantity, `[KIS 자동취소] ${cancelReason}`);
@@ -4565,6 +4553,8 @@ export default function App() {
             ? (currentPrice - 4 * tickSize) 
             : entryPriceMode === 'BID2' 
             ? (currentPrice - 2 * tickSize) 
+            : entryPriceMode === 'BID1'
+            ? (currentPrice - 1 * tickSize)
             : currentPrice;
           const targetBuyPrice = isUSStock 
             ? Number(rawTargetBuyPrice.toFixed(4)) 
@@ -6824,7 +6814,7 @@ export default function App() {
                     onChange={(e) => setScalpingTargetProfit(Number(e.target.value))}
                     className="bg-black/40 border border-emerald-500/40 rounded p-1 text-xs font-mono outline-none text-emerald-400 text-center font-bold appearance-none"
                   >
-                    {Array.from({ length: 50 }, (_, i) => Math.round((i + 1) * 0.1 * 10) / 10).map(val => (
+                    {[0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 5.0].map(val => (
                       <option key={val} value={val} className="bg-sleek-bg text-emerald-400">+{val}%</option>
                     ))}
                   </select>
@@ -6915,7 +6905,18 @@ export default function App() {
                   <span className="text-[10px] font-bold text-white flex items-center gap-1 mb-1">
                     <TrendingDown className="w-3 h-3 text-amber-400" /> 진입 호가 방식
                   </span>
-                  <div className="grid grid-cols-3 gap-1">
+                  <div className="grid grid-cols-4 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => setEntryPriceMode('BID1')}
+                      className={cn(
+                        "py-1 rounded text-[10px] font-bold border text-center transition-all cursor-pointer",
+                        entryPriceMode === 'BID1' ? "bg-blue-500/20 border-blue-500/40 text-blue-300" : "bg-black/20 border-white/5 text-gray-400 hover:text-gray-200"
+                      )}
+                      title="매수 1호가 지정가 진입"
+                    >
+                      매수1호가
+                    </button>
                     <button
                       type="button"
                       onClick={() => setEntryPriceMode('BID2')}
@@ -6923,9 +6924,9 @@ export default function App() {
                         "py-1 rounded text-[10px] font-bold border text-center transition-all cursor-pointer",
                         entryPriceMode === 'BID2' ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" : "bg-black/20 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
-                      title="기본 매수 1단계 진입"
+                      title="기본 매수 2호가 진입 (스캘퍼 권장)"
                     >
-                      매수1단계★
+                      매수2호가★
                     </button>
                     <button
                       type="button"
@@ -6934,9 +6935,9 @@ export default function App() {
                         "py-1 rounded text-[10px] font-bold border text-center transition-all cursor-pointer",
                         entryPriceMode === 'BID4' ? "bg-amber-500/20 border-amber-500/40 text-amber-300" : "bg-black/20 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
-                      title="매수 2단계 진입"
+                      title="매수 4호가 지정가 진입"
                     >
-                      매수2단계
+                      매수4호가
                     </button>
                     <button
                       type="button"
@@ -6945,9 +6946,9 @@ export default function App() {
                         "py-1 rounded text-[10px] font-bold border text-center transition-all cursor-pointer",
                         entryPriceMode === 'CURRENT' ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue" : "bg-black/20 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
-                      title="현재 시장 체결가 즉시 지정가 진입"
+                      title="현재 시장 체결가 진입"
                     >
-                      현재 체결가
+                      현재가
                     </button>
                   </div>
                 </div>
@@ -6981,11 +6982,12 @@ export default function App() {
               <div className="bg-white/5 p-2.5 rounded-2xl border border-white/5 flex flex-col justify-between space-y-1.5">
                 <div>
                   <span className="text-[10px] font-bold text-sleek-text-secondary uppercase block mb-1">실행 속도</span>
-                  <div className="grid grid-cols-3 gap-1">
+                  <div className="grid grid-cols-4 gap-1">
                     {[
+                      { label: '0.1s', value: 100 },
+                      { label: '0.2s', value: 200 },
                       { label: '0.3s', value: 300 },
-                      { label: '0.5s', value: 500 },
-                      { label: '1.5s', value: 1500 }
+                      { label: '0.5s', value: 500 }
                     ].map(opt => (
                       <button
                         key={opt.value}
@@ -7563,14 +7565,14 @@ export default function App() {
                     <div className="xl:col-span-6 flex flex-col gap-2.5 min-w-0 justify-between">
                       {/* Top Row: Real-time Order Book (Left) & Real-time Interval Monitor (Right) */}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                        {/* Real-time Order Book (4단계) */}
+                        {/* Real-time Order Book (4호가) */}
                         <div className="bg-black/40 rounded-2xl border border-sleek-border p-2.5 flex flex-col justify-between min-w-0">
                           <div>
                             <div className="text-center font-black text-sleek-text-secondary uppercase text-[10px] tracking-widest pb-1 border-b border-white/5 mb-1">
-                              실시간 잔량 호가창 (4단계)
+                              실시간 잔량 호가창 (4호가)
                             </div>
                             
-                            {/* Ask Levels (매도 4~1단계) */}
+                            {/* Ask Levels (매도 4~1호가) */}
                             <div className="space-y-0.5">
                               {askLevels.map((lvlPrice, idx) => {
                                 const vol = askVolumes[idx];
@@ -7580,7 +7582,7 @@ export default function App() {
                                   <div key={`ask-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
                                     {/* Brighter volume bar */}
                                     <div className="absolute right-0 top-0 bottom-0 bg-sky-500/30 border-l border-sky-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
-                                    <span className="w-12 shrink-0 text-[9px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}단계</span>
+                                    <span className="w-12 shrink-0 text-[9px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}호가</span>
                                     <span className={cn(
                                       "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
                                       isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-200"
@@ -7604,7 +7606,7 @@ export default function App() {
                               </span>
                             </div>
 
-                            {/* Bid Levels (매수 1~4단계) */}
+                            {/* Bid Levels (매수 1~4호가) */}
                             <div className="space-y-0.5">
                               {bidLevels.map((lvlPrice, idx) => {
                                 const vol = bidVolumes[idx];
@@ -7614,7 +7616,7 @@ export default function App() {
                                   <div key={`bid-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
                                     {/* Brighter volume bar */}
                                     <div className="absolute right-0 top-0 bottom-0 bg-rose-500/30 border-l border-rose-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
-                                    <span className="w-12 shrink-0 text-[9px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}단계</span>
+                                    <span className="w-12 shrink-0 text-[9px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}호가</span>
                                     <span className={cn(
                                       "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
                                       isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-200"

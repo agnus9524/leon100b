@@ -715,6 +715,10 @@ class KISService {
     }
   }
 
+  public async cancelDomesticOrder(orgNo: string, ordNo: string, qty: string) {
+    return this.reviseDomestic(orgNo, ordNo, qty, "0", '02');
+  }
+
   public async reviseDomestic(orgNo: string, ordNo: string, qty: string, price: string, dvsn: '01' | '02' = '01', ordDvsn: string = '00') {
     if (!this.config) throw new Error("KIS Config not initialized");
     const token = await this.getAccessToken();
@@ -726,7 +730,7 @@ class KISService {
       KRX_FWDG_ORD_ORGNO: orgNo,
       ORGN_ODNO: ordNo,
       ORD_DVSN: ordDvsn,
-      RVSE_CNCL_DVSN_CD: dvsn,
+      RVSE_CNCL_DVSN_CD: dvsn, // '01': 정정, '02': 취소
       ORD_QTY: qty,
       ORD_UNPR: price,
       QTY_ALL_ORD_YN: 'Y',
@@ -736,12 +740,52 @@ class KISService {
 
     const hashkey = await this.getHashKey(body);
 
+    const isVirtual = this.baseUrl.includes('openapivts');
+    // TR_ID: TTTC0803U (실전 주식 정정/취소) / VTTC0803U (모의주식 정정/취소)
+    const trId = isVirtual ? 'VTTC0803U' : 'TTTC0803U';
+
     const headers = {
       'content-type': 'application/json',
       'authorization': `Bearer ${token}`,
       'appkey': this.config.appKey,
       'appsecret': this.config.appSecret,
-      'tr-id': 'TTTC0013U',
+      'tr-id': trId,
+      'hashkey': hashkey,
+      'custtype': 'P',
+    };
+
+    const res = await axios.post(`${this.baseUrl}${endpoint}`, body, { headers });
+    return res.data;
+  }
+
+  public async cancelOverseasOrder(orgNo: string, ordNo: string, symbol: string, qty: string) {
+    if (!this.config) throw new Error("KIS Config not initialized");
+    const token = await this.getAccessToken();
+    const endpoint = '/uapi/overseas-stock/v1/trading/order-rvsecncl';
+
+    const body = {
+      CANO: this.config.accountNo,
+      ACNT_PRDT_CD: this.config.accountCode,
+      OVRS_EXCG_CD: 'NASD',
+      PDNO: symbol,
+      ORGN_ODNO: ordNo,
+      RVSE_CNCL_DVSN_CD: '02', // '02': 취소
+      ORD_QTY: qty,
+      ORD_UNPR: '0',
+      MGENA_APLP_YN: 'N'
+    };
+
+    const hashkey = await this.getHashKey(body);
+    const isVirtual = this.baseUrl.includes('openapivts');
+    // TR_ID: TTTS1003U (실전 해외주식 정정/취소) / VTSM1003U (모의 해외주식 정정/취소)
+    const trId = isVirtual ? 'VTSM1003U' : 'TTTS1003U';
+
+    const headers = {
+      'content-type': 'application/json',
+      'authorization': `Bearer ${token}`,
+      'appkey': this.config.appKey,
+      'appsecret': this.config.appSecret,
+      'tr-id': trId,
       'hashkey': hashkey,
       'custtype': 'P',
     };
