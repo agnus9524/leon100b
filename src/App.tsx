@@ -4426,21 +4426,24 @@ export default function App() {
     };
   };
 
-  // 실시간 4대 스캘핑 전략 조건 감지 센서 (선택된 종목 기반)
-  const activeStrategyDetection = useMemo(() => {
-    if (!selectedStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isCvdDivergence: false };
+  // 실시간 4대 스캘핑 전략 조건 감지 센서 (종목별 자율 연산)
+  const detectStockStrategies = useCallback((targetStock: Stock) => {
+    if (!targetStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
 
-    const historyPrices = (selectedStock.history ? selectedStock.history.map(h => h.price) : [selectedStock.price]).filter((p): p is number => typeof p === 'number');
-    const currentPrice = selectedStock.price || 0;
+    const historyPrices = (targetStock.history ? targetStock.history.map(h => h.price) : [targetStock.price]).filter((p): p is number => typeof p === 'number' && !isNaN(p));
+    const currentPrice = targetStock.price || 0;
+    if (currentPrice <= 0 || historyPrices.length === 0) {
+      return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
+    }
+
     const rsi = calculateRSI(historyPrices, 14);
     const bb = calculateBollingerBands(historyPrices, 20, 2);
     const sma5 = calculateSMA(historyPrices, 5);
     const sma20 = calculateSMA(historyPrices, 20);
     const vwap = historyPrices.length > 0 ? (historyPrices.reduce((a, b) => a + b, 0) / historyPrices.length) : currentPrice;
 
-    const isUSStock = selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US';
+    const isUSStock = targetStock.market === 'US' || /^[A-Za-z]/.test(targetStock.symbol) || marketType === 'US';
 
-    // Volume Profile (POC: Point of Control - 최대 매매 수평 거래량 발생 구간)
     const priceBuckets: Record<string, number> = {};
     historyPrices.forEach(p => {
       const bucket = isUSStock ? p.toFixed(4) : p.toFixed(0);
@@ -4455,7 +4458,6 @@ export default function App() {
       }
     });
 
-    // CVD (Cumulative Volume Delta - 누적 거래량 차이) & 유동성 흡수/불일치 감지
     let cvd = 0;
     let prevP = historyPrices[0] || currentPrice;
     const cvdSeries: number[] = [];
@@ -4471,84 +4473,76 @@ export default function App() {
     const recentMaxCvd = cvdSeries.length >= 5 ? Math.max(...cvdSeries.slice(-10, -1)) : cvd;
     const recentMinCvd = cvdSeries.length >= 5 ? Math.min(...cvdSeries.slice(-10, -1)) : cvd;
 
-    // CVD Divergence/Absorption (유동성 분석)
-    // 1. 하락 유동성 흡수 (Bullish): 가격은 저점 부근이나 CVD가 바닥을 찍고 상승 혹은 가격보다 강세 (매수 타점)
     const isBullishAbsorption = (currentPrice <= recentLow * 1.01) && (cvd > recentMinCvd);
-    // 2. 상승 유동성 흡수 (Bearish): 가격은 고점 부근이나 CVD가 꺾임 (매도/관망 타점)
     const isBearishAbsorption = (currentPrice >= recentPeak * 0.995) && (cvd < recentMaxCvd);
 
     const momentumPositive = sma5 >= sma20;
     const isNearLowerBand = currentPrice <= bb.lower * 1.005;
+    const isNearUpperBand = currentPrice >= bb.upper * 0.995;
     const lastPrice = historyPrices.length >= 2 ? historyPrices[historyPrices.length - 2] : currentPrice;
     const hasVolumeMomentum = currentPrice >= lastPrice || rsi >= 25;
 
-    // ① 상승 추세 눌림목
     const isPullback = momentumPositive && (rsi < 40 || isNearLowerBand) && currentPrice >= sma5 && hasVolumeMomentum;
-
-    // ② 거래량/전고점 돌파
     const isBreakout = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
-
-    // ③ VWAP 지지반등
     const isVwapSupport = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
-
-    // ④ 볼륨 프로파일 POC 지지 및 CVD 유동성 반등
-    const isPocSupport = Math.abs(currentPrice - poc) / (poc || 1) < 0.008; // 0.8% 이내 근접
+    const isPocSupport = Math.abs(currentPrice - poc) / (poc || 1) < 0.008;
     const isVolumeProfile = isPocSupport || isBullishAbsorption;
 
     const activeCount = (isPullback ? 1 : 0) + (isBreakout ? 1 : 0) + (isVwapSupport ? 1 : 0) + (isVolumeProfile ? 1 : 0);
 
-    return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd, isBullishAbsorption, isBearishAbsorption };
-  }, [selectedStock]);
+    return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd, isBullishAbsorption, isBearishAbsorption, bb, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice, hasVolumeMomentum };
+  }, [marketType]);
+
+  const activeStrategyDetection = useMemo(() => {
+    if (!selectedStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
+    return detectStockStrategies(selectedStock);
+  }, [selectedStock, detectStockStrategies]);
 
   // Trailing Stop Loss State to track the peak price after each buy
-  const [highWaterMark, setHighWaterMark] = useState<{ [price: number]: number }>({});
+  const [highWaterMark, setHighWaterMark] = useState<{ [key: string]: number }>({});
 
-  // 2. High-speed automatic trading decisions (Profit Maximizer Engine)
+  // 2. High-speed automatic trading decisions (Multi-Stock Automatic Engine)
   useEffect(() => {
-    if (!isGapBotActive || !selectedStock) {
-      if (!isGapBotActive) setScalperMessage("대기 중...");
+    if (!isGapBotActive) {
+      setScalperMessage("대기 중...");
       return;
     }
 
-    let lastPrice = selectedStock.price;
-
     const gapInterval = setInterval(async () => {
-      // Find the latest price in current stocks array
-      const currentStock = stocksRef.current.find(s => s.symbol === selectedStock.symbol) || selectedStock;
-      const currentPrice = currentStock.price;
-      const historyPrices = Array.isArray(currentStock?.history) ? currentStock.history.map(h => h.price) : [currentPrice];
+      const activeStocksList = stocksRef.current.length > 0 ? stocksRef.current : (selectedStock ? [selectedStock] : []);
+      if (activeStocksList.length === 0) return;
 
-      if (gapBuyPrice <= 0 || gapSellPrice <= 0) return;
+      for (const stockItem of activeStocksList) {
+        const isSelected = selectedStock && stockItem.symbol === selectedStock.symbol;
+        const currentPrice = stockItem.price;
+        if (!currentPrice || currentPrice <= 0) continue;
 
-      // 1. Calculate Indicators for Precise Entry/Exit & Strategy Alignment
-      const rsi = calculateRSI(historyPrices, 14);
-      const bb = calculateBollingerBands(historyPrices, 20, 2);
-      const sma5 = calculateSMA(historyPrices, 5);
-      const sma20 = calculateSMA(historyPrices, 20);
-      const vwap = historyPrices.length > 0 ? (historyPrices.reduce((a, b) => a + b, 0) / historyPrices.length) : currentPrice;
-      
-      const minPrice = gapBuyPrice;
-      const maxPrice = gapSellPrice;
+        const strat = detectStockStrategies(stockItem);
+        const { rsi, bb, sma5, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice } = strat;
 
-      // 2. Scalper Guide Core Principles Analysis (Trend & Volume Priority)
-      const isOverSold = rsi < 35;
-      const isOverBought = rsi > 65;
-      const isNearLowerBand = currentPrice <= bb.lower * 1.005; 
-      const isNearUpperBand = currentPrice >= bb.upper * 0.995; 
-      const momentumPositive = sma5 >= sma20; // Principle 3: Trend-following only (상승 추세)
-      const hasVolumeMomentum = currentPrice >= lastPrice || rsi >= 25; // Principle 2: Volume/Tick velocity support
+        let minPrice = 0;
+        let maxPrice = 0;
+        if (isSelected && gapBuyPrice > 0 && gapSellPrice > 0) {
+          minPrice = gapBuyPrice;
+          maxPrice = gapSellPrice;
+        } else {
+          const isUS = stockItem.market === 'US' || /^[A-Za-z]/.test(stockItem.symbol) || marketType === 'US';
+          const limits = calculateStockLimits(currentPrice, stockItem.changePercent, isUS);
+          minPrice = limits.lowerLimit;
+          maxPrice = limits.upperLimit;
+        }
 
-      // A. PROFIT MAX BUY Condition: Only check buys inside min ~ max range
-      if (currentPrice >= minPrice && currentPrice <= maxPrice) {
-        if (lastPrice > 0) {
-          // Principle 3 & 2 Strategy Rules Execution - Sync directly with activeStrategyDetection for 100% UI alignment
-          const isPullbackCond = activeStrategyDetection.isPullback;
-          const isBreakoutCond = activeStrategyDetection.isBreakout;
-          const isVwapSupportCond = activeStrategyDetection.isVwapSupport;
-          const isVolumeProfileCond = activeStrategyDetection.isVolumeProfile;
+        const isOverSold = rsi < 35;
+        const isOverBought = rsi > 65;
 
-          // 4개 실시간 전략 센서에 불이 모두 들어왔는지 확인 (activeCount === 4)
-          const isAll4SensorsOn = activeStrategyDetection.activeCount === 4 || (isPullbackCond && isBreakoutCond && isVwapSupportCond && isVolumeProfileCond);
+        // A. PROFIT MAX BUY Condition: Check buys inside min ~ max range
+        if (currentPrice >= minPrice && currentPrice <= maxPrice && lastPrice > 0) {
+          const isPullbackCond = strat.isPullback;
+          const isBreakoutCond = strat.isBreakout;
+          const isVwapSupportCond = strat.isVwapSupport;
+          const isVolumeProfileCond = strat.isVolumeProfile;
+
+          const isAll4SensorsOn = strat.activeCount === 4 || (isPullbackCond && isBreakoutCond && isVwapSupportCond && isVolumeProfileCond);
 
           let meetsBuyCriteria = false;
           let strategyLabel = "AI 스캘퍼";
@@ -4569,8 +4563,6 @@ export default function App() {
             meetsBuyCriteria = isVolumeProfileCond;
             strategyLabel = "④ VP/CVD 유동성포착";
           } else if (scalperStrategyMode === 'AI_MAX_YIELD') {
-            // ⚡ [최고수익 AI 자율 가변 모드]
-            // 전략 센서 결합도(1~4)에 따라 최적 매수 조건 및 가변 수량, 진입 호가를 수급 상태에 따라 자율 결정
             if (isAll4SensorsOn) {
               meetsBuyCriteria = true;
               strategyLabel = "⚡ [최고수익 AI] 4/4 올-그린 정밀수급 풀진입";
@@ -4591,7 +4583,7 @@ export default function App() {
               strategyLabel = "⚡ [최고수익 AI] 과매도 수급 반등 탐색";
             }
           } else {
-            // 'AUTO' 모드 (기본값): 4개 센서 동시 포착 시 최우선 발동
+            // 'AUTO' 모드
             if (isAll4SensorsOn) {
               meetsBuyCriteria = true;
               strategyLabel = "🎯 [4/4 올-그린] 4개 전략 동시포착";
@@ -4615,11 +4607,10 @@ export default function App() {
               if (meetsBuyCriteria) strategyLabel = "AI포착: 과매도 반등";
             }
           }
-          
-          const isUSStock = selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US';
+
+          const isUSStock = stockItem.market === 'US' || /^[A-Za-z]/.test(stockItem.symbol) || marketType === 'US';
           const tickSize = getTickSize(currentPrice, isUSStock ? 'US' : 'KR');
 
-          // 전략별 맞춤형 진입 호가 계산 (돌파 -> 매도1호가/현재가 체결우선, 눌림목/VWAP -> 매수1~2호가 지정가 대기)
           let rawTargetBuyPrice = currentPrice;
           const isBreakoutStrategyActive = (scalperStrategyMode === 'BREAKOUT') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('돌파')) || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('돌파'));
           const isPullbackStrategyActive = (scalperStrategyMode === 'PULLBACK') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('눌림목')) || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('눌림목'));
@@ -4627,22 +4618,11 @@ export default function App() {
           const isVpCvdStrategyActive = (scalperStrategyMode === 'VOLUME_PROFILE_CVD') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('VP/CVD')) || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('VP/CVD'));
 
           if (isBreakoutStrategyActive) {
-            // 돌파 매매: 돌파 속도/수급상 매도 1호가(현재가)로 즉시 체결 진입
             rawTargetBuyPrice = currentPrice;
-          } else if (isPullbackStrategyActive) {
-            // 눌림목 매매: 일시 조정 시 매수 1~2호가 지정가 대기
-            const offset = entryPriceMode === 'BID4' ? 4 : entryPriceMode === 'BID2' ? 2 : 1;
-            rawTargetBuyPrice = currentPrice - offset * tickSize;
-          } else if (isVwapStrategyActive) {
-            // VWAP 지지 매매: 지지선 인근 매수 1~2호가 대기
-            const offset = entryPriceMode === 'BID4' ? 4 : entryPriceMode === 'BID2' ? 2 : 1;
-            rawTargetBuyPrice = currentPrice - offset * tickSize;
-          } else if (isVpCvdStrategyActive) {
-            // VP/CVD 유동성 매매: 라운드 피겨/POC 지지선 인근 매수 받쳐두기
+          } else if (isPullbackStrategyActive || isVwapStrategyActive || isVpCvdStrategyActive) {
             const offset = entryPriceMode === 'BID4' ? 4 : entryPriceMode === 'BID2' ? 2 : 1;
             rawTargetBuyPrice = currentPrice - offset * tickSize;
           } else {
-            // 기본 호가 설정 적용
             rawTargetBuyPrice = entryPriceMode === 'BID4' 
               ? (currentPrice - 4 * tickSize) 
               : entryPriceMode === 'BID2' 
@@ -4656,83 +4636,76 @@ export default function App() {
             ? Number(rawTargetBuyPrice.toFixed(4)) 
             : Math.round(rawTargetBuyPrice / tickSize) * tickSize;
 
-          const currentInventory = gapInventoryRef.current;
-          
-          // Check for minimum gap between slots
+          const currentInventory = isSelected ? gapInventoryRef.current : [];
+          const stockHoldingsQty = holdings[stockItem.symbol] || 0;
+          const inFlightBuyCount = buyingLockPricesRef.current.filter(p => p.symbol === stockItem.symbol).length;
+          const pendingBuyCount = pendingBuyOrdersRef.current.filter(p => p.symbol === stockItem.symbol).length;
+          const currentInvCount = isSelected ? currentInventory.length : (stockHoldingsQty > 0 ? 1 : 0);
+          const totalOccupied = currentInvCount + pendingBuyCount + inFlightBuyCount;
+
+          const isAll4SensorsFullEntry = isAll4SensorsOn && totalOccupied < maxSlots;
+
+          const isSamePriceBlocked = !allowSamePriceEntry && !isAll4SensorsFullEntry && (
+            (isSelected && currentInventory.some(slot => Math.abs(slot.price - targetBuyPrice) < tickSize * 0.95)) ||
+            pendingBuyOrdersRef.current.some(p => p.symbol === stockItem.symbol && Math.abs(p.orderPrice - targetBuyPrice) < tickSize * 0.95) ||
+            buyingLockPricesRef.current.some(p => p.symbol === stockItem.symbol && Math.abs(p.price - targetBuyPrice) < tickSize * 0.95)
+          );
+
+          const isLockActive = inFlightBuyCount > 0;
+          const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
+
           const lastSlot = currentInventory.length > 0 ? currentInventory[currentInventory.length - 1] : null;
-          let currentWeightedAvg = avgPrices[selectedStock.symbol] || 0;
+          let currentWeightedAvg = avgPrices[stockItem.symbol] || 0;
           if (currentWeightedAvg <= 0 && currentInventory.length > 0) {
             const totalCost = currentInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
             const totalQty = currentInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
             currentWeightedAvg = totalQty > 0 ? (isUSStock ? Number((totalCost / totalQty).toFixed(4)) : Math.round(totalCost / totalQty)) : 0;
           }
           const isPositionInProfit = currentWeightedAvg > 0 && currentPrice >= currentWeightedAvg;
-          
           const isGapSatisfied = !isPositionInProfit && (!lastSlot || (currentPrice <= lastSlot.price * (1 - (minGapBetweenSlots / 100))));
 
-          const inFlightBuyCount = buyingLockPricesRef.current.filter(p => p.symbol === selectedStock.symbol).length;
-          const pendingBuyCount = pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length;
-          const totalOccupied = currentInventory.length + pendingBuyCount + inFlightBuyCount;
-
-          // 4개 센서에 불이 모두 켜지면 슬롯 개수만큼 미보유 슬롯 전체를 가득 채워서 즉시 진입
-          const isAll4SensorsFullEntry = isAll4SensorsOn && totalOccupied < maxSlots;
-
-          // Check if an active slot, pending order, or in-flight lock already exists
-          const isSamePriceBlocked = !allowSamePriceEntry && !isAll4SensorsFullEntry && (
-            currentInventory.some(slot => Math.abs(slot.price - targetBuyPrice) < tickSize * 0.95) ||
-            pendingBuyOrdersRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.orderPrice - targetBuyPrice) < tickSize * 0.95) ||
-            buyingLockPricesRef.current.some(p => p.symbol === selectedStock.symbol && Math.abs(p.price - targetBuyPrice) < tickSize * 0.95)
-          );
-          
-          const isLockActive = inFlightBuyCount > 0;
-
-          const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
-
-          // Buy Trigger: Check gap and criteria (4개 센서 모두 켜지면 갭 무관 슬롯 가득 매수 진입)
           if ((isGapSatisfied || isAll4SensorsFullEntry) && (meetsBuyCriteria || (immediateEntry && totalOccupied < maxSlots))) {
             if (isSamePriceBlocked) {
-              setScalperMessage(`[중복 차단] ${formatCurrency(targetBuyPrice)} 보유/주문 중`);
+              if (isSelected) setScalperMessage(`[중복 차단] ${formatCurrency(targetBuyPrice)} 보유/주문 중`);
             } else if (totalOccupied >= maxSlots) {
-              setScalperMessage(`[슬롯 가득 참] ${totalOccupied}/${maxSlots} (매도 대기)`);
+              if (isSelected) setScalperMessage(`[슬롯 가득 참] ${totalOccupied}/${maxSlots} (매도 대기)`);
             } else if (isLockActive) {
-              setScalperMessage(`[주문 처리 중] ${formatCurrency(targetBuyPrice)} API 통신 대기...`);
+              if (isSelected) setScalperMessage(`[주문 처리 중] ${formatCurrency(targetBuyPrice)} API 통신 대기...`);
             } else {
-              // 4개 센서 올-그린 포착 시 남은 슬롯 개수만큼 가득 진입
               const slotsToBuy = isAll4SensorsFullEntry ? Math.max(1, maxSlots - totalOccupied) : 1;
 
               for (let i = 0; i < slotsToBuy; i++) {
-                const currentInventoryNow = gapInventoryRef.current;
-                const inFlightNow = buyingLockPricesRef.current.filter(p => p.symbol === selectedStock.symbol).length;
-                const pendingNow = pendingBuyOrdersRef.current.filter(p => p.symbol === selectedStock.symbol).length;
-                const currentTotalOccupied = currentInventoryNow.length + pendingNow + inFlightNow;
+                const inFlightNow = buyingLockPricesRef.current.filter(p => p.symbol === stockItem.symbol).length;
+                const pendingNow = pendingBuyOrdersRef.current.filter(p => p.symbol === stockItem.symbol).length;
+                const currentTotalOccupied = (isSelected ? gapInventoryRef.current.length : (holdings[stockItem.symbol] > 0 ? 1 : 0)) + pendingNow + inFlightNow;
 
                 if (currentTotalOccupied >= maxSlots) break;
 
                 const currentStep = currentTotalOccupied + 1;
-                const scaledQuantity = tradeQuantity; 
+                const scaledQuantity = tradeQuantity;
                 const scaledCost = priceInKrw * scaledQuantity;
 
                 if (balance < scaledCost) {
-                  setScalperMessage(`[매수 차단] 예수금 부족 (필요: ${formatCurrency(scaledCost)})`);
+                  if (isSelected) setScalperMessage(`[매수 차단] 예수금 부족 (필요: ${formatCurrency(scaledCost)})`);
                   break;
                 }
 
-                setScalperMessage(`[슬롯#${currentStep}/${maxSlots} 진입] ${formatCurrency(targetBuyPrice)} (${strategyLabel})...`);
-                
-                const lockEntry = { symbol: selectedStock.symbol, price: targetBuyPrice };
+                if (isSelected) setScalperMessage(`[슬롯#${currentStep}/${maxSlots} 진입] ${stockItem.name} ${formatCurrency(targetBuyPrice)} (${strategyLabel})...`);
+
+                const lockEntry = { symbol: stockItem.symbol, price: targetBuyPrice };
                 buyingLockPricesRef.current.push(lockEntry);
 
                 try {
                   const currentSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                  const executedQty = await executeTrade('BUY', selectedStock, scaledQuantity, `Scalper Slot #${currentStep}/${maxSlots} (${strategyLabel}): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId);
-                  
+                  const executedQty = await executeTrade('BUY', stockItem, scaledQuantity, `Scalper Slot #${currentStep}/${maxSlots} (${strategyLabel}): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId);
+
                   if (executedQty > 0) {
-                    setScalperMessage(`[매수 완료] 슬롯#${currentStep}/${maxSlots} ${formatCurrency(targetBuyPrice)} (${strategyLabel})`);
-                    setBotStatus(`[스캘퍼 엔진] 슬롯#${currentStep}/${maxSlots} ${formatCurrency(targetBuyPrice)} ${formatQuantity(executedQty)} 진입 완료 (${strategyLabel})`);
-                    setHighWaterMark(prev => ({ ...prev, [targetBuyPrice]: targetBuyPrice }));
+                    if (isSelected) setScalperMessage(`[매수 완료] ${stockItem.name} 슬롯#${currentStep}/${maxSlots} ${formatCurrency(targetBuyPrice)} (${strategyLabel})`);
+                    setBotStatus(`[스캘퍼 엔진] ${stockItem.name} (${stockItem.symbol}) ${formatCurrency(targetBuyPrice)} ${formatQuantity(executedQty)} 진입 완료 (${strategyLabel})`);
+                    setHighWaterMark(prev => ({ ...prev, [`${stockItem.symbol}_${targetBuyPrice}`]: targetBuyPrice }));
                     setLastTradeType('BUY');
                     setGapTradeCount(prev => prev + 1);
-                    showNotification(`${selectedStock.name} 슬롯#${currentStep}/${maxSlots} ${formatCurrency(targetBuyPrice)} (${strategyLabel}) 매수 완료`, "success");
+                    showNotification(`${stockItem.name} ${formatCurrency(targetBuyPrice)} (${strategyLabel}) 매수 완료`, "success");
                     playScalpingSound('BUY');
                   }
                 } finally {
@@ -4740,199 +4713,111 @@ export default function App() {
                 }
               }
             }
-          } else {
+          } else if (isSelected) {
             if (scalperStrategyMode === 'AUTO') {
               if (isPullbackCond || isBreakoutCond || isVwapSupportCond) {
-                setScalperMessage("진입 모니터링 중...");
+                setScalperMessage(`${stockItem.name} 진입 모니터링 중...`);
               } else if (!momentumPositive) {
-                setScalperMessage(`[AI관망] 하락 추세 (SMA5<SMA20). 추세 전환 대기 중...`);
+                setScalperMessage(`[AI관망] ${stockItem.name} 하락 추세 (SMA5<SMA20). 추세 전환 대기 중...`);
               } else {
-                setScalperMessage(`수급/지지선 감시 중 (RSI: ${Math.round(rsi)}, 보유 슬롯: ${currentInventory.length}/${maxSlots})`);
+                setScalperMessage(`${stockItem.name} 수급/지지선 감시 중 (RSI: ${Math.round(rsi)}, 보유: ${stockHoldingsQty}주)`);
               }
             } else {
-              if (!momentumPositive && scalperStrategyMode === 'PULLBACK') setScalperMessage(`하락 추세 감지 (SMA5<SMA20). 원칙 3에 따라 관망 중`);
-              else if (isOverSold) setScalperMessage(`과매도 포착 (RSI: ${Math.round(rsi)}). 수급 반등 확인 중...`);
-              else if (isNearLowerBand) setScalperMessage(`지지선(BB Lower) 도달. 매수 타점 분석 중...`);
-              else setScalperMessage(`관망 중 (RSI: ${Math.round(rsi)}, 보유 슬롯: ${currentInventory.length}/${maxSlots})`);
+              setScalperMessage(`${stockItem.name} 감시 중 (RSI: ${Math.round(rsi)}, 보유: ${stockHoldingsQty}주)`);
             }
           }
         }
-      } else {
-        if (gapInventoryRef.current.length === 0) {
-          setScalperMessage(`범위 외 관망 (${formatCurrency(minPrice)}~${formatCurrency(maxPrice)})`);
-        }
-      }
 
-      // B. PROFIT MAX SELL Condition
-      // Principle 4: Combined Position Mechanical Stop Loss & Profit Target Exit
-      const currentInventory2 = gapInventoryRef.current;
-      const totalHeldQty = holdings[selectedStock.symbol] || 0;
-      let weightedAvgPrice = avgPrices[selectedStock.symbol] || 0;
-      if (weightedAvgPrice <= 0 && currentInventory2.length > 0) {
-        const totalCost = currentInventory2.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
-        const totalQty = currentInventory2.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
-        weightedAvgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
-      }
+        // B. PROFIT MAX SELL Condition for stockItem
+        const totalHeldQty = holdings[stockItem.symbol] || 0;
+        let weightedAvgPrice = avgPrices[stockItem.symbol] || 0;
 
-      if (totalHeldQty > 0 && weightedAvgPrice > 0) {
-        const overallProfitRatio = (currentPrice - weightedAvgPrice) / weightedAvgPrice;
-        
-        // 1) Combined Profit Exit
-        if (enableCombinedAvgProfitExit && overallProfitRatio >= (scalpingTargetProfit / 100) && overallProfitRatio > 0) {
-          setScalperMessage(`[통합 평단가 일괄 익절] ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (+${(overallProfitRatio * 100).toFixed(2)}%)`);
-          await executeTrade('SELL', selectedStock, totalHeldQty, `통합 평단가 일괄 익절 (+${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice, weightedAvgPrice);
-          
-          gapInventoryRef.current = [];
-          setGapInventory([]);
-          setHighWaterMark({});
-          setLastTradeType('SELL');
-          setGapTradeCount(prev => prev + 1);
-          playScalpingSound('SELL');
-          lastPrice = currentPrice;
-          return;
-        }
+        if (totalHeldQty > 0 && weightedAvgPrice > 0) {
+          const overallProfitRatio = (currentPrice - weightedAvgPrice) / weightedAvgPrice;
 
-        // 2) Principle 4: Combined Emergency Stop Loss Execution (-0.5% or configured stop loss)
-        if (overallProfitRatio <= (scalpingStopLoss / 100)) {
-          setScalperMessage(`[통합 기계적 손절 실행] ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (${(overallProfitRatio * 100).toFixed(2)}%)`);
-          await executeTrade('SELL', selectedStock, totalHeldQty, `스캘핑 원칙4 기계적 손절 (${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice, weightedAvgPrice);
-          
-          gapInventoryRef.current = [];
-          setGapInventory([]);
-          setHighWaterMark({});
-          setLastTradeType('SELL');
-          setGapTradeCount(prev => prev + 1);
-          playScalpingSound('SELL');
-          lastPrice = currentPrice;
-          return;
-        }
-      }
+          // 1) Combined Profit Exit
+          if (enableCombinedAvgProfitExit && overallProfitRatio >= (scalpingTargetProfit / 100) && overallProfitRatio > 0) {
+            if (isSelected) setScalperMessage(`[통합 익절] ${stockItem.name} ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (+${(overallProfitRatio * 100).toFixed(2)}%)`);
+            await executeTrade('SELL', stockItem, totalHeldQty, `통합 평단가 일괄 익절 (+${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice, weightedAvgPrice);
 
-      // Technique 2: INDIVIDUAL SLOT PROFIT EXIT (슬롯별 독립 익절/손절 - 병렬 연속 즉시 매도 처리)
-      let activeSlots = [...gapInventoryRef.current];
-      if (activeSlots.length > 0) {
-        const slotsToProcess = [...activeSlots];
-        for (const slot of slotsToProcess) {
-          const slotPrice = slot.price || 0;
-          const buyPrice = slotPrice;
-          const buyQty = slot.quantity || tradeQuantity || 1;
-          const slotId = slot.id;
-          if (!buyPrice || buyPrice <= 0) continue;
-
-          const profitRatio = (currentPrice - buyPrice) / buyPrice;
-
-          // [핵심] 이미 매도 주문이 나간 슬롯인 경우: 목표 수익률 도달 시 즉시 체결 및 슬롯 비우기
-          const existingPending = pendingSellOrdersRef.current.find(p => p.symbol === selectedStock.symbol && p.slotId === slotId);
-          if (existingPending) {
-            if (existingPending.isSimulated && profitRatio >= (scalpingTargetProfit / 100) - 0.00001) {
-              const priceInKrw = marketType === 'US' ? currentPrice * exchangeRate : currentPrice;
-              setBalance(prev => prev + priceInKrw * buyQty);
-
-              const profit = (currentPrice - buyPrice) * buyQty * (marketType === 'US' ? exchangeRate : 1);
-              setGapTradingProfit(prev => prev + profit);
-              if (profit > 0) setScalpingWins(prev => prev + 1);
-              else if (profit < 0) setScalpingLosses(prev => prev + 1);
-
-              showNotification(`${selectedStock.name} 목표수익 즉시 체결 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
-
-              // Clear slot
-              const updatedInv = gapInventoryRef.current.filter(s => s.id !== slotId);
-              gapInventoryRef.current = updatedInv;
-              setGapInventory(updatedInv);
-
-              // Remove pending sell order
-              setPendingSellOrders(prev => prev.filter(p => p.id !== existingPending.id));
-
-              // Update holdings
-              const heldQty = holdings[selectedStock.symbol] || 0;
-              const newHoldings = { ...holdings, [selectedStock.symbol]: Number(Math.max(0, heldQty - buyQty).toFixed(4)) };
-              setHoldings(newHoldings);
-              if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-
-              addLog(selectedStock.symbol, '매도', currentPrice, buyQty, `[목표수익 즉시 체결] ${formatCurrency(buyPrice)} -> ${formatCurrency(currentPrice)} (+${(profitRatio * 100).toFixed(2)}%)`);
-              playScalpingSound('SELL');
+            if (isSelected) {
+              gapInventoryRef.current = [];
+              setGapInventory([]);
             }
+            setLastTradeType('SELL');
+            setGapTradeCount(prev => prev + 1);
+            playScalpingSound('SELL');
             continue;
           }
 
-          // Update High Water Mark for Trailing Stop Loss per slot
-          if (currentPrice > (highWaterMark[buyPrice] || buyPrice)) {
-            setHighWaterMark(prev => ({ ...prev, [buyPrice]: currentPrice }));
+          // 2) Emergency Stop Loss
+          if (overallProfitRatio <= (scalpingStopLoss / 100)) {
+            if (isSelected) setScalperMessage(`[손절 실행] ${stockItem.name} ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (${(overallProfitRatio * 100).toFixed(2)}%)`);
+            await executeTrade('SELL', stockItem, totalHeldQty, `스캘핑 기계적 손절 (${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice, weightedAvgPrice);
+
+            if (isSelected) {
+              gapInventoryRef.current = [];
+              setGapInventory([]);
+            }
+            setLastTradeType('SELL');
+            setGapTradeCount(prev => prev + 1);
+            playScalpingSound('SELL');
+            continue;
           }
 
-          const currentHigh = highWaterMark[buyPrice] || buyPrice;
+          // 3) Trailing Stop & Profit Max for stockItem
+          const markKey = `${stockItem.symbol}_${weightedAvgPrice}`;
+          const currentHigh = Math.max(highWaterMark[markKey] || weightedAvgPrice, currentPrice);
+          if (currentPrice > (highWaterMark[markKey] || weightedAvgPrice)) {
+            setHighWaterMark(prev => ({ ...prev, [markKey]: currentPrice }));
+          }
           const dropFromPeak = (currentHigh - currentPrice) / currentHigh;
 
-          // Dynamic Target Profit Calculation for AI Max-Yield Engine
-          // When in AI_MAX_YIELD mode, override fixed target profit and expand profit target up to +0.8% ~ +1.5% in strong momentum!
           let effectiveTargetRatio = scalpingTargetProfit / 100;
           let isAiMaxYieldActive = scalperStrategyMode === 'AI_MAX_YIELD';
 
           if (isAiMaxYieldActive) {
             if (rsi >= 60 && currentPrice >= sma5 && momentumPositive) {
-              // 강한 모멘텀/돌파 장세: 목표 수익률을 +0.8% ~ +1.2%로 확장하여 수익 극대화!
               effectiveTargetRatio = Math.max(scalpingTargetProfit / 100, 0.008);
             } else if (rsi >= 45 && rsi < 60) {
-              // 완만한 추세: +0.4% ~ +0.6% 목표
               effectiveTargetRatio = Math.max(scalpingTargetProfit / 100, 0.004);
             } else {
-              // 박스권/초단타: +0.25% 스캘핑 목표
               effectiveTargetRatio = Math.max(0.0025, scalpingTargetProfit / 100);
             }
           }
 
-          // 1. Ultra-Scalping Micro & AI Dynamic Trailing Stop:
-          // Profit reaches target or threshold, then rides trend until pulling back 0.08% from peak
           const microThreshold = isAiMaxYieldActive ? effectiveTargetRatio : Math.max(0.001, scalpingTargetProfit / 100);
-          const isMicroTrailingStop = profitRatio >= microThreshold && dropFromPeak >= 0.0008;
-          const isStandardTrailing = profitRatio > 0.002 && dropFromPeak > 0.003;
+          const isMicroTrailingStop = overallProfitRatio >= microThreshold && dropFromPeak >= 0.0008;
+          const isStandardTrailing = overallProfitRatio > 0.002 && dropFromPeak > 0.003;
           const isTrailingStop = isMicroTrailingStop || isStandardTrailing;
-          
-          // 2. Target Profit Exit: Overbought OR Near Upper Band OR dynamic target profit % hit
-          const isProfitTarget = (isOverBought || isNearUpperBand || profitRatio >= effectiveTargetRatio) && (profitRatio > 0);
-          
-          // 3. Dynamic Stop Loss: Absolute bottom line or risk management
+          const isProfitTarget = (isOverBought || isNearUpperBand || overallProfitRatio >= effectiveTargetRatio) && (overallProfitRatio > 0);
           const effectiveStopLossRatio = isAiMaxYieldActive ? Math.min(scalpingStopLoss / 100, -0.005) : scalpingStopLoss / 100;
-          const isStopLoss = profitRatio <= effectiveStopLossRatio;
-
-          // Smart Logic: even more aggressive selling if target is hit or RSI is very high
-          const isSmartExit = (isSmartScalperMode || isAiMaxYieldActive) && (rsi > 70 || profitRatio >= effectiveTargetRatio * 1.2);
+          const isStopLoss = overallProfitRatio <= effectiveStopLossRatio;
+          const isSmartExit = (isSmartScalperMode || isAiMaxYieldActive) && (rsi > 70 || overallProfitRatio >= effectiveTargetRatio * 1.2);
 
           if (isTrailingStop || isProfitTarget || isStopLoss || isSmartExit) {
-            const heldQty = holdings[selectedStock.symbol] || 0;
-            const sellQty = Math.min(heldQty > 0 ? heldQty : buyQty, buyQty) || buyQty;
+            let sellReason = "";
+            if (isTrailingStop) sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 최고점 추적스탑 (+${(overallProfitRatio * 100).toFixed(2)}%)` : "트레일링 스탑 (수익 보존)";
+            else if (isProfitTarget) sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 동적목표달성 (+${(overallProfitRatio * 100).toFixed(2)}%)` : `목표 수익 달성 (+${(overallProfitRatio * 100).toFixed(2)}%)`;
+            else sellReason = "리스크 관리 손절";
 
-            if (sellQty > 0 || kisConfig.isConnected) {
-              let sellReason = "";
-              if (isTrailingStop) sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 최고점 추적스탑 (+${(profitRatio * 100).toFixed(2)}%)` : "트레일링 스탑 (수익 보존)";
-              else if (isProfitTarget) sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 동적목표달성 (+${(profitRatio * 100).toFixed(2)}%)` : `목표 수익 달성 (+${(profitRatio * 100).toFixed(2)}%)`;
-              else sellReason = "리스크 관리 손절";
+            if (isSelected) setScalperMessage(`[최고수익 AI 매도] ${stockItem.name} ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (${sellReason})`);
+            await executeTrade('SELL', stockItem, totalHeldQty, `Profit Max (${stockItem.name}): ${sellReason}`, currentPrice, weightedAvgPrice);
 
-              setScalperMessage(`[${isAiMaxYieldActive ? '최고수익 AI 매도' : '목표수익 즉시 매도'}] ${formatCurrency(buyPrice)} -> ${formatCurrency(currentPrice)} (${sellReason})`);
-              await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ${formatCurrency(buyPrice)}, 수량: ${formatQuantity(sellQty)}): ${sellReason}`, currentPrice, buyPrice, slotId);
-              
-              setHighWaterMark(prev => {
-                const next = { ...prev };
-                delete next[buyPrice];
-                return next;
-              });
-              setLastTradeType('SELL');
-              setGapTradeCount(prev => prev + 1);
-              
-              // [중요] 슬롯 제거(gapInventory 업데이트)는 executeTrade 또는 pendingSellOrders 모니터링에서 실제 체결 시점에 처리됨
-              // (사용자 요청: 실제 매도 체결 시점에만 슬롯 비우기)
-              
-              // Continue loop without break to clear all eligible profitable slots in parallel!
-            }
+            setHighWaterMark(prev => {
+              const next = { ...prev };
+              delete next[markKey];
+              return next;
+            });
+            setLastTradeType('SELL');
+            setGapTradeCount(prev => prev + 1);
           }
         }
       }
-
-      lastPrice = currentPrice;
     }, scalpingSpeed);
 
     return () => clearInterval(gapInterval);
-  }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, entryPriceMode, lowestBidOnlyMode, maxSlots, allowSamePriceEntry, enableCombinedAvgProfitExit]);
+  }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, entryPriceMode, lowestBidOnlyMode, maxSlots, allowSamePriceEntry, enableCombinedAvgProfitExit, detectStockStrategies]);
 
   const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number, buyPrice?: number, slotId?: string): Promise<number> => {
     if (action === 'HOLD' || amount <= 0) return 0;
