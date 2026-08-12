@@ -4541,17 +4541,14 @@ export default function App() {
       // A. PROFIT MAX BUY Condition: Only check buys inside min ~ max range
       if (currentPrice >= minPrice && currentPrice <= maxPrice) {
         if (lastPrice > 0) {
-          // Principle 3 & 2 Strategy Rules Execution
-          const isPullbackCond = momentumPositive && (rsi < 40 || isNearLowerBand) && currentPrice >= sma5 && hasVolumeMomentum;
-          const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
-          const isBreakoutCond = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
-          const isVwapSupportCond = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
-          const { poc, cvd, isBullishAbsorption } = activeStrategyDetection;
-          const isPocSupportCond = Math.abs(currentPrice - (poc || currentPrice)) / (poc || currentPrice) < 0.008;
-          const isVolumeProfileCond = isPocSupportCond || isBullishAbsorption;
+          // Principle 3 & 2 Strategy Rules Execution - Sync directly with activeStrategyDetection for 100% UI alignment
+          const isPullbackCond = activeStrategyDetection.isPullback;
+          const isBreakoutCond = activeStrategyDetection.isBreakout;
+          const isVwapSupportCond = activeStrategyDetection.isVwapSupport;
+          const isVolumeProfileCond = activeStrategyDetection.isVolumeProfile;
 
           // 4개 실시간 전략 센서에 불이 모두 들어왔는지 확인 (activeCount === 4)
-          const isAll4SensorsOn = isPullbackCond && isBreakoutCond && isVwapSupportCond && isVolumeProfileCond;
+          const isAll4SensorsOn = activeStrategyDetection.activeCount === 4 || (isPullbackCond && isBreakoutCond && isVwapSupportCond && isVolumeProfileCond);
 
           let meetsBuyCriteria = false;
           let strategyLabel = "AI 스캘퍼";
