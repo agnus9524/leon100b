@@ -150,7 +150,10 @@ class KISService {
       const token = await this.getAccessToken();
       const endpoint = '/uapi/overseas-stock/v1/trading/order';
       
-      let trId = side === 'BUY' ? 'TTTS1002U' : 'TTTS1006U';
+      const isVirtual = this.baseUrl.includes('openapivts');
+      let trId = isVirtual
+        ? (side === 'BUY' ? 'VTSM1002U' : 'VTSM1006U')
+        : (side === 'BUY' ? 'TTTS1002U' : 'TTTS1006U');
 
       const body = {
           CANO: this.config.accountNo,
@@ -415,12 +418,15 @@ class KISService {
     const token = await this.getAccessToken();
     const endpoint = '/uapi/domestic-stock/v1/trading/inquire-balance';
     
+    const isVirtual = this.baseUrl.includes('openapivts');
+    const defaultTrId = isVirtual ? 'VTTC8434R' : 'TTTC8434R';
+    
     const headers: any = {
       'content-type': 'application/json',
       'authorization': `Bearer ${token}`,
       'appkey': this.config.appKey,
       'appsecret': this.config.appSecret,
-      'tr-id': 'TTTC8434R',
+      'tr-id': defaultTrId,
       'tr-cont': '',
       'custtype': 'P',
     };
@@ -465,12 +471,15 @@ class KISService {
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/inquire-psbl-order';
       
+      const isVirtual = this.baseUrl.includes('openapivts');
+      const trId = isVirtual ? 'VTTC8908R' : 'TTTC8908R';
+
       const headers = {
         'content-type': 'application/json',
         'authorization': `Bearer ${token}`,
         'appkey': this.config.appKey,
         'appsecret': this.config.appSecret,
-        'tr-id': 'TTTC8908R',
+        'tr-id': trId,
         'custtype': 'P',
       };
 
@@ -540,12 +549,15 @@ class KISService {
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/inquire-psbl-sell';
       
+      const isVirtual = this.baseUrl.includes('openapivts');
+      const trId = isVirtual ? 'VTTC8408R' : 'TTTC8408R';
+
       const headers = {
         'content-type': 'application/json',
         'authorization': `Bearer ${token}`,
         'appkey': this.config.appKey,
         'appsecret': this.config.appSecret,
-        'tr-id': 'TTTC8408R',
+        'tr-id': trId,
         'custtype': 'P',
       };
 
@@ -605,12 +617,15 @@ class KISService {
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/inquire-daily-ccnl';
       
+      const isVirtual = this.baseUrl.includes('openapivts');
+      const trId = isVirtual ? 'VTTC8001R' : 'TTTC8001R';
+
       const headers = {
         'content-type': 'application/json',
         'authorization': `Bearer ${token}`,
         'appkey': this.config.appKey,
         'appsecret': this.config.appSecret,
-        'tr-id': 'TTTC8001R',
+        'tr-id': trId,
         'custtype': 'P',
       };
 
@@ -694,12 +709,17 @@ class KISService {
 
       const hashkey = await this.getHashKey(body);
 
+      const isVirtual = this.baseUrl.includes('openapivts');
+      const trId = isVirtual
+        ? (side === 'BUY' ? 'VTTC0802U' : 'VTTC0801U')
+        : (side === 'BUY' ? 'TTTC0802U' : 'TTTC0801U');
+
       const headers = {
         'content-type': 'application/json',
         'authorization': `Bearer ${token}`,
         'appkey': this.config.appKey,
         'appsecret': this.config.appSecret,
-        'tr-id': side === 'BUY' ? 'TTTC0012U' : 'TTTC0011U',
+        'tr-id': trId,
         'hashkey': hashkey,
         'custtype': 'P',
       };
