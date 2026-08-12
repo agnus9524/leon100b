@@ -1422,8 +1422,8 @@ export default function App() {
   }, [gapInventory]);
 
   // Automated Scalping Configuration States
-  const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.3); // Scalping net target profit (+0.3% tight default)
-  const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-1.0); // -1.0% standard stop loss
+  const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.5); // Scalping net target profit (+0.5% default)
+  const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-1.5); // -1.5% standard stop loss
   const [scalpingSpeed, setScalpingSpeed] = useState<number>(300); // 300ms (0.3s) fast execution speed
   const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(false);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
