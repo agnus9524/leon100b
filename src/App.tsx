@@ -1710,13 +1710,15 @@ export default function App() {
       let dailyList: any[] = [];
       let yearlyList: any[] = [];
 
-      // 1. KIS API Query
+      // 1. KIS API Query using Promise.allSettled to prevent indefinite spinning
       if (kisConfig.isConnected) {
-        const [resPeriod, resProfit, resDaily] = await Promise.all([
+        const results = await Promise.allSettled([
           kisService.getDomesticPeriodRealizedPnL(startStr, endStr),
-          kisService.getPeriodTradeProfit(startStr, endStr),
-          kisService.getDomesticDailyRealizedPnL(startStr, endStr)
+          kisService.getPeriodTradeProfit(startStr, endStr, '', '02')
         ]);
+
+        const resPeriod = results[0].status === 'fulfilled' ? results[0].value : null;
+        const resProfit = results[1].status === 'fulfilled' ? results[1].value : null;
 
         if (resPeriod && resPeriod.rt_cd === '0' && Array.isArray(resPeriod.output1) && resPeriod.output1.length > 0) {
           stockList = resPeriod.output1.map((item: any) => ({
@@ -1754,17 +1756,6 @@ export default function App() {
           }
         }
 
-        if (dailyList.length === 0 && resDaily && resDaily.rt_cd === '0' && Array.isArray(resDaily.output1) && resDaily.output1.length > 0) {
-          dailyList = resDaily.output1.map((item: any) => ({
-            stck_bsop_date: item.stck_bsop_date || item.trad_dt || '',
-            trad_cnt: Number(item.trad_cnt || item.ccld_cnt || 1),
-            pchs_amt: Number(item.pchs_amt || item.pchs_ccld_amt || 0),
-            sll_amt: Number(item.sll_amt || item.sll_ccld_amt || 0),
-            rlzt_pnl: Number(item.rlzt_pnl || item.sll_pnl_amt || 0),
-            erng_rt: Number(item.erng_rt || item.pnl_rat || 0),
-          }));
-        }
-
         // Calculate total KIS realized PnL
         const totalPnlFromKis = stockList.reduce((acc, curr) => acc + (curr.rlzt_pnl || 0), 0);
         setKisTotalRealizedPnL(totalPnlFromKis);
@@ -1772,8 +1763,8 @@ export default function App() {
         setKisTotalRealizedPnL(null);
       }
 
-      // 2. Simulation Mode Fallback ONLY when KIS is NOT connected
-      if (!kisConfig.isConnected) {
+      // 2. Simulation Mode Fallback ONLY when KIS is NOT connected or returns no trades
+      if (!kisConfig.isConnected || (stockList.length === 0 && dailyList.length === 0)) {
         if (stockList.length === 0) {
           const initialStocks = stocksRef.current.length > 0 ? stocksRef.current : INITIAL_STOCKS_KR;
           const krStocks = initialStocks.filter(s => s.market === 'KR' || /^\d+$/.test(s.symbol));
@@ -3504,7 +3495,6 @@ export default function App() {
       }
       
       setBotStatus("상태 동기화 완료");
-      loadRealizedPnL();
       await updateKisBuyableQty(totalConvertedBalance);
     } catch (e: any) {
       console.error("KIS Sync Error", e);
@@ -6760,20 +6750,6 @@ export default function App() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setScalperStrategyMode('AUTO')}
-                  className={cn(
-                    "px-2 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
-                    scalperStrategyMode === 'AUTO'
-                      ? "bg-gradient-to-r from-amber-500/30 to-amber-600/30 text-amber-200 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
-                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
-                  )}
-                  title="프로그램이 실시간 차트 지표를 종합 분석하여 4가지 스캘핑 전략을 모두 자동 포착 및 적용"
-                >
-                  <Bot className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                  <span>AI 종합</span>
-                </button>
-                <button
-                  type="button"
                   onClick={() => setScalperStrategyMode('ALL_SENSORS_4')}
                   className={cn(
                     "relative px-2 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
@@ -6799,9 +6775,9 @@ export default function App() {
                   className={cn(
                     "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
                     activeStrategyDetection.isPullback
-                      ? "bg-emerald-500/30 text-emerald-200 border-emerald-400 shadow-[0_0_15px_rgba(16,185,129,0.5)]"
+                      ? "bg-cyan-500/30 text-cyan-200 border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.5)]"
                       : scalperStrategyMode === 'PULLBACK'
-                      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-md"
+                      ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-md"
                       : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
                   )}
                   title="상승 추세(SMA5>=SMA20) 눌림목 후 반등 진입 (원칙 1,3)"
@@ -6809,7 +6785,7 @@ export default function App() {
                   <span className={cn(
                     "w-2 h-2 rounded-full transition-all shrink-0",
                     activeStrategyDetection.isPullback
-                      ? "bg-emerald-400 shadow-[0_0_10px_#10b981] animate-pulse"
+                      ? "bg-cyan-400 shadow-[0_0_10px_#06b6d4] animate-pulse"
                       : "bg-slate-600/60 border border-slate-700"
                   )} />
                   <span>① 눌림목</span>

@@ -653,7 +653,7 @@ class KISService {
         CTX_AREA_FK100: ''
       };
 
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params, timeout: 5000 });
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Period Trade Profit Exception safely caught:", error?.response?.data || error?.message);
@@ -692,46 +692,10 @@ class KISService {
         CANO_PWD: this.config.accountPw || ''
       };
 
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params, timeout: 5000 });
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Period Realized PnL Exception safely caught:", error?.response?.data || error?.message);
-      return { rt_cd: '0', output1: [], output2: {} };
-    }
-  }
-
-  public async getDomesticDailyRealizedPnL(startDate: string, endDate: string) {
-    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output1: [], output2: {} };
-    try {
-      const token = await this.getAccessToken();
-      const endpoint = '/uapi/domestic-stock/v1/trading/inquire-daily-realized-profit';
-
-      const isVirtual = this.baseUrl.includes('openapivts');
-      const trId = isVirtual ? 'VTTC8408R' : 'TTTC8408R';
-
-      const headers = {
-        'content-type': 'application/json',
-        'authorization': `Bearer ${token}`,
-        'appkey': this.config.appKey,
-        'appsecret': this.config.appSecret,
-        'tr-id': trId,
-        'custtype': 'P',
-      };
-
-      const params = {
-        CANO: this.config.accountNo,
-        ACNT_PRDT_CD: this.config.accountCode,
-        INQR_STRT_DT: startDate,
-        INQR_END_DT: endDate,
-        WDRW_DVSN: '00',
-        CTX_AREA_FK100: '',
-        CTX_AREA_NK100: ''
-      };
-
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-      return res.data;
-    } catch (error: any) {
-      console.warn("[KIS Service] Daily Realized PnL Exception safely caught:", error?.response?.data || error?.message);
       return { rt_cd: '0', output1: [], output2: {} };
     }
   }
