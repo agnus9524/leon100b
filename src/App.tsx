@@ -1693,6 +1693,7 @@ export default function App() {
   const [pnlPeriodRange, setPnlPeriodRange] = useState<'1m' | '3m' | '6m' | '1y' | 'all'>('3m');
 
   // 🚨 갭하락 대응 AI 예상보고서 모달 & 상태
+  const [isAppReady, setIsAppReady] = useState<boolean>(false);
   const [showGapDownReportModal, setShowGapDownReportModal] = useState<boolean>(false);
   const [gapDownReportData, setGapDownReportData] = useState<any>(null);
   const [gapDownReportLoading, setGapDownReportLoading] = useState<boolean>(false);
@@ -1700,6 +1701,14 @@ export default function App() {
   const [gapDownDeferredSymbols, setGapDownDeferredSymbols] = useState<Record<string, boolean>>({});
   const [gapDownTargetPriceMap, setGapDownTargetPriceMap] = useState<Record<string, number>>({});
   const [customReboundTargetPrice, setCustomReboundTargetPrice] = useState<string>('');
+
+  // Delay auto-popup triggers until initial program loading & price/stock sync completes
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setIsAppReady(true);
+    }, 4000);
+    return () => clearTimeout(timer);
+  }, []);
 
   const triggerGapDownReport = useCallback(async (
     stock: any,
@@ -5030,7 +5039,8 @@ export default function App() {
           }
 
           // 2) Emergency Stop Loss Intercept & AI Gap-Down Report
-          if (overallProfitRatio <= (scalpingStopLoss / 100)) {
+          // Only evaluate when app is fully loaded (isAppReady) and prices are fully initialized
+          if (isAppReady && currentPrice > 0 && weightedAvgPrice > 0 && currentPrice > weightedAvgPrice * 0.2 && overallProfitRatio <= (scalpingStopLoss / 100) && overallProfitRatio > -0.85) {
             // Check if symbol has been intercepted for Gap-Down AI report popup in this session
             if (!gapDownInterceptedSymbols[stockItem.symbol]) {
               setGapDownInterceptedSymbols(prev => ({ ...prev, [stockItem.symbol]: true }));
@@ -9332,12 +9342,12 @@ export default function App() {
       {/* 🚨 오늘의 갭하락 대응 AI 예상보고서 팝업 모달 */}
       <AnimatePresence>
         {showGapDownReportModal && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[90] flex items-center justify-center p-3 sm:p-5">
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[90] flex items-center justify-center p-3 sm:p-4">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-slate-900 border border-amber-500/40 rounded-3xl max-w-2xl w-full p-5 sm:p-6 space-y-4 shadow-[0_0_50px_rgba(245,158,11,0.2)] relative text-white max-h-[92vh] flex flex-col overflow-hidden"
+              exit={{ opacity: 0, scale: 0.95, y: 10 }}
+              className="bg-slate-900/95 border border-amber-500/40 rounded-2xl max-w-lg w-full p-4 sm:p-5 space-y-3 shadow-[0_0_40px_rgba(245,158,11,0.25)] relative text-white max-h-[82vh] flex flex-col overflow-hidden"
             >
               {/* Modal Header */}
               <div className="flex items-center justify-between border-b border-slate-800 pb-3.5 shrink-0">
