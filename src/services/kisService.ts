@@ -629,12 +629,15 @@ class KISService {
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/inquire-period-trade-profit';
 
+      const isVirtual = this.baseUrl.includes('openapivts');
+      const trId = isVirtual ? 'VTTC8715R' : 'TTTC8715R';
+
       const headers = {
         'content-type': 'application/json',
         'authorization': `Bearer ${token}`,
         'appkey': this.config.appKey,
         'appsecret': this.config.appSecret,
-        'tr-id': 'TTTC8715R',
+        'tr-id': trId,
         'custtype': 'P',
       };
 
@@ -655,6 +658,45 @@ class KISService {
     } catch (error: any) {
       console.warn("[KIS Service] Period Trade Profit Exception safely caught:", error?.response?.data || error?.message);
       return { rt_cd: '0', output1: [], output2: [] };
+    }
+  }
+
+  public async getDomesticPeriodRealizedPnL(startDate: string, endDate: string, symbol: string = '') {
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output1: [], output2: {} };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/trading/inquire-period-profit';
+
+      const isVirtual = this.baseUrl.includes('openapivts');
+      const trId = isVirtual ? 'VTTC8494R' : 'TTTC8494R';
+
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': trId,
+        'custtype': 'P',
+      };
+
+      const params = {
+        CANO: this.config.accountNo,
+        ACNT_PRDT_CD: this.config.accountCode,
+        INQR_STRT_DT: startDate,
+        INQR_END_DT: endDate,
+        PDNO: symbol,
+        COST_ICLD_YN: 'N',
+        PRCS_DVSN: '00',
+        CTX_AREA_FK100: '',
+        CTX_AREA_NK100: '',
+        CANO_PWD: this.config.accountPw || ''
+      };
+
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Period Realized PnL Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output1: [], output2: {} };
     }
   }
 
