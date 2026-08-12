@@ -3913,21 +3913,28 @@ export default function App() {
         const currentPrice = currentStock.price;
         const orderPrice = order.orderPrice;
 
+        const isUSStock = currentStock.market === 'US' || /^[A-Za-z]/.test(currentStock.symbol) || marketType === 'US';
+        const tickSize = getTickSize(orderPrice, isUSStock ? 'US' : 'KR');
+        const tickDiff = (currentPrice - orderPrice) / tickSize;
+
         // Calculate ratios from orderPrice
         const dropPercent = ((orderPrice - currentPrice) / orderPrice) * 100;
         const risePercent = ((currentPrice - orderPrice) / orderPrice) * 100;
-        const autoCancelRiseThreshold = 0.3;
 
-        const isDropCancel = dropPercent >= autoCancelThreshold;
-        const isRiseCancel = risePercent >= autoCancelRiseThreshold;
+        // Smart Escape Criteria:
+        // - Upward: current price rises 2+ ticks above buy order price OR rises >= 0.2% (Capital release)
+        // - Downward: current price drops 2+ ticks below buy order price OR drops >= autoCancelThreshold (Avoid falling knives)
+        const isRiseCancel = tickDiff >= 2 || risePercent >= 0.2;
+        const isDropCancel = tickDiff <= -2 || dropPercent >= autoCancelThreshold;
 
         if (isDropCancel || isRiseCancel) {
           // 1. CANCEL CONDITION TRIGGERED
           updated = true;
           
+          const tickStr = Math.abs(Math.round(tickDiff)) > 0 ? `${Math.abs(Math.round(tickDiff))}틱` : '';
           const cancelReason = isDropCancel 
-            ? `주문가 대비 ${dropPercent.toFixed(2)}% 하락 (기준: ${autoCancelThreshold}%)`
-            : `주문가 대비 ${risePercent.toFixed(2)}% 상승 (기준: ${autoCancelRiseThreshold}%)`;
+            ? `주문가 대비 ${dropPercent.toFixed(2)}%${tickStr ? ` (${tickStr})` : ''} 급락 이탈 (손실 방지)`
+            : `주문가 대비 ${risePercent.toFixed(2)}%${tickStr ? ` (${tickStr})` : ''} 상승 이탈 (미체결 회수)`;
           
           if (!order.id) {
             // Placeholder / in-flight order without ID: clean up silently without error warning
@@ -4153,6 +4160,49 @@ export default function App() {
         if (!currentStock) {
           nextPending.push(order);
           continue;
+        }
+
+        const isUSStock = currentStock.market === 'US' || /^[A-Za-z]/.test(currentStock.symbol) || marketType === 'US';
+        const tickSize = getTickSize(order.orderPrice, isUSStock ? 'US' : 'KR');
+        const tickDiff = (currentStock.price - order.orderPrice) / tickSize;
+        const dropPercentFromSell = ((order.orderPrice - currentStock.price) / order.orderPrice) * 100;
+
+        // Check Smart Auto-Cancel for Pending Sell Order when price escapes
+        const isStopLossLevelHit = order.buyPrice && order.buyPrice > 0 && ((currentStock.price - order.buyPrice) / order.buyPrice * 100) <= -scalpingStopLoss;
+        const isSellDropCancel = tickDiff <= -3 || dropPercentFromSell >= 0.4 || isStopLossLevelHit;
+        const isSellRiseCancel = tickDiff >= 3;
+
+        if (isSellDropCancel || isSellRiseCancel) {
+          updated = true;
+          const tickStr = `${Math.abs(Math.round(tickDiff))}틱`;
+          const cancelReason = isSellDropCancel
+            ? `목표가 대비 -${tickStr} 하향 이탈 (손절/슬롯 해제 자동 취소)`
+            : `목표가 대비 +${tickStr} 상향 급등 이탈 (타점 재조정)`;
+
+          if (order.isSimulated) {
+            addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[가상 스마트 매도취소] ${cancelReason}`);
+            showNotification(`${currentStock.name} 가상 매도 대기 주문 자동 취소 (${cancelReason})`, "info");
+          } else {
+            try {
+              setBotStatus(`[KIS API] 매도 주문(${order.id}) 취소 요청 중...`);
+              const cancelRes = marketType === 'US'
+                ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString())
+                : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+              
+              if (cancelRes && cancelRes.rt_cd === '0') {
+                addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 스마트 매도취소] ${cancelReason}`);
+                showNotification(`${currentStock.name} KIS 매도 주문 자동 취소 (${cancelReason})`, "info");
+                setBotStatus(`[KIS 취소] 매도 주문 취소 완료`);
+              } else {
+                const errMsg = cancelRes?.msg1 || "취소 완료/체결 처리";
+                addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소 완료] ${errMsg}`);
+              }
+            } catch (e: any) {
+              console.error("[KIS Sell Order Auto-Cancel Exception]:", e);
+              addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소 완료] 대기 주문 정리 완료`);
+            }
+          }
+          continue; // Order cancelled, do not push to nextPending
         }
 
         if (order.isSimulated) {
