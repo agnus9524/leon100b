@@ -1095,6 +1095,34 @@ class KISService {
     }
   }
 
+  public async getDomesticOrderbook(symbol: string, marketCode: string = 'J') {
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output1: {}, output2: {} };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/quotations/inquire-asking-price-exp-ccn';
+      
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': 'FHKST01010200',
+        'custtype': 'P'
+      };
+
+      const params = {
+        FID_COND_MRKT_DIV_CODE: marketCode,
+        FID_INPUT_ISCD: symbol
+      };
+
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Domestic Orderbook Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output1: {}, output2: {} };
+    }
+  }
+
   public async getExchangeRate() {
     if (!this.config) throw new Error("KIS Config not initialized");
     const token = await this.getAccessToken();
