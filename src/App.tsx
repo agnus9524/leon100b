@@ -922,6 +922,7 @@ export default function App() {
     const saved = localStorage.getItem('sleek_orderable_usd');
     return saved !== null ? Number(saved) : 34.68;
   });
+  const [kisTotalRealizedPnL, setKisTotalRealizedPnL] = useState<number | null>(null);
 
   useEffect(() => {
     localStorage.setItem('sleek_orderable_krw', String(orderableKrw));
@@ -1711,8 +1712,11 @@ export default function App() {
 
       // 1. KIS API Query
       if (kisConfig.isConnected) {
-        const resPeriod = await kisService.getDomesticPeriodRealizedPnL(startStr, endStr);
-        const resProfit = await kisService.getPeriodTradeProfit(startStr, endStr);
+        const [resPeriod, resProfit, resDaily] = await Promise.all([
+          kisService.getDomesticPeriodRealizedPnL(startStr, endStr),
+          kisService.getPeriodTradeProfit(startStr, endStr),
+          kisService.getDomesticDailyRealizedPnL(startStr, endStr)
+        ]);
 
         if (resPeriod && resPeriod.rt_cd === '0' && Array.isArray(resPeriod.output1) && resPeriod.output1.length > 0) {
           stockList = resPeriod.output1.map((item: any) => ({
@@ -1740,7 +1744,7 @@ export default function App() {
           }
           if (Array.isArray(resProfit.output2) && resProfit.output2.length > 0) {
             dailyList = resProfit.output2.map((item: any) => ({
-              stck_bsop_date: item.stck_bsop_date || item.trad_dt || item.dt || '2026.08.11',
+              stck_bsop_date: item.stck_bsop_date || item.trad_dt || item.dt || '',
               trad_cnt: Number(item.trad_cnt || item.ccld_cnt || 1),
               pchs_amt: Number(item.pchs_amt || 0),
               sll_amt: Number(item.sll_amt || 0),
@@ -1749,92 +1753,103 @@ export default function App() {
             }));
           }
         }
-      }
 
-      // 2. Fallback / Simulation Data Generation with Real Stock Ref & Scalper History
-      if (stockList.length === 0) {
-        const initialStocks = stocksRef.current.length > 0 ? stocksRef.current : INITIAL_STOCKS_KR;
-        const krStocks = initialStocks.filter(s => s.market === 'KR' || /^\d+$/.test(s.symbol));
-
-        stockList = krStocks.map((s, idx) => {
-          const isSelected = s.symbol === selectedSymbol;
-          const pnl = isSelected && gapTradingProfit !== 0 ? gapTradingProfit : (idx === 0 ? 145000 : idx === 1 ? -32000 : 88000);
-          const buyAmt = 1500000 + idx * 400000;
-          const sellAmt = buyAmt + pnl;
-          const qty = 20 + idx * 5;
-          const erngRt = buyAmt > 0 ? (pnl / buyAmt) * 100 : 0;
-
-          return {
-            pdno: s.symbol,
-            prdt_name: s.name,
-            sll_qty: qty,
-            pchs_amt: buyAmt,
-            sll_amt: sellAmt,
-            rlzt_pnl: pnl,
-            erng_rt: Number(erngRt.toFixed(2))
-          };
-        });
-      }
-
-      if (dailyList.length === 0) {
-        const dates = [
-          now.toISOString().slice(0, 10).replace(/-/g, '.'),
-          '2026.08.10',
-          '2026.08.09',
-          '2026.08.08',
-          '2026.08.05',
-          '2026.08.01',
-          '2026.07.28',
-          '2026.07.25'
-        ];
-
-        dailyList = dates.map((d, idx) => {
-          const pnl = idx === 0 ? (gapTradingProfit || 145000) : Math.floor(185000 * Math.sin(idx * 1.5) + (idx === 1 ? -28000 : 54000));
-          const buyAmt = 2500000 + idx * 300000;
-          const sellAmt = buyAmt + pnl;
-          return {
-            stck_bsop_date: d,
-            trad_cnt: idx === 0 ? Math.max(1, gapTradeCount) : Math.floor(Math.random() * 8) + 2,
-            pchs_amt: buyAmt,
-            sll_amt: sellAmt,
-            rlzt_pnl: pnl,
-            erng_rt: Number(((pnl / buyAmt) * 100).toFixed(2))
-          };
-        });
-      }
-
-      // Generate Yearly List
-      const currentYrTotalPnl = dailyList.reduce((acc, curr) => acc + (curr.rlzt_pnl || 0), 0);
-      const currentYrSellAmt = dailyList.reduce((acc, curr) => acc + (curr.sll_amt || 0), 0);
-      const currentYrBuyAmt = dailyList.reduce((acc, curr) => acc + (curr.pchs_amt || 0), 0);
-      const currentYrCnt = dailyList.reduce((acc, curr) => acc + (curr.trad_cnt || 1), 0);
-
-      yearlyList = [
-        {
-          stck_bsop_year: '2026년',
-          trad_cnt: currentYrCnt,
-          pchs_amt: currentYrBuyAmt,
-          sll_amt: currentYrSellAmt,
-          rlzt_pnl: currentYrTotalPnl,
-          erng_rt: currentYrBuyAmt > 0 ? Number(((currentYrTotalPnl / currentYrBuyAmt) * 100).toFixed(2)) : 0
-        },
-        {
-          stck_bsop_year: '2025년',
-          trad_cnt: 142,
-          pchs_amt: 48500000,
-          sll_amt: 52180000,
-          rlzt_pnl: 3680000,
-          erng_rt: 7.59
-        },
-        {
-          stck_bsop_year: '2024년',
-          trad_cnt: 98,
-          pchs_amt: 32000000,
-          sll_amt: 34120000,
-          rlzt_pnl: 2120000,
-          erng_rt: 6.63
+        if (dailyList.length === 0 && resDaily && resDaily.rt_cd === '0' && Array.isArray(resDaily.output1) && resDaily.output1.length > 0) {
+          dailyList = resDaily.output1.map((item: any) => ({
+            stck_bsop_date: item.stck_bsop_date || item.trad_dt || '',
+            trad_cnt: Number(item.trad_cnt || item.ccld_cnt || 1),
+            pchs_amt: Number(item.pchs_amt || item.pchs_ccld_amt || 0),
+            sll_amt: Number(item.sll_amt || item.sll_ccld_amt || 0),
+            rlzt_pnl: Number(item.rlzt_pnl || item.sll_pnl_amt || 0),
+            erng_rt: Number(item.erng_rt || item.pnl_rat || 0),
+          }));
         }
-      ];
+
+        // Calculate total KIS realized PnL
+        const totalPnlFromKis = stockList.reduce((acc, curr) => acc + (curr.rlzt_pnl || 0), 0);
+        setKisTotalRealizedPnL(totalPnlFromKis);
+      } else {
+        setKisTotalRealizedPnL(null);
+      }
+
+      // 2. Simulation Mode Fallback ONLY when KIS is NOT connected
+      if (!kisConfig.isConnected) {
+        if (stockList.length === 0) {
+          const initialStocks = stocksRef.current.length > 0 ? stocksRef.current : INITIAL_STOCKS_KR;
+          const krStocks = initialStocks.filter(s => s.market === 'KR' || /^\d+$/.test(s.symbol));
+
+          stockList = krStocks.map((s, idx) => {
+            const isSelected = s.symbol === selectedSymbol;
+            const pnl = isSelected && gapTradingProfit !== 0 ? gapTradingProfit : (idx === 0 ? 145000 : idx === 1 ? -32000 : 88000);
+            const buyAmt = 1500000 + idx * 400000;
+            const sellAmt = buyAmt + pnl;
+            const qty = 20 + idx * 5;
+            const erngRt = buyAmt > 0 ? (pnl / buyAmt) * 100 : 0;
+
+            return {
+              pdno: s.symbol,
+              prdt_name: s.name,
+              sll_qty: qty,
+              pchs_amt: buyAmt,
+              sll_amt: sellAmt,
+              rlzt_pnl: pnl,
+              erng_rt: Number(erngRt.toFixed(2))
+            };
+          });
+        }
+
+        if (dailyList.length === 0) {
+          const dates = [
+            now.toISOString().slice(0, 10).replace(/-/g, '.'),
+            '2026.08.10',
+            '2026.08.09',
+            '2026.08.08',
+            '2026.08.05',
+            '2026.08.01',
+            '2026.07.28',
+            '2026.07.25'
+          ];
+
+          dailyList = dates.map((d, idx) => {
+            const pnl = idx === 0 ? (gapTradingProfit || 145000) : Math.floor(185000 * Math.sin(idx * 1.5) + (idx === 1 ? -28000 : 54000));
+            const buyAmt = 2500000 + idx * 300000;
+            const sellAmt = buyAmt + pnl;
+            return {
+              stck_bsop_date: d,
+              trad_cnt: idx === 0 ? Math.max(1, gapTradeCount) : Math.floor(Math.random() * 8) + 2,
+              pchs_amt: buyAmt,
+              sll_amt: sellAmt,
+              rlzt_pnl: pnl,
+              erng_rt: Number(((pnl / buyAmt) * 100).toFixed(2))
+            };
+          });
+        }
+      }
+
+      // Generate Yearly List dynamically from dailyList if available
+      if (dailyList.length > 0) {
+        const yearlyGroup: Record<string, { trad_cnt: number; pchs_amt: number; sll_amt: number; rlzt_pnl: number }> = {};
+        dailyList.forEach(item => {
+          const yr = (item.stck_bsop_date || '').replace(/[^0-9]/g, '').slice(0, 4) || '2026';
+          const label = `${yr}년`;
+          if (!yearlyGroup[label]) {
+            yearlyGroup[label] = { trad_cnt: 0, pchs_amt: 0, sll_amt: 0, rlzt_pnl: 0 };
+          }
+          yearlyGroup[label].trad_cnt += (item.trad_cnt || 1);
+          yearlyGroup[label].pchs_amt += (item.pchs_amt || 0);
+          yearlyGroup[label].sll_amt += (item.sll_amt || 0);
+          yearlyGroup[label].rlzt_pnl += (item.rlzt_pnl || 0);
+        });
+
+        yearlyList = Object.entries(yearlyGroup).map(([yrLabel, vals]) => ({
+          stck_bsop_year: yrLabel,
+          trad_cnt: vals.trad_cnt,
+          pchs_amt: vals.pchs_amt,
+          sll_amt: vals.sll_amt,
+          rlzt_pnl: vals.rlzt_pnl,
+          erng_rt: vals.pchs_amt > 0 ? Number(((vals.rlzt_pnl / vals.pchs_amt) * 100).toFixed(2)) : 0
+        }));
+      }
 
       setPnlDataStock(stockList);
       setPnlDataDaily(dailyList);
@@ -3407,71 +3422,89 @@ export default function App() {
 
       setAvgPrices(prev => ({ ...prev, ...newAvgPrices }));
 
-      // Self-Healing Slot Matching: Ensure gapInventory total quantity matches the actual holdings on KIS
-      if (selectedStock && isGapBotActive) {
-        const actualQty = newHoldings[selectedStock.symbol] || 0;
-        const totalSlotQty = gapInventoryRef.current.reduce((acc, slot) => acc + (slot.quantity || 0), 0);
-        
+      // Auto-activate and Self-Healing Slot Matching for all held stocks
+      const updatedTabs = [...scalperTabsRef.current];
+      let tabsChanged = false;
+      let isGapBotActivated = false;
+
+      // Step 1: Ensure all held stocks have an active tab
+      for (const [symbol, qty] of Object.entries(newHoldings)) {
+        if (qty > 0) {
+          let tabIndex = updatedTabs.findIndex(t => t.symbol === symbol);
+          if (tabIndex === -1) {
+            const stockInfo = stocksRef.current.find(s => s.symbol === symbol) || INITIAL_STOCKS_KR.find(s => s.symbol === symbol) || INITIAL_STOCKS.find(s => s.symbol === symbol);
+            if (stockInfo) {
+              const newTab = {
+                id: `tab-${symbol}-${Date.now()}`,
+                symbol,
+                name: stockInfo.name,
+                isBotActive: true,
+                gapInventory: []
+              };
+              updatedTabs.push(newTab);
+              tabsChanged = true;
+            }
+          } else if (!updatedTabs[tabIndex].isBotActive) {
+            updatedTabs[tabIndex] = { ...updatedTabs[tabIndex], isBotActive: true };
+            tabsChanged = true;
+          }
+
+          if (symbol === selectedSymbol && !isGapBotActive) {
+            isGapBotActivated = true;
+            setIsGapBotActive(true);
+          }
+        }
+      }
+
+      // Step 2: Sync gapInventory for all active tabs
+      for (let i = 0; i < updatedTabs.length; i++) {
+        const tab = updatedTabs[i];
+        const isActive = tab.isBotActive || (tab.id === activeTabId && (isGapBotActive || isGapBotActivated)) || (tab.symbol === selectedSymbol && (isGapBotActive || isGapBotActivated));
+        if (!isActive) continue;
+
+        const symbol = tab.symbol;
+        const actualQty = newHoldings[symbol] || 0;
+        const currentInventory = (tab.id === activeTabId || tab.symbol === selectedSymbol) ? gapInventoryRef.current : (tab.gapInventory || []);
+        const totalSlotQty = currentInventory.reduce((acc, slot) => acc + (slot.quantity || 0), 0);
+
         if (Math.abs(actualQty - totalSlotQty) > 0.0001) {
-          console.log(`[Slot Sync] Desync detected. KIS actual holdings: ${actualQty}, local slots total: ${totalSlotQty}`);
+          console.log(`[Slot Sync] Desync for ${symbol}. KIS: ${actualQty}, Local: ${totalSlotQty}`);
+          let newInv = [...currentInventory];
           
           if (actualQty < totalSlotQty) {
-            // Trim the slots to match actual holdings
+            // Trim slots
             let remaining = actualQty;
-            const newInv: {price: number, quantity: number}[] = [];
-            for (const slot of gapInventoryRef.current) {
+            newInv = [];
+            for (const slot of currentInventory) {
               if (remaining <= 0) break;
               const take = Math.min(slot.quantity, remaining);
               newInv.push({ ...slot, quantity: take });
               remaining -= take;
             }
-            setGapInventory(newInv);
-            console.log(`[Slot Sync] Trimmed slots to match ${actualQty} qty`);
           } else {
-            // Expand slots by fetching today's executions
-            try {
-              const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-              const execs = await kisService.getDomesticOrderExecutions(todayStr, todayStr, '02', '01');
-              
-              const filledSlots: {price: number, quantity: number}[] = [];
-              if (execs && execs.rt_cd === '0' && execs.output1 && Array.isArray(execs.output1)) {
-                const symbolExecs = execs.output1.filter((item: any) => item.pdno === selectedStock.symbol);
-                symbolExecs.forEach((item: any) => {
-                  const qty = Number(item.tot_ccld_qty || 0);
-                  const price = Number(item.avg_prvs || item.ord_unpr || 0);
-                  if (qty > 0 && price > 0) {
-                    filledSlots.push({ price, quantity: qty });
-                  }
-                });
-              }
-
-              if (filledSlots.length > 0) {
-                // Take latest slots to match the missing quantity
-                let needed = actualQty - totalSlotQty;
-                const recoverySlots: {price: number, quantity: number}[] = [];
-                for (const fs of filledSlots.reverse()) {
-                  if (needed <= 0) break;
-                  const add = Math.min(fs.quantity, needed);
-                  recoverySlots.push({ ...fs, quantity: add });
-                  needed -= add;
-                }
-                setGapInventory(prev => [...prev, ...recoverySlots]);
-                console.log(`[Slot Sync] Recovered missing slots from execution history`);
-              } else if (actualQty > totalSlotQty) {
-                // Fallback: Add one slot with average price
-                const missing = actualQty - totalSlotQty;
-                const avgP = avgPrices[selectedStock.symbol] || selectedStock.price;
-                setGapInventory(prev => [...prev, { price: avgP, quantity: missing }]);
-                console.log(`[Slot Sync] Added fallback recovery slot for ${missing} qty`);
-              }
-            } catch (err) {
-              console.error("[Slot Sync] Error during expansion:", err);
+            // Expand slots
+            const missing = actualQty - totalSlotQty;
+            const avgP = newAvgPrices[symbol] || avgPrices[symbol] || (stocksRef.current.find(s => s.symbol === symbol)?.price || 0);
+            if (avgP > 0) {
+              newInv.push({ id: `RECOVERED-${Date.now()}-${Math.floor(Math.random() * 1000)}`, price: avgP, quantity: missing });
             }
+          }
+
+          updatedTabs[i] = { ...tab, gapInventory: newInv };
+          tabsChanged = true;
+          if (tab.id === activeTabId || tab.symbol === selectedSymbol) {
+            setGapInventory(newInv);
+            gapInventoryRef.current = newInv;
           }
         }
       }
+
+      if (tabsChanged) {
+        setScalperTabs(updatedTabs);
+      }
       
       setBotStatus("상태 동기화 완료");
+      loadRealizedPnL();
       await updateKisBuyableQty(totalConvertedBalance);
     } catch (e: any) {
       console.error("KIS Sync Error", e);
@@ -4501,12 +4534,17 @@ export default function App() {
 
   // Auto-Sell Order Enforcer for Held Stocks (e.g. 동양 1주): Ensures all held stocks automatically register a target profit limit sell order
   useEffect(() => {
-    if (!isGapBotActive || scalpingTargetProfit <= 0) return;
+    const hasAnyActiveBot = isGapBotActive || scalperTabsRef.current.some(t => t.isBotActive);
+    if (!hasAnyActiveBot || scalpingTargetProfit <= 0) return;
 
     const runAutoSell = async () => {
       for (const [symbol, qtyVal] of Object.entries(holdings)) {
         const numQty = Number(qtyVal) || 0;
         if (numQty <= 0) continue;
+
+        const tabForSymbol = scalperTabsRef.current.find(t => t.symbol === symbol);
+        const isBotActiveForSymbol = (symbol === selectedSymbol) ? isGapBotActive : (tabForSymbol?.isBotActive || false);
+        if (!isBotActiveForSymbol) continue;
 
         if (autoSellInFlightRef.current.has(symbol)) continue;
 
@@ -4525,7 +4563,6 @@ export default function App() {
           const targetSellPrice = calculateTargetSellPrice(avgP, scalpingTargetProfit);
 
           if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
-            // Real KIS Mode: Transmit actual limit sell order to Korea Investment & Securities
             autoSellInFlightRef.current.add(symbol);
             try {
               await executeTrade('SELL', stockObj, missingQty, `[자동 매도] 평단가 대비 +${scalpingTargetProfit}% 익절 지정가 매도`, targetSellPrice, avgP);
@@ -4540,7 +4577,7 @@ export default function App() {
     };
 
     runAutoSell();
-  }, [holdings, avgPrices, scalpingTargetProfit, kisConfig.isConnected, kisConfig.isRealOrderEnabled, stocks, isGapBotActive]);
+  }, [holdings, avgPrices, scalpingTargetProfit, kisConfig.isConnected, kisConfig.isRealOrderEnabled, stocks, isGapBotActive, selectedSymbol]);
 
   // Technical Indicators Utility Functions
   const calculateSMA = (data: number[], period: number) => {
@@ -8018,9 +8055,18 @@ export default function App() {
                 <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shadow-md group-hover:scale-105 transition-transform border border-rose-500/30">
                   <TrendingUp className="w-5 h-5 text-rose-400" />
                 </div>
-                <span className="text-xs font-bold text-slate-300 group-hover:text-rose-400 transition-colors">
-                  실현손익
-                </span>
+                <div className="flex flex-col items-center">
+                  <span className="text-xs font-bold text-slate-300 group-hover:text-rose-400 transition-colors">
+                    실현손익
+                  </span>
+                  <span className={cn(
+                    "text-[11px] font-mono font-black mt-0.5",
+                    (kisTotalRealizedPnL ?? gapTradingProfit) >= 0 ? "text-rose-400" : "text-sky-400"
+                  )}>
+                    {(kisTotalRealizedPnL ?? gapTradingProfit) >= 0 ? '+' : ''}
+                    {formatCurrency(kisTotalRealizedPnL ?? gapTradingProfit)}
+                  </span>
+                </div>
               </button>
             </div>
           </div>
@@ -9036,23 +9082,34 @@ export default function App() {
                     <tbody className="divide-y divide-slate-800/60 font-mono">
                       {pnlDataStock
                         .filter(item => !pnlFilterQuery || item.prdt_name.includes(pnlFilterQuery) || item.pdno.includes(pnlFilterQuery))
-                        .map((item, idx) => (
-                          <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
-                            <td className="p-3 font-sans">
-                              <div className="font-bold text-white text-xs">{item.prdt_name}</div>
-                              <div className="text-[10px] text-slate-400 font-mono">{item.pdno}</div>
-                            </td>
-                            <td className="p-3 text-right text-slate-300 font-bold">{item.sll_qty}주</td>
-                            <td className="p-3 text-right text-slate-300">{formatCurrency(item.pchs_amt)}</td>
-                            <td className="p-3 text-right text-slate-300">{formatCurrency(item.sll_amt)}</td>
-                            <td className={cn("p-3 text-right font-black text-sm", item.rlzt_pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
-                              {item.rlzt_pnl >= 0 ? '+' : ''}{formatCurrency(item.rlzt_pnl)}
-                            </td>
-                            <td className={cn("p-3 text-right font-bold", item.erng_rt >= 0 ? "text-rose-400" : "text-sky-400")}>
-                              {item.erng_rt >= 0 ? '+' : ''}{item.erng_rt.toFixed(2)}%
-                            </td>
-                          </tr>
-                        ))}
+                        .length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-slate-400 font-sans">
+                            <p className="font-bold text-sm text-slate-300">조회된 종목별 실현손익 내역이 없습니다.</p>
+                            <p className="text-xs text-slate-500 mt-1">지정한 기간 내 KIS 매도 체결 건이 없거나 조회 조건에 맞는 데이터가 없습니다.</p>
+                          </td>
+                        </tr>
+                      ) : (
+                        pnlDataStock
+                          .filter(item => !pnlFilterQuery || item.prdt_name.includes(pnlFilterQuery) || item.pdno.includes(pnlFilterQuery))
+                          .map((item, idx) => (
+                            <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
+                              <td className="p-3 font-sans">
+                                <div className="font-bold text-white text-xs">{item.prdt_name}</div>
+                                <div className="text-[10px] text-slate-400 font-mono">{item.pdno}</div>
+                              </td>
+                              <td className="p-3 text-right text-slate-300 font-bold">{item.sll_qty}주</td>
+                              <td className="p-3 text-right text-slate-300">{formatCurrency(item.pchs_amt)}</td>
+                              <td className="p-3 text-right text-slate-300">{formatCurrency(item.sll_amt)}</td>
+                              <td className={cn("p-3 text-right font-black text-sm", item.rlzt_pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
+                                {item.rlzt_pnl >= 0 ? '+' : ''}{formatCurrency(item.rlzt_pnl)}
+                              </td>
+                              <td className={cn("p-3 text-right font-bold", item.erng_rt >= 0 ? "text-rose-400" : "text-sky-400")}>
+                                {item.erng_rt >= 0 ? '+' : ''}{item.erng_rt.toFixed(2)}%
+                              </td>
+                            </tr>
+                          ))
+                      )}
                     </tbody>
                   </table>
                 ) : pnlActiveTab === 'daily' ? (
@@ -9069,20 +9126,29 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 font-mono">
-                      {pnlDataDaily.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
-                          <td className="p-3 font-bold text-slate-200">{item.stck_bsop_date}</td>
-                          <td className="p-3 text-center text-slate-300 font-bold">{item.trad_cnt}건</td>
-                          <td className="p-3 text-right text-slate-300">{formatCurrency(item.pchs_amt)}</td>
-                          <td className="p-3 text-right text-slate-300">{formatCurrency(item.sll_amt)}</td>
-                          <td className={cn("p-3 text-right font-black text-sm", item.rlzt_pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
-                            {item.rlzt_pnl >= 0 ? '+' : ''}{formatCurrency(item.rlzt_pnl)}
-                          </td>
-                          <td className={cn("p-3 text-right font-bold", item.erng_rt >= 0 ? "text-rose-400" : "text-sky-400")}>
-                            {item.erng_rt >= 0 ? '+' : ''}{item.erng_rt.toFixed(2)}%
+                      {pnlDataDaily.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-slate-400 font-sans">
+                            <p className="font-bold text-sm text-slate-300">조회된 일별 실현손익 내역이 없습니다.</p>
+                            <p className="text-xs text-slate-500 mt-1">선택한 기간 동안 KIS 일별 체결 데이터가 없거나 조회된 건수가 없습니다.</p>
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        pnlDataDaily.map((item, idx) => (
+                          <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
+                            <td className="p-3 font-bold text-slate-200">{item.stck_bsop_date}</td>
+                            <td className="p-3 text-center text-slate-300 font-bold">{item.trad_cnt}건</td>
+                            <td className="p-3 text-right text-slate-300">{formatCurrency(item.pchs_amt)}</td>
+                            <td className="p-3 text-right text-slate-300">{formatCurrency(item.sll_amt)}</td>
+                            <td className={cn("p-3 text-right font-black text-sm", item.rlzt_pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
+                              {item.rlzt_pnl >= 0 ? '+' : ''}{formatCurrency(item.rlzt_pnl)}
+                            </td>
+                            <td className={cn("p-3 text-right font-bold", item.erng_rt >= 0 ? "text-rose-400" : "text-sky-400")}>
+                              {item.erng_rt >= 0 ? '+' : ''}{item.erng_rt.toFixed(2)}%
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 ) : (
@@ -9099,20 +9165,29 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 font-mono">
-                      {pnlDataYearly.map((item, idx) => (
-                        <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
-                          <td className="p-3 font-bold text-white text-sm">{item.stck_bsop_year}</td>
-                          <td className="p-3 text-center text-slate-300 font-bold">{item.trad_cnt}건</td>
-                          <td className="p-3 text-right text-slate-300">{formatCurrency(item.pchs_amt)}</td>
-                          <td className="p-3 text-right text-slate-300">{formatCurrency(item.sll_amt)}</td>
-                          <td className={cn("p-3 text-right font-black text-sm", item.rlzt_pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
-                            {item.rlzt_pnl >= 0 ? '+' : ''}{formatCurrency(item.rlzt_pnl)}
-                          </td>
-                          <td className={cn("p-3 text-right font-bold", item.erng_rt >= 0 ? "text-rose-400" : "text-sky-400")}>
-                            {item.erng_rt >= 0 ? '+' : ''}{item.erng_rt.toFixed(2)}%
+                      {pnlDataYearly.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="p-8 text-center text-slate-400 font-sans">
+                            <p className="font-bold text-sm text-slate-300">조회된 연도별 실현손익 내역이 없습니다.</p>
+                            <p className="text-xs text-slate-500 mt-1">선택한 기간 동안 KIS 연도별 체결 데이터가 없거나 조회된 건수가 없습니다.</p>
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        pnlDataYearly.map((item, idx) => (
+                          <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
+                            <td className="p-3 font-bold text-white text-sm">{item.stck_bsop_year}</td>
+                            <td className="p-3 text-center text-slate-300 font-bold">{item.trad_cnt}건</td>
+                            <td className="p-3 text-right text-slate-300">{formatCurrency(item.pchs_amt)}</td>
+                            <td className="p-3 text-right text-slate-300">{formatCurrency(item.sll_amt)}</td>
+                            <td className={cn("p-3 text-right font-black text-sm", item.rlzt_pnl >= 0 ? "text-rose-400" : "text-sky-400")}>
+                              {item.rlzt_pnl >= 0 ? '+' : ''}{formatCurrency(item.rlzt_pnl)}
+                            </td>
+                            <td className={cn("p-3 text-right font-bold", item.erng_rt >= 0 ? "text-rose-400" : "text-sky-400")}>
+                              {item.erng_rt >= 0 ? '+' : ''}{item.erng_rt.toFixed(2)}%
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 )}
