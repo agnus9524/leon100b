@@ -1862,6 +1862,24 @@ export default function App() {
     return `${month}.${date}. ${hours}:${minutes}`;
   }, [time]);
 
+  const effectiveHoldings = useMemo(() => {
+    const result: Record<string, number> = { ...holdings };
+    
+    scalperTabs.forEach(tab => {
+      if (tab.gapInventory && tab.gapInventory.length > 0) {
+        const tabQty = tab.gapInventory.reduce((acc, slot) => {
+          const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
+          return acc + q;
+        }, 0);
+        if (tabQty > 0) {
+          result[tab.symbol] = Math.max(result[tab.symbol] || 0, tabQty);
+        }
+      }
+    });
+
+    return result;
+  }, [holdings, scalperTabs]);
+
   const assetAnalysis = useMemo(() => {
     const isUSD = displayCurrency === 'USD';
     const conv = (krwVal: number) => isUSD ? krwVal / exchangeRate : krwVal;
@@ -1881,7 +1899,7 @@ export default function App() {
       portfolioShare: number;
     }> = [];
 
-    Object.entries(holdings).forEach(([sym, rawQty]) => {
+    Object.entries(effectiveHoldings).forEach(([sym, rawQty]) => {
       const qty = Number(rawQty);
       if (qty <= 0) return;
 
@@ -1964,7 +1982,7 @@ export default function App() {
       pendingShare: currentViewTotal > 0 ? (conv(pendingOrderReserve) / currentViewTotal) * 100 : 0,
       stockList
     };
-  }, [balance, holdings, stocks, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, principal, pnl, pnlPercent, marketType, displayCurrency]);
+  }, [balance, holdings, effectiveHoldings, stocks, avgPrices, gapInventory, selectedSymbol, exchangeRate, pendingBuyOrders, totalValue, principal, pnl, pnlPercent, marketType, displayCurrency]);
 
   // Stable symbol ordering for TOP 5 Scalper Optimal Stocks:
   // Priority: Real-time Rising Momentum + 1-Year Upward Trend + AI Recommended Optimal Candidates (No Price Limit)
@@ -3929,14 +3947,20 @@ export default function App() {
       addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[가상 매수취소] 수동 취소`);
     } else {
       try {
-        if (marketType === 'US') {
-          await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString());
-        } else {
-          await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+        const cancelRes = marketType === 'US'
+          ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString())
+          : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+
+        if (cancelRes && cancelRes.rt_cd && cancelRes.rt_cd !== '0') {
+          showNotification(`[KIS 매수취소 실패] ${cancelRes.msg1 || '취소가 거부되었습니다.'}`, "error");
+          addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 매수취소 실패] ${cancelRes.msg1}`);
+          return;
         }
-        addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 매수취소] 수동 취소`);
-      } catch (e) {
+        addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 매수취소] 수동 취소 완료`);
+      } catch (e: any) {
         console.error("Failed to cancel KIS pending buy order:", e);
+        showNotification(`KIS 매수 취소 실패: ${e.message}`, "error");
+        return;
       }
     }
 
@@ -3950,14 +3974,20 @@ export default function App() {
 
     if (!order.isSimulated && kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
       try {
-        if (marketType === 'US') {
-          await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString());
-        } else {
-          await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+        const cancelRes = marketType === 'US'
+          ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString())
+          : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+
+        if (cancelRes && cancelRes.rt_cd && cancelRes.rt_cd !== '0') {
+          showNotification(`[KIS 매도취소 실패] ${cancelRes.msg1 || '매도 취소가 거부되었습니다.'}`, "error");
+          addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소 실패] ${cancelRes.msg1}`);
+          return;
         }
-        addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소] 수동 취소`);
-      } catch (e) {
+        addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소] 수동 취소 완료`);
+      } catch (e: any) {
         console.error("Failed to cancel KIS pending sell order:", e);
+        showNotification(`KIS 매도 취소 실패: ${e.message}`, "error");
+        return;
       }
     } else {
       addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[매도취소] 수동 취소`);
@@ -7923,7 +7953,7 @@ export default function App() {
 
                         <div className="space-y-1 max-h-[140px] overflow-y-auto custom-scrollbar pr-0.5">
                           {(() => {
-                            const filteredHoldings = Object.entries(holdings).filter(([sym, qty]) => {
+                            const filteredHoldings = Object.entries(effectiveHoldings).filter(([sym, qty]) => {
                               if (Number(qty) <= 0) return false;
                               const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
                               const isKR = !isUS;
@@ -8857,7 +8887,7 @@ export default function App() {
                           const isUS = /^[A-Za-z]/.test(item.symbol) && !/^\d+$/.test(item.symbol);
                           const isKR = !isUS;
                           return holdingsViewTab === 'KR' ? isKR : !isKR;
-                        }).reduce((acc, curr) => acc + curr.invested, 0))}
+                        }).reduce((acc, curr) => acc + curr.investedAmount, 0))}
                       </span>
                     </div>
                   </div>

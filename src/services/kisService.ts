@@ -833,16 +833,29 @@ class KISService {
     const token = await this.getAccessToken();
     const endpoint = '/uapi/domestic-stock/v1/trading/order-rvsecncl';
     
+    // KIS OpenAPI specifications for order revision / cancellation:
+    // 1. ORGN_ODNO (Original Order No): MUST be 10 digits string padded with leading zeros
+    const formattedOrdNo = ordNo ? ordNo.toString().trim().padStart(10, '0') : '';
+    
+    // 2. KRX_FWDG_ORD_ORGNO: Exchange order organization no (5 chars, or empty string if not applicable)
+    const formattedOrgNo = orgNo ? orgNo.toString().trim() : '';
+
+    // 3. QTY_ALL_ORD_YN & ORD_QTY:
+    // When cancelling full remaining quantity (dvsn === '02'), QTY_ALL_ORD_YN = 'Y' and ORD_QTY = '0' per KIS spec.
+    const isCancel = dvsn === '02';
+    const allOrdYn = isCancel ? 'Y' : (qty && qty !== '0' ? 'N' : 'Y');
+    const orderQty = (isCancel || allOrdYn === 'Y') ? '0' : (qty || '0');
+
     const body = {
       CANO: this.config.accountNo,
       ACNT_PRDT_CD: this.config.accountCode,
-      KRX_FWDG_ORD_ORGNO: orgNo,
-      ORGN_ODNO: ordNo,
+      KRX_FWDG_ORD_ORGNO: formattedOrgNo,
+      ORGN_ODNO: formattedOrdNo,
       ORD_DVSN: ordDvsn,
       RVSE_CNCL_DVSN_CD: dvsn, // '01': 정정, '02': 취소
-      ORD_QTY: qty,
-      ORD_UNPR: price,
-      QTY_ALL_ORD_YN: 'Y',
+      ORD_QTY: orderQty,
+      ORD_UNPR: isCancel ? '0' : (price || '0'),
+      QTY_ALL_ORD_YN: allOrdYn,
       CNDT_PRIC: '',
       EXCG_ID_DVSN_CD: 'KRX'
     };
@@ -864,6 +877,9 @@ class KISService {
     };
 
     const res = await axios.post(`${this.baseUrl}${endpoint}`, body, { headers });
+    if (res.data.rt_cd && res.data.rt_cd !== '0') {
+      console.warn(`[KIS Service] Revise/Cancel Order Result (${res.data.rt_cd}): ${res.data.msg1} (${res.data.msg_cd})`);
+    }
     return res.data;
   }
 
@@ -872,12 +888,14 @@ class KISService {
     const token = await this.getAccessToken();
     const endpoint = '/uapi/overseas-stock/v1/trading/order-rvsecncl';
 
+    const formattedOrdNo = ordNo ? ordNo.toString().trim().padStart(10, '0') : '';
+
     const body = {
       CANO: this.config.accountNo,
       ACNT_PRDT_CD: this.config.accountCode,
       OVRS_EXCG_CD: 'NASD',
       PDNO: symbol,
-      ORGN_ODNO: ordNo,
+      ORGN_ODNO: formattedOrdNo,
       RVSE_CNCL_DVSN_CD: '02', // '02': 취소
       ORD_QTY: qty,
       ORD_UNPR: '0',
@@ -900,6 +918,9 @@ class KISService {
     };
 
     const res = await axios.post(`${this.baseUrl}${endpoint}`, body, { headers });
+    if (res.data.rt_cd && res.data.rt_cd !== '0') {
+      console.warn(`[KIS Service] Overseas Cancel Order Result (${res.data.rt_cd}): ${res.data.msg1} (${res.data.msg_cd})`);
+    }
     return res.data;
   }
 
