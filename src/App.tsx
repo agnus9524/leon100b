@@ -4501,18 +4501,26 @@ export default function App() {
   // Trailing Stop Loss State to track the peak price after each buy
   const [highWaterMark, setHighWaterMark] = useState<{ [key: string]: number }>({});
 
-  // 2. High-speed automatic trading decisions (Multi-Stock Automatic Engine)
+  // 2. High-speed automatic trading decisions (Multi-Stock Automatic Engine - Only Started Stocks)
   useEffect(() => {
-    if (!isGapBotActive) {
+    const hasAnyActiveBot = isGapBotActive || scalperTabsRef.current.some(t => t.isBotActive);
+    if (!hasAnyActiveBot) {
       setScalperMessage("대기 중...");
       return;
     }
 
     const gapInterval = setInterval(async () => {
-      const activeStocksList = stocksRef.current.length > 0 ? stocksRef.current : (selectedStock ? [selectedStock] : []);
-      if (activeStocksList.length === 0) return;
+      // 내가 '스타트'한 종목(스캘핑 탭에서 isBotActive가 true이거나 현재 활성 탭이 시작된 종목)만 선별
+      const startedTabs = scalperTabsRef.current.filter(t => t.id === activeTabId ? isGapBotActive : t.isBotActive);
+      if (startedTabs.length === 0) {
+        if (!isGapBotActive) setScalperMessage("대기 중...");
+        return;
+      }
 
-      for (const stockItem of activeStocksList) {
+      for (const tabItem of startedTabs) {
+        const stockItem = stocksRef.current.find(s => s.symbol === tabItem.symbol || s.symbol === tabItem.id) || (selectedStock?.symbol === tabItem.symbol ? selectedStock : null);
+        if (!stockItem) continue;
+
         const isSelected = selectedStock && stockItem.symbol === selectedStock.symbol;
         const currentPrice = stockItem.price;
         if (!currentPrice || currentPrice <= 0) continue;
@@ -4522,7 +4530,10 @@ export default function App() {
 
         let minPrice = 0;
         let maxPrice = 0;
-        if (isSelected && gapBuyPrice > 0 && gapSellPrice > 0) {
+        if (tabItem.gapBuyPrice > 0 && tabItem.gapSellPrice > 0) {
+          minPrice = tabItem.gapBuyPrice;
+          maxPrice = tabItem.gapSellPrice;
+        } else if (isSelected && gapBuyPrice > 0 && gapSellPrice > 0) {
           minPrice = gapBuyPrice;
           maxPrice = gapSellPrice;
         } else {
@@ -4531,6 +4542,10 @@ export default function App() {
           minPrice = limits.lowerLimit;
           maxPrice = limits.upperLimit;
         }
+
+        const itemTradeQty = tabItem.tradeQuantity || (isSelected ? tradeQuantity : 1);
+        const itemMaxSlots = tabItem.maxSlots || (isSelected ? maxSlots : 3);
+        const itemEntryMode = tabItem.entryPriceMode || (isSelected ? entryPriceMode : 'BID2');
 
         const isOverSold = rsi < 35;
         const isOverBought = rsi > 65;
@@ -4620,14 +4635,14 @@ export default function App() {
           if (isBreakoutStrategyActive) {
             rawTargetBuyPrice = currentPrice;
           } else if (isPullbackStrategyActive || isVwapStrategyActive || isVpCvdStrategyActive) {
-            const offset = entryPriceMode === 'BID4' ? 4 : entryPriceMode === 'BID2' ? 2 : 1;
+            const offset = itemEntryMode === 'BID4' ? 4 : itemEntryMode === 'BID2' ? 2 : 1;
             rawTargetBuyPrice = currentPrice - offset * tickSize;
           } else {
-            rawTargetBuyPrice = entryPriceMode === 'BID4' 
+            rawTargetBuyPrice = itemEntryMode === 'BID4' 
               ? (currentPrice - 4 * tickSize) 
-              : entryPriceMode === 'BID2' 
+              : itemEntryMode === 'BID2' 
               ? (currentPrice - 2 * tickSize) 
-              : entryPriceMode === 'BID1'
+              : itemEntryMode === 'BID1'
               ? (currentPrice - 1 * tickSize)
               : currentPrice;
           }
@@ -4636,14 +4651,14 @@ export default function App() {
             ? Number(rawTargetBuyPrice.toFixed(4)) 
             : Math.round(rawTargetBuyPrice / tickSize) * tickSize;
 
-          const currentInventory = isSelected ? gapInventoryRef.current : [];
+          const currentInventory = isSelected ? gapInventoryRef.current : (tabItem.gapInventory || []);
           const stockHoldingsQty = holdings[stockItem.symbol] || 0;
           const inFlightBuyCount = buyingLockPricesRef.current.filter(p => p.symbol === stockItem.symbol).length;
           const pendingBuyCount = pendingBuyOrdersRef.current.filter(p => p.symbol === stockItem.symbol).length;
           const currentInvCount = isSelected ? currentInventory.length : (stockHoldingsQty > 0 ? 1 : 0);
           const totalOccupied = currentInvCount + pendingBuyCount + inFlightBuyCount;
 
-          const isAll4SensorsFullEntry = isAll4SensorsOn && totalOccupied < maxSlots;
+          const isAll4SensorsFullEntry = isAll4SensorsOn && totalOccupied < itemMaxSlots;
 
           const isSamePriceBlocked = !allowSamePriceEntry && !isAll4SensorsFullEntry && (
             (isSelected && currentInventory.some(slot => Math.abs(slot.price - targetBuyPrice) < tickSize * 0.95)) ||
@@ -4664,25 +4679,25 @@ export default function App() {
           const isPositionInProfit = currentWeightedAvg > 0 && currentPrice >= currentWeightedAvg;
           const isGapSatisfied = !isPositionInProfit && (!lastSlot || (currentPrice <= lastSlot.price * (1 - (minGapBetweenSlots / 100))));
 
-          if ((isGapSatisfied || isAll4SensorsFullEntry) && (meetsBuyCriteria || (immediateEntry && totalOccupied < maxSlots))) {
+          if ((isGapSatisfied || isAll4SensorsFullEntry) && (meetsBuyCriteria || (immediateEntry && totalOccupied < itemMaxSlots))) {
             if (isSamePriceBlocked) {
               if (isSelected) setScalperMessage(`[중복 차단] ${formatCurrency(targetBuyPrice)} 보유/주문 중`);
-            } else if (totalOccupied >= maxSlots) {
-              if (isSelected) setScalperMessage(`[슬롯 가득 참] ${totalOccupied}/${maxSlots} (매도 대기)`);
+            } else if (totalOccupied >= itemMaxSlots) {
+              if (isSelected) setScalperMessage(`[슬롯 가득 참] ${totalOccupied}/${itemMaxSlots} (매도 대기)`);
             } else if (isLockActive) {
               if (isSelected) setScalperMessage(`[주문 처리 중] ${formatCurrency(targetBuyPrice)} API 통신 대기...`);
             } else {
-              const slotsToBuy = isAll4SensorsFullEntry ? Math.max(1, maxSlots - totalOccupied) : 1;
+              const slotsToBuy = isAll4SensorsFullEntry ? Math.max(1, itemMaxSlots - totalOccupied) : 1;
 
               for (let i = 0; i < slotsToBuy; i++) {
                 const inFlightNow = buyingLockPricesRef.current.filter(p => p.symbol === stockItem.symbol).length;
                 const pendingNow = pendingBuyOrdersRef.current.filter(p => p.symbol === stockItem.symbol).length;
                 const currentTotalOccupied = (isSelected ? gapInventoryRef.current.length : (holdings[stockItem.symbol] > 0 ? 1 : 0)) + pendingNow + inFlightNow;
 
-                if (currentTotalOccupied >= maxSlots) break;
+                if (currentTotalOccupied >= itemMaxSlots) break;
 
                 const currentStep = currentTotalOccupied + 1;
-                const scaledQuantity = tradeQuantity;
+                const scaledQuantity = itemTradeQty;
                 const scaledCost = priceInKrw * scaledQuantity;
 
                 if (balance < scaledCost) {
@@ -4690,17 +4705,17 @@ export default function App() {
                   break;
                 }
 
-                if (isSelected) setScalperMessage(`[슬롯#${currentStep}/${maxSlots} 진입] ${stockItem.name} ${formatCurrency(targetBuyPrice)} (${strategyLabel})...`);
+                if (isSelected) setScalperMessage(`[슬롯#${currentStep}/${itemMaxSlots} 진입] ${stockItem.name} ${formatCurrency(targetBuyPrice)} (${strategyLabel})...`);
 
                 const lockEntry = { symbol: stockItem.symbol, price: targetBuyPrice };
                 buyingLockPricesRef.current.push(lockEntry);
 
                 try {
                   const currentSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                  const executedQty = await executeTrade('BUY', stockItem, scaledQuantity, `Scalper Slot #${currentStep}/${maxSlots} (${strategyLabel}): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId);
+                  const executedQty = await executeTrade('BUY', stockItem, scaledQuantity, `Scalper Slot #${currentStep}/${itemMaxSlots} (${strategyLabel}): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId);
 
                   if (executedQty > 0) {
-                    if (isSelected) setScalperMessage(`[매수 완료] ${stockItem.name} 슬롯#${currentStep}/${maxSlots} ${formatCurrency(targetBuyPrice)} (${strategyLabel})`);
+                    if (isSelected) setScalperMessage(`[매수 완료] ${stockItem.name} 슬롯#${currentStep}/${itemMaxSlots} ${formatCurrency(targetBuyPrice)} (${strategyLabel})`);
                     setBotStatus(`[스캘퍼 엔진] ${stockItem.name} (${stockItem.symbol}) ${formatCurrency(targetBuyPrice)} ${formatQuantity(executedQty)} 진입 완료 (${strategyLabel})`);
                     setHighWaterMark(prev => ({ ...prev, [`${stockItem.symbol}_${targetBuyPrice}`]: targetBuyPrice }));
                     setLastTradeType('BUY');
