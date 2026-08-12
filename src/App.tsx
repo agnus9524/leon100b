@@ -7,8 +7,6 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   TrendingUp, 
   TrendingDown,
-  Maximize2,
-  ZoomIn,
   BarChart3, 
   Activity, 
   Wallet, 
@@ -1418,7 +1416,6 @@ export default function App() {
   const lowestBidOnlyMode = entryPriceMode === 'BID4'; // Backward compatibility ref
   const [scalperMessage, setScalperMessage] = useState<string>("대기 중...");
   const [selectedTimeframeBar, setSelectedTimeframeBar] = useState<'1m' | '3m' | '5m' | '10m'>('1m');
-  const [chartStyleMode, setChartStyleMode] = useState<'MTS' | 'DARK'>('MTS');
   const gapInventoryRef = React.useRef<{id: string, price: number, quantity: number}[]>([]);
   useEffect(() => {
     gapInventoryRef.current = gapInventory;
@@ -4552,13 +4549,40 @@ export default function App() {
           
           const isUSStock = selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US';
           const tickSize = getTickSize(currentPrice, isUSStock ? 'US' : 'KR');
-          const rawTargetBuyPrice = entryPriceMode === 'BID4' 
-            ? (currentPrice - 4 * tickSize) 
-            : entryPriceMode === 'BID2' 
-            ? (currentPrice - 2 * tickSize) 
-            : entryPriceMode === 'BID1'
-            ? (currentPrice - 1 * tickSize)
-            : currentPrice;
+
+          // 전략별 맞춤형 진입 호가 계산 (돌파 -> 매도1호가/현재가 체결우선, 눌림목/VWAP -> 매수1~2호가 지정가 대기)
+          let rawTargetBuyPrice = currentPrice;
+          const isBreakoutStrategyActive = (scalperStrategyMode === 'BREAKOUT') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('돌파'));
+          const isPullbackStrategyActive = (scalperStrategyMode === 'PULLBACK') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('눌림목'));
+          const isVwapStrategyActive = (scalperStrategyMode === 'VWAP_SUPPORT') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('VWAP'));
+          const isVpCvdStrategyActive = (scalperStrategyMode === 'VOLUME_PROFILE_CVD') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('VP/CVD'));
+
+          if (isBreakoutStrategyActive) {
+            // 돌파 매매: 돌파 속도/수급상 매도 1호가(현재가)로 즉시 체결 진입
+            rawTargetBuyPrice = currentPrice;
+          } else if (isPullbackStrategyActive) {
+            // 눌림목 매매: 일시 조정 시 매수 1~2호가 지정가 대기
+            const offset = entryPriceMode === 'BID4' ? 4 : entryPriceMode === 'BID2' ? 2 : 1;
+            rawTargetBuyPrice = currentPrice - offset * tickSize;
+          } else if (isVwapStrategyActive) {
+            // VWAP 지지 매매: 지지선 인근 매수 1~2호가 대기
+            const offset = entryPriceMode === 'BID4' ? 4 : entryPriceMode === 'BID2' ? 2 : 1;
+            rawTargetBuyPrice = currentPrice - offset * tickSize;
+          } else if (isVpCvdStrategyActive) {
+            // VP/CVD 유동성 매매: 라운드 피겨/POC 지지선 인근 매수 받쳐두기
+            const offset = entryPriceMode === 'BID4' ? 4 : entryPriceMode === 'BID2' ? 2 : 1;
+            rawTargetBuyPrice = currentPrice - offset * tickSize;
+          } else {
+            // 기본 호가 설정 적용
+            rawTargetBuyPrice = entryPriceMode === 'BID4' 
+              ? (currentPrice - 4 * tickSize) 
+              : entryPriceMode === 'BID2' 
+              ? (currentPrice - 2 * tickSize) 
+              : entryPriceMode === 'BID1'
+              ? (currentPrice - 1 * tickSize)
+              : currentPrice;
+          }
+
           const targetBuyPrice = isUSStock 
             ? Number(rawTargetBuyPrice.toFixed(4)) 
             : Math.round(rawTargetBuyPrice / tickSize) * tickSize;
@@ -6754,6 +6778,28 @@ export default function App() {
               </div>
             </div>
 
+            {/* 전략별 호가 타점 시스템 안내 배지 */}
+            <div className="bg-gradient-to-r from-blue-950/40 via-purple-950/30 to-black/40 p-2 rounded-2xl border border-blue-500/20 flex flex-wrap items-center justify-between gap-2 text-[10px]">
+              <div className="flex items-center gap-1.5 text-blue-300 font-bold">
+                <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
+                <span>전략별 맞춤 진입 타점:</span>
+                <span className="text-white font-mono">
+                  {scalperStrategyMode === 'BREAKOUT' 
+                    ? "🚀 돌파 매매 → [매도1호가 / 현재가] 즉시 체결 타점" 
+                    : scalperStrategyMode === 'PULLBACK' 
+                    ? "📉 눌림목 매매 → [매수1~2호가] 지지 대기 타점" 
+                    : scalperStrategyMode === 'VWAP_SUPPORT' 
+                    ? "📊 VWAP 지지 → [VWAP선 / 매수1호가] 반등 받쳐두기" 
+                    : scalperStrategyMode === 'VOLUME_PROFILE_CVD' 
+                    ? "🌊 VP/CVD 유동성 → [POC / 라운드피겨 지지선] 받쳐두기" 
+                    : "🤖 AI 종합 → 포착 시그널(돌파=현재가, 눌림목=매수1~2호가) 자동 분기 체결"}
+                </span>
+              </div>
+              <div className="text-[9px] text-slate-400 font-sans">
+                호가창 수급(매도잔량&gt;매수잔량) &amp; 라운드피겨 지지선 자동 분석 적용
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 items-stretch text-xs">
               {/* 1. Upper & Lower Price Bounds */}
               <div className="bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5">
@@ -7314,7 +7360,7 @@ export default function App() {
                   });
                 });
 
-                // Calculate SMA Moving Averages (5, 10, 20, 60, 120, 200)
+                // Calculate SMA Moving Averages
                 const closes = candleData.map(c => c.close);
                 const volumes = candleData.map(c => c.volume);
 
@@ -7324,46 +7370,10 @@ export default function App() {
                     return slice.reduce((a, b) => a + b, 0) / (slice.length || 1);
                   };
                   item.ma5 = Math.round(getSma(closes, 5));
-                  item.ma10 = Math.round(getSma(closes, 10));
                   item.ma20 = Math.round(getSma(closes, 20));
                   item.ma60 = Math.round(getSma(closes, 60));
                   item.ma120 = Math.round(getSma(closes, 120));
-                  item.ma200 = Math.round(getSma(closes, 200));
-
-                  item.volMa5 = Math.round(getSma(volumes, 5));
                   item.volMa20 = Math.round(getSma(volumes, 20));
-                  item.volMa60 = Math.round(getSma(volumes, 60));
-                  item.volMa120 = Math.round(getSma(volumes, 120));
-                });
-
-                // Calculate RSI 14 & Signal 9
-                const rsiValues: number[] = [];
-                for (let i = 0; i < candleData.length; i++) {
-                  if (i === 0) {
-                    rsiValues.push(50);
-                  } else {
-                    const startIdx = Math.max(0, i - 14 + 1);
-                    const slice = candleData.slice(startIdx, i + 1);
-                    let gains = 0;
-                    let losses = 0;
-                    for (let k = 1; k < slice.length; k++) {
-                      const diff = slice[k].close - slice[k - 1].close;
-                      if (diff > 0) gains += diff;
-                      else losses += Math.abs(diff);
-                    }
-                    const avgGain = gains / (slice.length - 1 || 1);
-                    const avgLoss = losses / (slice.length - 1 || 1);
-                    const rs = avgLoss === 0 ? 100 : avgGain / avgLoss;
-                    const rsi = 100 - (100 / (1 + rs));
-                    rsiValues.push(Number(rsi.toFixed(2)));
-                  }
-                }
-
-                candleData.forEach((item, idx) => {
-                  item.rsi14 = rsiValues[idx];
-                  const slice = rsiValues.slice(Math.max(0, idx - 9 + 1), idx + 1);
-                  const signal = slice.reduce((a, b) => a + b, 0) / (slice.length || 1);
-                  item.rsiSignal9 = Number(signal.toFixed(2));
                 });
 
                 // Find peak (high) and trough (low) for annotations
@@ -7376,251 +7386,227 @@ export default function App() {
 
                 return (
                   <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 items-stretch">
-                    {/* 1. Chart Graph - Korean MTS / HTS Style */}
-                    <div className="xl:col-span-6 flex flex-col min-w-0 bg-white rounded-2xl border border-slate-300 p-2.5 justify-between space-y-1.5 shadow-lg text-slate-900 font-sans">
-                      {/* Top Header Controls Toolbar */}
-                      <div className="bg-slate-100 border border-slate-200 rounded-xl p-2 flex flex-col space-y-1.5">
-                        {/* Stock Title Row */}
-                        <div className="flex items-center justify-between font-mono text-xs border-b border-slate-200 pb-1.5">
-                          <div className="flex items-center gap-1.5 font-bold text-slate-800">
-                            <span className="bg-amber-100 text-amber-800 border border-amber-300 px-1 py-0.2 rounded text-[10px] font-black">신</span>
-                            <span className="text-sm font-black text-slate-900">{selectedStock.name}</span>
-                            <span className="text-slate-500 text-xs font-normal">{selectedStock.symbol}</span>
-                            <ChevronDown className="w-3.5 h-3.5 text-slate-400" />
-                          </div>
-
-                          <div className="flex items-center gap-2 font-bold">
-                            <span className={cn(
-                              "text-base font-black font-mono",
-                              (selectedStock.change || 0) >= 0 ? "text-rose-600" : "text-blue-600"
-                            )}>
-                              {formatCurrency(selectedStock.price)}
-                            </span>
-                            <span className={cn(
-                              "text-xs font-mono flex items-center gap-0.5",
-                              (selectedStock.change || 0) >= 0 ? "text-rose-600" : "text-blue-600"
-                            )}>
-                              <span>{(selectedStock.change || 0) >= 0 ? '▲' : '▼'} {formatCurrency(Math.abs(selectedStock.change || 0))}</span>
-                              <span>{(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%</span>
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Toolbar Row: [지표 >] [일] [1분 ▾] [1틱 ▾] [도구] [⤢] */}
-                        <div className="flex items-center justify-between text-xs font-mono">
-                          <div className="flex items-center gap-1">
-                            <button type="button" className="px-2 py-0.5 bg-white border border-slate-300 rounded text-slate-700 font-bold hover:bg-slate-50 flex items-center gap-0.5 shadow-xs text-[11px]">
-                              <span>지표</span>
-                              <ChevronRight className="w-3 h-3 text-slate-400" />
-                            </button>
-
-                            <div className="h-3 w-px bg-slate-300 mx-0.5" />
-
-                            <div className="flex items-center gap-1">
-                              <button type="button" className="px-2 py-0.5 bg-white border border-slate-300 rounded text-slate-700 font-bold text-[11px]">일</button>
-                              <button type="button" onClick={() => setSelectedTimeframeBar('1m')} className={cn("px-2 py-0.5 rounded border text-[11px] font-bold transition-all shadow-xs", selectedTimeframeBar === '1m' ? "bg-slate-800 text-white border-slate-800" : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50")}>
-                                1분 ▾
-                              </button>
-                              <button type="button" className="px-2 py-0.5 bg-white border border-slate-300 rounded text-slate-700 font-bold text-[11px]">1틱 ▾</button>
+                    {/* 1. Chart Graph (Width reduced to half: xl:col-span-6) */}
+                    <div className="xl:col-span-6 flex flex-col min-w-0 bg-black/40 rounded-2xl border border-sleek-border p-3 justify-between space-y-2">
+                      <div>
+                        {/* Header: Price & Moving Averages Legend */}
+                        <div className="mb-2 flex items-center justify-between gap-2 flex-wrap pb-1.5 border-b border-white/5">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="text-xl md:text-2xl font-black text-white italic tracking-tighter font-mono">
+                                {formatCurrency(selectedStock.price)}
+                              </span>
+                              <span className={cn(
+                                "text-xs font-black italic font-mono px-1.5 py-0.5 rounded flex items-center gap-1",
+                                (selectedStock.change || 0) >= 0 ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400"
+                              )}>
+                                <span>{(selectedStock.change || 0) >= 0 ? '▲ +' : '▼ '}{formatCurrency(selectedStock.change || 0)}</span>
+                                <span>({(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%)</span>
+                              </span>
+                            </div>
+                            
+                            {/* Moving Average Line Legend matching attached photo */}
+                            <div className="flex items-center gap-2 text-[11px] font-mono mt-0.5">
+                              <span className="text-gray-400 font-bold">이동평균선</span>
+                              <span className="text-[#10B981] font-black">5</span>
+                              <span className="text-[#EF4444] font-black">20</span>
+                              <span className="text-[#F59E0B] font-black">60</span>
+                              <span className="text-[#8B5CF6] font-black">120</span>
                             </div>
                           </div>
 
-                          <div className="flex items-center gap-1">
-                            <button type="button" className="px-2 py-0.5 bg-white border border-slate-300 rounded text-slate-700 font-bold hover:bg-slate-50 shadow-xs text-[11px]">
-                              도구
-                            </button>
-                            <button type="button" onClick={() => setChartStyleMode(chartStyleMode === 'MTS' ? 'DARK' : 'MTS')} className="p-1 bg-white border border-slate-300 rounded text-slate-700 font-bold hover:bg-slate-50 shadow-xs" title="테마 변경">
-                              <Maximize2 className="w-3.5 h-3.5 text-slate-600" />
-                            </button>
+                          {/* Timeframe Controls */}
+                          <div className="flex items-center gap-1 bg-black/60 border border-white/5 p-1 rounded-xl shrink-0">
+                            {(['1m', '3m', '5m', '10m'] as const).map(tf => (
+                              <button
+                                key={tf}
+                                type="button"
+                                onClick={() => setSelectedTimeframeBar(tf)}
+                                className={cn(
+                                  "px-2 py-0.5 rounded-lg text-xs font-bold transition-all font-mono",
+                                  selectedTimeframeBar === tf
+                                    ? "bg-sleek-blue text-white shadow-sm"
+                                    : "text-sleek-text-secondary hover:bg-white/5 hover:text-white"
+                                )}
+                              >
+                                {tf === '1m' ? '1분' : tf === '3m' ? '3분' : tf === '5m' ? '5분' : '10분'}
+                              </button>
+                            ))}
                           </div>
                         </div>
-                      </div>
 
-                      {/* Main Candlestick Pane */}
-                      <div className="bg-white rounded-xl border border-slate-200 p-1.5 relative shadow-inner w-full flex flex-col space-y-1">
-                        {/* MA Legend Header matching image colors */}
-                        <div className="flex items-center justify-between text-[10px] font-mono border-b border-slate-100 pb-1 px-1">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <span className="font-black text-slate-800">MA 단순 종가</span>
-                            <span className="font-bold text-[#D946EF] flex items-center gap-0.5"><span className="w-1.5 h-1.5 rounded-full bg-[#D946EF] inline-block"/>5</span>
-                            <span className="font-bold text-[#2563EB] flex items-center gap-0.5"><span className="w-1.5 h-1.5 rounded-full bg-[#2563EB] inline-block"/>10</span>
-                            <span className="font-bold text-[#EAB308] flex items-center gap-0.5"><span className="w-1.5 h-1.5 rounded-full bg-[#EAB308] inline-block"/>20</span>
-                            <span className="font-bold text-[#16A34A] flex items-center gap-0.5"><span className="w-1.5 h-1.5 rounded-full bg-[#16A34A] inline-block"/>60</span>
-                            <span className="font-bold text-[#6B7280] flex items-center gap-0.5"><span className="w-1.5 h-1.5 rounded-full bg-[#6B7280] inline-block"/>120</span>
-                            <span className="font-bold text-[#06B6D4] flex items-center gap-0.5"><span className="w-1.5 h-1.5 rounded-full bg-[#06B6D4] inline-block"/>200</span>
-                          </div>
-                          <div className="text-[9px] text-slate-400 font-mono">57</div>
-                        </div>
-
-                        {/* Price Chart Area */}
-                        <div className="h-[185px] w-full relative">
-                          {/* Magnifying Glass Overlay Icon */}
-                          <div className="absolute top-1 left-1 z-10 border border-slate-200 bg-white/90 p-1 rounded-full shadow-xs text-slate-400 hover:text-slate-700 cursor-pointer">
-                            <Search className="w-3.5 h-3.5" />
+                        {/* Main Candlestick + MA Lines Chart */}
+                        <div className="bg-slate-950/80 rounded-xl border border-white/5 p-1.5 relative shadow-inner w-full" style={{ height: 175 }}>
+                          {/* Chart Exchange Rate Overlay */}
+                          <div className="absolute top-3 left-4 z-20 flex flex-col items-start pointer-events-none select-none">
+                            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/10">
+                              <USAFlag />
+                              <span className="text-[10px] font-mono font-black text-white/40 tracking-widest uppercase">FX Context</span>
+                              <div className="h-2.5 w-px bg-white/10 mx-0.5" />
+                              <span className={cn(
+                                "text-[10px] font-mono font-black",
+                                exchangeRateTrend === 'UP' ? "text-sleek-red" : "text-sleek-green"
+                              )}>
+                                ₩{exchangeRate.toLocaleString()}
+                              </span>
+                              {exchangeRateTrend === 'UP' ? <TrendingUp className="w-2.5 h-2.5 text-sleek-red" /> : <TrendingDown className="w-2.5 h-2.5 text-sleek-green" />}
+                            </div>
                           </div>
 
                           {candleData && candleData.length > 0 ? (
                             <ResponsiveContainer width="100%" height="100%">
-                              <ComposedChart data={candleData} margin={{ top: 18, right: 45, left: 0, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="1 1" vertical={true} opacity={0.35} stroke="#E2E8F0" />
-                                <XAxis dataKey="time" axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#64748B' }} />
-                                <YAxis domain={['auto', 'auto']} axisLine={false} tickLine={false} tick={{ fontSize: 9, fill: '#64748B' }} orientation="right" />
-                                <Tooltip content={({ active, payload }) => {
-                                  if (active && payload && payload.length) {
-                                    const data = payload[0].payload;
-                                    return (
-                                      <div className="bg-white border border-slate-300 p-2 rounded-lg shadow-xl space-y-1 text-xs font-mono text-slate-900">
-                                        <div className="flex items-center justify-between gap-2 border-b border-slate-200 pb-1">
-                                          <span className="text-slate-600 font-bold">{data.time}</span>
-                                          <span className={cn("font-bold px-1 py-0.2 rounded text-[10px]", data.isUp ? "bg-rose-100 text-rose-600" : "bg-blue-100 text-blue-600")}>
-                                            {data.isUp ? "양봉" : "음봉"}
-                                          </span>
+                              <ComposedChart data={candleData} margin={{ top: 15, right: 45, left: 0, bottom: 0 }}>
+                                <CartesianGrid strokeDasharray="2 2" vertical={true} opacity={0.06} stroke="#FFFFFF" />
+                                <XAxis 
+                                  dataKey="time" 
+                                  axisLine={false} 
+                                  tickLine={false} 
+                                  tick={{ fontSize: 10, fill: '#6B7280' }}
+                                />
+                                <YAxis 
+                                  domain={['auto', 'auto']} 
+                                  axisLine={false} 
+                                  tickLine={false} 
+                                  tick={{ fontSize: 10, fill: '#6B7280' }}
+                                  orientation="right"
+                                />
+                                <Tooltip 
+                                  content={({ active, payload }) => {
+                                    if (active && payload && payload.length) {
+                                      const data = payload[0].payload;
+                                      return (
+                                        <div className="bg-[#1A1D23] border border-[#2D3139] p-2 rounded-xl shadow-2xl space-y-1 text-xs font-mono">
+                                          <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-1">
+                                            <span className="text-sleek-text-secondary font-bold">{data.time}</span>
+                                            <span className={cn("font-bold px-1 py-0.2 rounded text-[10px]", data.isUp ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400")}>
+                                              {data.isUp ? "양봉" : "음봉"}
+                                            </span>
+                                          </div>
+                                          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px]">
+                                            <div>시가: <strong className="text-white">{formatCurrency(data.open)}</strong></div>
+                                            <div>고가: <strong className="text-rose-400">{formatCurrency(data.high)}</strong></div>
+                                            <div>저가: <strong className="text-sky-400">{formatCurrency(data.low)}</strong></div>
+                                            <div>종가: <strong className={data.close >= data.open ? "text-rose-400" : "text-sky-400"}>{formatCurrency(data.close)}</strong></div>
+                                          </div>
                                         </div>
-                                        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px]">
-                                          <div>시가: <strong className="text-slate-900">{formatCurrency(data.open)}</strong></div>
-                                          <div>고가: <strong className="text-rose-600">{formatCurrency(data.high)}</strong></div>
-                                          <div>저가: <strong className="text-blue-600">{formatCurrency(data.low)}</strong></div>
-                                          <div>종가: <strong className={data.close >= data.open ? "text-rose-600" : "text-blue-600"}>{formatCurrency(data.close)}</strong></div>
-                                        </div>
-                                      </div>
-                                    );
-                                  }
-                                  return null;
-                                }} />
+                                      );
+                                    }
+                                    return null;
+                                  }}
+                                />
 
-                                {/* Candlesticks */}
-                                <Bar dataKey="close" radius={[1, 1, 0, 0]} isAnimationActive={false} animationDuration={0}>
+                                {/* Candle Bars */}
+                                <Bar dataKey="close" radius={[2, 2, 0, 0]} isAnimationActive={false} animationDuration={0}>
                                   {candleData.map((candle, idx) => (
                                     <Cell 
                                       key={`candle-${candle.time}-${idx}`} 
-                                      fill={candle.isUp ? '#DC2626' : '#2563EB'} 
-                                      stroke={candle.isLive ? (candle.isUp ? '#EF4444' : '#3B82F6') : 'none'}
-                                      strokeWidth={candle.isLive ? 1 : 0}
+                                      fill={candle.isUp ? '#EF4444' : '#3B82F6'} 
+                                      stroke={candle.isLive ? (candle.isUp ? '#F87171' : '#60A5FA') : 'none'}
+                                      strokeWidth={candle.isLive ? 1.5 : 0}
                                     />
                                   ))}
                                 </Bar>
 
-                                {/* Moving Average Lines */}
-                                <Line type="monotone" dataKey="ma5" stroke="#D946EF" strokeWidth={1.2} dot={false} isAnimationActive={false} />
-                                <Line type="monotone" dataKey="ma10" stroke="#2563EB" strokeWidth={1.2} dot={false} isAnimationActive={false} />
-                                <Line type="monotone" dataKey="ma20" stroke="#EAB308" strokeWidth={1.2} dot={false} isAnimationActive={false} />
-                                <Line type="monotone" dataKey="ma60" stroke="#16A34A" strokeWidth={1.2} dot={false} isAnimationActive={false} />
-                                <Line type="monotone" dataKey="ma120" stroke="#6B7280" strokeWidth={1.2} dot={false} isAnimationActive={false} />
-                                <Line type="monotone" dataKey="ma200" stroke="#06B6D4" strokeWidth={1.2} dot={false} isAnimationActive={false} />
+                                {/* Moving Average Lines (5, 20, 60, 120) */}
+                                <Line type="monotone" dataKey="ma5" stroke="#10B981" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                                <Line type="monotone" dataKey="ma20" stroke="#EF4444" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                                <Line type="monotone" dataKey="ma60" stroke="#F59E0B" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                                <Line type="monotone" dataKey="ma120" stroke="#8B5CF6" strokeWidth={1.5} dot={false} isAnimationActive={false} />
 
-                                {/* Highest Price Marker */}
+                                {/* High Point Marker with Down Arrow */}
                                 {highCandle && (
-                                  <ReferenceDot x={highCandle.time} y={highCandle.high} r={3} fill="#DC2626" stroke="#FFFFFF" strokeWidth={1}>
+                                  <ReferenceDot 
+                                    x={highCandle.time} 
+                                    y={highCandle.high} 
+                                    r={3} 
+                                    fill="#EF4444" 
+                                    stroke="#FFFFFF" 
+                                    strokeWidth={1}
+                                  >
                                     <Label 
-                                      value={`최고 ${formatCurrency(highCandle.high)} (${(selectedStock?.price ? (((highCandle.high - selectedStock.price)/selectedStock.price)*100) : 0).toFixed(2)}%) ↓`} 
+                                      value={`${formatCurrency(highCandle.high)} (${(selectedStock?.price ? (((highCandle.high - selectedStock.price)/selectedStock.price)*100) : 0).toFixed(1)}%) ↓`} 
                                       position="top" 
-                                      fill="#DC2626" 
+                                      fill="#EF4444" 
                                       fontSize={9} 
                                       fontWeight="bold" 
                                     />
                                   </ReferenceDot>
                                 )}
 
-                                {/* Lowest Price Marker */}
+                                {/* Low Point Marker with Up Arrow */}
                                 {lowCandle && (
-                                  <ReferenceDot x={lowCandle.time} y={lowCandle.low} r={3} fill="#2563EB" stroke="#FFFFFF" strokeWidth={1}>
+                                  <ReferenceDot 
+                                    x={lowCandle.time} 
+                                    y={lowCandle.low} 
+                                    r={3} 
+                                    fill="#3B82F6" 
+                                    stroke="#FFFFFF" 
+                                    strokeWidth={1}
+                                  >
                                     <Label 
-                                      value={`최저 ${formatCurrency(lowCandle.low)} (${(selectedStock?.price ? (((lowCandle.low - selectedStock.price)/selectedStock.price)*100) : 0).toFixed(2)}%) ↑`} 
+                                      value={`${formatCurrency(lowCandle.low)} (${(selectedStock?.price ? (((lowCandle.low - selectedStock.price)/selectedStock.price)*100) : 0).toFixed(1)}%) ↑`} 
                                       position="bottom" 
-                                      fill="#2563EB" 
+                                      fill="#3B82F6" 
                                       fontSize={9} 
                                       fontWeight="bold" 
                                     />
                                   </ReferenceDot>
                                 )}
 
-                                {/* Buy / Sell Boundary Lines */}
+                                {/* Buy & Sell Boundary Lines */}
                                 {gapBuyPrice > 0 && (
-                                  <ReferenceLine y={gapBuyPrice} stroke="#DC2626" strokeDasharray="3 3" strokeWidth={1}>
-                                    <Label value="BUY" position="left" fill="#DC2626" fontSize={9} fontWeight="bold" />
+                                  <ReferenceLine y={gapBuyPrice} stroke="#EF4444" strokeDasharray="3 3" strokeWidth={1}>
+                                    <Label value="BUY" position="left" fill="#EF4444" fontSize={10} fontWeight="bold" />
                                   </ReferenceLine>
                                 )}
                                 {gapSellPrice > 0 && (
-                                  <ReferenceLine y={gapSellPrice} stroke="#2563EB" strokeDasharray="3 3" strokeWidth={1}>
-                                    <Label value="SELL" position="left" fill="#2563EB" fontSize={9} fontWeight="bold" />
+                                  <ReferenceLine y={gapSellPrice} stroke="#3B82F6" strokeDasharray="3 3" strokeWidth={1}>
+                                    <Label value="SELL" position="left" fill="#3B82F6" fontSize={10} fontWeight="bold" />
                                   </ReferenceLine>
                                 )}
                               </ComposedChart>
                             </ResponsiveContainer>
                           ) : null}
 
-                          {/* Solid Blue Current Price Badge on Right Y Axis matching image */}
-                          <div className="absolute right-0 top-1/2 -translate-y-1/2 bg-blue-600 text-white font-mono font-bold text-[10px] px-1.5 py-0.5 rounded-l shadow-md border-l border-white/30">
-                            {isUSStock ? (selectedStock?.price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : (selectedStock?.price || 0).toLocaleString()}
+                          {/* Solid Red Current Price Badge on Right Axis */}
+                          <div className="absolute right-0 top-1/2 -translate-y-1/2 bg-rose-600 text-white font-mono font-bold text-[10px] px-1.5 py-0.5 rounded-l shadow-lg border-l border-white/20 animate-pulse">
+                            {isUSStock ? (selectedStock?.price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : (selectedStock?.price || 0).toLocaleString()} <span className="text-[8px] opacity-80">00:18</span>
+                          </div>
+                        </div>
+
+                        {/* Sub-Pane: Trading Volume (거래량 (20)) */}
+                        <div className="mt-2 pt-1 border-t border-white/5">
+                          <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono mb-0.5">
+                            <span className="font-bold">거래량 (20)</span>
+                            <span className="text-emerald-400 font-bold">1.48K / 1.00K</span>
+                          </div>
+                          <div className="h-12 w-full bg-slate-950/50 rounded-lg p-0.5 relative">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <ComposedChart data={candleData} margin={{ top: 2, right: 35, left: 0, bottom: 0 }}>
+                                <Bar dataKey="volume" radius={[1, 1, 0, 0]} isAnimationActive={false} animationDuration={0}>
+                                  {candleData.map((c, idx) => (
+                                    <Cell key={`vol-${c.time}-${idx}`} fill={c.isUp ? '#EF4444' : '#3B82F6'} opacity={0.8} />
+                                  ))}
+                                </Bar>
+                                <Line type="monotone" dataKey="volMa20" stroke="#10B981" strokeWidth={1} dot={false} isAnimationActive={false} animationDuration={0} />
+                              </ComposedChart>
+                            </ResponsiveContainer>
                           </div>
                         </div>
                       </div>
 
-                      {/* Sub-Pane 1: Volume Chart (거래량) */}
-                      <div className="bg-white rounded-xl border border-slate-200 p-1.5 flex flex-col space-y-0.5 shadow-xs">
-                        <div className="flex items-center justify-between text-[10px] font-mono text-slate-700 px-1 border-b border-slate-100 pb-0.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-slate-800">MA 단순</span>
-                            <span className="font-bold text-[#D946EF]">■ 5</span>
-                            <span className="font-bold text-[#EAB308]">■ 20</span>
-                            <span className="font-bold text-[#16A34A]">■ 60</span>
-                            <span className="font-bold text-[#6B7280]">■ 120</span>
-                          </div>
-                          <div className="font-bold text-slate-900 bg-slate-800 text-white px-1 rounded text-[9px]">
-                            {(candleData[candleData.length - 1]?.volume || 0).toLocaleString()}
-                          </div>
+                      {/* Bottom Timeframe Toolbar */}
+                      <div className="pt-1.5 border-t border-white/5 flex items-center justify-between text-[11px] text-gray-400 font-mono">
+                        <div className="flex items-center gap-1">
+                          <span className="px-2 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] flex items-center gap-1">1분 ▼</span>
+                          <span className="px-2 py-0.5 rounded hover:bg-white/5 text-[10px] cursor-pointer">일</span>
+                          <span className="px-2 py-0.5 rounded hover:bg-white/5 text-[10px] cursor-pointer">주</span>
+                          <span className="px-2 py-0.5 rounded hover:bg-white/5 text-[10px] cursor-pointer">월</span>
+                          <span className="px-2 py-0.5 rounded hover:bg-white/5 text-[10px] cursor-pointer">년</span>
                         </div>
-
-                        <div className="h-[52px] w-full relative">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <ComposedChart data={candleData} margin={{ top: 2, right: 45, left: 0, bottom: 0 }}>
-                              <Bar dataKey="volume" radius={[1, 1, 0, 0]} isAnimationActive={false} animationDuration={0}>
-                                {candleData.map((c, idx) => (
-                                  <Cell key={`vol-${c.time}-${idx}`} fill={c.isUp ? '#DC2626' : '#2563EB'} />
-                                ))}
-                              </Bar>
-                              <Line type="monotone" dataKey="volMa5" stroke="#D946EF" strokeWidth={1} dot={false} isAnimationActive={false} />
-                              <Line type="monotone" dataKey="volMa20" stroke="#EAB308" strokeWidth={1} dot={false} isAnimationActive={false} />
-                              <Line type="monotone" dataKey="volMa60" stroke="#16A34A" strokeWidth={1} dot={false} isAnimationActive={false} />
-                            </ComposedChart>
-                          </ResponsiveContainer>
+                        <div className="flex items-center gap-1 text-rose-400 font-bold text-xs">
+                          <span>📊</span>
                         </div>
-                      </div>
-
-                      {/* Sub-Pane 2: Technical Indicator (RSI 14 / Signal 9) */}
-                      <div className="bg-white rounded-xl border border-slate-200 p-1.5 flex flex-col space-y-0.5 shadow-xs">
-                        <div className="flex items-center justify-between text-[10px] font-mono text-slate-700 px-1 border-b border-slate-100 pb-0.5">
-                          <div className="flex items-center gap-1.5">
-                            <span className="font-bold text-orange-600">RSI 14</span>
-                            <span className="font-bold text-purple-600">■ Signal(9)</span>
-                          </div>
-                          <div className="font-bold text-slate-600 font-mono text-[9px]">
-                            {candleData[candleData.length - 1]?.rsi14 || 50.00}
-                          </div>
-                        </div>
-
-                        <div className="h-[48px] w-full relative">
-                          <ResponsiveContainer width="100%" height="100%">
-                            <ComposedChart data={candleData} margin={{ top: 2, right: 45, left: 0, bottom: 0 }}>
-                              <CartesianGrid strokeDasharray="1 1" vertical={false} opacity={0.3} stroke="#CBD5E1" />
-                              <YAxis domain={[0, 100]} ticks={[30, 70]} axisLine={false} tickLine={false} tick={{ fontSize: 8, fill: '#64748B' }} orientation="right" />
-                              <ReferenceLine y={70} stroke="#EF4444" strokeDasharray="2 2" strokeWidth={0.8} />
-                              <ReferenceLine y={30} stroke="#3B82F6" strokeDasharray="2 2" strokeWidth={0.8} />
-                              <Line type="monotone" dataKey="rsi14" stroke="#F97316" strokeWidth={1.2} dot={false} isAnimationActive={false} />
-                              <Line type="monotone" dataKey="rsiSignal9" stroke="#A855F7" strokeWidth={1.2} dot={false} isAnimationActive={false} />
-                            </ComposedChart>
-                          </ResponsiveContainer>
-                        </div>
-                      </div>
-
-                      {/* Bottom Market Bar matching screenshot footer */}
-                      <div className="pt-1 border-t border-slate-200 flex items-center justify-between text-[10px] text-slate-600 font-mono px-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-bold text-slate-800">코스닥</span>
-                          <span className="font-black text-blue-600">931.68</span>
-                          <span className="text-blue-600 font-bold">▼ 12.26 1.30%</span>
-                        </div>
-                        <div className="text-slate-400 font-bold text-[9px]">980.452</div>
                       </div>
                     </div>
 
