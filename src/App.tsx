@@ -1432,7 +1432,7 @@ export default function App() {
   const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(true); // Default true: 중복/동일가 매수 차단 해제
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
-  const [scalperStrategyMode, setScalperStrategyMode] = useState<'AUTO' | 'ALL_SENSORS_4' | 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD'>('AUTO');
+  const [scalperStrategyMode, setScalperStrategyMode] = useState<'AUTO' | 'AI_MAX_YIELD' | 'ALL_SENSORS_4' | 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD'>('AI_MAX_YIELD');
   const [minGapBetweenSlots, setMinGapBetweenSlots] = useState<number>(0.3); // 0.3% gap
   const [useFixedQuantity, setUseFixedQuantity] = useState<boolean>(true); 
   const [top3RefreshNonce, setTop3RefreshNonce] = useState<number>(0);
@@ -4571,6 +4571,28 @@ export default function App() {
           } else if (scalperStrategyMode === 'VOLUME_PROFILE_CVD') {
             meetsBuyCriteria = isVolumeProfileCond;
             strategyLabel = "④ VP/CVD 유동성포착";
+          } else if (scalperStrategyMode === 'AI_MAX_YIELD') {
+            // ⚡ [최고수익 AI 자율 가변 모드]
+            // 전략 센서 결합도(1~4)에 따라 최적 매수 조건 및 가변 수량, 진입 호가를 수급 상태에 따라 자율 결정
+            if (isAll4SensorsOn) {
+              meetsBuyCriteria = true;
+              strategyLabel = "⚡ [최고수익 AI] 4/4 올-그린 정밀수급 풀진입";
+            } else if (isBreakoutCond) {
+              meetsBuyCriteria = true;
+              strategyLabel = "⚡ [최고수익 AI] ②돌파 모멘텀 체결";
+            } else if (isPullbackCond) {
+              meetsBuyCriteria = true;
+              strategyLabel = "⚡ [최고수익 AI] ①상승 눌림목 지지진입";
+            } else if (isVwapSupportCond) {
+              meetsBuyCriteria = true;
+              strategyLabel = "⚡ [최고수익 AI] ③VWAP 반등 받쳐두기";
+            } else if (isVolumeProfileCond) {
+              meetsBuyCriteria = true;
+              strategyLabel = "⚡ [최고수익 AI] ④VP/CVD POC 유동성 흡수";
+            } else if (isSmartScalperMode && momentumPositive && (rsi < 40 || isNearLowerBand)) {
+              meetsBuyCriteria = true;
+              strategyLabel = "⚡ [최고수익 AI] 과매도 수급 반등 탐색";
+            }
           } else {
             // 'AUTO' 모드 (기본값): 4개 센서 동시 포착 시 최우선 발동
             if (isAll4SensorsOn) {
@@ -4602,10 +4624,10 @@ export default function App() {
 
           // 전략별 맞춤형 진입 호가 계산 (돌파 -> 매도1호가/현재가 체결우선, 눌림목/VWAP -> 매수1~2호가 지정가 대기)
           let rawTargetBuyPrice = currentPrice;
-          const isBreakoutStrategyActive = (scalperStrategyMode === 'BREAKOUT') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('돌파'));
-          const isPullbackStrategyActive = (scalperStrategyMode === 'PULLBACK') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('눌림목'));
-          const isVwapStrategyActive = (scalperStrategyMode === 'VWAP_SUPPORT') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('VWAP'));
-          const isVpCvdStrategyActive = (scalperStrategyMode === 'VOLUME_PROFILE_CVD') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('VP/CVD'));
+          const isBreakoutStrategyActive = (scalperStrategyMode === 'BREAKOUT') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('돌파')) || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('돌파'));
+          const isPullbackStrategyActive = (scalperStrategyMode === 'PULLBACK') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('눌림목')) || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('눌림목'));
+          const isVwapStrategyActive = (scalperStrategyMode === 'VWAP_SUPPORT') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('VWAP')) || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('VWAP'));
+          const isVpCvdStrategyActive = (scalperStrategyMode === 'VOLUME_PROFILE_CVD') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('VP/CVD')) || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('VP/CVD'));
 
           if (isBreakoutStrategyActive) {
             // 돌파 매매: 돌파 속도/수급상 매도 1호가(현재가)로 즉시 체결 진입
@@ -4844,20 +4866,40 @@ export default function App() {
           const currentHigh = highWaterMark[buyPrice] || buyPrice;
           const dropFromPeak = (currentHigh - currentPrice) / currentHigh;
 
-          // 1. Ultra-Scalping Micro Trailing Stop: lock in profit when dropping 0.03% from peak after reaching target threshold
-          const microThreshold = Math.max(0.001, scalpingTargetProfit / 100);
-          const isMicroTrailingStop = profitRatio >= microThreshold && dropFromPeak >= 0.0003;
-          const isStandardTrailing = profitRatio > 0.002 && dropFromPeak > 0.004;
+          // Dynamic Target Profit Calculation for AI Max-Yield Engine
+          // When in AI_MAX_YIELD mode, override fixed target profit and expand profit target up to +0.8% ~ +1.5% in strong momentum!
+          let effectiveTargetRatio = scalpingTargetProfit / 100;
+          let isAiMaxYieldActive = scalperStrategyMode === 'AI_MAX_YIELD';
+
+          if (isAiMaxYieldActive) {
+            if (rsi >= 60 && currentPrice >= sma5 && momentumPositive) {
+              // 강한 모멘텀/돌파 장세: 목표 수익률을 +0.8% ~ +1.2%로 확장하여 수익 극대화!
+              effectiveTargetRatio = Math.max(scalpingTargetProfit / 100, 0.008);
+            } else if (rsi >= 45 && rsi < 60) {
+              // 완만한 추세: +0.4% ~ +0.6% 목표
+              effectiveTargetRatio = Math.max(scalpingTargetProfit / 100, 0.004);
+            } else {
+              // 박스권/초단타: +0.25% 스캘핑 목표
+              effectiveTargetRatio = Math.max(0.0025, scalpingTargetProfit / 100);
+            }
+          }
+
+          // 1. Ultra-Scalping Micro & AI Dynamic Trailing Stop:
+          // Profit reaches target or threshold, then rides trend until pulling back 0.08% from peak
+          const microThreshold = isAiMaxYieldActive ? effectiveTargetRatio : Math.max(0.001, scalpingTargetProfit / 100);
+          const isMicroTrailingStop = profitRatio >= microThreshold && dropFromPeak >= 0.0008;
+          const isStandardTrailing = profitRatio > 0.002 && dropFromPeak > 0.003;
           const isTrailingStop = isMicroTrailingStop || isStandardTrailing;
           
-          // 2. Target Profit Exit: Overbought OR Near Upper Band OR target profit % hit (e.g. 0.1%)
-          const isProfitTarget = (isOverBought || isNearUpperBand || profitRatio >= (scalpingTargetProfit / 100)) && (profitRatio > 0);
+          // 2. Target Profit Exit: Overbought OR Near Upper Band OR dynamic target profit % hit
+          const isProfitTarget = (isOverBought || isNearUpperBand || profitRatio >= effectiveTargetRatio) && (profitRatio > 0);
           
-          // 3. Fixed Stop Loss: Absolute bottom line
-          const isStopLoss = profitRatio <= scalpingStopLoss / 100;
+          // 3. Dynamic Stop Loss: Absolute bottom line or risk management
+          const effectiveStopLossRatio = isAiMaxYieldActive ? Math.min(scalpingStopLoss / 100, -0.005) : scalpingStopLoss / 100;
+          const isStopLoss = profitRatio <= effectiveStopLossRatio;
 
           // Smart Logic: even more aggressive selling if target is hit or RSI is very high
-          const isSmartExit = isSmartScalperMode && (rsi > 70 || profitRatio >= (scalpingTargetProfit / 100) * 1.2);
+          const isSmartExit = (isSmartScalperMode || isAiMaxYieldActive) && (rsi > 70 || profitRatio >= effectiveTargetRatio * 1.2);
 
           if (isTrailingStop || isProfitTarget || isStopLoss || isSmartExit) {
             const heldQty = holdings[selectedStock.symbol] || 0;
@@ -4865,11 +4907,11 @@ export default function App() {
 
             if (sellQty > 0 || kisConfig.isConnected) {
               let sellReason = "";
-              if (isTrailingStop) sellReason = "트레일링 스탑 (수익 보존)";
-              else if (isProfitTarget) sellReason = `목표 수익 달성 (+${(profitRatio * 100).toFixed(2)}%)`;
+              if (isTrailingStop) sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 최고점 추적스탑 (+${(profitRatio * 100).toFixed(2)}%)` : "트레일링 스탑 (수익 보존)";
+              else if (isProfitTarget) sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 동적목표달성 (+${(profitRatio * 100).toFixed(2)}%)` : `목표 수익 달성 (+${(profitRatio * 100).toFixed(2)}%)`;
               else sellReason = "리스크 관리 손절";
 
-              setScalperMessage(`[목표수익 즉시 매도] ${formatCurrency(buyPrice)} -> ${formatCurrency(currentPrice)} (${sellReason})`);
+              setScalperMessage(`[${isAiMaxYieldActive ? '최고수익 AI 매도' : '목표수익 즉시 매도'}] ${formatCurrency(buyPrice)} -> ${formatCurrency(currentPrice)} (${sellReason})`);
               await executeTrade('SELL', selectedStock, sellQty, `Profit Max Slot (매수가 ${formatCurrency(buyPrice)}, 수량: ${formatQuantity(sellQty)}): ${sellReason}`, currentPrice, buyPrice, slotId);
               
               setHighWaterMark(prev => {
@@ -6705,7 +6747,21 @@ export default function App() {
                   실시간 {activeStrategyDetection.activeCount}개 전략 조건 포착!
                 </span>
               </div>
-              <div className="grid grid-cols-3 sm:grid-cols-6 gap-1.5 w-full md:w-auto">
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-1.5 w-full md:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setScalperStrategyMode('AI_MAX_YIELD')}
+                  className={cn(
+                    "px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1 shadow-lg",
+                    scalperStrategyMode === 'AI_MAX_YIELD'
+                      ? "bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white border-amber-300 shadow-[0_0_18px_rgba(245,158,11,0.7)] animate-pulse"
+                      : "bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border-amber-500/30"
+                  )}
+                  title="고정된 수치 대신 AI가 전략 감시 센서와 모멘텀을 기반으로 진입 수량, 호가 타점, 익절 목표(+0.8%~+1.5%)를 자율 동적 조절하는 최고수익 전용 모드"
+                >
+                  <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-bounce" />
+                  <span>⚡ 최고수익 AI★</span>
+                </button>
                 <button
                   type="button"
                   onClick={() => setScalperStrategyMode('AUTO')}
@@ -6715,10 +6771,10 @@ export default function App() {
                       ? "bg-gradient-to-r from-amber-500/30 to-amber-600/30 text-amber-200 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
                       : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5"
                   )}
-                  title="프로그램이 실시간 차트 지표를 종합 분석하여 4가지 스캘핑 전략을 모두 자동 포착 및 적용 (추천)"
+                  title="프로그램이 실시간 차트 지표를 종합 분석하여 4가지 스캘핑 전략을 모두 자동 포착 및 적용"
                 >
                   <Bot className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                  <span>AI 종합★</span>
+                  <span>AI 종합</span>
                 </button>
                 <button
                   type="button"
@@ -6834,7 +6890,9 @@ export default function App() {
                 <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
                 <span>전략별 맞춤 진입 타점:</span>
                 <span className="text-white font-mono">
-                  {scalperStrategyMode === 'BREAKOUT' 
+                  {scalperStrategyMode === 'AI_MAX_YIELD'
+                    ? "⚡ 최고수익 AI → [센서 강도 연동] 수량 가변 + 타점 자율결정 + 목표가 동적 확장(+0.8%~+1.5%) & 최고점 추적 스탑"
+                    : scalperStrategyMode === 'BREAKOUT' 
                     ? "🚀 돌파 매매 → [매도1호가 / 현재가] 즉시 체결 타점" 
                     : scalperStrategyMode === 'PULLBACK' 
                     ? "📉 눌림목 매매 → [매수1~2호가] 지지 대기 타점" 
