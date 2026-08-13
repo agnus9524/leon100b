@@ -1324,10 +1324,42 @@ export default function App() {
     return () => clearInterval(rotateInterval);
   }, [isAutoRotateTabs, activeTabId, marketType]);
 
+  const activeTabIdRef = React.useRef<string>(activeTabId);
+  useEffect(() => {
+    activeTabIdRef.current = activeTabId;
+  }, [activeTabId]);
+
   const handleSwitchTab = (tabId: string) => {
+    if (tabId === activeTabIdRef.current) return;
     const targetTab = scalperTabsRef.current.find(t => t.id === tabId);
     if (!targetTab) return;
 
+    // 1. Save current active tab's properties into scalperTabs before switching
+    const prevTabId = activeTabIdRef.current;
+    if (prevTabId) {
+      setScalperTabs(prev => prev.map(tab => {
+        if (tab.id !== prevTabId) return tab;
+        return {
+          ...tab,
+          isBotActive: isGapBotActiveRef.current,
+          gapBuyPrice: gapBuyPriceRef.current,
+          gapSellPrice: gapSellPriceRef.current,
+          tradeQuantity: tradeQuantityRef.current,
+          maxSlots: maxSlotsRef.current,
+          gapInventory: gapInventoryRef.current,
+          gapTradingProfit: gapTradingProfitRef.current,
+          gapTradeCount: gapTradeCountRef.current,
+          lastTradeType: lastTradeTypeRef.current,
+          scalperMessage: scalperMessageRef.current,
+          entryPriceMode: entryPriceModeRef.current,
+          autoCancelThreshold: autoCancelThresholdRef.current,
+          tradeLogs: tradeLogsRef.current
+        };
+      }));
+    }
+
+    // 2. Set new active tab and sync refs immediately
+    activeTabIdRef.current = tabId;
     setActiveTabId(tabId);
     setSelectedSymbol(targetTab.symbol);
     setIsGapBotActive(targetTab.isBotActive);
@@ -1335,7 +1367,11 @@ export default function App() {
     setGapSellPrice(targetTab.gapSellPrice);
     setTradeQuantity(targetTab.tradeQuantity);
     setMaxSlots(targetTab.maxSlots);
-    setGapInventory(targetTab.gapInventory || []);
+
+    const nextInv = targetTab.gapInventory || [];
+    setGapInventory(nextInv);
+    gapInventoryRef.current = nextInv;
+
     setGapTradingProfit(targetTab.gapTradingProfit || 0);
     setGapTradeCount(targetTab.gapTradeCount || 0);
     setLastTradeType(targetTab.lastTradeType || null);
@@ -1351,6 +1387,31 @@ export default function App() {
       handleSwitchTab(existing.id);
       return;
     }
+
+    // Save current active tab's properties before creating new tab
+    const prevTabId = activeTabIdRef.current;
+    if (prevTabId) {
+      setScalperTabs(prev => prev.map(tab => {
+        if (tab.id !== prevTabId) return tab;
+        return {
+          ...tab,
+          isBotActive: isGapBotActiveRef.current,
+          gapBuyPrice: gapBuyPriceRef.current,
+          gapSellPrice: gapSellPriceRef.current,
+          tradeQuantity: tradeQuantityRef.current,
+          maxSlots: maxSlotsRef.current,
+          gapInventory: gapInventoryRef.current,
+          gapTradingProfit: gapTradingProfitRef.current,
+          gapTradeCount: gapTradeCountRef.current,
+          lastTradeType: lastTradeTypeRef.current,
+          scalperMessage: scalperMessageRef.current,
+          entryPriceMode: entryPriceModeRef.current,
+          autoCancelThreshold: autoCancelThresholdRef.current,
+          tradeLogs: tradeLogsRef.current
+        };
+      }));
+    }
+
     const stock = stocksRef.current.find(s => s.symbol === symbol) ||
                   INITIAL_STOCKS_KR.find(s => s.symbol === symbol) ||
                   INITIAL_STOCKS.find(s => s.symbol === symbol);
@@ -1383,12 +1444,15 @@ export default function App() {
       const diffMarket = prev.filter(t => isUS ? !/^[A-Z]/.test(t.symbol) : /^[A-Z]/.test(t.symbol));
       return isUS ? [...diffMarket, newTab, ...sameMarket] : [newTab, ...sameMarket, ...diffMarket];
     });
+
+    activeTabIdRef.current = symbol;
     setActiveTabId(symbol);
     setSelectedSymbol(symbol);
     setIsGapBotActive(false);
     setGapBuyPrice(newTab.gapBuyPrice);
     setGapSellPrice(newTab.gapSellPrice);
     setGapInventory([]);
+    gapInventoryRef.current = [];
     setGapTradingProfit(0);
     setGapTradeCount(0);
     setLastTradeType(null);
@@ -1493,9 +1557,35 @@ export default function App() {
     return cleaned || "진입 모니터링 중...";
   }, [scalperMessage]);
 
+  const isGapBotActiveRef = React.useRef(isGapBotActive);
+  const gapBuyPriceRef = React.useRef(gapBuyPrice);
+  const gapSellPriceRef = React.useRef(gapSellPrice);
+  const tradeQuantityRef = React.useRef(tradeQuantity);
+  const maxSlotsRef = React.useRef(maxSlots);
+  const gapTradingProfitRef = React.useRef(gapTradingProfit);
+  const gapTradeCountRef = React.useRef(gapTradeCount);
+  const lastTradeTypeRef = React.useRef(lastTradeType);
+  const scalperMessageRef = React.useRef(scalperMessage);
+  const entryPriceModeRef = React.useRef(entryPriceMode);
+  const autoCancelThresholdRef = React.useRef(autoCancelThreshold);
+  const tradeLogsRef = React.useRef(tradeLogs);
+
+  useEffect(() => { isGapBotActiveRef.current = isGapBotActive; }, [isGapBotActive]);
+  useEffect(() => { gapBuyPriceRef.current = gapBuyPrice; }, [gapBuyPrice]);
+  useEffect(() => { gapSellPriceRef.current = gapSellPrice; }, [gapSellPrice]);
+  useEffect(() => { tradeQuantityRef.current = tradeQuantity; }, [tradeQuantity]);
+  useEffect(() => { maxSlotsRef.current = maxSlots; }, [maxSlots]);
+  useEffect(() => { gapTradingProfitRef.current = gapTradingProfit; }, [gapTradingProfit]);
+  useEffect(() => { gapTradeCountRef.current = gapTradeCount; }, [gapTradeCount]);
+  useEffect(() => { lastTradeTypeRef.current = lastTradeType; }, [lastTradeType]);
+  useEffect(() => { scalperMessageRef.current = scalperMessage; }, [scalperMessage]);
+  useEffect(() => { entryPriceModeRef.current = entryPriceMode; }, [entryPriceMode]);
+  useEffect(() => { autoCancelThresholdRef.current = autoCancelThreshold; }, [autoCancelThreshold]);
+  useEffect(() => { tradeLogsRef.current = tradeLogs; }, [tradeLogs]);
+
   useEffect(() => {
     setScalperTabs(prev => prev.map(tab => {
-      if (tab.id !== activeTabId) return tab;
+      if (tab.id !== activeTabIdRef.current) return tab;
       return {
         ...tab,
         isBotActive: isGapBotActive,
@@ -1513,7 +1603,7 @@ export default function App() {
         tradeLogs
       };
     }));
-  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, tradeLogs, activeTabId]);
+  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, tradeLogs]);
 
   // Helper for tick-aware target sell price calculation to guarantee positive profit above tick size
   const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number) => {
