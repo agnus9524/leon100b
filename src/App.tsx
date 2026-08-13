@@ -1535,7 +1535,7 @@ export default function App() {
   const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(false);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
-  const [maxSlots, setMaxSlots] = useState<number>(10);
+  const [maxSlots, setMaxSlots] = useState<number>(3);
   const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(true); // Default true: 중복/동일가 매수 차단 해제
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
@@ -3356,7 +3356,7 @@ export default function App() {
         if (res && res.rt_cd === '0' && res.output) {
           if (res.output.ord_psbl_cash !== undefined && res.output.ord_psbl_cash !== null) {
             const cashVal = Number(res.output.ord_psbl_cash);
-            if (!isNaN(cashVal)) {
+            if (!isNaN(cashVal) && cashVal > 0) {
               setOrderableKrw(prev => prev === cashVal ? prev : cashVal);
             }
           }
@@ -3510,7 +3510,7 @@ export default function App() {
           const actualPurchaseCost = Math.max(domesticPurchase, totalStockPurchaseCost);
 
           // Direct deposit/cash balance in account (Prioritize immediate orderable cash)
-          const domesticCash = ordPsblCash >= 0 && out2.ord_psbl_cash !== undefined ? ordPsblCash : dnclAmt;
+          const domesticCash = ordPsblCash > 0 ? ordPsblCash : dnclAmt;
           setOrderableKrw(domesticCash);
           
           if (marketType === 'KR') {
@@ -4337,45 +4337,15 @@ export default function App() {
     const currentStock = stocksRef.current.find(s => s.symbol === stockSymbol);
     if (!currentStock) return;
 
-    if (enableCombinedAvgProfitExit) {
-      // 통합평단가 익절 모드: 전체 통합 수량 및 평단가 산출 후 매도 주문 자동 갱신
-      // forcedNewAvg/forcedNewTotalQty 가 있으면 그것을 사용 (상태 업데이트 전 호출 대비)
-      const totalQty = forcedNewTotalQty !== undefined ? forcedNewTotalQty : (holdings[stockSymbol] || 0);
-      const newAvg = forcedNewAvg !== undefined ? forcedNewAvg : (avgPrices[stockSymbol] || buyPrice);
-      
-      if (totalQty <= 0) return;
-      
-      const targetSellPrice = calculateTargetSellPrice(newAvg, scalpingTargetProfit);
+    const newAvg = forcedNewAvg !== undefined ? forcedNewAvg : (avgPrices[stockSymbol] || buyPrice);
+    const targetSellPrice = calculateTargetSellPrice(enableCombinedAvgProfitExit ? newAvg : buyPrice, scalpingTargetProfit);
 
-      // 기존 해당 종목 대기 매도 주문이 있으면 취소 후 갱신
-      setPendingSellOrders(prev => prev.filter(o => o.symbol !== stockSymbol));
-
-      setTimeout(() => {
-        executeTrade(
-          'SELL', 
-          currentStock, 
-          totalQty, 
-          `[통합평단가 익절] 평단가 ${formatCurrency(newAvg)} 대비 +${scalpingTargetProfit}% 자동 주문`, 
-          targetSellPrice,
-          newAvg
-        );
-      }, 300);
-    } else {
-      // 개별 슬롯 익절 모드: 각 슬롯별 매수가 기준 개별 매도 주문 등록
-      const targetSellPrice = calculateTargetSellPrice(buyPrice, scalpingTargetProfit);
-      setTimeout(() => {
-        executeTrade(
-          'SELL', 
-          currentStock, 
-          qty, 
-          `[슬롯 독립익절] 매수가 ${formatCurrency(buyPrice)} 대비 +${scalpingTargetProfit}% (목표가: ${formatCurrency(targetSellPrice)})`, 
-          targetSellPrice,
-          buyPrice,
-          slotId
-        );
-      }, 300);
+    // [개선] 매수 즉시 매도 주문을 넣지 않고, 실시간 평단가/목표가가 달성되는 순간 즉시 실시간 매도 전송하도록 감시 설정
+    if (stockSymbol === selectedStock?.symbol) {
+      setScalperMessage(`[매수완료/익절감시] ${currentStock.name} (목표가: ${formatCurrency(targetSellPrice)}원 / +${scalpingTargetProfit}% 도달 시 즉시 매도)`);
     }
-  }, [scalpingTargetProfit, enableCombinedAvgProfitExit, holdings, avgPrices]);
+    setBotStatus(`[실시간 익절 감시] ${currentStock.name} 평단가 대비 목표가 ${formatCurrency(targetSellPrice)}원 (+${scalpingTargetProfit}%) 도달 감시 중`);
+  }, [scalpingTargetProfit, enableCombinedAvgProfitExit, avgPrices, calculateTargetSellPrice, selectedStock?.symbol]);
 
   const cancelAllPendingOrders = useCallback(async () => {
     const buyOrdersToCancel = pendingBuyOrdersRef.current;
@@ -7297,6 +7267,27 @@ export default function App() {
                     <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
                   ))}
                 </select>
+
+                <div className="pt-1 border-t border-white/5">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <label className="text-[10px] font-black text-sleek-text-secondary uppercase flex items-center gap-1">
+                      <Layers className="w-3 h-3 text-emerald-400" /> 최대 분할 슬롯
+                    </label>
+                    <span className="text-[10px] font-bold text-emerald-400 font-mono">추천: 3개</span>
+                  </div>
+                  <select 
+                    value={maxSlots}
+                    onChange={(e) => setMaxSlots(Number(e.target.value))}
+                    className="w-full bg-black/40 border border-emerald-500/30 rounded p-1 text-center text-xs font-bold outline-none text-emerald-300 font-mono appearance-none cursor-pointer"
+                    title="최대 분할 매수 슬롯 개수 (추천: 3회 분할 진입)"
+                  >
+                    {[1, 2, 3, 4, 5].map(val => (
+                      <option key={val} value={val} className="bg-sleek-bg text-white">
+                        {val}개 슬롯 {val === 3 ? '(추천★)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
 
                 <div className="pt-1 border-t border-white/5">
                   <div className="text-[10px] font-black uppercase leading-tight space-y-0.5">
