@@ -16,16 +16,68 @@ interface KrxStock {
   market: 'KR';
 }
 
-let krxStocksCache: KrxStock[] = [];
+const FALLBACK_KRX_STOCKS: KrxStock[] = [
+  { symbol: '005930', name: '삼성전자', market: 'KR' },
+  { symbol: '000660', name: 'SK하이닉스', market: 'KR' },
+  { symbol: '373220', name: 'LG에너지솔루션', market: 'KR' },
+  { symbol: '207940', name: '삼성바이오로직스', market: 'KR' },
+  { symbol: '005380', name: '현대차', market: 'KR' },
+  { symbol: '035420', name: 'NAVER', market: 'KR' },
+  { symbol: '035720', name: '카카오', market: 'KR' },
+  { symbol: '000270', name: '기아', market: 'KR' },
+  { symbol: '068270', name: '셀트리온', market: 'KR' },
+  { symbol: '105560', name: 'KB금융', market: 'KR' },
+  { symbol: '005490', name: 'POSCO홀딩스', market: 'KR' },
+  { symbol: '055550', name: '신한지주', market: 'KR' },
+  { symbol: '006400', name: '삼성SDI', market: 'KR' },
+  { symbol: '051910', name: 'LG화학', market: 'KR' },
+  { symbol: '012330', name: '현대모비스', market: 'KR' },
+  { symbol: '028260', name: '삼성물산', market: 'KR' },
+  { symbol: '086790', name: '하나금융지주', market: 'KR' },
+  { symbol: '138040', name: '메리츠금융지주', market: 'KR' },
+  { symbol: '247540', name: '에코프로비엠', market: 'KR' },
+  { symbol: '086520', name: '에코프로', market: 'KR' },
+  { symbol: '196170', name: '알테오젠', market: 'KR' },
+  { symbol: '028300', name: 'HLB', market: 'KR' },
+  { symbol: '003230', name: '삼양식품', market: 'KR' },
+  { symbol: '329180', name: 'HD현대중공업', market: 'KR' },
+  { symbol: '012450', name: '한화에어로스페이스', market: 'KR' },
+  { symbol: '079550', name: 'LIG넥스원', market: 'KR' },
+  { symbol: '025820', name: '이구산업', market: 'KR' },
+  { symbol: '001520', name: '동양', market: 'KR' },
+  { symbol: '025560', name: '미래산업', market: 'KR' },
+  { symbol: '004060', name: 'SG세계물산', market: 'KR' },
+  { symbol: '014160', name: '대영포장', market: 'KR' },
+  { symbol: '030200', name: 'KT', market: 'KR' },
+  { symbol: '017670', name: 'SK텔레콤', market: 'KR' },
+  { symbol: '032830', name: '삼성생명', market: 'KR' },
+  { symbol: '018260', name: '삼성에스디에스', market: 'KR' },
+  { symbol: '010140', name: '삼성중공업', market: 'KR' },
+  { symbol: '009540', name: 'HD한국조선해양', market: 'KR' },
+  { symbol: '010950', name: 'S-Oil', market: 'KR' },
+  { symbol: '036570', name: '엔씨소프트', market: 'KR' },
+  { symbol: '251270', name: '넷마블', market: 'KR' },
+  { symbol: '263750', name: '펄어비스', market: 'KR' },
+  { symbol: '293490', name: '카카오게임즈', market: 'KR' },
+  { symbol: '352820', name: '하이브', market: 'KR' },
+  { symbol: '069500', name: 'KODEX 200', market: 'KR' },
+  { symbol: '122630', name: 'KODEX 레버리지', market: 'KR' },
+  { symbol: '252670', name: 'KODEX 200선물인버스2X', market: 'KR' },
+  { symbol: '371460', name: 'TIGER 차이나전기차SOLACTIVE', market: 'KR' },
+  { symbol: '133690', name: 'TIGER 미국나스닥100', market: 'KR' },
+  { symbol: '360750', name: 'TIGER 미국S&P500', market: 'KR' }
+];
+
+let krxStocksCache: KrxStock[] = [...FALLBACK_KRX_STOCKS];
 
 async function fetchKrxStocks() {
   try {
-    console.log('[KRX Cache] Fetching master list from KIND...');
+    console.log('[KRX Cache] Background sync master list from KIND...');
     const response = await axios.get('https://kind.krx.co.kr/corpgeneral/corpList.do?method=download', {
-      timeout: 10000,
+      timeout: 4000,
       responseType: 'arraybuffer',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       }
     });
 
@@ -53,13 +105,19 @@ async function fetchKrxStocks() {
     }
 
     if (stocks.length > 0) {
+      FALLBACK_KRX_STOCKS.forEach(fb => {
+        if (!seenSymbols.has(fb.symbol)) {
+          stocks.push(fb);
+          seenSymbols.add(fb.symbol);
+        }
+      });
       krxStocksCache = stocks;
       console.log(`[KRX Cache] Successfully loaded ${krxStocksCache.length} stocks from KIND.`);
     } else {
-      console.error('[KRX Cache] Failed to parse stocks. Parsed count is 0.');
+      console.warn('[KRX Cache Notice] KIND returned 0 stocks. Retaining existing cache.');
     }
   } catch (error: any) {
-    console.error('[KRX Cache] Error fetching KRX stock list:', error.message);
+    console.warn(`[KRX Cache Notice] KIND sync skipped (${error.message}). Operating with local cache (${krxStocksCache.length} items).`);
   }
 }
 
@@ -645,10 +703,12 @@ async function startServer() {
         }
         return res.json([]);
       } else {
-        // KR Stock Search Strategy: Use our 100% reliable local high-speed KRX listings cache
+        // KR Stock Search Strategy: Use local high-speed KRX listings cache
         if (krxStocksCache.length === 0) {
-          console.log('[KRX Cache] Cache is empty on request. Performing emergency sync...');
-          await fetchKrxStocks();
+          krxStocksCache = [...FALLBACK_KRX_STOCKS];
+        }
+        if (krxStocksCache.length <= FALLBACK_KRX_STOCKS.length) {
+          fetchKrxStocks().catch(() => {});
         }
 
         const lowerKeyword = cleanKeyword.toLowerCase();
