@@ -1287,6 +1287,10 @@ export default function App() {
     const lastKR = localStorage.getItem('sleek_last_symbol_KR') || '073240';
     return lastMarket === 'US' ? lastUS : lastKR;
   });
+
+  // 🔄 스캘핑 종목 탭 8초 간격 자동 순환 상태
+  const [isAutoRotateTabs, setIsAutoRotateTabs] = useState<boolean>(true);
+
   const scalperTabsRef = React.useRef<ScalperTab[]>(scalperTabs);
   useEffect(() => {
     scalperTabsRef.current = scalperTabs;
@@ -1296,6 +1300,29 @@ export default function App() {
       console.error("Failed to persist scalperTabs", e);
     }
   }, [scalperTabs]);
+
+  // 🔄 8초 간격 종목 탭 자동 순환 (오른쪽 탭으로 연속 순환)
+  useEffect(() => {
+    if (!isAutoRotateTabs) return;
+
+    const rotateInterval = setInterval(() => {
+      const currentMarketTabs = scalperTabsRef.current.filter(tab => {
+        const isTabUS = /^[A-Z]/.test(tab.symbol);
+        return marketType === 'US' ? isTabUS : !isTabUS;
+      });
+
+      if (currentMarketTabs.length <= 1) return;
+
+      const currentIdx = currentMarketTabs.findIndex(t => t.id === activeTabId);
+      const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % currentMarketTabs.length : 0;
+      const nextTab = currentMarketTabs[nextIdx];
+      if (nextTab && nextTab.id !== activeTabId) {
+        handleSwitchTab(nextTab.id);
+      }
+    }, 8000);
+
+    return () => clearInterval(rotateInterval);
+  }, [isAutoRotateTabs, activeTabId, marketType]);
 
   const handleSwitchTab = (tabId: string) => {
     const targetTab = scalperTabsRef.current.find(t => t.id === tabId);
@@ -7434,6 +7461,20 @@ export default function App() {
                     {formatCurrency(gapBuyPrice && gapSellPrice ? (gapSellPrice - gapBuyPrice) : 0)}
                   </span>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => setIsAutoRotateTabs(prev => !prev)}
+                  className={cn(
+                    "flex items-center gap-1.5 px-2.5 py-1 rounded-xl border text-xs font-mono font-bold transition-all cursor-pointer shadow-inner",
+                    isAutoRotateTabs 
+                      ? "bg-purple-500/20 border-purple-500/40 text-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.2)]" 
+                      : "bg-black/40 border-white/5 text-gray-400 hover:text-white"
+                  )}
+                  title="스캘핑 종목 탭 8초 간격 자동 순환 ON/OFF"
+                >
+                  <RefreshCw className={cn("w-3.5 h-3.5 text-purple-400", isAutoRotateTabs && "animate-spin-slow")} />
+                  <span>8초 탭 순환 {isAutoRotateTabs ? "ON" : "OFF"}</span>
+                </button>
               </div>
             </div>
 
