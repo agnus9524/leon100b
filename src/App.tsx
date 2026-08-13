@@ -3308,7 +3308,9 @@ export default function App() {
       return;
     }
     const isKR = /^\d{6}$/.test(selectedStock.symbol);
-    const currentBalance = overrideBalance !== undefined ? overrideBalance : balance;
+    const availableCash = overrideBalance !== undefined 
+      ? overrideBalance 
+      : (isKR ? (orderableKrw > 0 ? orderableKrw : balance) : (orderableUsd > 0 ? orderableUsd * exchangeRate : balance));
 
     try {
       if (isKR) {
@@ -3326,22 +3328,30 @@ export default function App() {
           if (res.output.ord_psbl_cash && Number(res.output.ord_psbl_cash) > 0) {
             setOrderableKrw(Number(res.output.ord_psbl_cash));
           }
-          const nrcyStr = res.output.nrcy_buy_qty || res.output.nrcy_ord_psbl_qty;
-          const ordPsblStr = res.output.ord_psbl_qty || res.output.psbl_qty;
-          const maxQtyStr = res.output.max_ord_qty || res.output.tot_ord_psbl_qty || res.output.max_buy_qty;
 
-          let qty = 0;
-          if (nrcyStr !== undefined && nrcyStr !== null && nrcyStr !== '') {
-            qty = parseInt(nrcyStr, 10);
-          } else if (ordPsblStr !== undefined && ordPsblStr !== null && ordPsblStr !== '') {
-            qty = parseInt(ordPsblStr, 10);
-          } else if (maxQtyStr !== undefined && maxQtyStr !== null && maxQtyStr !== '') {
-            qty = parseInt(maxQtyStr, 10);
+          const candidateQtys = [
+            res.output.nrcy_buy_qty,
+            res.output.nrcy_ord_psbl_qty,
+            res.output.ord_psbl_qty,
+            res.output.psbl_qty,
+            res.output.max_ord_qty,
+            res.output.tot_ord_psbl_qty,
+            res.output.max_buy_qty,
+            res.output.max_ord_psbl_qty
+          ].map(v => (v !== undefined && v !== null && v !== '') ? parseInt(String(v), 10) : 0)
+           .filter(v => !isNaN(v) && v > 0);
+
+          let qty = candidateQtys.length > 0 ? Math.max(...candidateQtys) : 0;
+
+          const psblCash = res.output.ord_psbl_cash && Number(res.output.ord_psbl_cash) > 0 ? Number(res.output.ord_psbl_cash) : availableCash;
+          if (qty <= 0 && psblCash > 0 && selectedStock.price > 0) {
+            qty = Math.floor(psblCash / selectedStock.price);
           }
 
-          if (isNaN(qty) || qty < 0) qty = 0;
-          setKisBuyableQty(qty);
-          return;
+          if (qty > 0) {
+            setKisBuyableQty(qty);
+            return;
+          }
         }
       } else {
         // Overseas (US)
@@ -3353,40 +3363,49 @@ export default function App() {
         if (res && res.rt_cd === '0' && res.output) {
           const usdAmt = Number(res.output.frcr_ord_psbl_amt || res.output.ord_psbl_frcr_amt || res.output.ovrs_ord_psbl_amt || 0);
           if (usdAmt > 0) setOrderableUsd(usdAmt);
-          const buyableStr = res.output.nrcy_buy_qty || res.output.ord_psbl_qty || res.output.max_buy_qty;
-          let qty = 0;
-          if (buyableStr !== undefined && buyableStr !== null && buyableStr !== '') {
-            qty = parseInt(buyableStr, 10);
+
+          const candidateQtys = [
+            res.output.nrcy_buy_qty,
+            res.output.ord_psbl_qty,
+            res.output.max_buy_qty,
+            res.output.max_ord_qty
+          ].map(v => (v !== undefined && v !== null && v !== '') ? parseInt(String(v), 10) : 0)
+           .filter(v => !isNaN(v) && v > 0);
+
+          let qty = candidateQtys.length > 0 ? Math.max(...candidateQtys) : 0;
+
+          const usableUsd = usdAmt > 0 ? usdAmt * exchangeRate : availableCash;
+          if (qty <= 0 && usableUsd > 0 && selectedStock.price > 0) {
+            qty = Math.floor(usableUsd / (selectedStock.price * exchangeRate));
           }
-          
-          if (isNaN(qty) || qty < 0) qty = 0;
-          setKisBuyableQty(qty);
-          return;
+
+          if (qty > 0) {
+            setKisBuyableQty(qty);
+            return;
+          }
         }
       }
 
-      if (currentBalance > 0 && selectedStock.price > 0) {
+      if (availableCash > 0 && selectedStock.price > 0) {
         const priceInBalanceCurrency = isKR ? selectedStock.price : selectedStock.price * exchangeRate;
-        setKisBuyableQty(Math.max(0, Math.floor(currentBalance / priceInBalanceCurrency)));
+        setKisBuyableQty(Math.max(0, Math.floor(availableCash / priceInBalanceCurrency)));
       } else {
         setKisBuyableQty(0);
       }
     } catch (err) {
       console.warn("Failed to update KIS buyable quantity:", err);
-      // API 실패 시에도 실제 계좌 현금을 기준으로 계산하여 폴백
-      if (currentBalance > 0 && selectedStock.price > 0) {
+      if (availableCash > 0 && selectedStock.price > 0) {
         const priceInBalanceCurrency = isKR ? selectedStock.price : selectedStock.price * exchangeRate;
-        const fallbackQty = Math.floor(currentBalance / priceInBalanceCurrency);
-        setKisBuyableQty(fallbackQty);
+        setKisBuyableQty(Math.floor(availableCash / priceInBalanceCurrency));
       } else {
         setKisBuyableQty(null);
       }
     }
-  }, [kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, selectedStock, balance]);
+  }, [kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, selectedStock, balance, orderableKrw, orderableUsd, exchangeRate]);
 
   useEffect(() => {
     updateKisBuyableQty();
-  }, [selectedSymbol, balance, kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, updateKisBuyableQty]);
+  }, [selectedSymbol, balance, orderableKrw, orderableUsd, kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, updateKisBuyableQty]);
 
   const handleSyncKIS = async () => {
     if (!kisConfig.isConnected) return;
@@ -5361,55 +5380,98 @@ export default function App() {
                 const isKR = /^\d{6}$/.test(stock.symbol);
                 if (isKR) {
                     setBotStatus(`[KIS API] ${stock.symbol} 매수 가능 수량 조회 중...`);
+                    let parsedQty = 0;
                     const psblRes = await kisService.getDomesticBuyableAmount(stock.symbol, tradePrice.toString(), kisConfig.domesticOrderType || '00');
                     if (psblRes && psblRes.rt_cd === '0' && psblRes.output) {
-                        const nrcyStr = psblRes.output.nrcy_buy_qty || psblRes.output.nrcy_ord_psbl_qty;
-                        const ordPsblStr = psblRes.output.ord_psbl_qty || psblRes.output.psbl_qty;
-                        const maxQtyStr = psblRes.output.max_ord_qty || psblRes.output.tot_ord_psbl_qty || psblRes.output.max_buy_qty;
+                        const candidateQtys = [
+                          psblRes.output.nrcy_buy_qty,
+                          psblRes.output.nrcy_ord_psbl_qty,
+                          psblRes.output.ord_psbl_qty,
+                          psblRes.output.psbl_qty,
+                          psblRes.output.max_ord_qty,
+                          psblRes.output.tot_ord_psbl_qty,
+                          psblRes.output.max_buy_qty,
+                          psblRes.output.max_ord_psbl_qty
+                        ].map(v => (v !== undefined && v !== null && v !== '') ? parseInt(String(v), 10) : 0)
+                         .filter(v => !isNaN(v) && v > 0);
 
-                        let parsedQty = 0;
-                        if (nrcyStr !== undefined && nrcyStr !== null && nrcyStr !== '') {
-                          parsedQty = parseInt(nrcyStr, 10);
-                        } else if (ordPsblStr !== undefined && ordPsblStr !== null && ordPsblStr !== '') {
-                          parsedQty = parseInt(ordPsblStr, 10);
-                        } else if (maxQtyStr !== undefined && maxQtyStr !== null && maxQtyStr !== '') {
-                          parsedQty = parseInt(maxQtyStr, 10);
-                        }
+                        parsedQty = candidateQtys.length > 0 ? Math.max(...candidateQtys) : 0;
 
-                        if (isNaN(parsedQty) || parsedQty < 0) parsedQty = 0;
+                        const psblCash = psblRes.output.ord_psbl_cash && Number(psblRes.output.ord_psbl_cash) > 0 
+                          ? Number(psblRes.output.ord_psbl_cash) 
+                          : (orderableKrw > 0 ? orderableKrw : balance);
+                        if (parsedQty <= 0 && psblCash > 0 && tradePrice > 0) {
+                          parsedQty = Math.floor(psblCash / tradePrice);
+                        }
+                    } else {
+                        const availCash = orderableKrw > 0 ? orderableKrw : balance;
+                        if (availCash > 0 && tradePrice > 0) {
+                          parsedQty = Math.floor(availCash / tradePrice);
+                        }
+                    }
 
-                        if (parsedQty <= 0) {
-                            setBotStatus(`[매수 취소] 실제 매수 가능 수량 0주`);
-                            setScalperMessage("실제 주문 가능 수량 부족 (0주)으로 진입 건너뜀");
-                            addLog(stock.symbol, '매수', tradePrice, amount, `[주문취소] KIS 매수 가능 수량 부족 (0주)`);
-                            showNotification(`매수 스킵: 실제 계좌의 매수 가능 수량이 0주입니다.`, "error");
-                            return 0;
-                        }
-                        if (parsedQty < finalAmount) {
-                            setBotStatus(`[매수 진입 차단] 주문 가능 수량 부족 (요청: ${finalAmount}주 / 가능: ${parsedQty}주)`);
-                            setScalperMessage(`실제 주문 가능 수량 부족으로 진입 건너뜀 (가능: ${parsedQty}주)`);
-                            addLog(stock.symbol, '매수', tradePrice, amount, `[진입스킵] 실시간 주문 가능 금액/수량 초과 (요청: ${amount}주 / 가능: ${parsedQty}주)`);
-                            showNotification(`매수 진입 차단: 실시간 주문 가능 금액/수량을 초과하여 진입하지 않습니다. (요청: ${amount}주, 가능: ${parsedQty}주)`, "error");
-                            return 0;
-                        }
+                    const availCash = orderableKrw > 0 ? orderableKrw : balance;
+                    if (parsedQty <= 0 && availCash >= tradePrice * finalAmount) {
+                      parsedQty = finalAmount;
+                    }
+
+                    if (parsedQty <= 0) {
+                        setBotStatus(`[매수 취소] 실제 매수 가능 수량 0주`);
+                        setScalperMessage("실제 주문 가능 수량 부족 (0주)으로 진입 건너뜀");
+                        addLog(stock.symbol, '매수', tradePrice, amount, `[주문취소] KIS 매수 가능 수량 부족 (0주)`);
+                        showNotification(`매수 스킵: 실제 계좌의 매수 가능 수량이 0주입니다.`, "error");
+                        return 0;
+                    }
+                    if (parsedQty < finalAmount && availCash < tradePrice * finalAmount) {
+                        setBotStatus(`[매수 진입 차단] 주문 가능 수량 부족 (요청: ${finalAmount}주 / 가능: ${parsedQty}주)`);
+                        setScalperMessage(`실제 주문 가능 수량 부족으로 진입 건너뜀 (가능: ${parsedQty}주)`);
+                        addLog(stock.symbol, '매수', tradePrice, amount, `[진입스킵] 실시간 주문 가능 금액/수량 초과 (요청: ${amount}주 / 가능: ${parsedQty}주)`);
+                        showNotification(`매수 진입 차단: 실시간 주문 가능 금액/수량을 초과하여 진입하지 않습니다. (요청: ${amount}주, 가능: ${parsedQty}주)`, "error");
+                        return 0;
                     }
                 } else {
                     // Overseas buyable amount check
                     setBotStatus(`[KIS API] ${stock.symbol} 해외 매수 가능 수량 조회 중...`);
+                    let parsedQty = 0;
                     try {
                         const psblRes = await kisService.getOverseasBuyableAmount(stock.symbol, tradePrice.toString());
                         if (psblRes?.rt_cd === '0' && psblRes.output) {
-                            const psblQty = Number(psblRes.output.nrcy_buy_qty || psblRes.output.ord_psbl_qty || 0);
-                            if (psblQty <= 0) {
-                                setBotStatus(`[매수 취소] 실제 매수 가능 수량 0주`);
-                                showNotification(`해외 매수 스킵: 매수 가능 수량이 0주입니다.`, "error");
-                                return 0;
+                            const candidateQtys = [
+                              psblRes.output.nrcy_buy_qty,
+                              psblRes.output.ord_psbl_qty,
+                              psblRes.output.max_buy_qty,
+                              psblRes.output.max_ord_qty
+                            ].map(v => (v !== undefined && v !== null && v !== '') ? parseInt(String(v), 10) : 0)
+                             .filter(v => !isNaN(v) && v > 0);
+
+                            parsedQty = candidateQtys.length > 0 ? Math.max(...candidateQtys) : 0;
+
+                            const usdAmt = Number(psblRes.output.frcr_ord_psbl_amt || psblRes.output.ord_psbl_frcr_amt || psblRes.output.ovrs_ord_psbl_amt || 0);
+                            const availUsd = usdAmt > 0 ? usdAmt * exchangeRate : (orderableUsd > 0 ? orderableUsd * exchangeRate : balance);
+                            if (parsedQty <= 0 && availUsd > 0 && tradePrice > 0) {
+                              parsedQty = Math.floor(availUsd / (tradePrice * exchangeRate));
                             }
-                            if (psblQty < finalAmount) {
-                                setBotStatus(`[매수 진입 차단] 해외 주문 가능 수량 부족 (${psblQty}주)`);
-                                showNotification(`해외 매수 차단: 가능 수량(${psblQty}주)이 부족합니다.`, "error");
-                                return 0;
+                        } else {
+                            const availUsd = orderableUsd > 0 ? orderableUsd * exchangeRate : balance;
+                            if (availUsd > 0 && tradePrice > 0) {
+                              parsedQty = Math.floor(availUsd / (tradePrice * exchangeRate));
                             }
+                        }
+
+                        const availUsd = orderableUsd > 0 ? orderableUsd * exchangeRate : balance;
+                        if (parsedQty <= 0 && availUsd >= (tradePrice * exchangeRate * finalAmount)) {
+                          parsedQty = finalAmount;
+                        }
+
+                        if (parsedQty <= 0) {
+                            setBotStatus(`[매수 취소] 실제 매수 가능 수량 0주`);
+                            showNotification(`해외 매수 스킵: 매수 가능 수량이 0주입니다.`, "error");
+                            return 0;
+                        }
+                        if (parsedQty < finalAmount && availUsd < (tradePrice * exchangeRate * finalAmount)) {
+                            setBotStatus(`[매수 진입 차단] 해외 주문 가능 수량 부족 (${parsedQty}주)`);
+                            showNotification(`해외 매수 차단: 가능 수량(${parsedQty}주)이 부족합니다.`, "error");
+                            return 0;
                         }
                     } catch (e) {
                         console.warn("Overseas buyable check failed, proceeding anyway:", e);

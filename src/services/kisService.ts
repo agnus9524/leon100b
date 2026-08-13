@@ -544,12 +544,12 @@ class KISService {
       const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
       if (res.data.rt_cd && res.data.rt_cd !== '0') {
         console.warn(`[KIS Service] Domestic Buyable Amount Error: ${res.data.msg1} (${res.data.msg_cd})`);
-        return { rt_cd: '0', output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0' } };
+        return { rt_cd: res.data.rt_cd || '1', msg1: res.data.msg1 || 'Domestic buyable error', output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0' } };
       }
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Domestic Buyable Amount Exception safely caught:", error?.response?.data || error?.message);
-      return { rt_cd: '0', output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0' } };
+      return { rt_cd: '1', msg1: error?.message || 'Domestic buyable exception', output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0' } };
     }
   }
 
@@ -581,12 +581,12 @@ class KISService {
       const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
       if (res.data.rt_cd && res.data.rt_cd !== '0') {
         console.warn(`[KIS Service] Overseas Buyable Amount Error: ${res.data.msg1} (${res.data.msg_cd})`);
-        return { rt_cd: '0', output: { max_ord_psbl_qty: '0', ord_psbl_qty: '0' } };
+        return { rt_cd: res.data.rt_cd || '1', msg1: res.data.msg1 || 'Overseas buyable error', output: { max_ord_psbl_qty: '0', ord_psbl_qty: '0' } };
       }
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Overseas Buyable Amount Exception safely caught:", error?.response?.data || error?.message);
-      return { rt_cd: '0', output: { max_ord_psbl_qty: '0', ord_psbl_qty: '0' } };
+      return { rt_cd: '1', msg1: error?.message || 'Overseas buyable exception', output: { max_ord_psbl_qty: '0', ord_psbl_qty: '0' } };
     }
   }
 
