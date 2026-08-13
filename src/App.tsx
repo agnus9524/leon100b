@@ -1426,6 +1426,19 @@ export default function App() {
     }
   };
 
+  const handleToggleAllScalping = () => {
+    const isAnyActive = scalperTabs.some(t => t.isBotActive) || isGapBotActive;
+    const nextState = !isAnyActive;
+    setIsGapBotActive(nextState);
+    setScalperTabs(prev => prev.map(tab => ({ ...tab, isBotActive: nextState })));
+    showNotification(
+      nextState
+        ? "[전체 스캘퍼 실행] 추가된 모든 종목의 스캘퍼가 일괄 시작되었습니다."
+        : "[전체 스캘퍼 정지] 추가된 모든 종목의 스캘퍼가 일괄 정지되었습니다.",
+      nextState ? "success" : "info"
+    );
+  };
+
   const [pendingBuyOrders, setPendingBuyOrders] = useState<PendingBuyOrder[]>([]);
   const pendingBuyOrdersRef = React.useRef<PendingBuyOrder[]>([]);
   const [pendingSellOrders, setPendingSellOrders] = useState<PendingSellOrder[]>([]);
@@ -6553,13 +6566,6 @@ export default function App() {
                   </button>
                 )}
                 <button 
-                  onClick={() => setShowScalperGuide(true)}
-                  className="text-[10px] text-amber-400 hover:text-white flex items-center gap-1"
-                  title="스캘핑 매매 가이드"
-                >
-                  <BookOpen className="w-3 h-3" /> GUIDE
-                </button>
-                <button 
                   onClick={() => setShowKisModal(true)}
                   className={cn(
                     "flex items-center gap-2 font-black text-sm", 
@@ -6576,22 +6582,23 @@ export default function App() {
           </div>
           <div className="flex items-center gap-2">
             <button 
-              onClick={() => setShowScalperGuide(true)}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 transition-all text-[10px] font-bold"
-            >
-              <HelpCircle className="w-3 h-3" /> 매매 가이드
-            </button>
-            <button 
-              onClick={() => setIsGapBotActive(!isGapBotActive)}
+              onClick={handleToggleAllScalping}
               className={cn(
-                "flex items-center gap-2 px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-bold text-[10px] md:text-xs transition-all",
-                isGapBotActive 
-                  ? "bg-sleek-red/20 text-sleek-red border border-sleek-red/30 hover:bg-sleek-red hover:text-white" 
-                  : "bg-sleek-blue/20 text-sleek-blue border border-sleek-blue/30 hover:bg-sleek-blue hover:text-white"
+                "flex items-center gap-2 px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-bold text-[10px] md:text-xs transition-all shadow-sm",
+                (scalperTabs.some(t => t.isBotActive) || isGapBotActive)
+                  ? "bg-rose-500/20 text-rose-400 border border-rose-500/40 hover:bg-rose-500 hover:text-white" 
+                  : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500 hover:text-white"
               )}
+              title="현재 추가된 모든 종목의 스캘퍼를 일괄 시작/정지합니다"
             >
-              {isGapBotActive ? <Square className="w-2.5 h-2.5 fill-current" /> : <Play className="w-2.5 h-2.5 fill-current" />}
-              {isGapBotActive ? "정지" : "자동 스캘핑 시작"}
+              {(scalperTabs.some(t => t.isBotActive) || isGapBotActive) ? (
+                <Square className="w-2.5 h-2.5 fill-current" />
+              ) : (
+                <Play className="w-2.5 h-2.5 fill-current" />
+              )}
+              <span>
+                {(scalperTabs.some(t => t.isBotActive) || isGapBotActive) ? "전체 스캘퍼 정지" : "전체 스캘퍼 시작"}
+              </span>
             </button>
           </div>
         </div>
@@ -7296,6 +7303,7 @@ export default function App() {
                     }
                     setIsGapBotActive(!isGapBotActive);
                   }}
+                  title="현재 선택된 종목의 개별 스캘퍼 시작/정지"
                   className={cn(
                     "w-full h-full min-h-[90px] sm:min-h-[100px] py-3.5 px-3 rounded-2xl font-black text-base italic tracking-tighter uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-1.5 border",
                     isGapBotActive 
