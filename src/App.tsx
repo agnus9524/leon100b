@@ -6818,117 +6818,7 @@ export default function App() {
 
         {/* Center: Gap Trading Terminal */}
         <section className="bg-sleek-bg overflow-y-auto custom-scrollbar p-3 md:p-4 space-y-3">
-          {/* 1. Header Engine & Stock Status Banner */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
-            {/* Stock Quick Info Badge */}
-            <div className="bg-sleek-card border border-sleek-border p-3.5 rounded-2xl shadow-lg lg:col-span-4 flex items-center justify-between">
-              <div className="w-full">
-                <div className="flex items-center justify-between gap-2 mb-1.5 w-full">
-                  <span className="text-base font-black text-white text-left shrink-0">
-                    {selectedStock?.name || '종목 미선택'}
-                  </span>
-                  {selectedStock && (
-                    <div className="flex items-center justify-end gap-1.5 font-mono text-xs sm:text-sm text-right shrink-0">
-                      <span className="text-white font-black">{formatCurrency(selectedStock.price)}</span>
-                      <span className={cn(
-                        "font-bold",
-                        (selectedStock.change || 0) >= 0 ? "text-rose-400" : "text-sky-400"
-                      )}>
-                        {(selectedStock.change || 0) >= 0 ? '+' : ''}{formatCurrency(selectedStock.change || 0)}
-                      </span>
-                      <span className={cn(
-                        "font-bold",
-                        (selectedStock.change || 0) >= 0 ? "text-rose-400" : "text-sky-400"
-                      )}>
-                        ({(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%)
-                      </span>
-                    </div>
-                  )}
-                </div>
-                <div className="flex items-center justify-between text-xs font-mono pt-1.5 border-t border-white/5">
-                  <span className="text-sleek-text-secondary">현재 보유: <strong className="text-white font-bold">{holdings[selectedStock?.symbol || ''] || 0}주</strong></span>
-                  <span className="text-sleek-text-secondary">매수 가능: <strong className="text-sleek-blue font-bold">
-                    {kisConfig.isConnected && kisConfig.isRealOrderEnabled && kisBuyableQty !== null 
-                      ? `${kisBuyableQty.toLocaleString()}주 (실계좌)` 
-                      : `${Math.floor(balance / (selectedStock && /^[A-Z]/.test(selectedStock.symbol) ? selectedStock.price * exchangeRate : (selectedStock?.price || 1))).toLocaleString()}주 (로컬)`}
-                  </strong></span>
-                </div>
-              </div>
-            </div>
-
-            {/* Scalper Engine Status (8 Columns) */}
-            <div className="bg-sleek-card border border-sleek-blue/40 p-3.5 rounded-2xl shadow-lg lg:col-span-8 flex flex-col justify-between">
-              <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-2 flex-wrap min-w-0">
-                  <Zap className="w-4 h-4 text-sleek-blue animate-pulse shrink-0" />
-                  <span className="text-xs font-black text-sleek-text-secondary uppercase tracking-widest shrink-0">스캘퍼 엔진 상태</span>
-                  <span className="text-xs font-bold text-white font-mono shrink-0">[{selectedStock?.name || '종목 미선택'} ({selectedStock?.symbol || '-'})]</span>
-                  
-                  {/* 수동 지정가 매도 버튼 */}
-                  <button
-                    onClick={() => {
-                      if (selectedStock) {
-                        const held = holdings[selectedStock.symbol] || 1;
-                        setManualSellPrice(selectedStock.price || 0);
-                        setManualSellQty(held > 0 ? held : 1);
-                      }
-                      setManualSellModalOpen(true);
-                    }}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500 hover:text-white transition-all shadow-sm shrink-0"
-                  >
-                    <CircleDollarSign className="w-3.5 h-3.5" />
-                    <span>수동 지정가 매도</span>
-                  </button>
-
-                  {/* AI 갭하락 예상보고서 버튼 */}
-                  <button
-                    onClick={() => {
-                      if (selectedStock) {
-                        const held = holdings[selectedStock.symbol] || 0;
-                        const avg = avgPrices[selectedStock.symbol] || selectedStock.price;
-                        const pnlRatio = avg > 0 ? (selectedStock.price - avg) / avg : 0;
-                        triggerGapDownReport(selectedStock, held, avg, selectedStock.price, pnlRatio);
-                      }
-                    }}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500 hover:text-white transition-all shadow-sm shrink-0 cursor-pointer"
-                    title="전일 보유 주식 갭하락 대응 AI 호가/분위기 예상보고서 생성 및 조회"
-                  >
-                    <BrainCircuit className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                    <span>AI 갭하락 보고서</span>
-                  </button>
-
-                  <button
-                    onClick={cancelAllOrders}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-white/5 text-sleek-text-secondary border border-white/10 hover:bg-white/10 hover:text-white transition-all shadow-sm shrink-0"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                    <span>주문 취소</span>
-                  </button>
-                </div>
-
-                <div className={cn(
-                  "px-2.5 py-0.5 rounded-full text-xs font-black italic tracking-wider flex items-center gap-1 border shrink-0",
-                  isGapBotActive 
-                    ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 animate-pulse" 
-                    : "bg-white/5 text-sleek-text-secondary border-white/10"
-                )}>
-                  <span className={cn("w-1.5 h-1.5 rounded-full", isGapBotActive ? "bg-emerald-400" : "bg-slate-500")} />
-                  {isGapBotActive ? "RUNNING" : "STOPPED"}
-                </div>
-              </div>
-
-              <div className="pt-2 mt-1 border-t border-white/10 text-xs font-mono min-h-[2.5rem] h-[2.5rem] flex items-center overflow-hidden shrink-0">
-                <div className="flex items-center gap-1.5 w-full my-auto overflow-hidden">
-                  <span className="text-[11px] font-black text-sleek-text-secondary uppercase shrink-0">상태 메시지:</span>
-                  <span className="font-bold text-sleek-blue text-xs leading-snug truncate">
-                    {displayScalperMessage}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* 2. AI SCALPING CONFIG (Moved Up for Instant Parameter Access) */}
+          {/* 1. AI SCALPING CONFIG (Moved to Top) */}
           <div id="ai-scalping-config-panel" className="bg-sleek-card border border-sleek-border p-3.5 sm:p-4 rounded-3xl shadow-xl space-y-3">
             <div className="flex flex-wrap items-center justify-between pb-2 border-b border-white/5 gap-2">
               <div className="flex flex-col">
@@ -7105,7 +6995,7 @@ export default function App() {
                     : scalperStrategyMode === 'PULLBACK' 
                     ? "📉 눌림목 매매 → [매수1~2호가] 지지 대기 타점" 
                     : scalperStrategyMode === 'VWAP_SUPPORT' 
-                    ? "📊 VWAP 지지 → [VWAP선 / 매수1호가] 반등 받쳐두기" 
+                    ? "📊 VWAP 지지 → [VWAP선 / 매수1호가] 받쳐두기" 
                     : scalperStrategyMode === 'VOLUME_PROFILE_CVD' 
                     ? "🌊 VP/CVD 유동성 → [POC / 라운드피겨 지지선] 받쳐두기" 
                     : "🤖 AI 종합 → 포착 시그널(돌파=현재가, 눌림목=매수1~2호가) 자동 분기 체결"}
@@ -7425,6 +7315,116 @@ export default function App() {
                     </>
                   )}
                 </button>
+              </div>
+            </div>
+          </div>
+
+          {/* 2. Header Engine & Stock Status Banner (Moved Below AI SCALPING CONFIG) */}
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+            {/* Stock Quick Info Badge */}
+            <div className="bg-sleek-card border border-sleek-border p-3.5 rounded-2xl shadow-lg lg:col-span-4 flex items-center justify-between">
+              <div className="w-full">
+                <div className="flex items-center justify-between gap-2 mb-1.5 w-full">
+                  <span className="text-base font-black text-white text-left shrink-0">
+                    {selectedStock?.name || '종목 미선택'}
+                  </span>
+                  {selectedStock && (
+                    <div className="flex items-center justify-end gap-1.5 font-mono text-xs sm:text-sm text-right shrink-0">
+                      <span className="text-white font-black">{formatCurrency(selectedStock.price)}</span>
+                      <span className={cn(
+                        "font-bold",
+                        (selectedStock.change || 0) >= 0 ? "text-rose-400" : "text-sky-400"
+                      )}>
+                        {(selectedStock.change || 0) >= 0 ? '+' : ''}{formatCurrency(selectedStock.change || 0)}
+                      </span>
+                      <span className={cn(
+                        "font-bold",
+                        (selectedStock.change || 0) >= 0 ? "text-rose-400" : "text-sky-400"
+                      )}>
+                        ({(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%)
+                      </span>
+                    </div>
+                  )}
+                </div>
+                <div className="flex items-center justify-between text-xs font-mono pt-1.5 border-t border-white/5">
+                  <span className="text-sleek-text-secondary">현재 보유: <strong className="text-white font-bold">{holdings[selectedStock?.symbol || ''] || 0}주</strong></span>
+                  <span className="text-sleek-text-secondary">매수 가능: <strong className="text-sleek-blue font-bold">
+                    {kisConfig.isConnected && kisConfig.isRealOrderEnabled && kisBuyableQty !== null 
+                      ? `${kisBuyableQty.toLocaleString()}주 (실계좌)` 
+                      : `${Math.floor(balance / (selectedStock && /^[A-Z]/.test(selectedStock.symbol) ? selectedStock.price * exchangeRate : (selectedStock?.price || 1))).toLocaleString()}주 (로컬)`}
+                  </strong></span>
+                </div>
+              </div>
+            </div>
+
+            {/* Scalper Engine Status (8 Columns) */}
+            <div className="bg-sleek-card border border-sleek-blue/40 p-3.5 rounded-2xl shadow-lg lg:col-span-8 flex flex-col justify-between">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                  <Zap className="w-4 h-4 text-sleek-blue animate-pulse shrink-0" />
+                  <span className="text-xs font-black text-sleek-text-secondary uppercase tracking-widest shrink-0">스캘퍼 엔진 상태</span>
+                  <span className="text-xs font-bold text-white font-mono shrink-0">[{selectedStock?.name || '종목 미선택'} ({selectedStock?.symbol || '-'})]</span>
+                  
+                  {/* 수동 지정가 매도 버튼 */}
+                  <button
+                    onClick={() => {
+                      if (selectedStock) {
+                        const held = holdings[selectedStock.symbol] || 1;
+                        setManualSellPrice(selectedStock.price || 0);
+                        setManualSellQty(held > 0 ? held : 1);
+                      }
+                      setManualSellModalOpen(true);
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500 hover:text-white transition-all shadow-sm shrink-0"
+                  >
+                    <CircleDollarSign className="w-3.5 h-3.5" />
+                    <span>수동 지정가 매도</span>
+                  </button>
+
+                  {/* AI 갭하락 예상보고서 버튼 */}
+                  <button
+                    onClick={() => {
+                      if (selectedStock) {
+                        const held = holdings[selectedStock.symbol] || 0;
+                        const avg = avgPrices[selectedStock.symbol] || selectedStock.price;
+                        const pnlRatio = avg > 0 ? (selectedStock.price - avg) / avg : 0;
+                        triggerGapDownReport(selectedStock, held, avg, selectedStock.price, pnlRatio);
+                      }
+                    }}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-amber-500/20 text-amber-300 border border-amber-500/30 hover:bg-amber-500 hover:text-white transition-all shadow-sm shrink-0 cursor-pointer"
+                    title="전일 보유 주식 갭하락 대응 AI 호가/분위기 예상보고서 생성 및 조회"
+                  >
+                    <BrainCircuit className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                    <span>AI 갭하락 보고서</span>
+                  </button>
+
+                  <button
+                    onClick={cancelAllOrders}
+                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-white/5 text-sleek-text-secondary border border-white/10 hover:bg-white/10 hover:text-white transition-all shadow-sm shrink-0"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>주문 취소</span>
+                  </button>
+                </div>
+
+                <div className={cn(
+                  "px-2.5 py-0.5 rounded-full text-xs font-black italic tracking-wider flex items-center gap-1 border shrink-0",
+                  isGapBotActive 
+                    ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 animate-pulse" 
+                    : "bg-white/5 text-sleek-text-secondary border-white/10"
+                )}>
+                  <span className={cn("w-1.5 h-1.5 rounded-full", isGapBotActive ? "bg-emerald-400" : "bg-slate-500")} />
+                  {isGapBotActive ? "RUNNING" : "STOPPED"}
+                </div>
+              </div>
+
+              <div className="pt-2 mt-1 border-t border-white/10 text-xs font-mono min-h-[2.5rem] h-[2.5rem] flex items-center overflow-hidden shrink-0">
+                <div className="flex items-center gap-1.5 w-full my-auto overflow-hidden">
+                  <span className="text-[11px] font-black text-sleek-text-secondary uppercase shrink-0">상태 메시지:</span>
+                  <span className="font-bold text-sleek-blue text-xs leading-snug truncate">
+                    {displayScalperMessage}
+                  </span>
+                </div>
               </div>
             </div>
           </div>
