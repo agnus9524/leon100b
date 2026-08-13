@@ -2033,8 +2033,39 @@ export default function App() {
         setKisTotalRealizedPnL(null);
       }
 
-      // 2. Simulation Mode Fallback ONLY when KIS is NOT connected or returns no trades
+      // 2. Local Trade Log & Simulation Mode Fallback when KIS returns no closed trades
       if (!kisConfig.isConnected || (stockList.length === 0 && dailyList.length === 0)) {
+        // Try extracting session sell logs first
+        const allLogs = tradeLogsRef.current || [];
+        const sellLogs = allLogs.filter(log => log.type === 'SELL' || log.type === '매도' || (log.reason && (log.reason.includes('익절') || log.reason.includes('매도'))));
+        
+        if (stockList.length === 0 && sellLogs.length > 0) {
+          const grouped: Record<string, { pdno: string; prdt_name: string; sll_qty: number; pchs_amt: number; sll_amt: number; rlzt_pnl: number }> = {};
+          sellLogs.forEach(log => {
+            const sym = log.symbol || '005930';
+            const name = log.name || stocksRef.current.find(s => s.symbol === sym)?.name || sym;
+            const qty = log.amount || 1;
+            const sellAmt = log.price * qty;
+            const pnlMatch = log.reason?.match(/([+-]?\d+(?:\.\d+)?)\s*%/);
+            const pnlPct = pnlMatch ? parseFloat(pnlMatch[1]) : 1.0;
+            const buyAmt = Math.round(sellAmt / (1 + pnlPct / 100));
+            const pnl = sellAmt - buyAmt;
+
+            if (!grouped[sym]) {
+              grouped[sym] = { pdno: sym, prdt_name: name, sll_qty: 0, pchs_amt: 0, sll_amt: 0, rlzt_pnl: 0 };
+            }
+            grouped[sym].sll_qty += qty;
+            grouped[sym].pchs_amt += buyAmt;
+            grouped[sym].sll_amt += sellAmt;
+            grouped[sym].rlzt_pnl += pnl;
+          });
+
+          stockList = Object.values(grouped).map(item => ({
+            ...item,
+            erng_rt: item.pchs_amt > 0 ? Number(((item.rlzt_pnl / item.pchs_amt) * 100).toFixed(2)) : 0
+          }));
+        }
+
         if (stockList.length === 0) {
           const initialStocks = stocksRef.current.length > 0 ? stocksRef.current : INITIAL_STOCKS_KR;
           const krStocks = initialStocks.filter(s => s.market === 'KR' || /^\d+$/.test(s.symbol));
@@ -9539,7 +9570,13 @@ export default function App() {
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 font-mono">
                       {pnlDataStock
-                        .filter(item => !pnlFilterQuery || item.prdt_name.includes(pnlFilterQuery) || item.pdno.includes(pnlFilterQuery))
+                        .filter(item => {
+                          if (!pnlFilterQuery) return true;
+                          const q = pnlFilterQuery.toLowerCase();
+                          const name = String(item?.prdt_name || item?.hts_kor_isnm || '').toLowerCase();
+                          const code = String(item?.pdno || item?.stck_shrn_iscd || '').toLowerCase();
+                          return name.includes(q) || code.includes(q);
+                        })
                         .length === 0 ? (
                         <tr>
                           <td colSpan={6} className="p-8 text-center text-slate-400 font-sans">
@@ -9549,7 +9586,13 @@ export default function App() {
                         </tr>
                       ) : (
                         pnlDataStock
-                          .filter(item => !pnlFilterQuery || item.prdt_name.includes(pnlFilterQuery) || item.pdno.includes(pnlFilterQuery))
+                          .filter(item => {
+                            if (!pnlFilterQuery) return true;
+                            const q = pnlFilterQuery.toLowerCase();
+                            const name = String(item?.prdt_name || item?.hts_kor_isnm || '').toLowerCase();
+                            const code = String(item?.pdno || item?.stck_shrn_iscd || '').toLowerCase();
+                            return name.includes(q) || code.includes(q);
+                          })
                           .map((item, idx) => (
                             <tr key={idx} className="hover:bg-slate-800/40 transition-colors">
                               <td className="p-3 font-sans">
