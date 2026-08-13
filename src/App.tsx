@@ -1154,6 +1154,7 @@ export default function App() {
   const [scalperMode, setScalperMode] = useState<'NORMAL' | 'TURBO'>('NORMAL');
   const [isGapBotActive, setIsGapBotActive] = useState<boolean>(false);
   const [kisBuyableQty, setKisBuyableQty] = useState<number | null>(null);
+  const buyableReqSeqRef = React.useRef<number>(0);
   const [gapTradingProfit, setGapTradingProfit] = useState<number>(0);
   const [gapTradeCount, setGapTradeCount] = useState<number>(0);
   const [lastTradeType, setLastTradeType] = useState<'BUY' | 'SELL' | null>(null);
@@ -1771,6 +1772,20 @@ export default function App() {
     const pct = ((selectedStock.price - gapBuyPrice) / (gapSellPrice - gapBuyPrice)) * 100;
     return Math.min(100, Math.max(0, pct));
   }, [gapBuyPrice, gapSellPrice, selectedStock?.price]);
+
+  const displayBuyableQty = useMemo(() => {
+    if (!selectedStock || selectedStock.price <= 0) return 0;
+    const isUS = /^[A-Za-z]/.test(selectedStock.symbol) || selectedStock.market === 'US';
+    const stockPriceInKRW = isUS ? selectedStock.price * exchangeRate : selectedStock.price;
+
+    if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
+      if (kisBuyableQty !== null && kisBuyableQty > 0) return kisBuyableQty;
+      const realCash = isUS ? (orderableUsd > 0 ? orderableUsd * exchangeRate : balance) : (orderableKrw > 0 ? orderableKrw : balance);
+      return Math.floor(realCash / (stockPriceInKRW || 1));
+    } else {
+      return Math.floor(balance / (stockPriceInKRW || 1));
+    }
+  }, [selectedStock, kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisBuyableQty, orderableKrw, orderableUsd, balance, exchangeRate]);
   const totalValue = useMemo(() => {
     // Total Asset Valuation = Cash Balance + Current Market Value of Stock Holdings + Pending Order Reserves
     let stockValue = 0;
@@ -3307,7 +3322,10 @@ export default function App() {
       setKisBuyableQty(null);
       return;
     }
-    const isKR = /^\d{6}$/.test(selectedStock.symbol);
+    const currentSeq = ++buyableReqSeqRef.current;
+    const targetSymbol = selectedStock.symbol;
+    const isKR = /^\d{6}$/.test(targetSymbol);
+    const stockPrice = selectedStock.price;
     const availableCash = overrideBalance !== undefined 
       ? overrideBalance 
       : (isKR ? (orderableKrw > 0 ? orderableKrw : balance) : (orderableUsd > 0 ? orderableUsd * exchangeRate : balance));
@@ -3315,18 +3333,20 @@ export default function App() {
     try {
       if (isKR) {
         const ordDvsn = kisConfig.domesticOrderType || '00';
-        const tradePrice = selectedStock.price;
-        const queryPrice = ordDvsn === '00' ? tradePrice.toString() : '0';
+        const queryPrice = ordDvsn === '00' ? stockPrice.toString() : '0';
 
         const res = await kisService.getDomesticBuyableAmount(
-          selectedStock.symbol,
+          targetSymbol,
           queryPrice,
           ordDvsn
         );
 
+        if (buyableReqSeqRef.current !== currentSeq) return;
+
         if (res && res.rt_cd === '0' && res.output) {
           if (res.output.ord_psbl_cash && Number(res.output.ord_psbl_cash) > 0) {
-            setOrderableKrw(Number(res.output.ord_psbl_cash));
+            const cashVal = Number(res.output.ord_psbl_cash);
+            setOrderableKrw(prev => prev === cashVal ? prev : cashVal);
           }
 
           const candidateQtys = [
@@ -3344,8 +3364,8 @@ export default function App() {
           let qty = candidateQtys.length > 0 ? Math.max(...candidateQtys) : 0;
 
           const psblCash = res.output.ord_psbl_cash && Number(res.output.ord_psbl_cash) > 0 ? Number(res.output.ord_psbl_cash) : availableCash;
-          if (qty <= 0 && psblCash > 0 && selectedStock.price > 0) {
-            qty = Math.floor(psblCash / selectedStock.price);
+          if (qty <= 0 && psblCash > 0 && stockPrice > 0) {
+            qty = Math.floor(psblCash / stockPrice);
           }
 
           if (qty > 0) {
@@ -3356,13 +3376,17 @@ export default function App() {
       } else {
         // Overseas (US)
         const res = await kisService.getOverseasBuyableAmount(
-          selectedStock.symbol,
-          selectedStock.price.toString()
+          targetSymbol,
+          stockPrice.toString()
         );
+
+        if (buyableReqSeqRef.current !== currentSeq) return;
 
         if (res && res.rt_cd === '0' && res.output) {
           const usdAmt = Number(res.output.frcr_ord_psbl_amt || res.output.ord_psbl_frcr_amt || res.output.ovrs_ord_psbl_amt || 0);
-          if (usdAmt > 0) setOrderableUsd(usdAmt);
+          if (usdAmt > 0) {
+            setOrderableUsd(prev => prev === usdAmt ? prev : usdAmt);
+          }
 
           const candidateQtys = [
             res.output.nrcy_buy_qty,
@@ -3375,8 +3399,8 @@ export default function App() {
           let qty = candidateQtys.length > 0 ? Math.max(...candidateQtys) : 0;
 
           const usableUsd = usdAmt > 0 ? usdAmt * exchangeRate : availableCash;
-          if (qty <= 0 && usableUsd > 0 && selectedStock.price > 0) {
-            qty = Math.floor(usableUsd / (selectedStock.price * exchangeRate));
+          if (qty <= 0 && usableUsd > 0 && stockPrice > 0) {
+            qty = Math.floor(usableUsd / (stockPrice * exchangeRate));
           }
 
           if (qty > 0) {
@@ -3386,26 +3410,28 @@ export default function App() {
         }
       }
 
-      if (availableCash > 0 && selectedStock.price > 0) {
-        const priceInBalanceCurrency = isKR ? selectedStock.price : selectedStock.price * exchangeRate;
+      if (buyableReqSeqRef.current !== currentSeq) return;
+      if (availableCash > 0 && stockPrice > 0) {
+        const priceInBalanceCurrency = isKR ? stockPrice : stockPrice * exchangeRate;
         setKisBuyableQty(Math.max(0, Math.floor(availableCash / priceInBalanceCurrency)));
       } else {
         setKisBuyableQty(0);
       }
     } catch (err) {
+      if (buyableReqSeqRef.current !== currentSeq) return;
       console.warn("Failed to update KIS buyable quantity:", err);
-      if (availableCash > 0 && selectedStock.price > 0) {
-        const priceInBalanceCurrency = isKR ? selectedStock.price : selectedStock.price * exchangeRate;
+      if (availableCash > 0 && stockPrice > 0) {
+        const priceInBalanceCurrency = isKR ? stockPrice : stockPrice * exchangeRate;
         setKisBuyableQty(Math.floor(availableCash / priceInBalanceCurrency));
       } else {
         setKisBuyableQty(null);
       }
     }
-  }, [kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, selectedStock, balance, orderableKrw, orderableUsd, exchangeRate]);
+  }, [kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, selectedStock?.symbol, balance, orderableKrw, orderableUsd, exchangeRate]);
 
   useEffect(() => {
     updateKisBuyableQty();
-  }, [selectedSymbol, balance, orderableKrw, orderableUsd, kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, updateKisBuyableQty]);
+  }, [selectedSymbol, kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, updateKisBuyableQty]);
 
   const handleSyncKIS = async () => {
     if (!kisConfig.isConnected) return;
@@ -7509,9 +7535,7 @@ export default function App() {
                 <div className="flex items-center justify-between text-xs font-mono pt-1.5 border-t border-white/5">
                   <span className="text-sleek-text-secondary">현재 보유: <strong className="text-white font-bold">{holdings[selectedStock?.symbol || ''] || 0}주</strong></span>
                   <span className="text-sleek-text-secondary">매수 가능: <strong className="text-sleek-blue font-bold">
-                    {kisConfig.isConnected && kisConfig.isRealOrderEnabled && kisBuyableQty !== null 
-                      ? `${kisBuyableQty.toLocaleString()}주 (실계좌)` 
-                      : `${Math.floor(balance / (selectedStock && /^[A-Z]/.test(selectedStock.symbol) ? selectedStock.price * exchangeRate : (selectedStock?.price || 1))).toLocaleString()}주 (로컬)`}
+                    {`${displayBuyableQty.toLocaleString()}주 ${kisConfig.isConnected && kisConfig.isRealOrderEnabled ? '(실계좌)' : '(로컬)'}`}
                   </strong></span>
                 </div>
               </div>
