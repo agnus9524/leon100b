@@ -5333,20 +5333,10 @@ export default function App() {
           }
           const dropFromPeak = (currentHigh - currentPrice) / currentHigh;
 
-          let effectiveTargetRatio = scalpingTargetProfit / 100;
-          let isAiMaxYieldActive = scalperStrategyMode === 'AI_MAX_YIELD';
+          const effectiveTargetRatio = scalpingTargetProfit / 100;
+          const isAiMaxYieldActive = scalperStrategyMode === 'AI_MAX_YIELD';
 
-          if (isAiMaxYieldActive) {
-            if (rsi >= 60 && currentPrice >= sma5 && momentumPositive) {
-              effectiveTargetRatio = Math.max(scalpingTargetProfit / 100, 0.008);
-            } else if (rsi >= 45 && rsi < 60) {
-              effectiveTargetRatio = Math.max(scalpingTargetProfit / 100, 0.004);
-            } else {
-              effectiveTargetRatio = Math.max(0.0025, scalpingTargetProfit / 100);
-            }
-          }
-
-          const microThreshold = isAiMaxYieldActive ? effectiveTargetRatio : Math.max(0.001, scalpingTargetProfit / 100);
+          const microThreshold = Math.max(0.001, effectiveTargetRatio);
           const isMicroTrailingStop = overallProfitRatio >= microThreshold && dropFromPeak >= 0.0008;
           const isStandardTrailing = overallProfitRatio > 0.002 && dropFromPeak > 0.003;
           const isTrailingStop = isMicroTrailingStop || isStandardTrailing;
@@ -7080,7 +7070,7 @@ export default function App() {
                       ? "bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white border-amber-300 shadow-[0_0_18px_rgba(245,158,11,0.7)] animate-pulse"
                       : "bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border-amber-500/30"
                   )}
-                  title="고정된 수치 대신 AI가 전략 감시 센서와 모멘텀을 기반으로 진입 수량, 호가 타점, 익절 목표(+0.8%~+1.5%)를 자율 동적 조절하는 최고수익 전용 모드"
+                  title="AI가 전략 감시 센서와 모멘텀을 기반으로 진입 수량과 호가 타점을 자율 조절하고, 설정된 목표수익률에 맞춰 정확히 익절 매도하는 최고수익 전용 모드"
                 >
                   <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-bounce" />
                   <span>⚡ 최고수익 AI★</span>
@@ -7200,7 +7190,7 @@ export default function App() {
                 <span>전략별 맞춤 진입 타점:</span>
                 <span className="text-white font-mono">
                   {scalperStrategyMode === 'AI_MAX_YIELD'
-                    ? "⚡ 최고수익 AI → [센서 강도 연동] 수량 가변 + 타점 자율결정 + 목표가 동적 확장(+0.8%~+1.5%) & 최고점 추적 스탑"
+                    ? "⚡ 최고수익 AI → [센서 강도 연동] 수량 가변 + 타점 자율결정 + 설정 목표수익률 매도 & 최고점 추적 스탑"
                     : scalperStrategyMode === 'BREAKOUT' 
                     ? "🚀 돌파 매매 → [매도1호가 / 현재가] 즉시 체결 타점" 
                     : scalperStrategyMode === 'PULLBACK' 
