@@ -193,7 +193,7 @@ class KISService {
   public async orderOverseas(symbol: string, side: 'BUY' | 'SELL', price: string, qty: string) {
     if (!this.config) throw new Error("KIS Config not initialized");
     
-    try {
+    return this.queueRequest(async () => {
       const token = await this.getAccessToken();
       const endpoint = '/uapi/overseas-stock/v1/trading/order';
       
@@ -227,13 +227,13 @@ class KISService {
 
       const res = await axios.post(`${this.baseUrl}${endpoint}`, body, { headers });
       if (res.data.rt_cd && res.data.rt_cd !== '0') {
+        if (res.data.msg_cd === 'EGW00201' || res.data.msg1?.includes('초당 거래건수')) {
+          throw new Error(`[429] ${res.data.msg1}`);
+        }
         throw new Error(`해외 주문 실패: ${res.data.msg1} (${res.data.msg_cd})`);
       }
       return res.data;
-    } catch (error: any) {
-      console.error("KIS Overseas Order Exception:", error.response?.data || error.message);
-      throw error;
-    }
+    });
   }
 
   public async getOverseasPrice(symbol: string, excd?: string) {
@@ -514,7 +514,9 @@ class KISService {
 
   public async getDomesticBuyableAmount(symbol: string, price: string = '0', ordDvsn: string = '01') {
     if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0' } };
+    if (!symbol || !/^\d{6}$/.test(symbol)) return { rt_cd: '0', output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0' } };
     try {
+      await this.throttleRequest();
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/inquire-psbl-order';
       
@@ -591,8 +593,10 @@ class KISService {
   }
 
   public async getDomesticSellableQuantity(symbol: string) {
-    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: { ord_psbl_qty: '0' } };
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: { ord_psbl_qty: '0', nrc_psbl_qty: '0' } };
+    if (!symbol || !/^\d{6}$/.test(symbol)) return { rt_cd: '0', output: { ord_psbl_qty: '0', nrc_psbl_qty: '0' } };
     try {
+      await this.throttleRequest();
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/inquire-psbl-sell';
       
@@ -788,7 +792,7 @@ class KISService {
 
   public async orderDomestic(symbol: string, side: 'BUY' | 'SELL', price: string, qty: string, ordDvsn: string = '00') {
     if (!this.config) throw new Error("KIS Config not initialized");
-    try {
+    return this.queueRequest(async () => {
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/order-cash';
       
@@ -826,13 +830,13 @@ class KISService {
 
       const res = await axios.post(`${this.baseUrl}${endpoint}`, body, { headers });
       if (res.data.rt_cd && res.data.rt_cd !== '0') {
+        if (res.data.msg_cd === 'EGW00201' || res.data.msg1?.includes('초당 거래건수')) {
+          throw new Error(`[429] ${res.data.msg1}`);
+        }
         throw new Error(`국내 주문 실패: ${res.data.msg1} (${res.data.msg_cd})`);
       }
       return res.data;
-    } catch (error: any) {
-      console.error("KIS Domestic Order Exception:", error.response?.data || error.message);
-      throw error;
-    }
+    });
   }
 
   public async cancelDomesticOrder(orgNo: string, ordNo: string, qty: string) {
@@ -968,10 +972,63 @@ class KISService {
   }
 
   private lastRequestTime = 0;
-  private minRequestInterval = 500; // Minimum 500ms interval between API calls to prevent Rate Limit (초당 거래건수 초과) and 500 errors
+  private minRequestInterval = 500; // Minimum 500ms interval between API calls to prevent Rate Limit (EGW00201 / 429)
+  private requestQueueChain: Promise<any> = Promise.resolve();
+
+  public async queueRequest<T>(fn: () => Promise<T>): Promise<T> {
+    const nextInQueue = this.requestQueueChain.then(async () => {
+      const now = Date.now();
+      const timeSinceLast = now - this.lastRequestTime;
+      if (timeSinceLast < this.minRequestInterval) {
+        await new Promise(resolve => setTimeout(resolve, this.minRequestInterval - timeSinceLast));
+      }
+      this.lastRequestTime = Date.now();
+      return await this.executeWithBackoff(fn);
+    });
+
+    this.requestQueueChain = nextInQueue.catch(() => {});
+    return nextInQueue;
+  }
+
+  private async executeWithBackoff<T>(fn: () => Promise<T>, maxRetries = 4): Promise<T> {
+    let attempt = 0;
+    while (attempt < maxRetries) {
+      attempt++;
+      try {
+        return await fn();
+      } catch (error: any) {
+        const status = error?.response?.status;
+        const dataStr = typeof error?.response?.data === 'object' ? JSON.stringify(error?.response?.data) : String(error?.response?.data || error?.message || '');
+        
+        const isRateLimit = status === 429 || 
+          dataStr.includes('429') || 
+          dataStr.includes('Too many requests') || 
+          dataStr.includes('EGW00201') || 
+          dataStr.includes('Edge rate limit') ||
+          dataStr.includes('초당 거래건수') ||
+          dataStr.includes('Protection triggered');
+
+        if (isRateLimit && attempt < maxRetries) {
+          const backoffMs = Math.min(8000, 1000 * Math.pow(2, attempt - 1)); // 1s, 2s, 4s, 8s
+          console.warn(`[KIS Edge Rate Limit 429] Retrying attempt ${attempt}/${maxRetries} after ${backoffMs}ms backoff...`);
+          await new Promise(resolve => setTimeout(resolve, backoffMs));
+        } else {
+          throw error;
+        }
+      }
+    }
+    throw new Error("KIS API 요청 제한(429 Rate Limit) 초과: 재시도 횟수를 초과하였습니다.");
+  }
+
+  private async throttleRequest() {
+    return this.queueRequest(async () => {});
+  }
 
   public async getDomesticPrice(symbol: string, marketCode: string = 'J') {
     if (!this.config) throw new Error("KIS Config not initialized");
+    if (!symbol || !/^\d{6}$/.test(symbol)) {
+      return null;
+    }
     const token = await this.getAccessToken();
     const endpoint = '/uapi/domestic-stock/v1/quotations/inquire-price';
     
@@ -1201,65 +1258,7 @@ class KISService {
     if (!this.config) throw new Error("KIS Config not initialized");
     const token = await this.getAccessToken();
     
-    // 1. Try real-time Current Price for FX symbol (FX@KFX_USDKRW)
-    try {
-      const endpoint = '/uapi/domestic-stock/v1/quotations/inquire-price';
-      const headers = {
-        'content-type': 'application/json',
-        'authorization': `Bearer ${token}`,
-        'appkey': this.config.appKey,
-        'appsecret': this.config.appSecret,
-        'tr-id': 'FHKST01010100', 
-        'custtype': 'P'
-      };
-      
-      const params = {
-        FID_COND_MRKT_DIV_CODE: 'U',
-        FID_INPUT_ISCD: 'FX@KFX_USDKRW'
-      };
-
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-      if (res?.data?.rt_cd === '0' && res.data.output) {
-        const rate = res.data.output.stck_prpr; // Current FX Rate
-        if (rate && Number(rate) > 500) {
-          return [{ fx_rt: rate.toString() }];
-        }
-      }
-    } catch (e) {
-      console.warn("[KIS Service] Real-time FX symbol fetch failed", e);
-    }
-    
-    // 2. Try Domestic Daily Price (Historical/Backup)
-    try {
-      const endpoint = '/uapi/domestic-stock/v1/quotations/inquire-daily-price';
-      const headers = {
-        'content-type': 'application/json',
-        'authorization': `Bearer ${token}`,
-        'appkey': this.config.appKey,
-        'appsecret': this.config.appSecret,
-        'tr-id': 'FHKST01010400',
-        'custtype': 'P'
-      };
-      
-      const params = {
-        FID_COND_MRKT_DIV_CODE: 'U',
-        FID_INPUT_ISCD: 'FX@KFX_USDKRW',
-        FID_PERIOD_DIV_CODE: 'D',
-        FID_ORG_ADJ_PRC: '0000000001'
-      };
-
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-      if (res?.data?.rt_cd === '0' && res.data.output?.[0]) {
-        const rate = res.data.output[0].stck_prpr; // Current FX Rate
-        if (rate && Number(rate) > 500) {
-          return [{ fx_rt: rate.toString() }];
-        }
-      }
-    } catch (e) {
-      console.warn("[KIS Service] Daily FX rate fetch failed", e);
-    }
-    
-    // 3. Fallback trials from other endpoints (Same robust way as valuation)
+    // Fallback trials from overseas/present balance endpoints
     const trials = [
       { 
         endpoint: '/uapi/overseas-price/v1/quotations/price', 

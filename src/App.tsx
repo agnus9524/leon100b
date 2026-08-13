@@ -1510,6 +1510,8 @@ export default function App() {
   const pendingSellOrdersRef = React.useRef<PendingSellOrder[]>([]);
   const buyingLockPricesRef = React.useRef<{ symbol: string; price: number }[]>([]);
   const autoSellInFlightRef = React.useRef<Set<string>>(new Set());
+  const isExecutingRef = React.useRef<boolean>(false);
+  const pendingTradeKeysRef = React.useRef<Set<string>>(new Set());
   useEffect(() => {
     pendingBuyOrdersRef.current = pendingBuyOrders;
   }, [pendingBuyOrders]);
@@ -3374,7 +3376,7 @@ export default function App() {
     try {
       if (isKR) {
         const ordDvsn = kisConfig.domesticOrderType || '00';
-        const queryPrice = ordDvsn === '00' ? stockPrice.toString() : '0';
+        const queryPrice = ordDvsn === '00' ? (stockPrice || 0).toString() : '0';
 
         const res = await kisService.getDomesticBuyableAmount(
           targetSymbol,
@@ -3418,7 +3420,7 @@ export default function App() {
         // Overseas (US)
         const res = await kisService.getOverseasBuyableAmount(
           targetSymbol,
-          stockPrice.toString()
+          (stockPrice || 0).toString()
         );
 
         if (buyableReqSeqRef.current !== currentSeq) return;
@@ -3517,14 +3519,8 @@ export default function App() {
                 
                 totalStockPurchaseCost += (qty * (avgP > 0 ? avgP : 0));
 
-                try {
-                  const sellableData = await kisService.getDomesticSellableQuantity(item.pdno);
-                  if (sellableData?.output?.nrc_psbl_qty) {
-                    newSellable[item.pdno] = Number(sellableData.output.nrc_psbl_qty);
-                  }
-                } catch (e) {
-                  console.warn(`Sellable Qty Fetch Failed for ${item.pdno}:`, e);
-                }
+                const sellableQty = Number(item.ord_psbl_qty || item.nrc_psbl_qty || item.hldg_qty || qty);
+                newSellable[item.pdno] = sellableQty;
               }
             }
           }
@@ -4313,8 +4309,8 @@ export default function App() {
     } else {
       try {
         const cancelRes = marketType === 'US'
-          ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString())
-          : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+          ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, (order.quantity || 1).toString())
+          : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, (order.quantity || 1).toString());
 
         if (cancelRes && cancelRes.rt_cd && cancelRes.rt_cd !== '0') {
           showNotification(`[KIS 매수취소 실패] ${cancelRes.msg1 || '취소가 거부되었습니다.'}`, "error");
@@ -4340,8 +4336,8 @@ export default function App() {
     if (!order.isSimulated && kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
       try {
         const cancelRes = marketType === 'US'
-          ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString())
-          : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+          ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, (order.quantity || 1).toString())
+          : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, (order.quantity || 1).toString());
 
         if (cancelRes && cancelRes.rt_cd && cancelRes.rt_cd !== '0') {
           showNotification(`[KIS 매도취소 실패] ${cancelRes.msg1 || '매도 취소가 거부되었습니다.'}`, "error");
@@ -4393,9 +4389,9 @@ export default function App() {
       } else {
         try {
           if (marketType === 'US') {
-            await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString());
+            await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, (order.quantity || 1).toString());
           } else {
-            await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+            await kisService.cancelDomesticOrder(order.orgNo || "", order.id, (order.quantity || 1).toString());
           }
           addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
         } catch (e) {
@@ -4408,9 +4404,9 @@ export default function App() {
       if (!order.isSimulated) {
         try {
           if (marketType === 'US') {
-            await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString());
+            await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, (order.quantity || 1).toString());
           } else {
-            await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+            await kisService.cancelDomesticOrder(order.orgNo || "", order.id, (order.quantity || 1).toString());
           }
           addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매도 주문 일괄 취소`);
         } catch (e) {
@@ -4716,8 +4712,8 @@ export default function App() {
             try {
               setBotStatus(`[KIS API] 매도 주문(${order.id}) 취소 요청 중...`);
               const cancelRes = marketType === 'US'
-                ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, order.quantity.toString())
-                : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, order.quantity.toString());
+                ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, (order.quantity || 1).toString())
+                : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, (order.quantity || 1).toString());
               
               if (cancelRes && cancelRes.rt_cd === '0') {
                 addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 스마트 매도취소] ${cancelReason}`);
@@ -5033,14 +5029,17 @@ export default function App() {
     }
 
     const gapInterval = setInterval(async () => {
-      // 내가 '스타트'한 종목(스캘핑 탭에서 isBotActive가 true이거나 현재 활성 탭이 시작된 종목)만 선별
-      const startedTabs = scalperTabsRef.current.filter(t => t.id === activeTabId ? isGapBotActive : t.isBotActive);
-      if (startedTabs.length === 0) {
-        if (!isGapBotActive) setScalperMessage("대기 중...");
-        return;
-      }
+      if (isExecutingRef.current) return;
+      isExecutingRef.current = true;
+      try {
+        // 내가 '스타트'한 종목(스캘핑 탭에서 isBotActive가 true이거나 현재 활성 탭이 시작된 종목)만 선별
+        const startedTabs = scalperTabsRef.current.filter(t => t.id === activeTabId ? isGapBotActive : t.isBotActive);
+        if (startedTabs.length === 0) {
+          if (!isGapBotActive) setScalperMessage("대기 중...");
+          return;
+        }
 
-      for (const tabItem of startedTabs) {
+        for (const tabItem of startedTabs) {
         const stockItem = stocksRef.current.find(s => s.symbol === tabItem.symbol || s.symbol === tabItem.id) || (selectedStock?.symbol === tabItem.symbol ? selectedStock : null);
         if (!stockItem) continue;
 
@@ -5395,7 +5394,10 @@ export default function App() {
           }
         }
       }
-    }, scalpingSpeed);
+      } finally {
+        isExecutingRef.current = false;
+      }
+    }, Math.max(1000, scalpingSpeed));
 
     return () => clearInterval(gapInterval);
   }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, entryPriceMode, lowestBidOnlyMode, maxSlots, allowSamePriceEntry, enableCombinedAvgProfitExit, detectStockStrategies]);
@@ -5403,7 +5405,15 @@ export default function App() {
   const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number, buyPrice?: number, slotId?: string): Promise<number> => {
     if (action === 'HOLD' || amount <= 0) return 0;
 
-    let tradePrice = customPrice !== undefined ? customPrice : stock.price;
+    const tradeLockKey = `${stock.symbol}_${action}`;
+    if (pendingTradeKeysRef.current.has(tradeLockKey)) {
+      console.warn(`[중복 주문 방지] ${stock.symbol} ${action} 주문이 이미 진행 중입니다.`);
+      return 0;
+    }
+    pendingTradeKeysRef.current.add(tradeLockKey);
+
+    try {
+      let tradePrice = customPrice !== undefined ? customPrice : stock.price;
     // [수익률 극대화] 매도 시 현재 시장가가 지정 매도가보다 높으면, 매도가격을 현재가로 자동 상향
     if (action === 'SELL' && stock.price > tradePrice) {
       tradePrice = stock.price;
@@ -5425,7 +5435,7 @@ export default function App() {
                 if (isKR) {
                     setBotStatus(`[KIS API] ${stock.symbol} 매수 가능 수량 조회 중...`);
                     let parsedQty = 0;
-                    const psblRes = await kisService.getDomesticBuyableAmount(stock.symbol, tradePrice.toString(), kisConfig.domesticOrderType || '00');
+                    const psblRes = await kisService.getDomesticBuyableAmount(stock.symbol, (tradePrice || 0).toString(), kisConfig.domesticOrderType || '00');
                     if (psblRes && psblRes.rt_cd === '0' && psblRes.output) {
                         const candidateQtys = [
                           psblRes.output.nrcy_buy_qty,
@@ -5478,7 +5488,7 @@ export default function App() {
                     setBotStatus(`[KIS API] ${stock.symbol} 해외 매수 가능 수량 조회 중...`);
                     let parsedQty = 0;
                     try {
-                        const psblRes = await kisService.getOverseasBuyableAmount(stock.symbol, tradePrice.toString());
+                        const psblRes = await kisService.getOverseasBuyableAmount(stock.symbol, (tradePrice || 0).toString());
                         if (psblRes?.rt_cd === '0' && psblRes.output) {
                             const candidateQtys = [
                               psblRes.output.nrcy_buy_qty,
@@ -5534,8 +5544,8 @@ export default function App() {
             const res = await kisService.order(
                 stock.symbol, 
                 action, 
-                tradePrice.toString(), 
-                finalAmount.toString(),
+                (tradePrice || 0).toString(), 
+                (finalAmount || 1).toString(),
                 kisConfig.domesticOrderType || '00'
             );
             
@@ -5658,8 +5668,18 @@ export default function App() {
             }
         } catch (e: any) {
             console.error("KIS Order Error", e);
-            setBotStatus("증권사 API 서버 통신 오류");
-            showNotification(`KIS 통신 오류: ${e.message}`, "error");
+            const errMsg = e?.message || "";
+            if (errMsg.includes('APBK0918') || errMsg.includes('장운영시간')) {
+                setBotStatus("[장외 시간] KIS 정규 장운영시간이 아닙니다 (09:00~15:30)");
+                addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[장외 차단] KIS 정규 장운영시간이 아닙니다 (APBK0918)`);
+                showNotification(`주문 스킵: KIS 정규 장운영시간이 아닙니다.`, "info");
+            } else if (errMsg.includes('EGW00201') || errMsg.includes('429') || errMsg.includes('초당')) {
+                setBotStatus("[요청 제한] 초당 거래건수 초과 (자동 조절 중)");
+                showNotification(`요청 한도 초과: 잠시 후 다시 시도합니다.`, "info");
+            } else {
+                setBotStatus("증권사 API 서버 통신 오류");
+                showNotification(`KIS 통신 오류: ${errMsg}`, "error");
+            }
             return 0;
         }
     }
@@ -5743,16 +5763,19 @@ export default function App() {
         return 0; // KIS API 오류 시 안전을 위해 매도하지 않음
       }
 
-      if (finalAmount > 0) {
-        handleSyncKIS();
-        setTimeout(() => {
+        if (finalAmount > 0) {
           handleSyncKIS();
-        }, 1000);
-        return finalAmount;
+          setTimeout(() => {
+            handleSyncKIS();
+          }, 1000);
+          return finalAmount;
+        }
+        return 0;
       }
       return 0;
+    } finally {
+      pendingTradeKeysRef.current.delete(tradeLockKey);
     }
-    return 0;
   };
 
   const addLog = (symbol: string, type: 'BUY' | 'SELL' | '매수' | '매도', price: number, amount: number, reason: string) => {
