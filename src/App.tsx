@@ -1779,7 +1779,7 @@ export default function App() {
     const stockPriceInKRW = isUS ? selectedStock.price * exchangeRate : selectedStock.price;
 
     if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
-      if (kisBuyableQty !== null && kisBuyableQty > 0) return kisBuyableQty;
+      if (kisBuyableQty !== null) return kisBuyableQty;
       const realCash = isUS ? (orderableUsd > 0 ? orderableUsd * exchangeRate : balance) : (orderableKrw > 0 ? orderableKrw : balance);
       return Math.floor(realCash / (stockPriceInKRW || 1));
     } else {
@@ -2142,20 +2142,29 @@ export default function App() {
   const effectiveHoldings = useMemo(() => {
     const result: Record<string, number> = { ...holdings };
     
-    scalperTabs.forEach(tab => {
-      if (tab.gapInventory && tab.gapInventory.length > 0) {
-        const tabQty = tab.gapInventory.reduce((acc, slot) => {
-          const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
-          return acc + q;
-        }, 0);
-        if (tabQty > 0) {
-          result[tab.symbol] = Math.max(result[tab.symbol] || 0, tabQty);
+    // Only merge simulated tab gapInventory when real KIS trading is NOT enabled
+    if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
+      scalperTabs.forEach(tab => {
+        if (tab.gapInventory && tab.gapInventory.length > 0) {
+          const tabQty = tab.gapInventory.reduce((acc, slot) => {
+            const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
+            return acc + q;
+          }, 0);
+          if (tabQty > 0) {
+            result[tab.symbol] = Math.max(result[tab.symbol] || 0, tabQty);
+          }
         }
+      });
+    }
+
+    Object.keys(result).forEach(sym => {
+      if (!result[sym] || Number(result[sym]) <= 0) {
+        delete result[sym];
       }
     });
 
     return result;
-  }, [holdings, scalperTabs]);
+  }, [holdings, scalperTabs, kisConfig.isConnected, kisConfig.isRealOrderEnabled]);
 
   const assetAnalysis = useMemo(() => {
     const isUSD = displayCurrency === 'USD';
@@ -2602,12 +2611,13 @@ export default function App() {
               }
             }
             if (settings.holdings && typeof settings.holdings === 'object') {
-              setHoldings(prev => {
-                const merged = { ...settings.holdings, ...prev };
-                Object.keys(merged).forEach(k => {
-                  if (!merged[k] || Number(merged[k]) <= 0) delete merged[k];
+              setHoldings(() => {
+                const updated: Record<string, number> = {};
+                Object.entries(settings.holdings).forEach(([k, v]) => {
+                  const qty = Number(v);
+                  if (qty > 0) updated[k] = qty;
                 });
-                return merged;
+                return updated;
               });
             }
           }
@@ -3344,9 +3354,11 @@ export default function App() {
         if (buyableReqSeqRef.current !== currentSeq) return;
 
         if (res && res.rt_cd === '0' && res.output) {
-          if (res.output.ord_psbl_cash && Number(res.output.ord_psbl_cash) > 0) {
+          if (res.output.ord_psbl_cash !== undefined && res.output.ord_psbl_cash !== null) {
             const cashVal = Number(res.output.ord_psbl_cash);
-            setOrderableKrw(prev => prev === cashVal ? prev : cashVal);
+            if (!isNaN(cashVal)) {
+              setOrderableKrw(prev => prev === cashVal ? prev : cashVal);
+            }
           }
 
           const candidateQtys = [
@@ -3359,19 +3371,17 @@ export default function App() {
             res.output.max_buy_qty,
             res.output.max_ord_psbl_qty
           ].map(v => (v !== undefined && v !== null && v !== '') ? parseInt(String(v), 10) : 0)
-           .filter(v => !isNaN(v) && v > 0);
+           .filter(v => !isNaN(v) && v >= 0);
 
           let qty = candidateQtys.length > 0 ? Math.max(...candidateQtys) : 0;
 
-          const psblCash = res.output.ord_psbl_cash && Number(res.output.ord_psbl_cash) > 0 ? Number(res.output.ord_psbl_cash) : availableCash;
+          const psblCash = (res.output.ord_psbl_cash !== undefined && res.output.ord_psbl_cash !== null) ? Number(res.output.ord_psbl_cash) : availableCash;
           if (qty <= 0 && psblCash > 0 && stockPrice > 0) {
             qty = Math.floor(psblCash / stockPrice);
           }
 
-          if (qty > 0) {
-            setKisBuyableQty(qty);
-            return;
-          }
+          setKisBuyableQty(qty);
+          return;
         }
       } else {
         // Overseas (US)
@@ -3384,7 +3394,7 @@ export default function App() {
 
         if (res && res.rt_cd === '0' && res.output) {
           const usdAmt = Number(res.output.frcr_ord_psbl_amt || res.output.ord_psbl_frcr_amt || res.output.ovrs_ord_psbl_amt || 0);
-          if (usdAmt > 0) {
+          if (!isNaN(usdAmt)) {
             setOrderableUsd(prev => prev === usdAmt ? prev : usdAmt);
           }
 
@@ -3394,7 +3404,7 @@ export default function App() {
             res.output.max_buy_qty,
             res.output.max_ord_qty
           ].map(v => (v !== undefined && v !== null && v !== '') ? parseInt(String(v), 10) : 0)
-           .filter(v => !isNaN(v) && v > 0);
+           .filter(v => !isNaN(v) && v >= 0);
 
           let qty = candidateQtys.length > 0 ? Math.max(...candidateQtys) : 0;
 
@@ -3403,10 +3413,8 @@ export default function App() {
             qty = Math.floor(usableUsd / (stockPrice * exchangeRate));
           }
 
-          if (qty > 0) {
-            setKisBuyableQty(qty);
-            return;
-          }
+          setKisBuyableQty(qty);
+          return;
         }
       }
 
@@ -3501,9 +3509,9 @@ export default function App() {
           const domesticPurchase = Number(out2.pchs_amt_smtl_amt || 0);
           const actualPurchaseCost = Math.max(domesticPurchase, totalStockPurchaseCost);
 
-          // Direct deposit/cash balance in account
-          const domesticCash = dnclAmt > 0 ? dnclAmt : (ordPsblCash > 0 ? ordPsblCash : 0);
-          if (domesticCash > 0) setOrderableKrw(domesticCash);
+          // Direct deposit/cash balance in account (Prioritize immediate orderable cash)
+          const domesticCash = ordPsblCash >= 0 && out2.ord_psbl_cash !== undefined ? ordPsblCash : dnclAmt;
+          setOrderableKrw(domesticCash);
           
           if (marketType === 'KR') {
             totalConvertedBalance += Math.round(domesticCash);
