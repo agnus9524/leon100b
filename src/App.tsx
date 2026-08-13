@@ -4797,19 +4797,38 @@ export default function App() {
               showNotification(`${currentStock.name} KIS 매도 주문 체결 완료!`, "success");
               
               // Free up slot if paired with a buyPrice
-              if (order.slotId) {
-                const updatedInv = gapInventoryRef.current.filter(s => s.id !== order.slotId);
-                gapInventoryRef.current = updatedInv;
-                setGapInventory(updatedInv);
-              } else if (order.buyPrice) {
-                const idx = gapInventoryRef.current.findIndex(s => s.price === order.buyPrice);
-                if (idx !== -1) {
-                  const updatedInv = [...gapInventoryRef.current];
-                  updatedInv.splice(idx, 1);
+              if (order.symbol === selectedStock?.symbol) {
+                if (order.slotId) {
+                  const updatedInv = gapInventoryRef.current.filter(s => s.id !== order.slotId);
                   gapInventoryRef.current = updatedInv;
                   setGapInventory(updatedInv);
+                } else if (order.buyPrice) {
+                  const idx = gapInventoryRef.current.findIndex(s => s.price === order.buyPrice);
+                  if (idx !== -1) {
+                    const updatedInv = [...gapInventoryRef.current];
+                    updatedInv.splice(idx, 1);
+                    gapInventoryRef.current = updatedInv;
+                    setGapInventory(updatedInv);
+                  }
                 }
               }
+              setScalperTabs(prev => prev.map(t => {
+                if (t.symbol === order.symbol) {
+                  let prevInv = t.gapInventory || [];
+                  if (order.slotId) {
+                    prevInv = prevInv.filter(s => s.id !== order.slotId);
+                  } else if (order.buyPrice) {
+                    const idx = prevInv.findIndex(s => s.price === order.buyPrice);
+                    if (idx !== -1) {
+                      const updatedInv = [...prevInv];
+                      updatedInv.splice(idx, 1);
+                      prevInv = updatedInv;
+                    }
+                  }
+                  return { ...t, gapInventory: prevInv };
+                }
+                return t;
+              }));
 
               playScalpingSound('SELL');
               setTimeout(() => handleSyncKIS(), 500);
@@ -5564,9 +5583,18 @@ export default function App() {
                        showNotification(`${stock.name} ${action === 'BUY' ? '매수' : '매도'} 주문이 전량 체결되었습니다. (가격: ${formatCurrency(filledPrice)})`, "success");
                        finalAmount = filledQty;
                         if (action === "SELL" && slotId) {
-                            const next = gapInventoryRef.current.filter(s => s.id !== slotId);
-                            gapInventoryRef.current = next;
-                            setGapInventory(next);
+                            if (stock.symbol === selectedStock?.symbol) {
+                                const next = gapInventoryRef.current.filter(s => s.id !== slotId);
+                                gapInventoryRef.current = next;
+                                setGapInventory(next);
+                            }
+                            setScalperTabs(prev => prev.map(t => {
+                                if (t.symbol === stock.symbol) {
+                                    const inv = (t.gapInventory || []).filter(s => s.id !== slotId);
+                                    return { ...t, gapInventory: inv };
+                                }
+                                return t;
+                            }));
                         }
                    } else if (filledQty > 0) {
                        setBotStatus(`[일부 체결] 주문 번호(${odno})가 일부 체결되었습니다 (${filledQty}주).`);
@@ -5574,11 +5602,22 @@ export default function App() {
                        showNotification(`${stock.name} ${action === 'BUY' ? '매수' : '매도'} 주문이 일부 체결되었습니다 (${filledQty}주).`, "info");
                        finalAmount = filledQty;
                         if (action === "SELL" && slotId) {
-                            const next = gapInventoryRef.current.map(s => 
-                                s.id === slotId ? { ...s, quantity: Math.max(0, s.quantity - filledQty) } : s
-                            ).filter(s => s.quantity > 0);
-                            gapInventoryRef.current = next;
-                            setGapInventory(next);
+                            if (stock.symbol === selectedStock?.symbol) {
+                                const next = gapInventoryRef.current.map(s => 
+                                    s.id === slotId ? { ...s, quantity: Math.max(0, s.quantity - filledQty) } : s
+                                ).filter(s => s.quantity > 0);
+                                gapInventoryRef.current = next;
+                                setGapInventory(next);
+                            }
+                            setScalperTabs(prev => prev.map(t => {
+                                if (t.symbol === stock.symbol) {
+                                    const inv = (t.gapInventory || []).map(s =>
+                                        s.id === slotId ? { ...s, quantity: Math.max(0, s.quantity - filledQty) } : s
+                                    ).filter(s => s.quantity > 0);
+                                    return { ...t, gapInventory: inv };
+                                }
+                                return t;
+                            }));
                         }
                    } else {
                        setBotStatus(`[미체결 상태] 주문 번호(${odno})가 아직 체결되지 않았습니다.`);
@@ -5659,12 +5698,21 @@ export default function App() {
       if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
       
       // Add to gapInventory and update ref for immediate fill
-      const newSlot = { id: createdSlotId, price: tradePrice, quantity: finalAmount };
-      setGapInventory(prev => {
-        const next = [...prev, newSlot];
-        gapInventoryRef.current = next;
-        return next;
-      });
+      const newSlot = { id: createdSlotId, price: tradePrice, quantity: finalAmount, symbol: stock.symbol };
+      if (stock.symbol === selectedStock?.symbol) {
+        setGapInventory(prev => {
+          const next = [...prev, newSlot];
+          gapInventoryRef.current = next;
+          return next;
+        });
+      }
+      setScalperTabs(prev => prev.map(t => {
+        if (t.symbol === stock.symbol) {
+          const prevInv = t.gapInventory || [];
+          return { ...t, gapInventory: [...prevInv, newSlot] };
+        }
+        return t;
+      }));
 
       // Trigger Auto-Sell for immediate simulated or real fills that reached this point
       triggerAutoSell(stock.symbol, tradePrice, finalAmount, newAvg, newQty, createdSlotId);
@@ -8594,6 +8642,7 @@ export default function App() {
                     // 1. Filled Inventory Slots (매수체결 완료 - 매도감시 중)
                     gapInventory.forEach((filledSlot, slotIdx) => {
                       if (!filledSlot) return;
+                      if (typeof filledSlot === 'object' && filledSlot.symbol && currentStock?.symbol && filledSlot.symbol !== currentStock.symbol) return;
                       const slotNum = slotIdx + 1;
                       const buyPrice = typeof filledSlot === 'number' ? filledSlot : (filledSlot.price || 0);
                       const buyQty = typeof filledSlot === 'number' ? tradeQuantity : (filledSlot.quantity || 1);
