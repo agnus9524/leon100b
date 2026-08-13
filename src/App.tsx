@@ -162,11 +162,108 @@ interface Stock {
 const getTickSize = (price: number, market: 'KR' | 'US' = 'KR'): number => {
   if (market === 'US') return 0.01;
   if (price >= 500000) return 1000;
-  if (price >= 100000) return 500;
+  if (price >= 200000) return 500;
   if (price >= 50000) return 100;
-  if (price >= 10000) return 50;
+  if (price >= 20000) return 50;
   if (price >= 5000) return 10;
-  return 5;
+  if (price >= 2000) return 5;
+  return 1; // 2,000원 미만 (1,000원 미만 동전주 포함) 호가단위 1원
+};
+
+// 2026년 국내 상장주식 및 해외주식 수수료·제세금 상수 (실제 거래 및 스크린샷 역산 공식 기준)
+const KR_BROKER_FEE_RATE = 0.00014; // 매매 수수료율 (편도 약 0.014%, 왕복 ~0.028%)
+const KR_TAX_RATE = 0.0020;          // 2026년 국내 상장주식 매도 제세금 (증권거래세 + 농어촌특별세 = 0.20%)
+
+const US_BROKER_FEE_RATE = 0.0007;  // 해외 매매 수수료율 (편도 약 0.07%)
+const US_TAX_RATE = 0.0000278;      // 미국 SEC Fee (매도 시 0.00278%)
+
+/**
+ * 실현 및 평가 순수익(원/달러) 계산 함수
+ * 순수익 = 매도금액 - 매수금액 - 매수수수료 - 매도수수료 - 매도제세금
+ */
+const calculateNetProfitAmount = (
+  buyPrice: number,
+  sellPrice: number,
+  quantity: number = 1,
+  market: 'KR' | 'US' = 'KR'
+) => {
+  if (buyPrice <= 0 || sellPrice <= 0 || quantity <= 0) {
+    return { netProfit: 0, grossProfit: 0, buyFee: 0, sellFee: 0, sellTax: 0, totalCost: 0 };
+  }
+
+  const isKR = market === 'KR';
+  const feeRate = isKR ? KR_BROKER_FEE_RATE : US_BROKER_FEE_RATE;
+  const taxRate = isKR ? KR_TAX_RATE : US_TAX_RATE;
+
+  const buyAmount = buyPrice * quantity;
+  const sellAmount = sellPrice * quantity;
+  const grossProfit = sellAmount - buyAmount;
+
+  const buyFee = isKR ? Math.floor(buyAmount * feeRate) : Number((buyAmount * feeRate).toFixed(4));
+  const sellFee = isKR ? Math.floor(sellAmount * feeRate) : Number((sellAmount * feeRate).toFixed(4));
+  const sellTax = isKR ? Math.floor(sellAmount * taxRate) : Number((sellAmount * taxRate).toFixed(4));
+
+  const totalCost = buyFee + sellFee + sellTax;
+  const netProfit = grossProfit - totalCost;
+
+  return {
+    netProfit: isKR ? Math.round(netProfit) : Number(netProfit.toFixed(2)),
+    grossProfit: isKR ? Math.round(grossProfit) : Number(grossProfit.toFixed(2)),
+    buyFee,
+    sellFee,
+    sellTax,
+    totalCost: isKR ? Math.round(totalCost) : Number(totalCost.toFixed(2))
+  };
+};
+
+/**
+ * 제세금과 수수료를 제외한 순수익률(Net Profit %) 계산 함수
+ * 순수익률 = (순수익 / 매수원금) * 100
+ */
+const calculateNetProfitPercent = (
+  buyPrice: number,
+  currentOrSellPrice: number,
+  market: 'KR' | 'US' = 'KR'
+): number => {
+  if (buyPrice <= 0 || currentOrSellPrice <= 0) return 0;
+  const { netProfit } = calculateNetProfitAmount(buyPrice, currentOrSellPrice, 1, market);
+  const buyAmount = buyPrice;
+  return Number(((netProfit / buyAmount) * 100).toFixed(2));
+};
+
+/**
+ * 목표 순수익률(Target Net Profit %)을 온전히 달성하기 위한 목표 매도가격 계산 함수
+ * 제세금(0.20%) 및 왕복 수수료(0.028%)를 완벽히 커버하고, 호가단위 올림 처리하여 실제 손에 남는 순수익률 >= targetProfitPct 보장
+ */
+const calcTargetSellPriceByNetProfit = (
+  basePrice: number,
+  targetNetProfitPct: number,
+  market: 'KR' | 'US' = 'KR'
+): number => {
+  if (basePrice <= 0) return 0;
+
+  const isUS = market === 'US';
+  const feeRate = isUS ? US_BROKER_FEE_RATE : KR_BROKER_FEE_RATE;
+  const taxRate = isUS ? US_TAX_RATE : KR_TAX_RATE;
+  const tickSize = getTickSize(basePrice, market);
+
+  const targetRatio = targetNetProfitPct / 100;
+  // 순수익 공식: P_sell * (1 - feeRate - taxRate) - P_buy * (1 + feeRate) >= P_buy * targetRatio
+  // P_sell >= P_buy * (1 + feeRate + targetRatio) / (1 - feeRate - taxRate)
+  const numerator = 1 + feeRate + targetRatio;
+  const denominator = 1 - feeRate - taxRate;
+  const rawTarget = basePrice * (numerator / denominator);
+
+  // 호가 단위 올림(Ceil)을 적용하여 세금과 수수료를 공제하고도 순수익률 >= targetNetProfitPct를 확실히 보장
+  let rounded = isUS
+    ? Number((Math.ceil(rawTarget * 100) / 100).toFixed(2))
+    : Math.ceil(rawTarget / tickSize) * tickSize;
+
+  if (rounded <= basePrice) {
+    rounded = isUS ? Number((basePrice + 0.01).toFixed(2)) : basePrice + tickSize;
+  }
+
+  return rounded;
 };
 
 // Utility function to accurately calculate price change and percentage against base price
@@ -1608,27 +1705,9 @@ export default function App() {
     }));
   }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, tradeLogs]);
 
-  // Helper for tick-aware target sell price calculation to guarantee positive profit above tick size
+  // Helper for tick-aware target sell price calculation to guarantee positive net profit above tick size, fees, and taxes
   const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number) => {
-    if (basePrice <= 0) return 0;
-    
-    let tickSize;
-    if (marketType === 'US') {
-      tickSize = 0.01;
-    } else {
-      tickSize = basePrice >= 500000 ? 1000 : basePrice >= 100000 ? 500 : basePrice >= 50000 ? 100 : basePrice >= 10000 ? 50 : basePrice >= 5000 ? 10 : 5;
-    }
-    
-    const rawTarget = basePrice * (1 + targetProfitPct / 100);
-    let rounded = marketType === 'US' 
-      ? Number(rawTarget.toFixed(2)) 
-      : Math.round(rawTarget / tickSize) * tickSize;
-
-    if (rounded <= basePrice) {
-      rounded = marketType === 'US' ? Number((basePrice + 0.01).toFixed(2)) : basePrice + tickSize;
-    }
-
-    return rounded;
+    return calcTargetSellPriceByNetProfit(basePrice, targetProfitPct, marketType);
   }, [marketType]); 
 
   // Manual Limit Sell States
@@ -4732,27 +4811,28 @@ export default function App() {
         }
 
         if (order.isSimulated) {
-          // Simulated Mode: Check if market price reached/exceeded target sell price OR reached target profit percentage
-          const profitRatio = order.buyPrice && order.buyPrice > 0 ? (currentStock.price - order.buyPrice) / order.buyPrice : 0;
-          const isTargetProfitHit = order.buyPrice && order.buyPrice > 0 && profitRatio >= (scalpingTargetProfit / 100) - 0.00001;
+          // Simulated Mode: Check if market price reached/exceeded target sell price OR reached target net profit percentage
+          const isUS = currentStock.market === 'US' || /^[A-Za-z]/.test(currentStock.symbol) || marketType === 'US';
+          const netProfitPct = order.buyPrice && order.buyPrice > 0 ? calculateNetProfitPercent(order.buyPrice, currentStock.price, isUS ? 'US' : 'KR') : 0;
+          const isTargetProfitHit = order.buyPrice && order.buyPrice > 0 && netProfitPct >= (scalpingTargetProfit - 0.001);
 
           if (currentStock.price >= order.orderPrice || isTargetProfitHit) {
             updated = true;
             const priceInKrw = marketType === 'US' ? currentStock.price * exchangeRate : currentStock.price;
             setBalance(prev => prev + priceInKrw * order.quantity);
 
-            // Update profit stats if buyPrice is available
+            // Update net profit stats if buyPrice is available (deducting fees and 0.20% tax)
             if (order.buyPrice) {
-              const profit = (currentStock.price - order.buyPrice) * order.quantity * (marketType === 'US' ? exchangeRate : 1);
-              setGapTradingProfit(prev => prev + profit);
-              if (profit > 0) setScalpingWins(prev => prev + 1);
-              else if (profit < 0) setScalpingLosses(prev => prev + 1);
+              const { netProfit } = calculateNetProfitAmount(order.buyPrice, currentStock.price, order.quantity, isUS ? 'US' : 'KR');
+              const profitInKrw = marketType === 'US' ? netProfit * exchangeRate : netProfit;
+              setGapTradingProfit(prev => prev + profitInKrw);
+              if (netProfit > 0) setScalpingWins(prev => prev + 1);
+              else if (netProfit < 0) setScalpingLosses(prev => prev + 1);
               
-              const profitRatio = (currentStock.price - order.buyPrice) / order.buyPrice;
-              if (profit > 0) {
-                showNotification(`${currentStock.name} 목표수익 매도 체결 완료 (+${(profitRatio * 100).toFixed(2)}%)`, "success");
+              if (netProfit > 0) {
+                showNotification(`${currentStock.name} 목표 순수익 매도 체결 완료 (+${netProfitPct.toFixed(2)}%)`, "success");
               } else {
-                showNotification(`${currentStock.name} 리스크 관리 매도 체결 완료 (${(profitRatio * 100).toFixed(2)}%)`, "info");
+                showNotification(`${currentStock.name} 리스크 관리 매도 체결 완료 (${netProfitPct.toFixed(2)}%)`, "info");
               }
 
               // [중요] 매도가 실제로 체결되었으므로 해당 슬롯을 비움 (gapInventory 업데이트)
@@ -5270,12 +5350,14 @@ export default function App() {
         let weightedAvgPrice = avgPrices[stockItem.symbol] || 0;
 
         if (totalHeldQty > 0 && weightedAvgPrice > 0) {
-          const overallProfitRatio = (currentPrice - weightedAvgPrice) / weightedAvgPrice;
+          const isStockUS = stockItem.market === 'US' || /^[A-Za-z]/.test(stockItem.symbol) || marketType === 'US';
+          const netProfitPct = calculateNetProfitPercent(weightedAvgPrice, currentPrice, isStockUS ? 'US' : 'KR');
+          const overallProfitRatio = netProfitPct / 100;
 
-          // 1) Combined Profit Exit
-          if (enableCombinedAvgProfitExit && overallProfitRatio >= (scalpingTargetProfit / 100) && overallProfitRatio > 0) {
-            if (isSelected) setScalperMessage(`[통합 익절] ${stockItem.name} ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (+${(overallProfitRatio * 100).toFixed(2)}%)`);
-            await executeTrade('SELL', stockItem, totalHeldQty, `통합 평단가 일괄 익절 (+${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice, weightedAvgPrice);
+          // 1) Combined Profit Exit (기준: 제세금 0.20% 및 수수료 공제 후 순수익률 >= 목표수익률)
+          if (enableCombinedAvgProfitExit && netProfitPct >= scalpingTargetProfit) {
+            if (isSelected) setScalperMessage(`[통합 순익 익절] ${stockItem.name} ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (순익 +${netProfitPct.toFixed(2)}%)`);
+            await executeTrade('SELL', stockItem, totalHeldQty, `통합 평단가 일괄 순익 익절 (순익 +${netProfitPct.toFixed(2)}%)`, currentPrice, weightedAvgPrice);
 
             if (isSelected) {
               gapInventoryRef.current = [];
@@ -7335,7 +7417,10 @@ export default function App() {
 
                 <div className="pt-1 border-t border-white/5">
                   <div className="text-[10px] font-black uppercase leading-tight space-y-0.5">
-                    <div className="text-emerald-400">목표 익절 +{scalpingTargetProfit}%</div>
+                    <div className="text-emerald-400 flex items-center justify-between">
+                      <span>목표 순익 +{scalpingTargetProfit}%</span>
+                      <span className="text-[8.5px] font-normal text-emerald-400/80 font-sans">세금·수수료 차감후</span>
+                    </div>
                     <div className="text-rose-400">손절 {scalpingStopLoss}%</div>
                   </div>
                 </div>
@@ -7344,9 +7429,10 @@ export default function App() {
                     value={scalpingTargetProfit}
                     onChange={(e) => setScalpingTargetProfit(Number(e.target.value))}
                     className="bg-black/40 border border-emerald-500/40 rounded p-1 text-xs font-mono outline-none text-emerald-400 text-center font-bold appearance-none"
+                    title="목표 순수익률 (제세금 0.20% 및 왕복 수수료 공제 후 실질 순수익)"
                   >
                     {[0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 5.0].map(val => (
-                      <option key={val} value={val} className="bg-sleek-bg text-emerald-400">+{val}%</option>
+                      <option key={val} value={val} className="bg-sleek-bg text-emerald-400">+{val}% (순익)</option>
                     ))}
                   </select>
                   <select 
@@ -8409,7 +8495,8 @@ export default function App() {
                                 }
                                 if (avgPrice <= 0) avgPrice = st.price || 0;
 
-                                const profitRatio = avgPrice > 0 ? (((st.price || 0) - avgPrice) / avgPrice) * 100 : 0;
+                                const isStockUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
+                                const profitRatio = avgPrice > 0 ? calculateNetProfitPercent(avgPrice, st.price || 0, isStockUS ? 'US' : 'KR') : 0;
                                 const isSelected = selectedSymbol === sym;
 
                                 return (
@@ -8428,10 +8515,10 @@ export default function App() {
                                         <span className="font-bold text-white">{stockDisplayName}({sym})</span>
                                         <span className="text-[10px] text-white/80">{formatCurrency(st.price || 0)}</span>
                                         <span className={cn("font-bold text-[10px]", profitRatio >= 0 ? "text-rose-400" : "text-sky-400")}>
-                                          {profitRatio >= 0 ? '+' : ''}{(profitRatio || 0).toFixed(1)}%
+                                          {profitRatio >= 0 ? '+' : ''}{(profitRatio || 0).toFixed(2)}%
                                         </span>
                                       </div>
-                                      <span className="text-amber-300 text-[9.5px]">평단 {formatCurrency(avgPrice)}</span>
+                                      <span className="text-amber-300 text-[9.5px]">평단 {formatCurrency(avgPrice)} (순익)</span>
                                     </div>
 
                                     <div className="flex items-center gap-1.5">
@@ -8619,7 +8706,7 @@ export default function App() {
                     const totalCost = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
                     const totalQty = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
                     const avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
-                    const avgProfitPct = (avgPrice > 0 && selectedStock?.price) ? ((selectedStock.price - avgPrice) / avgPrice) * 100 : 0;
+                    const avgProfitPct = (avgPrice > 0 && selectedStock?.price) ? calculateNetProfitPercent(avgPrice, selectedStock.price, marketType) : 0;
                     const targetSellPrice = calculateTargetSellPrice(avgPrice, scalpingTargetProfit);
 
                     return (
@@ -8652,14 +8739,15 @@ export default function App() {
 
                         <div className="grid grid-cols-2 gap-2 text-xs font-mono">
                           <div>
-                            <span className="text-[10px] text-sleek-text-secondary block font-bold">매도예상가 (+{scalpingTargetProfit}%)</span>
+                            <span className="text-[10px] text-sleek-text-secondary block font-bold">매도예상가 (순익 +{scalpingTargetProfit}%)</span>
                             <span className="text-sm font-bold text-rose-400">{formatCurrency(targetSellPrice)}</span>
                           </div>
                           <div className="text-right">
-                            <span className="text-[10px] text-sleek-text-secondary block font-bold">평단 대비 손익률</span>
+                            <span className="text-[10px] text-sleek-text-secondary block font-bold">평단 대비 순손익률</span>
                             <span className={cn("text-sm font-black", avgProfitPct >= 0 ? "text-rose-400" : "text-sky-400")}>
                               {avgProfitPct >= 0 ? "+" : ""}{avgProfitPct.toFixed(2)}%
                             </span>
+                            <span className="text-[9px] text-slate-400 block font-sans">제세금(0.2%)·수수료 공제</span>
                           </div>
                         </div>
                       </motion.div>
@@ -8681,7 +8769,7 @@ export default function App() {
                       const slotNum = slotIdx + 1;
                       const buyPrice = typeof filledSlot === 'number' ? filledSlot : (filledSlot.price || 0);
                       const buyQty = typeof filledSlot === 'number' ? tradeQuantity : (filledSlot.quantity || 1);
-                      const profitPct = (buyPrice > 0 && currentStock?.price) ? ((currentStock.price - buyPrice) / buyPrice) * 100 : 0;
+                      const profitPct = (buyPrice > 0 && currentStock?.price) ? calculateNetProfitPercent(buyPrice, currentStock.price, marketType) : 0;
                       const targetSellPrice = calculateTargetSellPrice(buyPrice, scalpingTargetProfit);
 
                       const samePriceCount = gapInventory.filter(s => (typeof s === 'number' ? s : s.price) === buyPrice).length;
@@ -8704,9 +8792,12 @@ export default function App() {
                                 매수체결 #{slotNum}
                               </span>
                             </div>
-                            <span className={cn("font-extrabold text-xs tabular-nums px-2 py-0.5 rounded bg-black/40 border border-white/5 shrink-0", profitPct >= 0 ? "text-rose-400 border-rose-500/30" : "text-sky-400 border-sky-500/30")}>
-                              {profitPct >= 0 ? "+" : ""}{profitPct.toFixed(2)}%
-                            </span>
+                            <div className="flex flex-col items-end shrink-0">
+                              <span className={cn("font-extrabold text-xs tabular-nums px-2 py-0.5 rounded bg-black/40 border border-white/5", profitPct >= 0 ? "text-rose-400 border-rose-500/30" : "text-sky-400 border-sky-500/30")}>
+                                {profitPct >= 0 ? "+" : ""}{profitPct.toFixed(2)}%
+                              </span>
+                              <span className="text-[8.5px] text-slate-400 mt-0.5">순수익률</span>
+                            </div>
                           </div>
 
                           {samePriceCount > 1 && (
@@ -8722,14 +8813,14 @@ export default function App() {
                               <span className="text-emerald-400 font-extrabold text-xs block mt-0.5">{formatCurrency(buyPrice)}</span>
                             </div>
                             <div className="text-right">
-                              <span className="text-sleek-text-secondary text-[10px] block font-bold">목표가 (+{scalpingTargetProfit}%)</span>
+                              <span className="text-sleek-text-secondary text-[10px] block font-bold">목표가 (순익 +{scalpingTargetProfit}%)</span>
                               <span className="text-rose-400 font-extrabold text-xs block mt-0.5">{formatCurrency(targetSellPrice)}</span>
                             </div>
                           </div>
 
                           <div className="flex items-center gap-1.5 text-[10px] text-emerald-300 pt-1 border-t border-emerald-500/20 font-bold">
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                            <span>⚡ 매도 싸인 감시 중 (목표가 도달 시 자동 매도)</span>
+                            <span>⚡ 매도 싸인 감시 중 (목표 순익 도달 시 자동 매도)</span>
                           </div>
                         </motion.div>
                       );
