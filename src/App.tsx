@@ -4267,11 +4267,12 @@ export default function App() {
         // Calculate ratios from orderPrice
         const dropPercent = ((orderPrice - currentPrice) / orderPrice) * 100;
         const risePercent = ((currentPrice - orderPrice) / orderPrice) * 100;
+        const elapsedSec = (Date.now() - (order.createdAt || Date.now())) / 1000;
 
-        // Smart Escape Criteria:
-        // - Upward: current price rises 2+ ticks above buy order price OR rises >= 0.2% (Capital release)
-        // - Downward: current price drops 2+ ticks below buy order price OR drops >= autoCancelThreshold (Avoid falling knives)
-        const isRiseCancel = tickDiff >= 2 || risePercent >= 0.2;
+        // Smart Escape Criteria (자금 순환 및 미체결 방지):
+        // - Upward: 주가가 매수가 위로 상승(currentPrice > orderPrice), 1틱 이상 이탈, 0.05% 이상 상승, 또는 8초 이상 체결 미발생
+        // - Downward: 주가가 매수가 대비 2틱 이상 하락 또는 autoCancelThreshold 급락 (손실 방지)
+        const isRiseCancel = currentPrice > orderPrice || tickDiff >= 1 || risePercent >= 0.05 || elapsedSec >= 8;
         const isDropCancel = tickDiff <= -2 || dropPercent >= autoCancelThreshold;
 
         if (isDropCancel || isRiseCancel) {
@@ -4281,7 +4282,9 @@ export default function App() {
           const tickStr = Math.abs(Math.round(tickDiff)) > 0 ? `${Math.abs(Math.round(tickDiff))}틱` : '';
           const cancelReason = isDropCancel 
             ? `주문가 대비 ${dropPercent.toFixed(2)}%${tickStr ? ` (${tickStr})` : ''} 급락 이탈 (손실 방지)`
-            : `주문가 대비 ${risePercent.toFixed(2)}%${tickStr ? ` (${tickStr})` : ''} 상승 이탈 (미체결 회수)`;
+            : elapsedSec >= 8 && currentPrice <= orderPrice
+            ? `8초 체결 지연 타임아웃 (${elapsedSec.toFixed(0)}초 경과) -> 미체결 자금 순환 자동 취소`
+            : `주문가 대비 주가 상승 이탈 (${risePercent.toFixed(2)}%${tickStr ? ` +${tickStr}` : ''}) -> 미체결 자금 순환 자동 취소`;
           
           if (!order.id) {
             // Placeholder / in-flight order without ID: clean up silently without error warning
@@ -4294,18 +4297,24 @@ export default function App() {
             const priceInKrw = marketType === 'US' ? orderPrice * exchangeRate : orderPrice;
             const refundAmount = priceInKrw * (order.quantity || 1);
             setBalance(prev => prev + refundAmount);
+            addLog(order.symbol, '매수', orderPrice, order.quantity, `[자금순환 취소] ${cancelReason}`);
+            setScalperMessage(`[자금 순환 취소] ${currentStock.name} 미체결 매수 주문 취소 -> 주문가능금액 ${formatCurrency(refundAmount)}원 복구`);
+            showNotification(`[자금 순환 취소] ${currentStock.name} 매수가 대비 주가 상승 이탈로 미체결 매수 취소 (주문가능금액 원복)`, "info");
           } else {
             // Real KIS order cancel request!
             try {
-              setBotStatus(`[KIS API] 주문 번호(${order.id}) 취소 요청 중...`);
+              setBotStatus(`[KIS API] 주문 번호(${order.id}) 자금 순환 자동 취소 요청 중...`);
               const cancelRes = marketType === 'US' 
                 ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, (order.quantity || 1).toString())
                 : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, (order.quantity || 1).toString());
               
               if (cancelRes && cancelRes.rt_cd === '0') {
-                addLog(order.symbol, '매수', orderPrice, order.quantity, `[KIS 자동취소] ${cancelReason}`);
-                showNotification(`${currentStock.name} KIS 매수 자동 취소 (${isDropCancel ? '낙폭 과대' : '상승 이탈'})`, "info");
-                setBotStatus(`[KIS 취소] ${formatCurrency(orderPrice)} 주문 취소 완료`);
+                addLog(order.symbol, '매수', orderPrice, order.quantity, `[KIS 자금순환 취소] ${cancelReason}`);
+                showNotification(`${currentStock.name} KIS 매수 미체결 자동 취소 완료 (주문가능금액 환원)`, "info");
+                setScalperMessage(`[자금 순환 취소] ${currentStock.name} 미체결 매수 취소 완료 -> KIS 예수금/주문가능금액 원복`);
+                setBotStatus(`[KIS 취소완료] ${formatCurrency(orderPrice)} 미체결 취소 및 자금 순환 완료`);
+                // Trigger KIS balance resync
+                setTimeout(() => handleSyncKIS(), 300);
               } else {
                 const errMsg = cancelRes?.msg1 || "알 수 없는 오류";
                 
@@ -4329,15 +4338,16 @@ export default function App() {
 
                 if (!isFilledInMeantime) {
                   // Log status silently to trading logs without popping up user-facing error warnings
-                  addLog(order.symbol, '매수', orderPrice, order.quantity, `[자동취소 완료] 대기 주문 정리 (${errMsg})`);
+                  addLog(order.symbol, '매수', orderPrice, order.quantity, `[자금순환 정리] 대기 주문 정리 (${errMsg})`);
                   setBotStatus(`[자동취소 완료] ${formatCurrency(orderPrice)} 주문 정리됨`);
-                  console.log(`[Auto-Cancel Suppressed Warning] ${errMsg}`);
+                  setTimeout(() => handleSyncKIS(), 500);
                 }
               }
             } catch (e: any) {
               console.error("[KIS Auto-Cancel Exception]:", e);
               addLog(order.symbol, '매수', orderPrice, order.quantity, `[자동취소 완료] 대기 주문 정리 (${e?.message || '통신 완료'})`);
               setBotStatus("대기 주문 정리 완료");
+              setTimeout(() => handleSyncKIS(), 500);
             }
           }
           // Do NOT push to nextPending (it's cancelled/removed)
@@ -5076,8 +5086,17 @@ export default function App() {
           }
 
           // 2) Emergency Stop Loss Intercept & AI Gap-Down Report
-          // Only evaluate when app is fully loaded (isAppReady) and prices are fully initialized
-          if (isAppReady && currentPrice > 0 && weightedAvgPrice > 0 && currentPrice > weightedAvgPrice * 0.2 && overallProfitRatio <= (scalpingStopLoss / 100) && overallProfitRatio > -0.85) {
+          // Only evaluate when user holds stock (totalHeldQty > 0), app is ready, prices are valid, and profit ratio is at or below the stop loss threshold
+          const stopLossThreshold = -Math.abs(scalpingStopLoss) / 100; // e.g. -1.5% -> -0.015
+          if (
+            isAppReady &&
+            totalHeldQty > 0 &&
+            currentPrice > 0 &&
+            weightedAvgPrice > 0 &&
+            currentPrice > weightedAvgPrice * 0.2 &&
+            overallProfitRatio <= stopLossThreshold &&
+            overallProfitRatio > -0.85
+          ) {
             // Check if symbol has been intercepted for Gap-Down AI report popup in this session
             if (!gapDownInterceptedSymbols[stockItem.symbol]) {
               setGapDownInterceptedSymbols(prev => ({ ...prev, [stockItem.symbol]: true }));
