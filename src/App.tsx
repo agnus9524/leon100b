@@ -1386,7 +1386,7 @@ export default function App() {
     return lastMarket === 'US' ? lastUS : lastKR;
   });
 
-  // 🔄 스캘핑 종목 탭 8초 간격 자동 순환 상태
+  // 🔄 스캘핑 종목 탭 4초 간격 자동 순환 상태
   const [isAutoRotateTabs, setIsAutoRotateTabs] = useState<boolean>(true);
 
   // Manual Limit Sell States
@@ -1406,7 +1406,7 @@ export default function App() {
     }
   }, [scalperTabs]);
 
-  // 🔄 8초 간격 종목 탭 자동 순환 (오른쪽 탭으로 연속 순환 - 수동 매도 모달 열림 시 일시 중지)
+  // 🔄 4초 간격 종목 탭 자동 순환 (오른쪽 탭으로 연속 순환 - 수동 매도 모달 열림 시 일시 중지)
   useEffect(() => {
     if (!isAutoRotateTabs || manualSellModalOpen) return;
 
@@ -1424,7 +1424,7 @@ export default function App() {
       if (nextTab && nextTab.id !== activeTabId) {
         handleSwitchTab(nextTab.id);
       }
-    }, 8000);
+    }, 4000);
 
     return () => clearInterval(rotateInterval);
   }, [isAutoRotateTabs, activeTabId, marketType, manualSellModalOpen]);
@@ -7801,10 +7801,10 @@ export default function App() {
                       ? "bg-purple-500/20 border-purple-500/40 text-purple-300 shadow-[0_0_12px_rgba(168,85,247,0.2)]" 
                       : "bg-black/40 border-white/5 text-gray-400 hover:text-white"
                   )}
-                  title="스캘핑 종목 탭 8초 간격 자동 순환 ON/OFF"
+                  title="스캘핑 종목 탭 4초 간격 자동 순환 ON/OFF"
                 >
                   <RefreshCw className={cn("w-3.5 h-3.5 text-purple-400", isAutoRotateTabs && "animate-spin-slow")} />
-                  <span>8초 탭 순환 {isAutoRotateTabs ? "ON" : "OFF"}</span>
+                  <span>4초 탭 순환 {isAutoRotateTabs ? "ON" : "OFF"}</span>
                 </button>
               </div>
             </div>
