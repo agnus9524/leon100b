@@ -532,12 +532,17 @@ class KISService {
         'custtype': 'P',
       };
 
+      const numericPrice = Number(price);
+      // If limit order (00) but price is 0 or empty, query as market order (01) to fetch account orderable cash successfully
+      const effectiveOrdDvsn = (ordDvsn === '00' && (!numericPrice || numericPrice <= 0)) ? '01' : ordDvsn;
+      const effectivePrice = (effectiveOrdDvsn === '00' && numericPrice > 0) ? price : '0';
+
       const params = {
         CANO: this.config.accountNo,
         ACNT_PRDT_CD: this.config.accountCode,
         PDNO: symbol,
-        ORD_UNPR: ordDvsn === '00' ? price : '0',
-        ORD_DVSN: ordDvsn,
+        ORD_UNPR: effectivePrice,
+        ORD_DVSN: effectiveOrdDvsn,
         CMA_EVLU_AMT_ICLD_YN: 'N',
         OVRS_ICLD_YN: 'N',
         CANO_PWD: this.config.accountPw || ''

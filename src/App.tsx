@@ -3470,8 +3470,9 @@ export default function App() {
         if (buyableReqSeqRef.current !== currentSeq) return;
 
         if (res && res.rt_cd === '0' && res.output) {
-          if (res.output.ord_psbl_cash !== undefined && res.output.ord_psbl_cash !== null) {
-            const cashVal = Number(res.output.ord_psbl_cash);
+          const rawCash = res.output.ord_psbl_cash ?? res.output.ord_psbl_amt ?? res.output.nrcy_ord_psbl_amt;
+          if (rawCash !== undefined && rawCash !== null && rawCash !== '') {
+            const cashVal = Number(rawCash);
             if (!isNaN(cashVal) && cashVal > 0) {
               setOrderableKrw(prev => prev === cashVal ? prev : cashVal);
             }
@@ -3491,7 +3492,7 @@ export default function App() {
 
           let qty = candidateQtys.length > 0 ? Math.max(...candidateQtys) : 0;
 
-          const psblCash = (res.output.ord_psbl_cash !== undefined && res.output.ord_psbl_cash !== null) ? Number(res.output.ord_psbl_cash) : availableCash;
+          const psblCash = (rawCash !== undefined && rawCash !== null && rawCash !== '') ? Number(rawCash) : availableCash;
           if (qty <= 0 && psblCash > 0 && stockPrice > 0) {
             qty = Math.floor(psblCash / stockPrice);
           }
@@ -3509,9 +3510,19 @@ export default function App() {
         if (buyableReqSeqRef.current !== currentSeq) return;
 
         if (res && res.rt_cd === '0' && res.output) {
-          const usdAmt = Number(res.output.frcr_ord_psbl_amt || res.output.ord_psbl_frcr_amt || res.output.ovrs_ord_psbl_amt || 0);
-          if (!isNaN(usdAmt)) {
-            setOrderableUsd(prev => prev === usdAmt ? prev : usdAmt);
+          let rawUsd = Number(
+            res.output.frcr_ord_psbl_amt1 || 
+            res.output.ord_psbl_frcr_amt || 
+            res.output.frcr_ord_psbl_amt || 
+            res.output.ovrs_ord_psbl_amt || 
+            0
+          );
+          // If returned in KRW from KIS integrated margin response (>10000), convert to USD
+          if (rawUsd > 10000 && exchangeRate > 0) {
+            rawUsd = Number((rawUsd / exchangeRate).toFixed(2));
+          }
+          if (!isNaN(rawUsd) && rawUsd > 0) {
+            setOrderableUsd(prev => prev === rawUsd ? prev : rawUsd);
           }
 
           const candidateQtys = [
@@ -3524,7 +3535,7 @@ export default function App() {
 
           let qty = candidateQtys.length > 0 ? Math.max(...candidateQtys) : 0;
 
-          const usableUsd = usdAmt > 0 ? usdAmt * exchangeRate : availableCash;
+          const usableUsd = rawUsd > 0 ? rawUsd * exchangeRate : availableCash;
           if (qty <= 0 && usableUsd > 0 && stockPrice > 0) {
             qty = Math.floor(usableUsd / (stockPrice * exchangeRate));
           }
@@ -3610,18 +3621,20 @@ export default function App() {
           if (marketType === 'KR') setSellableHoldings(prev => ({ ...prev, ...newSellable }));
         }
 
-        if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output2?.[0]) {
+        if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output2) {
           foundAnyData = true;
           domesticSuccess = true;
-          const out2 = domesticBalanceData.output2[0];
-          const dnclAmt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.prsm_dncl_amt || 0);
-          const ordPsblCash = Number(out2.ord_psbl_cash || out2.ord_psbl_amt || 0);
+          const out2 = Array.isArray(domesticBalanceData.output2) ? (domesticBalanceData.output2[0] || {}) : domesticBalanceData.output2;
+          const dnclAmt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.prsm_dncl_amt || out2.cma_evlu_amt || 0);
+          const ordPsblCash = Number(out2.ord_psbl_cash || out2.ord_psbl_amt || out2.nrcy_ord_psbl_amt || 0);
           const domesticPurchase = Number(out2.pchs_amt_smtl_amt || 0);
           const actualPurchaseCost = Math.max(domesticPurchase, totalStockPurchaseCost);
 
           // Direct deposit/cash balance in account (Prioritize immediate orderable cash)
-          const domesticCash = ordPsblCash > 0 ? ordPsblCash : dnclAmt;
-          setOrderableKrw(domesticCash);
+          const domesticCash = ordPsblCash > 0 ? ordPsblCash : (dnclAmt > 0 ? dnclAmt : (Number(out2.nass_amt || 0) > actualPurchaseCost ? Number(out2.nass_amt) - actualPurchaseCost : 0));
+          if (domesticCash > 0) {
+            setOrderableKrw(domesticCash);
+          }
           
           if (marketType === 'KR') {
             totalConvertedBalance += Math.round(domesticCash);
@@ -3656,17 +3669,48 @@ export default function App() {
           }
         }
 
-        if (overseasBalanceData?.rt_cd === '0' && overseasBalanceData.output2) {
+        if (overseasBalanceData?.rt_cd === '0' && (overseasBalanceData.output2 || overseasBalanceData.output3)) {
           foundAnyData = true;
           overseasSuccess = true;
-          const out2 = overseasBalanceData.output2;
-          const frcr_dncl_amt = Number(out2.frcr_dncl_amt || 0); // Foreign currency deposit
-          const ovrs_tot_pchs_amt = Number(out2.ovrs_tot_pchs_amt || totalOverseasPurchaseCostUSD);
-          if (frcr_dncl_amt > 0) setOrderableUsd(frcr_dncl_amt);
+          const out2List = Array.isArray(overseasBalanceData.output2) 
+            ? overseasBalanceData.output2 
+            : (overseasBalanceData.output2 ? [overseasBalanceData.output2] : []);
+          const usdItem = out2List.find((item: any) => item.crcy_cd === 'USD') || out2List[0] || {};
+          const out3 = Array.isArray(overseasBalanceData.output3) 
+            ? (overseasBalanceData.output3[0] || {}) 
+            : (overseasBalanceData.output3 || {});
+
+          const frcr_dncl_amt = Number(
+            usdItem.frcr_dncl_amt || 
+            usdItem.frcr_drwg_psbl_amt || 
+            usdItem.ord_psbl_frcr_amt || 
+            usdItem.frcr_ord_psbl_amt1 || 
+            out3.frcr_ord_psbl_amt1 || 
+            out3.frcr_dncl_amt || 
+            0
+          );
+          let ordPsblUsd = Number(
+            usdItem.frcr_ord_psbl_amt1 || 
+            usdItem.ord_psbl_frcr_amt || 
+            usdItem.frcr_dncl_amt || 
+            out3.frcr_ord_psbl_amt1 || 
+            out3.ovrs_ord_psbl_amt || 
+            0
+          );
+          // If ordPsblUsd is in KRW (> 10000), convert to USD
+          if (ordPsblUsd > 10000 && exchangeRate > 0) {
+            ordPsblUsd = Number((ordPsblUsd / exchangeRate).toFixed(2));
+          }
+          const ovrs_tot_pchs_amt = Number(usdItem.ovrs_tot_pchs_amt || out3.frcr_pchs_amt || totalOverseasPurchaseCostUSD);
+          
+          const finalUsd = ordPsblUsd > 0 ? ordPsblUsd : frcr_dncl_amt;
+          if (finalUsd > 0) {
+            setOrderableUsd(finalUsd);
+          }
           
           if (marketType === 'US') {
-            totalConvertedBalance += frcr_dncl_amt;
-            totalConvertedPrincipal += (frcr_dncl_amt + ovrs_tot_pchs_amt);
+            totalConvertedBalance += finalUsd;
+            totalConvertedPrincipal += (finalUsd + ovrs_tot_pchs_amt);
           }
         }
       } catch (err: any) {
@@ -3685,23 +3729,26 @@ export default function App() {
       // 3. Integrated Asset Status (CTRP6548R)
       try {
         const assetStatus = await kisService.getInvestmentAssetStatus();
-          if (assetStatus?.output2) {
-            const out2 = assetStatus.output2;
-            const dncl_amt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.ord_psbl_cash || 0);
-            const tot_asst_amt = Number(out2.tot_asst_amt || 0);
-            
-            if (tot_asst_amt > 0) {
-              if (tot_asst_amt > totalConvertedPrincipal) {
-                totalConvertedPrincipal = Math.round(tot_asst_amt);
-              }
-              if (dncl_amt > 0 && totalConvertedBalance === 0) {
-                totalConvertedBalance = Math.round(dncl_amt);
-              }
+        if (assetStatus?.output2) {
+          const out2 = Array.isArray(assetStatus.output2) ? (assetStatus.output2[0] || {}) : assetStatus.output2;
+          const dncl_amt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.ord_psbl_cash || 0);
+          const tot_asst_amt = Number(out2.tot_asst_amt || 0);
+          
+          if (tot_asst_amt > 0) {
+            if (tot_asst_amt > totalConvertedPrincipal) {
+              totalConvertedPrincipal = Math.round(tot_asst_amt);
+            }
+            if (dncl_amt > 0 && totalConvertedBalance === 0) {
+              totalConvertedBalance = Math.round(dncl_amt);
             }
           }
-        } catch (err) {
-          console.warn("Asset Status Sync Skip:", err);
+          if (dncl_amt > 0) {
+            setOrderableKrw(prev => (prev === 0 ? dncl_amt : prev));
+          }
         }
+      } catch (err) {
+        console.warn("Asset Status Sync Skip:", err);
+      }
 
       // Final fallback: if total is still 0, check if we have any total eval amount in output2
       // common for some accounts to only populate tot_evlu_amt
@@ -8641,66 +8688,84 @@ export default function App() {
             </div>
 
             {/* Single Row 4-Column Grid: 주문가능원화, 주문가능달러, 총자산, 실현손익 */}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
-              {/* 1. 주문가능원화 */}
-              <div className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 flex flex-col justify-center transition-all">
-                <div className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight font-mono truncate">
-                  {Math.round(orderableKrw).toLocaleString()}원
-                </div>
-                <div className="text-xs font-bold text-slate-400 mt-1">
-                  주문가능원화
-                </div>
-              </div>
+            {(() => {
+              const displayOrderableKrw = kisConfig.isConnected
+                ? (orderableKrw > 0 ? orderableKrw : balance)
+                : (orderableKrw > 0 ? orderableKrw : (balance > 0 ? balance : 5000000));
 
-              {/* 2. 주문가능달러 */}
-              <div className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 flex flex-col justify-center transition-all">
-                <div className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight font-mono truncate">
-                  {Number(orderableUsd).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}달러
-                </div>
-                <div className="text-xs font-bold text-slate-400 mt-1">
-                  주문가능달러
-                </div>
-              </div>
+              let displayOrderableUsd = orderableUsd;
+              // If orderableUsd was in KRW from KIS integrated margin (> 10000), convert to USD
+              if (displayOrderableUsd > 10000 && exchangeRate > 0) {
+                displayOrderableUsd = Number((displayOrderableUsd / exchangeRate).toFixed(2));
+              }
+              // If USD is 0 or unassigned, calculate equivalent USD purchasing power from KRW cash
+              if ((!displayOrderableUsd || displayOrderableUsd <= 0) && displayOrderableKrw > 0 && exchangeRate > 0) {
+                displayOrderableUsd = Number((displayOrderableKrw / exchangeRate).toFixed(2));
+              }
 
-              {/* 3. 총자산 버튼 */}
-              <button
-                type="button"
-                onClick={() => setIsAssetAnalysisModalOpen(true)}
-                className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 hover:border-emerald-500/50 flex flex-col items-center justify-center gap-1.5 transition-all group cursor-pointer"
-                title="클릭 시 총자산 상세 산출 내역 팝업 보기"
-              >
-                <div className="w-10 h-10 rounded-full bg-emerald-500 text-white flex items-center justify-center font-mono font-black text-lg shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-transform">
-                  ₩
-                </div>
-                <span className="text-xs font-bold text-slate-300 group-hover:text-emerald-400 transition-colors">
-                  총자산
-                </span>
-              </button>
+              return (
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
+                  {/* 1. 주문가능원화 */}
+                  <div className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 flex flex-col justify-center transition-all">
+                    <div className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight font-mono truncate">
+                      {Math.round(displayOrderableKrw).toLocaleString()}원
+                    </div>
+                    <div className="text-xs font-bold text-slate-400 mt-1">
+                      주문가능원화
+                    </div>
+                  </div>
 
-              {/* 4. 실현손익 버튼 */}
-              <button
-                type="button"
-                onClick={() => setShowPnlDetailsModal(true)}
-                className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 hover:border-rose-500/50 flex flex-col items-center justify-center gap-1.5 transition-all group cursor-pointer"
-                title="클릭 시 실현손익 및 세부리포트 보기"
-              >
-                <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shadow-md group-hover:scale-105 transition-transform border border-rose-500/30">
-                  <TrendingUp className="w-5 h-5 text-rose-400" />
+                  {/* 2. 주문가능달러 */}
+                  <div className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 flex flex-col justify-center transition-all">
+                    <div className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight font-mono truncate">
+                      ${Number(displayOrderableUsd || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                    </div>
+                    <div className="text-xs font-bold text-slate-400 mt-1">
+                      주문가능달러
+                    </div>
+                  </div>
+
+                  {/* 3. 총자산 버튼 */}
+                  <button
+                    type="button"
+                    onClick={() => setIsAssetAnalysisModalOpen(true)}
+                    className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 hover:border-emerald-500/50 flex flex-col items-center justify-center gap-1.5 transition-all group cursor-pointer"
+                    title="클릭 시 총자산 상세 산출 내역 팝업 보기"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-emerald-500 text-white flex items-center justify-center font-mono font-black text-lg shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-transform">
+                      ₩
+                    </div>
+                    <span className="text-xs font-bold text-slate-300 group-hover:text-emerald-400 transition-colors">
+                      총자산
+                    </span>
+                  </button>
+
+                  {/* 4. 실현손익 버튼 */}
+                  <button
+                    type="button"
+                    onClick={() => setShowPnlDetailsModal(true)}
+                    className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 hover:border-rose-500/50 flex flex-col items-center justify-center gap-1.5 transition-all group cursor-pointer"
+                    title="클릭 시 실현손익 및 세부리포트 보기"
+                  >
+                    <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shadow-md group-hover:scale-105 transition-transform border border-rose-500/30">
+                      <TrendingUp className="w-5 h-5 text-rose-400" />
+                    </div>
+                    <div className="flex flex-col items-center">
+                      <span className="text-xs font-bold text-slate-300 group-hover:text-rose-400 transition-colors">
+                        실현손익
+                      </span>
+                      <span className={cn(
+                        "text-[11px] font-mono font-black mt-0.5",
+                        (kisTotalRealizedPnL ?? gapTradingProfit) >= 0 ? "text-rose-400" : "text-sky-400"
+                      )}>
+                        {(kisTotalRealizedPnL ?? gapTradingProfit) >= 0 ? '+' : ''}
+                        {formatCurrency(kisTotalRealizedPnL ?? gapTradingProfit)}
+                      </span>
+                    </div>
+                  </button>
                 </div>
-                <div className="flex flex-col items-center">
-                  <span className="text-xs font-bold text-slate-300 group-hover:text-rose-400 transition-colors">
-                    실현손익
-                  </span>
-                  <span className={cn(
-                    "text-[11px] font-mono font-black mt-0.5",
-                    (kisTotalRealizedPnL ?? gapTradingProfit) >= 0 ? "text-rose-400" : "text-sky-400"
-                  )}>
-                    {(kisTotalRealizedPnL ?? gapTradingProfit) >= 0 ? '+' : ''}
-                    {formatCurrency(kisTotalRealizedPnL ?? gapTradingProfit)}
-                  </span>
-                </div>
-              </button>
-            </div>
+              );
+            })()}
           </div>
         </section>
 
