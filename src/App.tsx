@@ -2645,6 +2645,8 @@ export default function App() {
     } catch (error: any) {
       console.error("Failed to fetch real exchange rate:", error);
       showNotification("환율 정보를 가져오는 데 실패했습니다.", "error");
+    } finally {
+      setIsRateLoading(false);
     }
   }, [kisConfig.isConnected]);
 
@@ -3842,12 +3844,25 @@ export default function App() {
           if (tabIndex === -1) {
             const stockInfo = stocksRef.current.find(s => s.symbol === symbol) || INITIAL_STOCKS_KR.find(s => s.symbol === symbol) || INITIAL_STOCKS.find(s => s.symbol === symbol);
             if (stockInfo) {
-              const newTab = {
-                id: `tab-${symbol}-${Date.now()}`,
+              const isUSStock = /^[A-Z]/.test(symbol);
+              const limits = calculateStockLimits(stockInfo.price || (isUSStock ? 10 : 1000), stockInfo.changePercent || 0, isUSStock, stockInfo.basePrice);
+              const newTab: ScalperTab = {
+                id: symbol,
                 symbol,
-                name: stockInfo.name,
+                name: stockInfo.name || symbol,
                 isBotActive: true,
-                gapInventory: []
+                gapBuyPrice: limits.lowerLimit,
+                gapSellPrice: limits.upperLimit,
+                tradeQuantity: 1,
+                maxSlots: 3,
+                gapInventory: [],
+                gapTradingProfit: 0,
+                gapTradeCount: 0,
+                lastTradeType: null,
+                scalperMessage: "대기 중...",
+                entryPriceMode: 'BID2',
+                autoCancelThreshold: 0.2,
+                tradeLogs: []
               };
               updatedTabs.push(newTab);
               tabsChanged = true;
@@ -8653,7 +8668,7 @@ export default function App() {
                     <span>
                       {kisConfig.isConnected && kisConfig.accountNo 
                         ? `${kisConfig.accountNo.slice(0, 8)}-${kisConfig.accountNo.slice(8) || '01'}` 
-                        : '44431721-01'}
+                        : '계좌 미연결'}
                     </span>
                     <ChevronDown className={cn("w-3.5 h-3.5 text-blue-400 transition-transform duration-200", showAccountDropdown && "rotate-180")} />
                   </button>
@@ -8665,7 +8680,7 @@ export default function App() {
                         onClick={() => { setSelectedAccountType('위탁'); setShowAccountDropdown(false); }}
                         className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-left hover:bg-blue-500/20 text-blue-400 cursor-pointer"
                       >
-                        <span>위탁 {kisConfig.accountNo ? `${kisConfig.accountNo.slice(0, 8)}-01` : '44431721-01'}</span>
+                        <span>위탁 {kisConfig.accountNo ? `${kisConfig.accountNo.slice(0, 8)}-01` : '계좌 미연결'}</span>
                         <span className="text-[10px] bg-blue-500/20 px-1.5 py-0.5 rounded text-blue-300">기본</span>
                       </button>
                       <button
@@ -8781,10 +8796,11 @@ export default function App() {
                       </div>
                     </div>
                   ) : (() => {
+                    const activeStock = selectedStock || (marketType === 'US' ? INITIAL_STOCKS[0] : INITIAL_STOCKS_KR[0]);
                     const totalCost = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
                     const totalQty = gapInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
                     const avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
-                    const avgProfitPct = (avgPrice > 0 && selectedStock?.price) ? calculateNetProfitPercent(avgPrice, selectedStock.price, marketType) : 0;
+                    const avgProfitPct = (avgPrice > 0 && activeStock?.price) ? calculateNetProfitPercent(avgPrice, activeStock.price, marketType) : 0;
                     const targetSellPrice = calculateTargetSellPrice(avgPrice, scalpingTargetProfit);
 
                     return (
@@ -8796,8 +8812,8 @@ export default function App() {
                         <div className="flex items-center justify-between border-b border-white/10 pb-2">
                           <div className="flex items-center gap-2">
                             <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse"></span>
-                            <span className="text-sm font-black text-white">{selectedStock.name}</span>
-                            <span className="text-xs font-mono text-sleek-text-secondary">({selectedStock.symbol})</span>
+                            <span className="text-sm font-black text-white">{activeStock?.name || '종목'}</span>
+                            <span className="text-xs font-mono text-sleek-text-secondary">({activeStock?.symbol || '-'})</span>
                           </div>
                           <span className="bg-sleek-blue/20 text-sleek-blue border border-sleek-blue/30 px-2 py-0.5 rounded text-[10px] font-bold">
                             통합 (보유 중)
@@ -8834,7 +8850,7 @@ export default function App() {
                 ) : (
                   /* Individual Slot Mode (개별 모드 - 매수진입/체결 및 매도싸인만 표시) */
                   (() => {
-                    const currentStock = selectedStock;
+                    const currentStock = selectedStock || (marketType === 'US' ? INITIAL_STOCKS[0] : INITIAL_STOCKS_KR[0]);
                     const stockPendingBuys = pendingBuyOrders.filter(p => p.symbol === currentStock?.symbol);
 
                     // Collect active slots (Filled Inventory & Pending Buy Orders)
@@ -8865,7 +8881,7 @@ export default function App() {
                           <div className="flex items-center justify-between border-b border-emerald-500/20 pb-2">
                             <div className="flex items-center gap-2 truncate">
                               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse shrink-0"></span>
-                              <span className="font-extrabold text-white text-sm truncate">{currentStock.name}</span>
+                              <span className="font-extrabold text-white text-sm truncate">{currentStock?.name || '종목'}</span>
                               <span className="text-[10px] font-bold text-emerald-300 bg-emerald-500/20 px-1.5 py-0.5 rounded border border-emerald-500/30 shrink-0">
                                 매수체결 #{slotNum}
                               </span>
@@ -8920,7 +8936,7 @@ export default function App() {
                           <div className="flex items-center justify-between border-b border-amber-500/20 pb-2">
                             <div className="flex items-center gap-2 truncate">
                               <Loader2 className="w-3.5 h-3.5 text-amber-400 animate-spin shrink-0" />
-                              <span className="font-extrabold text-white text-sm truncate">{currentStock.name}</span>
+                              <span className="font-extrabold text-white text-sm truncate">{currentStock?.name || '종목'}</span>
                               <span className="text-[10px] font-bold text-amber-300 bg-amber-500/20 px-1.5 py-0.5 rounded border border-amber-500/30 shrink-0">
                                 매수진입 시도 중
                               </span>
@@ -8958,7 +8974,7 @@ export default function App() {
                     }
 
                     // Filter logs strictly for current selected stock (zero cross-contamination)
-                    const filteredLogs = tradeLogs.filter(log => log.symbol === currentStock.symbol);
+                    const filteredLogs = tradeLogs.filter(log => log.symbol === currentStock?.symbol);
                     const logsToShow = filteredLogs;
 
                     return (
@@ -8966,7 +8982,7 @@ export default function App() {
                         <div className="bg-black/20 border border-dashed border-white/10 rounded-2xl p-4 text-center space-y-1">
                           <div className="flex items-center justify-center gap-1.5 text-xs text-white font-bold">
                             <Activity className="w-3.5 h-3.5 text-sleek-blue" />
-                            <span>[{currentStock.name}] 매수/매도 대기 중</span>
+                            <span>[{currentStock?.name || '선택 종목'}] 매수/매도 대기 중</span>
                           </div>
                           <p className="text-[11px] text-sleek-text-secondary font-mono">
                             매수진입 및 매도싸인 발생 시 진입 예상가와 목표가가 여기에 즉시 표시됩니다.
@@ -8993,7 +9009,7 @@ export default function App() {
                                       <span className={cn("px-1.5 py-0.2 rounded text-[9px] font-black", isBuy ? "bg-rose-500/20 text-rose-400 border border-rose-500/30" : "bg-sky-500/20 text-sky-400 border border-sky-500/30")}>
                                         {isBuy ? "매수진입" : "매도싸인"}
                                       </span>
-                                      <span className="font-bold text-white">{logStock.name}</span>
+                                      <span className="font-bold text-white">{logStock?.name || log.symbol}</span>
                                     </div>
                                     <span className="text-[10px] text-gray-500">{log.time}</span>
                                   </div>
@@ -9016,7 +9032,7 @@ export default function App() {
                           </div>
                         ) : (
                           <div className="text-[10px] text-gray-500 text-center py-2 font-mono">
-                            {currentStock.name} 종목의 최근 체결/주문 기록이 없습니다.
+                            {currentStock?.name || '선택'} 종목의 최근 체결/주문 기록이 없습니다.
                           </div>
                         )}
                       </div>
@@ -9399,7 +9415,7 @@ export default function App() {
                     <h3 className="text-lg md:text-xl font-black text-white flex items-center gap-2">
                       총 자산 산출 & 분석 리포트
                       <span className="text-xs font-mono font-bold px-2.5 py-0.5 bg-sleek-blue/15 text-sleek-blue rounded-full border border-sleek-blue/30">
-                        {kisConfig.isConnected ? "실계좌 연동 (44431721-01)" : "시뮬레이션 계좌"}
+                        {kisConfig.isConnected ? `실계좌 연동 (${kisConfig.accountNo ? `${kisConfig.accountNo.slice(0, 8)}-01` : '연동됨'})` : "시뮬레이션 계좌"}
                       </span>
                     </h3>
                     <p className="text-xs md:text-sm text-slate-300 mt-1">
