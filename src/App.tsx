@@ -1788,12 +1788,24 @@ export default function App() {
 
   const displayScalperMessage = useMemo(() => {
     const currentName = selectedStock?.name || selectedSymbol;
-    if (!scalperMessage || scalperMessage === "대기 중...") {
-      if (!isGapBotActive) {
-        const held = holdings[selectedSymbol] || 0;
-        return held > 0 
-          ? `[대기] ${currentName} (${held}주 보유) - 스캘퍼 정지 상태`
-          : `[대기] ${currentName} 스캘퍼 대기 중 (시작 버튼을 누르면 자동매매 시작)`;
+    const held = holdings[selectedSymbol] || 0;
+
+    if (!isGapBotActive) {
+      return held > 0 
+        ? `[대기] ${currentName} (${held}주 보유) - 스캘퍼 정지 상태`
+        : `[대기] ${currentName} 스캘퍼 대기 중 (시작 버튼을 누르면 자동매매 시작)`;
+    }
+
+    if (!scalperMessage || scalperMessage === "대기 중..." || scalperMessage.includes("자금 순환 취소") || scalperMessage.includes("미체결 매수 취소") || scalperMessage.includes("주문 취소")) {
+      if (selectedStock) {
+        const strat = detectStockStrategies(selectedStock);
+        if (strat.activeCount === 4) return `🎯 [4/4 올-그린] ${currentName} 4개 전략 동시포착 - 진입 대기`;
+        if (strat.isBreakout) return `⚡ [거래량 돌파] ${currentName} 거래량 급증 돌파 탐색 중`;
+        if (strat.isPullback) return `⚡ [눌림목 지지] ${currentName} 상승 추세 눌림목 지지선 감시 중`;
+        if (strat.isVwapSupport) return `⚡ [VWAP 반등] ${currentName} 당일 VWAP 지지 반등 감시`;
+        if (strat.isVolumeProfile) return `⚡ [VP/CVD 유동성] ${currentName} 매수 우위 유동성 감시 중`;
+        if (held > 0) return `${currentName} 보유 포지션 감시 중 (보유: ${held}주, RSI: ${Math.round(strat.rsi)})`;
+        return `${currentName} 실시간 수급/지지선 감시 중 (RSI: ${Math.round(strat.rsi)})`;
       }
       return `${currentName} 진입 모니터링 중...`;
     }
@@ -1811,7 +1823,6 @@ export default function App() {
     const isOtherStockMessage = stocksRef.current.some(s => s.symbol !== selectedSymbol && cleaned.includes(s.name) && !cleaned.includes(currentName));
     if (isOtherStockMessage) {
       if (!isGapBotActive) {
-        const held = holdings[selectedSymbol] || 0;
         return held > 0 
           ? `[대기] ${currentName} (${held}주 보유) - 스캘퍼 정지 상태`
           : `[대기] ${currentName} 스캘퍼 대기 중 (시작 버튼을 누르면 자동매매 시작)`;
@@ -1823,7 +1834,6 @@ export default function App() {
         if (strat.isPullback) return `⚡ [눌림목 지지] ${currentName} 상승 추세 눌림목 지지선 감시 중`;
         if (strat.isVwapSupport) return `⚡ [VWAP 반등] ${currentName} 당일 VWAP 지지 반등 감시`;
         if (strat.isVolumeProfile) return `⚡ [VP/CVD 유동성] ${currentName} 매수 우위 유동성 감시 중`;
-        const held = holdings[selectedSymbol] || 0;
         if (held > 0) return `${currentName} 보유 포지션 감시 중 (보유: ${held}주, RSI: ${Math.round(strat.rsi)})`;
         return `${currentName} 실시간 수급/지지선 감시 중 (RSI: ${Math.round(strat.rsi)})`;
       }
@@ -4762,6 +4772,9 @@ export default function App() {
             addLog(order.symbol, '매수', orderPrice, order.quantity, `[자금순환 취소] ${cancelReason}`);
             if (currentStock.symbol === selectedStock?.symbol) {
               setScalperMessage(`[자금 순환 취소] ${currentStock.name} 미체결 매수 주문 취소 -> 주문가능금액 ${formatCurrency(refundAmount)}원 복구`);
+              setTimeout(() => {
+                setScalperMessage("대기 중...");
+              }, 3000);
             }
             showNotification(`[자금 순환 취소] ${currentStock.name} 매수가 대비 주가 상승 이탈로 미체결 매수 취소 (주문가능금액 원복)`, "info");
           } else {
@@ -4777,6 +4790,9 @@ export default function App() {
                 showNotification(`${currentStock.name} KIS 매수 미체결 자동 취소 완료 (주문가능금액 환원)`, "info");
                 if (currentStock.symbol === selectedStock?.symbol) {
                   setScalperMessage(`[자금 순환 취소] ${currentStock.name} 미체결 매수 취소 완료 -> KIS 예수금/주문가능금액 원복`);
+                  setTimeout(() => {
+                    setScalperMessage("대기 중...");
+                  }, 3000);
                 }
                 setBotStatus(`[KIS 취소완료] ${formatCurrency(orderPrice)} 미체결 취소 및 자금 순환 완료`);
                 // Trigger KIS balance resync
@@ -5561,13 +5577,6 @@ export default function App() {
       tradePrice = stock.price;
     }
     let finalAmount = amount;
-
-    if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
-      setBotStatus("[실전매매 전용] KIS 연동 및 실제 주문 전송 옵션 미활성화");
-      setScalperMessage("[실전매매 전용] KIS 연동 및 실제 주문 전송 옵션을 활성화해주세요.");
-      showNotification("실전매매 전용: KIS API 연동 및 실제 주문 전송 옵션이 활성화되어 있어야 거래가 실행됩니다.", "info");
-      return 0;
-    }
 
     // KIS API가 연결되어 있고 실제 주문 전송이 활성화된 경우 실제 주문을 라이브 인터페이스를 통해 시도
     if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
