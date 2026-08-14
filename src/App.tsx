@@ -1652,7 +1652,17 @@ export default function App() {
   const [isRefreshingTop3, setIsRefreshingTop3] = useState<boolean>(false);
 
   const displayScalperMessage = useMemo(() => {
-    if (!scalperMessage) return "대기 중...";
+    const currentName = selectedStock?.name || selectedSymbol;
+    if (!scalperMessage || scalperMessage === "대기 중...") {
+      if (!isGapBotActive) {
+        const held = holdings[selectedSymbol] || 0;
+        return held > 0 
+          ? `[대기] ${currentName} (${held}주 보유) - 스캘퍼 정지 상태`
+          : `[대기] ${currentName} 스캘퍼 대기 중 (시작 버튼을 누르면 자동매매 시작)`;
+      }
+      return `${currentName} 진입 모니터링 중...`;
+    }
+
     let cleaned = scalperMessage
       .replace(/^\[AI전략 포착\]\s*.*?(감지!?|포착!?)\s*/g, '')
       .replace(/\[AI전략 포착\]\s*[^!]*감지!?\s*/g, '')
@@ -1661,8 +1671,32 @@ export default function App() {
       .replace(/^\[AI관망\]\s*/g, '')
       .replace(/\[AI관망\]\s*/g, '')
       .trim();
-    return cleaned || "진입 모니터링 중...";
-  }, [scalperMessage]);
+
+    // If message explicitly references a different stock name, synthesize accurate status for selected stock
+    const isOtherStockMessage = stocksRef.current.some(s => s.symbol !== selectedSymbol && cleaned.includes(s.name) && !cleaned.includes(currentName));
+    if (isOtherStockMessage) {
+      if (!isGapBotActive) {
+        const held = holdings[selectedSymbol] || 0;
+        return held > 0 
+          ? `[대기] ${currentName} (${held}주 보유) - 스캘퍼 정지 상태`
+          : `[대기] ${currentName} 스캘퍼 대기 중 (시작 버튼을 누르면 자동매매 시작)`;
+      }
+      if (selectedStock) {
+        const strat = detectStockStrategies(selectedStock);
+        if (strat.activeCount === 4) return `🎯 [4/4 올-그린] ${currentName} 4개 전략 동시포착 - 진입 대기`;
+        if (strat.isBreakout) return `⚡ [거래량 돌파] ${currentName} 거래량 급증 돌파 탐색 중`;
+        if (strat.isPullback) return `⚡ [눌림목 지지] ${currentName} 상승 추세 눌림목 지지선 감시 중`;
+        if (strat.isVwapSupport) return `⚡ [VWAP 반등] ${currentName} 당일 VWAP 지지 반등 감시`;
+        if (strat.isVolumeProfile) return `⚡ [VP/CVD 유동성] ${currentName} 매수 우위 유동성 감시 중`;
+        const held = holdings[selectedSymbol] || 0;
+        if (held > 0) return `${currentName} 보유 포지션 감시 중 (보유: ${held}주, RSI: ${Math.round(strat.rsi)})`;
+        return `${currentName} 실시간 수급/지지선 감시 중 (RSI: ${Math.round(strat.rsi)})`;
+      }
+      return `${currentName} 진입 모니터링 중...`;
+    }
+
+    return cleaned || `${currentName} 진입 모니터링 중...`;
+  }, [scalperMessage, selectedStock, selectedSymbol, isGapBotActive, holdings, detectStockStrategies]);
 
   const isGapBotActiveRef = React.useRef(isGapBotActive);
   const gapBuyPriceRef = React.useRef(gapBuyPrice);
@@ -4621,7 +4655,9 @@ export default function App() {
             const refundAmount = priceInKrw * (order.quantity || 1);
             setBalance(prev => prev + refundAmount);
             addLog(order.symbol, '매수', orderPrice, order.quantity, `[자금순환 취소] ${cancelReason}`);
-            setScalperMessage(`[자금 순환 취소] ${currentStock.name} 미체결 매수 주문 취소 -> 주문가능금액 ${formatCurrency(refundAmount)}원 복구`);
+            if (currentStock.symbol === selectedStock?.symbol) {
+              setScalperMessage(`[자금 순환 취소] ${currentStock.name} 미체결 매수 주문 취소 -> 주문가능금액 ${formatCurrency(refundAmount)}원 복구`);
+            }
             showNotification(`[자금 순환 취소] ${currentStock.name} 매수가 대비 주가 상승 이탈로 미체결 매수 취소 (주문가능금액 원복)`, "info");
           } else {
             // Real KIS order cancel request!
@@ -4634,7 +4670,9 @@ export default function App() {
               if (cancelRes && cancelRes.rt_cd === '0') {
                 addLog(order.symbol, '매수', orderPrice, order.quantity, `[KIS 자금순환 취소] ${cancelReason}`);
                 showNotification(`${currentStock.name} KIS 매수 미체결 자동 취소 완료 (주문가능금액 환원)`, "info");
-                setScalperMessage(`[자금 순환 취소] ${currentStock.name} 미체결 매수 취소 완료 -> KIS 예수금/주문가능금액 원복`);
+                if (currentStock.symbol === selectedStock?.symbol) {
+                  setScalperMessage(`[자금 순환 취소] ${currentStock.name} 미체결 매수 취소 완료 -> KIS 예수금/주문가능금액 원복`);
+                }
                 setBotStatus(`[KIS 취소완료] ${formatCurrency(orderPrice)} 미체결 취소 및 자금 순환 완료`);
                 // Trigger KIS balance resync
                 setTimeout(() => handleSyncKIS(), 300);
@@ -5575,14 +5613,14 @@ export default function App() {
 
                     if (parsedQty <= 0) {
                         setBotStatus(`[매수 취소] 실제 매수 가능 수량 0주`);
-                        setScalperMessage("실제 주문 가능 수량 부족 (0주)으로 진입 건너뜀");
+                        if (stock.symbol === selectedStock?.symbol) setScalperMessage("실제 주문 가능 수량 부족 (0주)으로 진입 건너뜀");
                         addLog(stock.symbol, '매수', tradePrice, amount, `[주문취소] KIS 매수 가능 수량 부족 (0주)`);
                         showNotification(`매수 스킵: 실제 계좌의 매수 가능 수량이 0주입니다.`, "error");
                         return 0;
                     }
                     if (parsedQty < finalAmount && availCash < tradePrice * finalAmount) {
                         setBotStatus(`[매수 진입 차단] 주문 가능 수량 부족 (요청: ${finalAmount}주 / 가능: ${parsedQty}주)`);
-                        setScalperMessage(`실제 주문 가능 수량 부족으로 진입 건너뜀 (가능: ${parsedQty}주)`);
+                        if (stock.symbol === selectedStock?.symbol) setScalperMessage(`실제 주문 가능 수량 부족으로 진입 건너뜀 (가능: ${parsedQty}주)`);
                         addLog(stock.symbol, '매수', tradePrice, amount, `[진입스킵] 실시간 주문 가능 금액/수량 초과 (요청: ${amount}주 / 가능: ${parsedQty}주)`);
                         showNotification(`매수 진입 차단: 실시간 주문 가능 금액/수량을 초과하여 진입하지 않습니다. (요청: ${amount}주, 가능: ${parsedQty}주)`, "error");
                         return 0;
@@ -5794,7 +5832,7 @@ export default function App() {
     if (action === 'BUY') {
       if (balance < cost) {
         setBotStatus(`[매수 진입 차단] 예수금 부족 (필요: ${formatCurrency(cost)} / 가능: ${formatCurrency(balance)})`);
-        setScalperMessage(`[매수 차단] 예수금 부족으로 진입 취소`);
+        if (stock.symbol === selectedStock?.symbol) setScalperMessage(`[매수 차단] 예수금 부족으로 진입 취소`);
         addLog(stock.symbol, '매수', tradePrice, finalAmount, `[진입차단] 예수금(매수 가능 금액) 초과 (필요: ${formatCurrency(cost)}, 예수금: ${formatCurrency(balance)})`);
         showNotification(`매수 진입 차단: 매수 가능 금액(예수금)을 초과하여 진입하지 않습니다.`, "error");
         return 0;
@@ -5848,7 +5886,7 @@ export default function App() {
             if (!isNaN(actualSellable)) {
               if (actualSellable <= 0) {
                 setBotStatus(`[매도 건너뜀] KIS 실제 매도 가능 수량 0주`);
-                setScalperMessage("실제 보유 주식이 없거나 미체결 상태여서 매도 대기 (실거래 미체결 대기)");
+                if (stock.symbol === selectedStock?.symbol) setScalperMessage("실제 보유 주식이 없거나 미체결 상태여서 매도 대기 (실거래 미체결 대기)");
                 showNotification(`매도 대기: 실제 계좌에 보유 중인 ${stock.name} 매도 가능 수량이 0주입니다.`, "info");
                 return 0;
               }
