@@ -8887,27 +8887,14 @@ export default function App() {
               </div>
             </div>
 
-            {/* Single Row 4-Column Grid: 주문가능원화, 주문가능달러, 총자산, 실현손익 */}
+            {/* Single Row 3-Column Grid: 주문가능원화, 총자산, 실현손익 */}
             {(() => {
               const displayOrderableKrw = kisConfig.isConnected
                 ? (orderableKrw > 0 ? orderableKrw : balance)
                 : (orderableKrw > 0 ? orderableKrw : (balance > 0 ? balance : 5000000));
 
-              let displayOrderableUsd = orderableUsd;
-              let isDirectFrcr = orderableUsd > 0;
-              // If orderableUsd was in KRW from KIS integrated margin (> 10000), convert to USD
-              if (displayOrderableUsd > 10000 && exchangeRate > 0) {
-                displayOrderableUsd = Number((displayOrderableUsd / exchangeRate).toFixed(2));
-                isDirectFrcr = false;
-              }
-              // If USD is 0 or unassigned, calculate equivalent USD purchasing power from KRW cash
-              if ((!displayOrderableUsd || displayOrderableUsd <= 0) && displayOrderableKrw > 0 && exchangeRate > 0) {
-                displayOrderableUsd = Number((displayOrderableKrw / exchangeRate).toFixed(2));
-                isDirectFrcr = false;
-              }
-
               return (
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-3 items-stretch">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-stretch">
                   {/* 1. 주문가능원화 */}
                   <div className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 flex flex-col justify-center transition-all">
                     <div className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight font-mono truncate">
@@ -8921,22 +8908,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* 2. 주문가능달러 */}
-                  <div className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 flex flex-col justify-center transition-all">
-                    <div className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight font-mono truncate">
-                      ${Number(displayOrderableUsd || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                    </div>
-                    <div className="text-xs font-bold text-slate-400 mt-1 flex items-center justify-between">
-                      <span>주문가능달러</span>
-                      {isDirectFrcr ? (
-                        <span className="text-[10px] text-emerald-400 font-mono font-bold bg-emerald-500/15 px-1.5 py-0.5 rounded border border-emerald-500/30">외화예수금</span>
-                      ) : displayOrderableKrw > 0 ? (
-                        <span className="text-[10px] text-amber-400 font-mono font-bold bg-amber-500/15 px-1.5 py-0.5 rounded border border-amber-500/30" title="실시간 환율 기반 원화 예수금 통합환산 주문가능액">통합환산</span>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {/* 3. 총자산 버튼 */}
+                  {/* 2. 총자산 버튼 */}
                   <button
                     type="button"
                     onClick={() => setIsAssetAnalysisModalOpen(true)}
@@ -8951,7 +8923,7 @@ export default function App() {
                     </span>
                   </button>
 
-                  {/* 4. 실현손익 버튼 */}
+                  {/* 3. 실현손익 버튼 */}
                   <button
                     type="button"
                     onClick={() => setShowPnlDetailsModal(true)}
