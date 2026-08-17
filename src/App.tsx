@@ -2809,18 +2809,33 @@ export default function App() {
   }, [time]);
 
   const effectiveHoldings = useMemo(() => {
-    const result: Record<string, number> = { ...holdings };
-    
-    // Only merge simulated tab gapInventory when real KIS trading is NOT enabled
-    if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
+    const result: Record<string, number> = {};
+
+    if (kisConfig.isConnected) {
+      // When KIS is connected, strictly use real KIS holdings
+      Object.entries(holdings).forEach(([sym, qty]) => {
+        const numQty = Number(qty);
+        if (numQty > 0) {
+          result[sym] = numQty;
+        }
+      });
+    } else {
+      // In simulation mode, use holdings combined with any active tab inventory
+      Object.entries(holdings).forEach(([sym, qty]) => {
+        const numQty = Number(qty);
+        if (numQty > 0) {
+          result[sym] = numQty;
+        }
+      });
+
       scalperTabs.forEach(tab => {
         if (tab.gapInventory && tab.gapInventory.length > 0) {
           const tabQty = tab.gapInventory.reduce((acc, slot) => {
             const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
             return acc + q;
           }, 0);
-          if (tabQty > 0) {
-            result[tab.symbol] = Math.max(result[tab.symbol] || 0, tabQty);
+          if (tabQty > 0 && result[tab.symbol]) {
+            result[tab.symbol] = Math.max(result[tab.symbol], tabQty);
           }
         }
       });
@@ -2833,7 +2848,7 @@ export default function App() {
     });
 
     return result;
-  }, [holdings, scalperTabs, kisConfig.isConnected, kisConfig.isRealOrderEnabled]);
+  }, [holdings, scalperTabs, kisConfig.isConnected]);
 
   const assetAnalysis = useMemo(() => {
     const isUSD = displayCurrency === 'USD';
@@ -4504,18 +4519,24 @@ export default function App() {
         }
       }
 
-      // Step 2: Sync gapInventory for all active tabs
+      // Step 2: Sync gapInventory for all tabs (and clear inventory if actualQty is 0)
       for (let i = 0; i < updatedTabs.length; i++) {
         const tab = updatedTabs[i];
-        const isActive = tab.isBotActive || (tab.id === activeTabId && (isGapBotActive || isGapBotActivated)) || (tab.symbol === selectedSymbol && (isGapBotActive || isGapBotActivated));
-        if (!isActive) continue;
-
         const symbol = tab.symbol;
         const actualQty = newHoldings[symbol] || 0;
         const currentInventory = (tab.id === activeTabId || tab.symbol === selectedSymbol) ? gapInventoryRef.current : (tab.gapInventory || []);
         const totalSlotQty = currentInventory.reduce((acc, slot) => acc + (slot.quantity || 0), 0);
 
-        if (Math.abs(actualQty - totalSlotQty) > 0.0001) {
+        if (actualQty <= 0) {
+          if (currentInventory.length > 0) {
+            updatedTabs[i] = { ...tab, gapInventory: [] };
+            tabsChanged = true;
+            if (tab.id === activeTabId || tab.symbol === selectedSymbol) {
+              setGapInventory([]);
+              gapInventoryRef.current = [];
+            }
+          }
+        } else if (Math.abs(actualQty - totalSlotQty) > 0.0001) {
           console.log(`[Slot Sync] Desync for ${symbol}. KIS: ${actualQty}, Local: ${totalSlotQty}`);
           let newInv = [...currentInventory];
           
@@ -6343,14 +6364,77 @@ export default function App() {
         return 0; // KIS API 오류 시 안전을 위해 매도하지 않음
       }
 
-        if (finalAmount > 0) {
+      if (finalAmount > 0) {
+        if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
+          const currentHeld = holdings[stock.symbol] || 0;
+          const newQty = Math.max(0, currentHeld - finalAmount);
+          const revenue = priceInKrw * finalAmount;
+          
+          setBalance(prev => prev + revenue);
+          
+          setHoldings(prev => {
+            const updated = { ...prev };
+            if (newQty <= 0) {
+              delete updated[stock.symbol];
+            } else {
+              updated[stock.symbol] = Number(newQty.toFixed(4));
+            }
+            try {
+              localStorage.setItem('sleek_holdings', JSON.stringify(updated));
+            } catch (e) {}
+            if (currentUser) saveUserHoldings(currentUser.uid, updated);
+            return updated;
+          });
+
+          // Trim/clear gapInventory for active tab
+          if (stock.symbol === selectedStock?.symbol) {
+            setGapInventory(prev => {
+              let rem = finalAmount;
+              const next: typeof prev = [];
+              for (const slot of prev) {
+                if (rem <= 0) {
+                  next.push(slot);
+                } else if (slot.quantity > rem) {
+                  next.push({ ...slot, quantity: slot.quantity - rem });
+                  rem = 0;
+                } else {
+                  rem -= slot.quantity;
+                }
+              }
+              gapInventoryRef.current = next;
+              return next;
+            });
+          }
+
+          setScalperTabs(prev => prev.map(t => {
+            if (t.symbol === stock.symbol) {
+              let rem = finalAmount;
+              const nextInv: typeof t.gapInventory = [];
+              for (const slot of (t.gapInventory || [])) {
+                if (rem <= 0) {
+                  nextInv.push(slot);
+                } else if (slot.quantity > rem) {
+                  nextInv.push({ ...slot, quantity: slot.quantity - rem });
+                  rem = 0;
+                } else {
+                  rem -= slot.quantity;
+                }
+              }
+              return { ...t, gapInventory: nextInv };
+            }
+            return t;
+          }));
+        }
+
+        if (kisConfig.isConnected) {
           handleSyncKIS();
           setTimeout(() => {
             handleSyncKIS();
           }, 1000);
-          return finalAmount;
         }
-        return 0;
+        return finalAmount;
+      }
+      return 0;
       }
       return 0;
     } finally {
