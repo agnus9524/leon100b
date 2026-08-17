@@ -2240,36 +2240,33 @@ export default function App() {
           stockList = resPeriod.output1.map((item: any) => ({
             pdno: item.pdno || item.stck_shrn_iscd || '005930',
             prdt_name: item.prdt_name || item.hts_kor_isnm || '주식',
-            sll_qty: Number(item.sll_qty || item.sll_ccld_qty || item.trad_qty || 0),
+            sll_qty: Number(item.sll_qty || item.ccld_qty || item.sll_ccld_qty || item.trad_qty || 0),
             pchs_amt: Number(item.pchs_amt || item.pchs_ccld_amt || item.buy_amt || 0),
             sll_amt: Number(item.sll_amt || item.sll_ccld_amt || item.sell_amt || 0),
-            rlzt_pnl: Number(item.rlzt_pnl || item.sll_pnl_amt || item.pnl_amt || 0),
-            erng_rt: Number(item.erng_rt || item.pnl_rat || item.profit_rate || 0),
+            rlzt_pnl: Number(item.rlzt_pfls_amt || item.real_pfls_amt || item.rlzt_pnl || item.sll_pnl_amt || item.pnl_amt || 0),
+            erng_rt: Number(item.rlzt_erng_rt || item.tot_erng_rt || item.erng_rt || item.pnl_rat || item.profit_rate || 0),
           }));
         }
 
         if (resProfit && resProfit.rt_cd === '0') {
-          if (stockList.length === 0 && Array.isArray(resProfit.output1) && resProfit.output1.length > 0) {
-            stockList = resProfit.output1.map((item: any) => ({
-              pdno: item.pdno || '025820',
-              prdt_name: item.prdt_name || '종목명',
-              sll_qty: Number(item.sll_qty || item.sll_ccld_qty || 0),
-              pchs_amt: Number(item.pchs_amt || 0),
-              sll_amt: Number(item.sll_amt || 0),
-              rlzt_pnl: Number(item.rlzt_pnl || item.sll_pnl_amt || 0),
-              erng_rt: Number(item.erng_rt || item.pnl_rat || 0),
-            }));
+          // TTTC8715R returns daily trade profit in output1
+          if (Array.isArray(resProfit.output1) && resProfit.output1.length > 0) {
+            dailyList = resProfit.output1.map((item: any) => {
+              let rawDate = item.stck_bsop_date || item.bzdt || item.trad_dt || item.dt || '';
+              if (rawDate && rawDate.length === 8 && !rawDate.includes('.')) {
+                rawDate = `${rawDate.slice(0, 4)}.${rawDate.slice(4, 6)}.${rawDate.slice(6, 8)}`;
+              }
+              return {
+                stck_bsop_date: rawDate,
+                trad_cnt: Number(item.trad_cnt || item.ccld_cnt || 1),
+                pchs_amt: Number(item.pchs_amt || item.smc_pchs_amt || 0),
+                sll_amt: Number(item.sll_amt || item.smc_sll_amt || 0),
+                rlzt_pnl: Number(item.rlzt_pfls_amt || item.real_pfls_amt || item.rlzt_pnl || item.pnl_amt || 0),
+                erng_rt: Number(item.tot_erng_rt || item.rlzt_erng_rt || item.erng_rt || item.pnl_rat || 0),
+              };
+            });
           }
-          if (Array.isArray(resProfit.output2) && resProfit.output2.length > 0) {
-            dailyList = resProfit.output2.map((item: any) => ({
-              stck_bsop_date: item.stck_bsop_date || item.trad_dt || item.dt || '',
-              trad_cnt: Number(item.trad_cnt || item.ccld_cnt || 1),
-              pchs_amt: Number(item.pchs_amt || 0),
-              sll_amt: Number(item.sll_amt || 0),
-              rlzt_pnl: Number(item.rlzt_pnl || item.pnl_amt || 0),
-              erng_rt: Number(item.erng_rt || item.pnl_rat || 0),
-            }));
-          }
+          // Sometimes summary is in output2, but we prioritize output1 for daily list
         }
 
         // 3rd Fallback: If stockList is still empty, parse order executions (TTTC8001R)
@@ -2290,7 +2287,17 @@ export default function App() {
         }
 
         // Calculate total KIS realized PnL
-        const totalPnlFromKis = stockList.reduce((acc, curr) => acc + (curr.rlzt_pnl || 0), 0);
+        let totalPnlFromKis = 0;
+        if (resProfit && resProfit.rt_cd === '0' && Array.isArray(resProfit.output2) && resProfit.output2.length > 0) {
+          const summary = resProfit.output2[0] || {};
+          totalPnlFromKis = Number(summary.smc_rlzt_pfls_amt || summary.rlzt_pfls_amt || summary.rlzt_pnl || 0);
+        }
+        if (totalPnlFromKis === 0 && dailyList.length > 0) {
+          totalPnlFromKis = dailyList.reduce((acc, curr) => acc + (curr.rlzt_pnl || 0), 0);
+        }
+        if (totalPnlFromKis === 0 && stockList.length > 0) {
+          totalPnlFromKis = stockList.reduce((acc, curr) => acc + (curr.rlzt_pnl || 0), 0);
+        }
         setKisTotalRealizedPnL(totalPnlFromKis);
       } else {
         setKisTotalRealizedPnL(null);
@@ -7573,40 +7580,8 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-stretch text-xs">
-              {/* 1. Upper & Lower Price Bounds */}
-              <div className="bg-black/30 p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1.5">
-                    <TrendingUp className="w-3.5 h-3.5 text-sleek-green" /> 상한가
-                  </label>
-                  <span className="text-xs sm:text-sm font-bold text-sleek-green font-mono">{formatCurrency(gapSellPrice)}</span>
-                </div>
-                <input 
-                  type="number" 
-                  step="any"
-                  value={gapSellPrice || ''}
-                  onChange={(e) => setGapSellPrice(Number(e.target.value))}
-                  className="w-full bg-black/50 border border-sleek-border rounded-xl p-1.5 text-xs sm:text-sm font-bold focus:border-sleek-green outline-none text-white font-mono"
-                  placeholder="상한선 금액"
-                />
-                <div className="flex items-center justify-between pt-1.5 border-t border-white/10">
-                  <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1.5">
-                    <TrendingDown className="w-3.5 h-3.5 text-sleek-red" /> 하한가
-                  </label>
-                  <span className="text-xs sm:text-sm font-bold text-sleek-red font-mono">{formatCurrency(gapBuyPrice)}</span>
-                </div>
-                <input 
-                  type="number" 
-                  step="any"
-                  value={gapBuyPrice || ''}
-                  onChange={(e) => setGapBuyPrice(Number(e.target.value))}
-                  className="w-full bg-black/50 border border-sleek-border rounded-xl p-1.5 text-xs sm:text-sm font-bold focus:border-sleek-red outline-none text-white font-mono"
-                  placeholder="하한선 금액"
-                />
-              </div>
-
-              {/* 2. Trade Quantity & Target Profit / Stop Loss */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 items-stretch text-xs">
+              {/* 1. Trade Quantity & Target Profit / Stop Loss */}
               <div className="bg-black/30 p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1.5">
