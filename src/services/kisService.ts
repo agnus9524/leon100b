@@ -290,8 +290,9 @@ class KISService {
     const token = await this.getAccessToken();
     const endpoint = '/uapi/overseas-stock/v1/trading/inquire-present-balance';
     
-    // US Balance: TTTS3012R
-    const trId = 'TTTS3012R';
+    // US Balance TR_ID: TTTS3012R (Real) / VTSM3012R or VTTS3012R (Virtual)
+    const isVirtual = this.baseUrl.includes('openapivts');
+    const trId = isVirtual ? 'VTSM3012R' : 'TTTS3012R';
     
     const headers: any = {
       'authorization': `Bearer ${token}`,
@@ -316,7 +317,7 @@ class KISService {
       const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
       if (res.data.rt_cd && res.data.rt_cd !== '0') {
          if (res.data.msg_cd === 'EGW00310' || res.data.msg1?.includes('EGW00310')) {
-            headers['tr-id'] = 'TTTS3010R';
+            headers['tr-id'] = isVirtual ? 'VTSM3010R' : 'TTTS3010R';
             const retryRes = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
             if (retryRes.data.rt_cd === '0') return retryRes.data;
          }
@@ -327,6 +328,61 @@ class KISService {
     } catch (error: any) {
       console.warn("[KIS Service] Overseas Balance Exception safely caught:", error?.response?.data || error?.message);
       return { rt_cd: '1', msg1: error?.response?.data?.msg1 || error?.message || 'Overseas balance exception', output1: [], output2: [] };
+    }
+  }
+
+  public async getOverseasOrderableCash() {
+    if (!this.config) return { orderableUsd: 0, usdDeposit: 0, rt_cd: '1', msg1: "KIS Config not initialized" };
+    try {
+      const balanceData = await this.getOverseasBalance();
+      if (balanceData?.rt_cd === '0') {
+        const out2List = Array.isArray(balanceData.output2) 
+          ? balanceData.output2 
+          : (balanceData.output2 ? [balanceData.output2] : []);
+        const usdItem = out2List.find((item: any) => item.crcy_cd === 'USD') || out2List[0] || {};
+        const out3 = Array.isArray(balanceData.output3) 
+          ? (balanceData.output3[0] || {}) 
+          : (balanceData.output3 || {});
+
+        const usdDeposit = Number(usdItem.frcr_dncl_amt || usdItem.frcr_drwg_psbl_amt || out3.frcr_dncl_amt || 0);
+        const ordPsblUsd = Number(
+          usdItem.frcr_ord_psbl_amt1 || 
+          usdItem.ord_psbl_frcr_amt || 
+          usdItem.frcr_dncl_amt || 
+          out3.frcr_ord_psbl_amt1 || 
+          out3.ovrs_ord_psbl_amt || 
+          0
+        );
+
+        return {
+          orderableUsd: ordPsblUsd > 0 ? ordPsblUsd : usdDeposit,
+          usdDeposit,
+          rt_cd: '0',
+          msg1: 'OK'
+        };
+      }
+
+      // Secondary check via inquire-psbl-order for a high-volume liquid stock (AAPL)
+      const buyable = await this.getOverseasBuyableAmount('AAPL', '100');
+      if (buyable?.rt_cd === '0' && buyable.output) {
+        const rawUsd = Number(
+          buyable.output.ovrs_ord_psbl_amt || 
+          buyable.output.frcr_ord_psbl_amt1 || 
+          buyable.output.ord_psbl_frcr_amt || 
+          buyable.output.frcr_ord_psbl_amt || 
+          0
+        );
+        return {
+          orderableUsd: rawUsd,
+          usdDeposit: rawUsd,
+          rt_cd: '0',
+          msg1: 'OK'
+        };
+      }
+
+      return { orderableUsd: 0, usdDeposit: 0, rt_cd: balanceData?.rt_cd || '1', msg1: balanceData?.msg1 || 'No data' };
+    } catch (e: any) {
+      return { orderableUsd: 0, usdDeposit: 0, rt_cd: '1', msg1: e.message };
     }
   }
 
@@ -566,12 +622,15 @@ class KISService {
       const token = await this.getAccessToken();
       const endpoint = '/uapi/overseas-stock/v1/trading/inquire-psbl-order';
       
+      const isVirtual = this.baseUrl.includes('openapivts');
+      const trId = isVirtual ? 'VTSM3007R' : 'TTTS3007R';
+
       const headers = {
         'content-type': 'application/json',
         'authorization': `Bearer ${token}`,
         'appkey': this.config.appKey,
         'appsecret': this.config.appSecret,
-        'tr-id': 'TTTS3007R',
+        'tr-id': trId,
         'custtype': 'P',
       };
 

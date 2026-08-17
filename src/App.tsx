@@ -1014,11 +1014,15 @@ export default function App() {
   const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
   const [orderableKrw, setOrderableKrw] = useState<number>(() => {
     const saved = localStorage.getItem('sleek_orderable_krw');
-    return saved !== null ? Number(saved) : 154000;
+    return saved !== null && !isNaN(Number(saved)) ? Number(saved) : 154000;
   });
   const [orderableUsd, setOrderableUsd] = useState<number>(() => {
     const saved = localStorage.getItem('sleek_orderable_usd');
-    return saved !== null ? Number(saved) : 34.68;
+    if (saved === '34.68') {
+      try { localStorage.removeItem('sleek_orderable_usd'); } catch {}
+      return 0;
+    }
+    return (saved !== null && !isNaN(Number(saved)) && Number(saved) !== 34.68) ? Number(saved) : 0;
   });
   const [kisTotalRealizedPnL, setKisTotalRealizedPnL] = useState<number | null>(null);
 
@@ -1027,7 +1031,9 @@ export default function App() {
   }, [orderableKrw]);
 
   useEffect(() => {
-    localStorage.setItem('sleek_orderable_usd', String(orderableUsd));
+    if (orderableUsd !== 34.68) {
+      localStorage.setItem('sleek_orderable_usd', String(orderableUsd));
+    }
   }, [orderableUsd]);
   const [holdings, setHoldings] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem('sleek_holdings') || '{}'); } catch { return {}; }
@@ -3873,7 +3879,17 @@ export default function App() {
           }
           const ovrs_tot_pchs_amt = Number(usdItem.ovrs_tot_pchs_amt || out3.frcr_pchs_amt || totalOverseasPurchaseCostUSD);
           
-          const finalUsd = ordPsblUsd > 0 ? ordPsblUsd : frcr_dncl_amt;
+          let finalUsd = ordPsblUsd > 0 ? ordPsblUsd : frcr_dncl_amt;
+          if (finalUsd <= 0) {
+            // Secondary fallback check via orderable cash API
+            try {
+              const cashRes = await kisService.getOverseasOrderableCash();
+              if (cashRes && cashRes.rt_cd === '0' && cashRes.orderableUsd > 0) {
+                finalUsd = cashRes.orderableUsd;
+              }
+            } catch {}
+          }
+
           if (finalUsd > 0) {
             setOrderableUsd(finalUsd);
           }
@@ -8878,13 +8894,16 @@ export default function App() {
                 : (orderableKrw > 0 ? orderableKrw : (balance > 0 ? balance : 5000000));
 
               let displayOrderableUsd = orderableUsd;
+              let isDirectFrcr = orderableUsd > 0;
               // If orderableUsd was in KRW from KIS integrated margin (> 10000), convert to USD
               if (displayOrderableUsd > 10000 && exchangeRate > 0) {
                 displayOrderableUsd = Number((displayOrderableUsd / exchangeRate).toFixed(2));
+                isDirectFrcr = false;
               }
               // If USD is 0 or unassigned, calculate equivalent USD purchasing power from KRW cash
               if ((!displayOrderableUsd || displayOrderableUsd <= 0) && displayOrderableKrw > 0 && exchangeRate > 0) {
                 displayOrderableUsd = Number((displayOrderableKrw / exchangeRate).toFixed(2));
+                isDirectFrcr = false;
               }
 
               return (
@@ -8894,8 +8913,11 @@ export default function App() {
                     <div className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight font-mono truncate">
                       {Math.round(displayOrderableKrw).toLocaleString()}원
                     </div>
-                    <div className="text-xs font-bold text-slate-400 mt-1">
-                      주문가능원화
+                    <div className="text-xs font-bold text-slate-400 mt-1 flex items-center justify-between">
+                      <span>주문가능원화</span>
+                      {kisConfig.isConnected && (
+                        <span className="text-[10px] text-emerald-400 font-mono font-bold">API 실시간</span>
+                      )}
                     </div>
                   </div>
 
@@ -8904,8 +8926,13 @@ export default function App() {
                     <div className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight font-mono truncate">
                       ${Number(displayOrderableUsd || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                     </div>
-                    <div className="text-xs font-bold text-slate-400 mt-1">
-                      주문가능달러
+                    <div className="text-xs font-bold text-slate-400 mt-1 flex items-center justify-between">
+                      <span>주문가능달러</span>
+                      {isDirectFrcr ? (
+                        <span className="text-[10px] text-emerald-400 font-mono font-bold bg-emerald-500/15 px-1.5 py-0.5 rounded border border-emerald-500/30">외화예수금</span>
+                      ) : displayOrderableKrw > 0 ? (
+                        <span className="text-[10px] text-amber-400 font-mono font-bold bg-amber-500/15 px-1.5 py-0.5 rounded border border-amber-500/30" title="실시간 환율 기반 원화 예수금 통합환산 주문가능액">통합환산</span>
+                      ) : null}
                     </div>
                   </div>
 
