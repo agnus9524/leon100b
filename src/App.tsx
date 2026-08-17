@@ -7071,227 +7071,118 @@ export default function App() {
         </div>
       </div>
 
-      <main className="flex-1 grid grid-cols-1 lg:grid-cols-[300px_1fr_350px] gap-px bg-sleek-border overflow-y-auto lg:overflow-hidden">
-        {/* Left: Stock Info & Global Settings */}
-        <aside className="bg-sleek-bg p-5 flex flex-col gap-6 lg:overflow-y-auto border-b lg:border-b-0 lg:border-r border-sleek-border">
-          <div className="space-y-6">
-            <div>
-              <h2 className="text-[12px] font-bold text-sleek-text-secondary uppercase tracking-widest mb-4 flex items-center justify-between">
-                종목 선택
-                <Search className="w-3 h-3 opacity-50" />
-              </h2>
-              <div ref={searchRef} className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-sleek-text-secondary" />
-                <input 
-                  ref={searchInputRef}
-                  type="text" 
-                  value={searchSymbol}
-                  onChange={(e) => setSearchSymbol(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleAddStock();
-                    }
-                  }}
-                  className="w-full bg-sleek-card/30 border border-sleek-border rounded-xl py-3 pl-10 pr-4 text-xs focus:border-sleek-blue outline-none transition-all" 
-                  placeholder="종목코드 또는 이름 입력"
-                />
-                
-                {/* Search Suggestions */}
-                <AnimatePresence>
-                  {showSuggestions && (
-                    <motion.div 
-                      initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }}
-                      className="absolute top-full left-0 right-0 mt-2 z-50 bg-sleek-card border border-sleek-border rounded-xl shadow-2xl overflow-hidden max-h-[300px] overflow-y-auto"
-                    >
-                      {searchSuggestions.map((s, idx) => (
-                        <button 
-                          key={`${s.symbol}-${idx}`}
-                          onClick={() => handleAddStock(s.symbol, undefined, s.name)}
-                          className="w-full flex items-center justify-between p-3 hover:bg-white/5 transition-colors border-b border-white/5 last:border-0 text-left"
-                        >
-                          <div className="flex flex-col gap-0.5">
-                            <div className="flex items-center gap-2">
-                              <div className="text-xs font-bold text-white">{s.name}</div>
-                              {s.price !== undefined && (
-                                <span className="text-[10px] text-sleek-blue font-black font-mono">
-                                  {formatCurrency(s.price)}
-                                </span>
-                              )}
-                            </div>
-                            <div className="text-[10px] text-sleek-text-secondary font-mono">{s.symbol}</div>
-                          </div>
-                          <ChevronRight className="w-3 h-3 opacity-30" />
-                        </button>
-                      ))}
-                    </motion.div>
-                  )}
-                </AnimatePresence>
+      <main className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_360px] gap-px bg-sleek-border overflow-y-auto lg:overflow-hidden">
+        {/* Main Terminal (Full Width Center & Left) */}
+        <section className="bg-sleek-bg overflow-y-auto custom-scrollbar p-3 sm:p-4 md:p-5 space-y-4">
+          {/* 0. 종목 선택 및 입력 영역 (AI SCALPING CONFIG 상단 배치) */}
+          <div className="bg-sleek-card border border-sleek-border p-4 sm:p-5 rounded-3xl shadow-xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 backdrop-blur-md">
+            <div className="flex items-center gap-3 shrink-0">
+              <div className="p-2.5 rounded-2xl bg-sleek-blue/20 border border-sleek-blue/40 text-sleek-blue shadow-inner">
+                <Search className="w-5 h-5" />
               </div>
-            </div>
-
-            {/* 스캘퍼 엔진 최적 추천 종목 TOP 5 Ranking Widget */}
-            <div className="space-y-3 pt-2">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-1.5">
-                  <div className="p-1 rounded-lg bg-amber-500/20 border border-amber-500/30 text-amber-400">
-                    <Zap className="w-3.5 h-3.5 fill-amber-400/30 animate-pulse" />
-                  </div>
-                  <div>
-                    <h2 className="text-[11px] font-black text-white uppercase tracking-wider flex items-center gap-1.5">
-                      스캘퍼 최적 추천 종목 TOP 5
-                      <span className="relative flex h-2 w-2">
-                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
-                        <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
-                      </span>
-                    </h2>
-                    <div className="text-[9px] font-semibold text-amber-400/90 tracking-tight mt-0.5">
-                      거래대금 상위 · 거래량 폭증 · 당일 고가 돌파 · 주도 테마/AI 5선
-                    </div>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={handleRefreshScalperTop3}
-                    disabled={isRefreshingTop3}
-                    className="flex items-center gap-1 text-[10px] font-bold text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 active:scale-95 px-2 py-0.5 rounded-lg border border-amber-500/30 transition-all cursor-pointer disabled:opacity-50"
-                    title="스캘퍼 최적 종목 갱신"
-                  >
-                    <RefreshCw className={cn("w-3.5 h-3.5 text-amber-400", isRefreshingTop3 && "animate-spin")} />
-                  </button>
-                  <span className="text-[9px] font-mono text-amber-300 font-bold px-2 py-0.5 bg-amber-500/10 rounded-full border border-amber-500/20">
-                    {marketType === 'KR' ? '국내' : '미국'}
+              <div>
+                <h2 className="text-base sm:text-lg font-black text-white uppercase tracking-wider flex items-center gap-2">
+                  종목 선택 &amp; 추가
+                  <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
+                    실시간 연동
                   </span>
-                </div>
-              </div>
-
-              <div className="space-y-2 max-h-[500px] overflow-y-auto pr-1 custom-scrollbar">
-                {scalperTop5Stocks.map((st, idx) => {
-                  const isSelected = selectedSymbol === st.symbol;
-                  const isUS = /^[A-Z]/.test(st.symbol);
-                  const pricePrefix = marketType === 'US' ? '$' : '₩';
-                  
-                  return (
-                    <motion.div
-                      key={`${st.symbol}-${idx}`}
-                      whileHover={{ scale: 1.01 }}
-                      onClick={() => {
-                        if (!stocks.some(s => s.symbol === st.symbol)) {
-                          setStocks(prev => [...prev, st]);
-                        }
-                        openOrSwitchScalperTab(st.symbol, st.name);
-                        showNotification(`[스캘퍼 종목 지정] ${st.name}(${st.symbol}) 종목 탭이 활성화되었습니다.`, "info");
-                      }}
-                      className={cn(
-                        "p-2.5 rounded-xl border transition-all cursor-pointer group relative overflow-hidden",
-                        isSelected
-                          ? "bg-amber-500/15 border-amber-500/50 shadow-md shadow-amber-500/5"
-                          : "bg-white/5 border-white/5 hover:bg-white/10 hover:border-amber-500/30"
-                      )}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        {/* Left: Rank Badge + Stock Name & Symbol */}
-                        <div className="flex items-start gap-2 min-w-0 flex-1">
-                          <div className={cn(
-                            "w-5 h-5 rounded-md text-[10px] font-black font-mono flex items-center justify-center shrink-0 shadow-sm border mt-0.5",
-                            idx === 0 ? "bg-gradient-to-br from-amber-400 to-yellow-600 text-black border-amber-300 font-extrabold" :
-                            idx === 1 ? "bg-gradient-to-br from-slate-300 to-slate-500 text-black border-slate-200" :
-                            idx === 2 ? "bg-gradient-to-br from-amber-700 to-amber-900 text-amber-200 border-amber-600" :
-                            "bg-white/10 text-slate-300 border-white/10"
-                          )}>
-                            {idx + 1}
-                          </div>
-
-                          <div className="min-w-0 flex-1">
-                            {/* Toss Style Stock Display */}
-                            <div className="text-xs font-bold text-white whitespace-normal break-words leading-snug flex items-center gap-1.5 flex-wrap">
-                              <span>{st.name}</span>
-                              <span className="text-[11px] font-mono text-white/90">
-                                {formatCurrency(st.price, false, st.market === 'US' ? 'US' : 'KR')}
-                              </span>
-                              <span className={cn(
-                                "text-[10px] font-mono font-bold",
-                                st.change >= 0 ? "text-rose-400" : "text-sky-400"
-                              )}>
-                                {(st.change || 0) >= 0 ? '+' : ''}{formatCurrency(st.change || 0, false, st.market === 'US' ? 'US' : 'KR')}
-                              </span>
-                              <span className={cn(
-                                "text-[10px] font-mono font-bold",
-                                (st.change || 0) >= 0 ? "text-rose-400" : "text-sky-400"
-                              )}>
-                                ({(st.changePercent || 0) >= 0 ? '+' : ''}{(st.changePercent || 0).toFixed(1)}%)
-                              </span>
-                            </div>
-                            {/* Stock Symbol/Code & Selection Criteria Badges */}
-                            <div className="text-[10px] font-mono text-sleek-text-secondary mt-0.5 flex items-center gap-1.5 flex-wrap">
-                              <span>{st.symbol}</span>
-                              {(st.screenerBadges || ['💰 거래대금 상위', '🚀 거래량 폭증']).map((badge, bIdx) => (
-                                <span key={bIdx} className="text-[9px] font-bold text-amber-300 bg-amber-500/15 px-1.5 py-0.2 rounded border border-amber-500/30">
-                                  {badge}
-                                </span>
-                              ))}
-                            </div>
-                            <div className="flex items-center gap-1.5 mt-1">
-                              <span className="text-[9px] font-bold text-emerald-300 bg-emerald-500/10 px-1.5 py-0.2 rounded border border-emerald-500/20">
-                                {st.reasonTag}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Right: Score only (Price moved to header for Toss style) */}
-                        <div className="text-right shrink-0">
-                          <div className="flex items-center justify-end gap-1">
-                            <span className="text-[10px] text-sleek-text-secondary">적합도</span>
-                            <span className="text-sm font-black font-mono text-emerald-400">{st.scalpScore}점</span>
-                          </div>
-                        </div>
-                      </div>
-                    </motion.div>
-                  );
-                })}
+                </h2>
+                <p className="text-xs sm:text-sm text-sleek-text-secondary mt-0.5">
+                  종목코드(6자리) 또는 종목명을 입력 후 Enter를 누르면 스캘핑 탭이 즉시 생성됩니다.
+                </p>
               </div>
             </div>
 
+            <div ref={searchRef} className="relative flex-1 max-w-2xl">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+              <input 
+                ref={searchInputRef}
+                type="text" 
+                value={searchSymbol}
+                onChange={(e) => setSearchSymbol(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    handleAddStock();
+                  }
+                }}
+                className="w-full bg-black/50 border border-white/15 focus:border-sleek-blue rounded-2xl py-3 pl-11 pr-24 text-sm sm:text-base font-semibold text-white placeholder:text-slate-500 outline-none transition-all shadow-inner" 
+                placeholder="종목코드 또는 이름 입력 (예: 005930, 셀트리온, 이구산업, NVDA)"
+              />
+              <button
+                type="button"
+                onClick={() => handleAddStock()}
+                className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 bg-sleek-blue hover:bg-blue-600 active:scale-95 text-white text-xs sm:text-sm font-bold rounded-xl transition-all shadow-md cursor-pointer"
+              >
+                추가
+              </button>
+              
+              {/* Search Suggestions */}
+              <AnimatePresence>
+                {showSuggestions && (
+                  <motion.div 
+                    initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }}
+                    className="absolute top-full left-0 right-0 mt-2 z-50 bg-slate-900/95 backdrop-blur-xl border border-white/20 rounded-2xl shadow-2xl overflow-hidden max-h-[320px] overflow-y-auto custom-scrollbar"
+                  >
+                    {searchSuggestions.map((s, idx) => (
+                      <button 
+                        key={`${s.symbol}-${idx}`}
+                        onClick={() => handleAddStock(s.symbol, undefined, s.name)}
+                        className="w-full flex items-center justify-between p-3.5 hover:bg-white/10 transition-colors border-b border-white/5 last:border-0 text-left cursor-pointer"
+                      >
+                        <div className="flex flex-col gap-0.5">
+                          <div className="flex items-center gap-2.5">
+                            <div className="text-sm sm:text-base font-bold text-white">{s.name}</div>
+                            {s.price !== undefined && (
+                              <span className="text-xs sm:text-sm text-sleek-blue font-black font-mono">
+                                {formatCurrency(s.price)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="text-xs text-slate-400 font-mono">{s.symbol}</div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-slate-400 opacity-60" />
+                      </button>
+                    ))}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           </div>
-        </aside>
 
-        {/* Center: Gap Trading Terminal */}
-        <section className="bg-sleek-bg overflow-y-auto custom-scrollbar p-3 md:p-4 space-y-3">
-          {/* 1. AI SCALPING CONFIG (Moved to Top) */}
-          <div id="ai-scalping-config-panel" className="bg-sleek-card border border-sleek-border p-3.5 sm:p-4 rounded-3xl shadow-xl space-y-3">
-            <div className="flex flex-wrap items-center justify-between pb-2 border-b border-white/5 gap-2">
+          {/* 1. AI SCALPING CONFIG (Moved Below Search) */}
+          <div id="ai-scalping-config-panel" className="bg-sleek-card border border-sleek-border p-4 sm:p-5 rounded-3xl shadow-xl space-y-3.5">
+            <div className="flex flex-wrap items-center justify-between pb-2.5 border-b border-white/5 gap-2">
               <div className="flex flex-col">
-                <div className="flex items-center gap-2">
-                  <h2 className="text-base font-black text-white italic uppercase tracking-tighter">AI SCALPING CONFIG</h2>
-                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                <div className="flex items-center gap-2.5">
+                  <h2 className="text-base sm:text-lg font-black text-white italic uppercase tracking-tight">AI SCALPING CONFIG</h2>
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
                     스캘핑 5대 원칙 100% 검증 완료
                   </span>
                 </div>
-                <span className="text-[11px] text-sleek-text-secondary">초단기 자동 스캘퍼 전략 및 위험 관리 엔진</span>
+                <span className="text-xs sm:text-sm text-sleek-text-secondary mt-0.5">초단기 자동 스캘퍼 전략 및 위험 관리 엔진</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 bg-black/40 px-2 py-1 rounded-xl border border-white/5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-sleek-blue animate-ping"></span>
-                  <span className="text-[10px] font-bold text-sleek-blue uppercase">Live Engine</span>
+                <div className="flex items-center gap-1.5 bg-black/40 px-2.5 py-1 rounded-xl border border-white/10">
+                  <span className="w-2 h-2 rounded-full bg-sleek-blue animate-ping"></span>
+                  <span className="text-xs font-bold text-sleek-blue uppercase">Live Engine</span>
                 </div>
               </div>
             </div>
 
             {/* Strategy Selection Mode Bar (Scalper Rules 2 & 3) */}
-            <div className="bg-black/40 p-2.5 rounded-2xl border border-white/5 flex flex-col md:flex-row items-center justify-between gap-2.5">
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-[11px] font-black text-slate-300 flex items-center gap-1.5">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-400 animate-spin" /> 스캘퍼 AI 실시간 전략 감지 센서:
+            <div className="bg-black/40 p-3 rounded-2xl border border-white/10 flex flex-col xl:flex-row items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 shrink-0">
+                <span className="text-xs sm:text-sm font-black text-slate-200 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-400 animate-spin" /> 스캘퍼 AI 실시간 전략 감지 센서:
                 </span>
                 <span className={cn(
-                  "px-2.5 py-0.5 rounded-full text-[9px] font-extrabold border transition-all flex items-center gap-1.5 shrink-0",
+                  "px-3 py-1 rounded-full text-xs font-extrabold border transition-all flex items-center gap-1.5 shrink-0",
                   activeStrategyDetection.activeCount > 0
                     ? "bg-amber-500/25 text-amber-300 border-amber-400/80 shadow-[0_0_12px_rgba(245,158,11,0.5)]"
                     : "bg-white/5 text-slate-500 border-white/5 opacity-60"
                 )}>
                   <span className={cn(
-                    "w-1.5 h-1.5 rounded-full transition-all shrink-0",
+                    "w-2 h-2 rounded-full transition-all shrink-0",
                     activeStrategyDetection.activeCount > 0
                       ? "bg-amber-400 shadow-[0_0_8px_#f59e0b] animate-ping"
                       : "bg-slate-600"
@@ -7299,26 +7190,26 @@ export default function App() {
                   실시간 {activeStrategyDetection.activeCount}개 전략 조건 포착!
                 </span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-1.5 w-full md:w-auto">
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2 w-full xl:w-auto">
                 <button
                   type="button"
                   onClick={() => setScalperStrategyMode('AI_MAX_YIELD')}
                   className={cn(
-                    "px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1 shadow-lg",
+                    "px-3 py-2 rounded-xl text-xs sm:text-sm font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1 shadow-lg",
                     scalperStrategyMode === 'AI_MAX_YIELD'
                       ? "bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white border-amber-300 shadow-[0_0_18px_rgba(245,158,11,0.7)] animate-pulse"
                       : "bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border-amber-500/30"
                   )}
                   title="AI가 전략 감시 센서와 모멘텀을 기반으로 진입 수량과 호가 타점을 자율 조절하고, 설정된 목표수익률에 맞춰 정확히 익절 매도하는 최고수익 전용 모드"
                 >
-                  <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-bounce" />
+                  <Zap className="w-4 h-4 text-amber-300 fill-amber-300 animate-bounce" />
                   <span>⚡ 최고수익 AI★</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setScalperStrategyMode('ALL_SENSORS_4')}
                   className={cn(
-                    "relative px-2 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    "relative px-2.5 py-2 rounded-xl text-xs sm:text-sm font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
                     activeStrategyDetection.activeCount === 4
                       ? "bg-gradient-to-r from-emerald-500/40 via-cyan-500/40 to-blue-500/40 text-emerald-200 border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.6)] animate-pulse"
                       : scalperStrategyMode === 'ALL_SENSORS_4'
@@ -7339,7 +7230,7 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('PULLBACK')}
                   className={cn(
-                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
+                    "relative px-2.5 py-2 rounded-xl text-xs sm:text-sm font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
                     activeStrategyDetection.isPullback
                       ? "bg-cyan-500/30 text-cyan-200 border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.5)]"
                       : scalperStrategyMode === 'PULLBACK'
@@ -7360,7 +7251,7 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('BREAKOUT')}
                   className={cn(
-                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
+                    "relative px-2.5 py-2 rounded-xl text-xs sm:text-sm font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
                     activeStrategyDetection.isBreakout
                       ? "bg-amber-500/30 text-amber-200 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.5)]"
                       : scalperStrategyMode === 'BREAKOUT'
@@ -7381,7 +7272,7 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('VWAP_SUPPORT')}
                   className={cn(
-                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
+                    "relative px-2.5 py-2 rounded-xl text-xs sm:text-sm font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
                     activeStrategyDetection.isVwapSupport
                       ? "bg-indigo-500/30 text-indigo-200 border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.5)]"
                       : scalperStrategyMode === 'VWAP_SUPPORT'
@@ -7402,7 +7293,7 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('VOLUME_PROFILE_CVD')}
                   className={cn(
-                    "relative px-2.5 py-1.5 rounded-xl text-[10px] font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
+                    "relative px-2.5 py-2 rounded-xl text-xs sm:text-sm font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
                     activeStrategyDetection.isVolumeProfile
                       ? "bg-purple-500/30 text-purple-200 border-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.5)]"
                       : scalperStrategyMode === 'VOLUME_PROFILE_CVD'
@@ -7423,11 +7314,11 @@ export default function App() {
             </div>
 
             {/* 전략별 호가 타점 시스템 안내 배지 */}
-            <div className="bg-gradient-to-r from-blue-950/40 via-purple-950/30 to-black/40 p-2 rounded-2xl border border-blue-500/20 flex flex-wrap items-center justify-between gap-2 text-[10px]">
-              <div className="flex items-center gap-1.5 text-blue-300 font-bold">
-                <span className="w-2 h-2 rounded-full bg-blue-400 animate-pulse"></span>
-                <span>전략별 맞춤 진입 타점:</span>
-                <span className="text-white font-mono">
+            <div className="bg-gradient-to-r from-blue-950/40 via-purple-950/30 to-black/40 p-2.5 rounded-2xl border border-blue-500/20 flex flex-wrap items-center justify-between gap-2 text-xs">
+              <div className="flex items-center gap-2 text-blue-300 font-bold">
+                <span className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-pulse"></span>
+                <span className="font-extrabold">전략별 맞춤 진입 타점:</span>
+                <span className="text-white font-mono text-xs sm:text-sm">
                   {scalperStrategyMode === 'AI_MAX_YIELD'
                     ? "⚡ 최고수익 AI → [센서 강도 연동] 수량 가변 + 타점 자율결정 + 설정 목표수익률 매도 & 최고점 추적 스탑"
                     : scalperStrategyMode === 'BREAKOUT' 
@@ -7441,73 +7332,73 @@ export default function App() {
                     : "🤖 AI 종합 → 포착 시그널(돌파=현재가, 눌림목=매수1~2호가) 자동 분기 체결"}
                 </span>
               </div>
-              <div className="text-[9px] text-slate-400 font-sans">
+              <div className="text-xs text-slate-400 font-sans">
                 호가창 수급(매도잔량&gt;매수잔량) &amp; 라운드피겨 지지선 자동 분석 적용
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2.5 items-stretch text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 items-stretch text-xs">
               {/* 1. Upper & Lower Price Bounds */}
-              <div className="bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5">
+              <div className="bg-black/30 p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-black text-sleek-text-secondary uppercase flex items-center gap-1">
-                    <TrendingUp className="w-3 h-3 text-sleek-green" /> 상한가
+                  <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5 text-sleek-green" /> 상한가
                   </label>
-                  <span className="text-xs font-bold text-sleek-green font-mono">{formatCurrency(gapSellPrice)}</span>
+                  <span className="text-xs sm:text-sm font-bold text-sleek-green font-mono">{formatCurrency(gapSellPrice)}</span>
                 </div>
                 <input 
                   type="number" 
                   step="any"
                   value={gapSellPrice || ''}
                   onChange={(e) => setGapSellPrice(Number(e.target.value))}
-                  className="w-full bg-black/40 border border-sleek-border rounded-lg p-1 text-xs font-bold focus:border-sleek-green outline-none text-white font-mono"
+                  className="w-full bg-black/50 border border-sleek-border rounded-xl p-1.5 text-xs sm:text-sm font-bold focus:border-sleek-green outline-none text-white font-mono"
                   placeholder="상한선 금액"
                 />
-                <div className="flex items-center justify-between pt-1 border-t border-white/5">
-                  <label className="text-[10px] font-black text-sleek-text-secondary uppercase flex items-center gap-1">
-                    <TrendingDown className="w-3 h-3 text-sleek-red" /> 하한가
+                <div className="flex items-center justify-between pt-1.5 border-t border-white/10">
+                  <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1.5">
+                    <TrendingDown className="w-3.5 h-3.5 text-sleek-red" /> 하한가
                   </label>
-                  <span className="text-xs font-bold text-sleek-red font-mono">{formatCurrency(gapBuyPrice)}</span>
+                  <span className="text-xs sm:text-sm font-bold text-sleek-red font-mono">{formatCurrency(gapBuyPrice)}</span>
                 </div>
                 <input 
                   type="number" 
                   step="any"
                   value={gapBuyPrice || ''}
                   onChange={(e) => setGapBuyPrice(Number(e.target.value))}
-                  className="w-full bg-black/40 border border-sleek-border rounded-lg p-1 text-xs font-bold focus:border-sleek-red outline-none text-white font-mono"
+                  className="w-full bg-black/50 border border-sleek-border rounded-xl p-1.5 text-xs sm:text-sm font-bold focus:border-sleek-red outline-none text-white font-mono"
                   placeholder="하한선 금액"
                 />
               </div>
 
               {/* 2. Trade Quantity & Target Profit / Stop Loss */}
-              <div className="bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5">
+              <div className="bg-black/30 p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-[10px] font-black text-sleek-text-secondary uppercase flex items-center gap-1">
-                    <Layers className="w-3 h-3 text-sleek-blue" /> 1회 거래수량
+                  <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1.5">
+                    <Layers className="w-3.5 h-3.5 text-sleek-blue" /> 1회 거래수량
                   </label>
-                  <span className="text-xs font-bold text-white font-mono">{tradeQuantity}주</span>
+                  <span className="text-xs sm:text-sm font-bold text-white font-mono">{tradeQuantity}주</span>
                 </div>
                 <select 
                   value={tradeQuantity}
                   onChange={(e) => setTradeQuantity(Number(e.target.value))}
-                  className="w-full bg-black/40 border border-sleek-border rounded p-1 text-center text-xs font-bold outline-none text-white font-mono appearance-none"
+                  className="w-full bg-black/50 border border-sleek-border rounded-xl p-1.5 text-center text-xs sm:text-sm font-bold outline-none text-white font-mono appearance-none cursor-pointer"
                 >
                   {Array.from({ length: 100 }, (_, i) => i + 1).map(val => (
                     <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
                   ))}
                 </select>
 
-                <div className="pt-1 border-t border-white/5">
-                  <div className="flex items-center justify-between mb-0.5">
-                    <label className="text-[10px] font-black text-sleek-text-secondary uppercase flex items-center gap-1">
-                      <Layers className="w-3 h-3 text-emerald-400" /> 최대 분할 슬롯
+                <div className="pt-1.5 border-t border-white/10">
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1.5">
+                      <Layers className="w-3.5 h-3.5 text-emerald-400" /> 최대 분할 슬롯
                     </label>
-                    <span className="text-[10px] font-bold text-emerald-400 font-mono">추천: 3개</span>
+                    <span className="text-xs font-bold text-emerald-400 font-mono">추천: 3개</span>
                   </div>
                   <select 
                     value={maxSlots}
                     onChange={(e) => setMaxSlots(Number(e.target.value))}
-                    className="w-full bg-black/40 border border-emerald-500/30 rounded p-1 text-center text-xs font-bold outline-none text-emerald-300 font-mono appearance-none cursor-pointer"
+                    className="w-full bg-black/50 border border-emerald-500/30 rounded-xl p-1.5 text-center text-xs sm:text-sm font-bold outline-none text-emerald-300 font-mono appearance-none cursor-pointer"
                     title="최대 분할 매수 슬롯 개수 (추천: 3회 분할 진입)"
                   >
                     {[1, 2, 3, 4, 5].map(val => (
@@ -7518,20 +7409,20 @@ export default function App() {
                   </select>
                 </div>
 
-                <div className="pt-1 border-t border-white/5">
-                  <div className="text-[10px] font-black uppercase leading-tight space-y-0.5">
+                <div className="pt-1.5 border-t border-white/10">
+                  <div className="text-xs font-black uppercase leading-tight space-y-0.5">
                     <div className="text-emerald-400 flex items-center justify-between">
                       <span>목표 순익 +{scalpingTargetProfit}%</span>
-                      <span className="text-[8.5px] font-normal text-emerald-400/80 font-sans">세금·수수료 차감후</span>
+                      <span className="text-[9px] font-normal text-emerald-400/80 font-sans">세금·수수료 차감후</span>
                     </div>
                     <div className="text-rose-400">손절 {scalpingStopLoss}%</div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 gap-1">
+                <div className="grid grid-cols-2 gap-1.5">
                   <select 
                     value={scalpingTargetProfit}
                     onChange={(e) => setScalpingTargetProfit(Number(e.target.value))}
-                    className="bg-black/40 border border-emerald-500/40 rounded p-1 text-xs font-mono outline-none text-emerald-400 text-center font-bold appearance-none"
+                    className="bg-black/50 border border-emerald-500/40 rounded-xl p-1.5 text-xs sm:text-sm font-mono outline-none text-emerald-400 text-center font-bold appearance-none cursor-pointer"
                     title="목표 순수익률 (제세금 0.20% 및 왕복 수수료 공제 후 실질 순수익)"
                   >
                     {[0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 5.0].map(val => (
@@ -7541,7 +7432,7 @@ export default function App() {
                   <select 
                     value={scalpingStopLoss}
                     onChange={(e) => setScalpingStopLoss(Number(e.target.value))}
-                    className="bg-black/40 border border-rose-500/40 rounded p-1 text-xs font-mono outline-none text-rose-400 text-center font-bold appearance-none"
+                    className="bg-black/50 border border-rose-500/40 rounded-xl p-1.5 text-xs sm:text-sm font-mono outline-none text-rose-400 text-center font-bold appearance-none cursor-pointer"
                   >
                     {Array.from({ length: 50 }, (_, i) => Math.round(-(i + 1) * 0.1 * 10) / 10).map(val => (
                       <option key={val} value={val} className="bg-sleek-bg text-rose-400">{val}%</option>
@@ -7551,18 +7442,18 @@ export default function App() {
               </div>
 
               {/* 3. Smart Scalper Configuration */}
-              <div className="bg-sleek-blue/5 border border-sleek-blue/20 p-2.5 rounded-2xl flex flex-col justify-between space-y-1.5">
+              <div className="bg-sleek-blue/5 border border-sleek-blue/20 p-3 rounded-2xl flex flex-col justify-between space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-[10px] font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1 group relative">
-                    <Zap className="w-3 h-3" /> SMART SCALPER
-                    <HelpCircle className="w-2.5 h-2.5 text-sleek-blue/50 cursor-help hover:text-sleek-blue transition-colors" />
+                  <span className="text-xs font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1 group relative">
+                    <Zap className="w-3.5 h-3.5" /> SMART SCALPER
+                    <HelpCircle className="w-3 h-3 text-sleek-blue/50 cursor-help hover:text-sleek-blue transition-colors" />
                     
                     {/* Help Tooltip */}
-                    <div className="absolute left-0 bottom-full mb-2 w-48 bg-slate-900 border border-sleek-blue/30 p-2 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none">
-                      <div className="text-[9px] font-bold text-sleek-blue mb-1 flex items-center gap-1 uppercase tracking-tighter">
-                        <Sparkles className="w-2.5 h-2.5" /> Scalping Logic
+                    <div className="absolute left-0 bottom-full mb-2 w-52 bg-slate-900 border border-sleek-blue/30 p-2.5 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none">
+                      <div className="text-[10px] font-bold text-sleek-blue mb-1 flex items-center gap-1 uppercase tracking-tighter">
+                        <Sparkles className="w-3 h-3" /> Scalping Logic
                       </div>
-                      <div className="text-[10px] leading-relaxed text-slate-200 font-medium normal-case tracking-normal">
+                      <div className="text-xs leading-relaxed text-slate-200 font-medium normal-case tracking-normal">
                         실시간 틱 데이터를 분석하여 <span className="text-sleek-blue font-bold">과매도/과매수</span> 지점의 기술적 반등을 포착하는 모드입니다. 지지/저항 돌파 시 자동으로 진입합니다.
                       </div>
                       <div className="absolute left-4 top-full w-2 h-2 bg-slate-900 border-r border-b border-sleek-blue/30 rotate-45 -translate-y-1/2" />
@@ -7572,7 +7463,7 @@ export default function App() {
                     type="button"
                     onClick={() => setIsSmartScalperMode(!isSmartScalperMode)}
                     className={cn(
-                      "px-2 py-0.5 rounded-full text-[9px] font-black transition-all border",
+                      "px-2.5 py-1 rounded-full text-[10px] font-black transition-all border cursor-pointer",
                       isSmartScalperMode
                         ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue"
                         : "bg-white/5 border-white/10 text-sleek-text-secondary opacity-60"
@@ -7583,11 +7474,11 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="text-[9px] font-black text-sleek-text-secondary uppercase block mb-0.5">추가 매수 간격 (Gap %)</label>
+                  <label className="text-[10px] sm:text-xs font-black text-slate-300 uppercase block mb-1">추가 매수 간격 (Gap %)</label>
                   <select 
                     value={minGapBetweenSlots}
                     onChange={(e) => setMinGapBetweenSlots(Number(e.target.value))}
-                    className="w-full bg-black/40 border border-white/10 rounded px-1.5 py-0.5 text-xs font-mono font-bold text-white outline-none cursor-pointer appearance-none"
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-2 py-1.5 text-xs sm:text-sm font-mono font-bold text-white outline-none cursor-pointer appearance-none"
                   >
                     {[0.1, 0.2, 0.3, 0.4, 0.5, 0.8, 1.0, 1.5, 2.0, 3.0, 5.0].map(gap => (
                       <option key={gap} value={gap} className="bg-sleek-bg text-white">{gap}%</option>
@@ -7596,42 +7487,42 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="text-[9px] font-black text-sleek-text-secondary uppercase block mb-0.5">동일/중복가 매수 설정</label>
+                  <label className="text-[10px] sm:text-xs font-black text-slate-300 uppercase block mb-1">동일/중복가 매수 설정</label>
                   <button
                     type="button"
                     onClick={() => setAllowSamePriceEntry(!allowSamePriceEntry)}
                     className={cn(
-                      "w-full py-1 px-2 rounded text-[10px] font-bold border transition-all cursor-pointer flex items-center justify-center gap-1",
+                      "w-full py-1.5 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center justify-center gap-1",
                       allowSamePriceEntry
                         ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
                         : "bg-rose-500/20 border-rose-500/40 text-rose-300"
                     )}
                   >
-                    {allowSamePriceEntry ? "✓ 동일가 매수 허용 (차단해제)" : "✕ 동일가 중복 차단"}
+                    {allowSamePriceEntry ? "✓ 동일가 매수 허용" : "✕ 동일가 중복 차단"}
                   </button>
                 </div>
 
                 <div>
-                  <label className="text-[9px] font-black text-sleek-text-secondary uppercase block mb-0.5">진입 수량 방식</label>
-                  <div className="w-full py-1 px-2 rounded bg-amber-500/10 border border-amber-500/30 text-amber-300 text-[10px] font-bold text-center">
-                    ✓ 고정 수량 (원칙 준수 - 물타기 금지)
+                  <label className="text-[10px] sm:text-xs font-black text-slate-300 uppercase block mb-1">진입 수량 방식</label>
+                  <div className="w-full py-1.5 px-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold text-center">
+                    ✓ 고정 수량 (물타기 금지)
                   </div>
                 </div>
               </div>
 
               {/* 4. Entry Mode & Auto Cancel Drop */}
-              <div className="bg-white/5 p-2.5 rounded-2xl border border-white/5 flex flex-col justify-between space-y-1.5">
+              <div className="bg-white/5 p-3 rounded-2xl border border-white/10 flex flex-col justify-between space-y-2">
                 <div>
-                  <span className="text-[10px] font-bold text-white flex items-center gap-1 mb-1">
-                    <TrendingDown className="w-3 h-3 text-amber-400" /> 진입 호가 방식
+                  <span className="text-xs font-bold text-white flex items-center gap-1 mb-1.5">
+                    <TrendingDown className="w-3.5 h-3.5 text-amber-400" /> 진입 호가 방식
                   </span>
                   <div className="grid grid-cols-4 gap-1">
                     <button
                       type="button"
                       onClick={() => setEntryPriceMode('BID1')}
                       className={cn(
-                        "py-1 rounded text-[10px] font-bold border text-center transition-all cursor-pointer",
-                        entryPriceMode === 'BID1' ? "bg-blue-500/20 border-blue-500/40 text-blue-300" : "bg-black/20 border-white/5 text-gray-400 hover:text-gray-200"
+                        "py-1.5 rounded-lg text-xs font-bold border text-center transition-all cursor-pointer",
+                        entryPriceMode === 'BID1' ? "bg-blue-500/20 border-blue-500/40 text-blue-300" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
                       title="매수 1호가 지정가 진입"
                     >
@@ -7641,8 +7532,8 @@ export default function App() {
                       type="button"
                       onClick={() => setEntryPriceMode('BID2')}
                       className={cn(
-                        "py-1 rounded text-[10px] font-bold border text-center transition-all cursor-pointer",
-                        entryPriceMode === 'BID2' ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" : "bg-black/20 border-white/5 text-gray-400 hover:text-gray-200"
+                        "py-1.5 rounded-lg text-xs font-bold border text-center transition-all cursor-pointer",
+                        entryPriceMode === 'BID2' ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
                       title="기본 매수 2호가 진입 (스캘퍼 권장)"
                     >
@@ -7652,8 +7543,8 @@ export default function App() {
                       type="button"
                       onClick={() => setEntryPriceMode('BID4')}
                       className={cn(
-                        "py-1 rounded text-[10px] font-bold border text-center transition-all cursor-pointer",
-                        entryPriceMode === 'BID4' ? "bg-amber-500/20 border-amber-500/40 text-amber-300" : "bg-black/20 border-white/5 text-gray-400 hover:text-gray-200"
+                        "py-1.5 rounded-lg text-xs font-bold border text-center transition-all cursor-pointer",
+                        entryPriceMode === 'BID4' ? "bg-amber-500/20 border-amber-500/40 text-amber-300" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
                       title="매수 4호가 지정가 진입"
                     >
@@ -7663,8 +7554,8 @@ export default function App() {
                       type="button"
                       onClick={() => setEntryPriceMode('CURRENT')}
                       className={cn(
-                        "py-1 rounded text-[10px] font-bold border text-center transition-all cursor-pointer",
-                        entryPriceMode === 'CURRENT' ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue" : "bg-black/20 border-white/5 text-gray-400 hover:text-gray-200"
+                        "py-1.5 rounded-lg text-xs font-bold border text-center transition-all cursor-pointer",
+                        entryPriceMode === 'CURRENT' ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
                       title="현재 시장 체결가 진입"
                     >
@@ -7675,20 +7566,20 @@ export default function App() {
 
                 <div>
                   <div className="flex justify-between items-center mb-1">
-                    <span className="text-[10px] font-bold text-white flex items-center gap-1">
-                      <Trash2 className="w-3 h-3 text-rose-400" /> 자동 취소 낙폭
+                    <span className="text-xs font-bold text-white flex items-center gap-1">
+                      <Trash2 className="w-3.5 h-3.5 text-rose-400" /> 자동 취소 낙폭
                     </span>
-                    <span className="text-xs font-bold text-rose-400 font-mono">-{autoCancelThreshold}%</span>
+                    <span className="text-xs sm:text-sm font-bold text-rose-400 font-mono">-{autoCancelThreshold}%</span>
                   </div>
-                  <div className="grid grid-cols-4 gap-0.5">
+                  <div className="grid grid-cols-4 gap-1">
                     {[ 0.1, 0.2, 0.3, 0.5 ].map(pct => (
                       <button
                         key={pct}
                         type="button"
                         onClick={() => setAutoCancelThreshold(pct)}
                         className={cn(
-                          "py-0.5 rounded text-[10px] font-bold font-mono border text-center transition-all",
-                          autoCancelThreshold === pct ? "bg-rose-500/20 border-rose-500/40 text-rose-300" : "bg-black/20 border-white/5 text-gray-400"
+                          "py-1 rounded-lg text-xs font-bold font-mono border text-center transition-all cursor-pointer",
+                          autoCancelThreshold === pct ? "bg-rose-500/20 border-rose-500/40 text-rose-300" : "bg-black/30 border-white/5 text-gray-400"
                         )}
                       >
                         {pct}%
@@ -7699,9 +7590,9 @@ export default function App() {
               </div>
 
               {/* 5. Speed & Immediate Entry */}
-              <div className="bg-white/5 p-2.5 rounded-2xl border border-white/5 flex flex-col justify-between space-y-1.5">
+              <div className="bg-white/5 p-3 rounded-2xl border border-white/10 flex flex-col justify-between space-y-2">
                 <div>
-                  <span className="text-[10px] font-bold text-sleek-text-secondary uppercase block mb-1">실행 속도</span>
+                  <span className="text-xs font-bold text-slate-300 uppercase block mb-1.5">실행 속도</span>
                   <div className="grid grid-cols-4 gap-1">
                     {[
                       { label: '0.1s', value: 100 },
@@ -7714,10 +7605,10 @@ export default function App() {
                         type="button"
                         onClick={() => setScalpingSpeed(opt.value)}
                         className={cn(
-                          "py-1 rounded text-[10px] font-mono font-bold transition-all text-center cursor-pointer",
+                          "py-1.5 rounded-lg text-xs font-mono font-bold transition-all text-center cursor-pointer",
                           scalpingSpeed === opt.value
                             ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                            : "bg-white/5 text-sleek-text-secondary hover:bg-white/10"
+                            : "bg-white/5 text-slate-400 hover:bg-white/10"
                         )}
                       >
                         {opt.label}
@@ -7726,20 +7617,20 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="pt-1 border-t border-white/5">
+                <div className="pt-1.5 border-t border-white/10">
                   <button
                     type="button"
                     onClick={() => setImmediateEntry(!immediateEntry)}
                     className={cn(
-                      "w-full py-1 px-1.5 rounded text-[10px] font-bold border flex items-center justify-center gap-1 transition-all cursor-pointer",
+                      "w-full py-1.5 px-2 rounded-xl text-xs font-bold border flex items-center justify-center gap-1.5 transition-all cursor-pointer",
                       immediateEntry 
                         ? "bg-rose-500/25 border-rose-500/50 text-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.3)] animate-pulse" 
-                        : "bg-black/30 border-white/10 text-gray-400 hover:text-white"
+                        : "bg-black/40 border-white/10 text-gray-400 hover:text-white"
                     )}
                     title="전략 조건 충족을 기다리지 않고 즉시 매수 진입합니다."
                   >
-                    <Zap className="w-3 h-3 text-amber-400" />
-                    <span>{immediateEntry ? "⚡ 즉시 강제 진입 ON" : "조건포착 후 매수 (기본)"}</span>
+                    <Zap className="w-3.5 h-3.5 text-amber-400" />
+                    <span>{immediateEntry ? "⚡ 즉시 강제 진입 ON" : "조건포착 후 매수"}</span>
                   </button>
                 </div>
               </div>
@@ -7763,7 +7654,7 @@ export default function App() {
                   }}
                   title="현재 선택된 종목의 개별 스캘퍼 시작/정지"
                   className={cn(
-                    "w-full h-full min-h-[90px] sm:min-h-[100px] py-3.5 px-3 rounded-2xl font-black text-base italic tracking-tighter uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-1.5 border",
+                    "w-full h-full min-h-[90px] sm:min-h-[100px] py-4 px-3 rounded-2xl font-black text-base sm:text-lg italic tracking-tight uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-2 border cursor-pointer",
                     isGapBotActive 
                       ? "bg-gradient-to-br from-rose-600 to-red-800 text-white border-rose-500/50 shadow-rose-900/40 hover:scale-[1.02]" 
                       : "bg-gradient-to-br from-sleek-blue to-indigo-700 text-white border-sleek-blue/50 shadow-sleek-blue/40 hover:scale-[1.02]"
@@ -7771,12 +7662,12 @@ export default function App() {
                 >
                   {isGapBotActive ? (
                     <>
-                      <Square className="w-5 h-5 fill-current animate-pulse" />
+                      <Square className="w-6 h-6 fill-current animate-pulse" />
                       <span>SCALPER STOP</span>
                     </>
                   ) : (
                     <>
-                      <Play className="w-5 h-5 fill-current" />
+                      <Play className="w-6 h-6 fill-current" />
                       <span className="text-center leading-tight">START AI<br />SCALPER</span>
                     </>
                   )}
@@ -7786,16 +7677,16 @@ export default function App() {
           </div>
 
           {/* 2. Header Engine & Stock Status Banner (Moved Below AI SCALPING CONFIG) */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-3.5">
             {/* Stock Quick Info Badge */}
-            <div className="bg-sleek-card border border-sleek-border p-3.5 rounded-2xl shadow-lg lg:col-span-4 flex items-center justify-between">
+            <div className="bg-sleek-card border border-sleek-border p-4 rounded-2xl shadow-lg lg:col-span-4 flex items-center justify-between">
               <div className="w-full">
-                <div className="flex items-center justify-between gap-2 mb-1.5 w-full">
-                  <span className="text-base font-black text-white text-left shrink-0">
+                <div className="flex items-center justify-between gap-2 mb-2 w-full">
+                  <span className="text-lg sm:text-xl font-black text-white text-left shrink-0">
                     {selectedStock?.name || '종목 미선택'}
                   </span>
                   {selectedStock && (
-                    <div className="flex items-center justify-end gap-1.5 font-mono text-xs sm:text-sm text-right shrink-0">
+                    <div className="flex items-center justify-end gap-2 font-mono text-sm sm:text-base text-right shrink-0">
                       <span className="text-white font-black">{formatCurrency(selectedStock.price)}</span>
                       <span className={cn(
                         "font-bold",
@@ -7812,9 +7703,9 @@ export default function App() {
                     </div>
                   )}
                 </div>
-                <div className="flex items-center justify-between text-xs font-mono pt-1.5 border-t border-white/5">
-                  <span className="text-sleek-text-secondary">현재 보유: <strong className="text-white font-bold">{holdings[selectedStock?.symbol || ''] || 0}주</strong></span>
-                  <span className="text-sleek-text-secondary">매수 가능: <strong className="text-sleek-blue font-bold">
+                <div className="flex items-center justify-between text-xs sm:text-sm font-mono pt-2 border-t border-white/10">
+                  <span className="text-slate-300">현재 보유: <strong className="text-white font-bold">{holdings[selectedStock?.symbol || ''] || 0}주</strong></span>
+                  <span className="text-slate-300">매수 가능: <strong className="text-sleek-blue font-bold">
                     {`${displayBuyableQty.toLocaleString()}주 ${kisConfig.isConnected && kisConfig.isRealOrderEnabled ? '(실계좌)' : '(로컬)'}`}
                   </strong></span>
                 </div>
@@ -7822,12 +7713,12 @@ export default function App() {
             </div>
 
             {/* Scalper Engine Status (8 Columns) */}
-            <div className="bg-sleek-card border border-sleek-blue/40 p-3.5 rounded-2xl shadow-lg lg:col-span-8 flex flex-col justify-between">
+            <div className="bg-sleek-card border border-sleek-blue/40 p-4 rounded-2xl shadow-lg lg:col-span-8 flex flex-col justify-between">
               <div className="flex items-center justify-between gap-2 flex-wrap">
-                <div className="flex items-center gap-2 flex-wrap min-w-0">
-                  <Zap className="w-4 h-4 text-sleek-blue animate-pulse shrink-0" />
-                  <span className="text-xs font-black text-sleek-text-secondary uppercase tracking-widest shrink-0">스캘퍼 엔진 상태</span>
-                  <span className="text-xs font-bold text-white font-mono shrink-0">[{selectedStock?.name || '종목 미선택'} ({selectedStock?.symbol || '-'})]</span>
+                <div className="flex items-center gap-2.5 flex-wrap min-w-0">
+                  <Zap className="w-5 h-5 text-sleek-blue animate-pulse shrink-0" />
+                  <span className="text-xs sm:text-sm font-black text-slate-300 uppercase tracking-widest shrink-0">스캘퍼 엔진 상태</span>
+                  <span className="text-xs sm:text-sm font-bold text-white font-mono shrink-0">[{selectedStock?.name || '종목 미선택'} ({selectedStock?.symbol || '-'})]</span>
                   
                   {/* 수동 지정가 매도 버튼 */}
                   <button
@@ -7841,36 +7732,36 @@ export default function App() {
                       }
                       setManualSellModalOpen(true);
                     }}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500 hover:text-white transition-all shadow-sm shrink-0 cursor-pointer active:scale-95"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500 hover:text-white transition-all shadow-sm shrink-0 cursor-pointer active:scale-95"
                   >
-                    <CircleDollarSign className="w-3.5 h-3.5" />
+                    <CircleDollarSign className="w-4 h-4" />
                     <span>수동 지정가 매도</span>
                   </button>
 
                   <button
                     onClick={cancelAllOrders}
-                    className="flex items-center gap-1 px-2.5 py-1 rounded-lg font-bold text-[11px] bg-white/5 text-sleek-text-secondary border border-white/10 hover:bg-white/10 hover:text-white transition-all shadow-sm shrink-0"
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl font-bold text-xs bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10 hover:text-white transition-all shadow-sm shrink-0 cursor-pointer"
                   >
-                    <Trash2 className="w-3.5 h-3.5" />
+                    <Trash2 className="w-4 h-4" />
                     <span>주문 취소</span>
                   </button>
                 </div>
 
                 <div className={cn(
-                  "px-2.5 py-0.5 rounded-full text-xs font-black italic tracking-wider flex items-center gap-1 border shrink-0",
+                  "px-3 py-1 rounded-full text-xs font-black italic tracking-wider flex items-center gap-1.5 border shrink-0",
                   isGapBotActive 
                     ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 animate-pulse" 
-                    : "bg-white/5 text-sleek-text-secondary border-white/10"
+                    : "bg-white/5 text-slate-400 border-white/10"
                 )}>
-                  <span className={cn("w-1.5 h-1.5 rounded-full", isGapBotActive ? "bg-emerald-400" : "bg-slate-500")} />
+                  <span className={cn("w-2 h-2 rounded-full", isGapBotActive ? "bg-emerald-400" : "bg-slate-500")} />
                   {isGapBotActive ? "RUNNING" : "STOPPED"}
                 </div>
               </div>
 
-              <div className="pt-2 mt-1 border-t border-white/10 text-xs font-mono min-h-[2.5rem] h-[2.5rem] flex items-center overflow-hidden shrink-0">
-                <div className="flex items-center gap-1.5 w-full my-auto overflow-hidden">
-                  <span className="text-[11px] font-black text-sleek-text-secondary uppercase shrink-0">상태 메시지:</span>
-                  <span className="font-bold text-sleek-blue text-xs leading-snug truncate">
+              <div className="pt-2.5 mt-1.5 border-t border-white/10 text-xs sm:text-sm font-mono min-h-[2.5rem] flex items-center overflow-hidden shrink-0">
+                <div className="flex items-center gap-2 w-full my-auto overflow-hidden">
+                  <span className="text-xs font-black text-slate-400 uppercase shrink-0">상태 메시지:</span>
+                  <span className="font-bold text-sleek-blue text-xs sm:text-sm leading-snug truncate">
                     {displayScalperMessage}
                   </span>
                 </div>
@@ -7879,34 +7770,34 @@ export default function App() {
           </div>
 
           {/* 3. PROFIT MAXIMIZER ENGINE (Chart + Compact 4-Level Order Book) */}
-          <div className="bg-sleek-card border border-sleek-border p-3.5 sm:p-4 rounded-3xl shadow-2xl space-y-3">
-            <div className="flex items-center justify-between pb-2 border-b border-white/5">
+          <div className="bg-sleek-card border border-sleek-border p-4 sm:p-5 rounded-3xl shadow-2xl space-y-3.5">
+            <div className="flex items-center justify-between pb-2.5 border-b border-white/10">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-sleek-card border border-sleek-border rounded-xl flex items-center justify-center shadow-md">
-                  <Activity className="w-4 h-4 text-sleek-blue animate-pulse" />
+                <div className="w-9 h-9 bg-sleek-card border border-sleek-border rounded-xl flex items-center justify-center shadow-md">
+                  <Activity className="w-5 h-5 text-sleek-blue animate-pulse" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-black text-white uppercase italic tracking-tighter">PROFIT MAXIMIZER ENGINE</h3>
+                  <h3 className="text-base font-black text-white uppercase italic tracking-tight">PROFIT MAXIMIZER ENGINE</h3>
                   <div className="flex items-center gap-1.5">
-                    <div className="w-1.5 h-1.5 rounded-full bg-sleek-green animate-pulse"></div>
-                    <span className="text-[11px] font-bold text-sleek-text-secondary uppercase">Real-time Trading Stage</span>
+                    <div className="w-2 h-2 rounded-full bg-sleek-green animate-pulse"></div>
+                    <span className="text-xs font-bold text-slate-400 uppercase">Real-time Trading Stage</span>
                   </div>
                 </div>
               </div>
               <div className="text-right flex items-center gap-3 text-xs font-mono">
-                <div className="flex items-center gap-2 bg-black/40 px-2.5 py-1 rounded-xl border border-white/5 shadow-inner">
-                  <span className="text-[11px] text-sleek-text-secondary uppercase font-black">RSI (14)</span>
+                <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 shadow-inner">
+                  <span className="text-xs text-slate-400 uppercase font-black">RSI (14)</span>
                   <span className={cn(
-                    "font-black italic text-xs font-mono",
+                    "font-black italic text-xs sm:text-sm font-mono",
                     calculateRSI(selectedStock?.history?.map(h => h.price) || []) < 30 ? "text-sleek-red" : 
                     calculateRSI(selectedStock?.history?.map(h => h.price) || []) > 70 ? "text-sleek-green" : "text-sleek-blue"
                   )}>
                     {Math.round(calculateRSI(selectedStock?.history?.map(h => h.price) || []))}
                   </span>
                 </div>
-                <div className="flex items-center gap-2 bg-black/40 px-2.5 py-1 rounded-xl border border-white/5 shadow-inner">
-                  <span className="text-[11px] text-sleek-text-secondary uppercase font-black">감시 구간 폭</span>
-                  <span className="font-black text-sleek-blue italic text-xs font-mono">
+                <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 shadow-inner">
+                  <span className="text-xs text-slate-400 uppercase font-black">감시 구간 폭</span>
+                  <span className="font-black text-sleek-blue italic text-xs sm:text-sm font-mono">
                     {formatCurrency(gapBuyPrice && gapSellPrice ? (gapSellPrice - gapBuyPrice) : 0)}
                   </span>
                 </div>
@@ -7915,26 +7806,26 @@ export default function App() {
                   "flex items-center rounded-xl border transition-all shadow-inner",
                   isAutoRotateTabs 
                     ? "bg-purple-500/15 border-purple-500/40 shadow-[0_0_12px_rgba(168,85,247,0.2)]" 
-                    : "bg-black/40 border-white/5"
+                    : "bg-black/40 border-white/10"
                 )}>
                   <button
                     type="button"
                     onClick={() => setIsAutoRotateTabs(prev => !prev)}
                     className={cn(
-                      "flex items-center gap-1.5 px-2.5 py-1 text-xs font-mono font-bold transition-all cursor-pointer",
+                      "flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-mono font-bold transition-all cursor-pointer",
                       isAutoRotateTabs 
                         ? "text-purple-300 hover:text-purple-200" 
                         : "text-gray-400 hover:text-white"
                     )}
                     title={`스캘핑 종목 탭 ${tabRotationInterval}초 간격 자동 순환 ON/OFF`}
                   >
-                    <RefreshCw className={cn("w-3.5 h-3.5 text-purple-400", isAutoRotateTabs && "animate-spin-slow")} />
+                    <RefreshCw className={cn("w-4 h-4 text-purple-400", isAutoRotateTabs && "animate-spin-slow")} />
                     <span>탭 순환 {isAutoRotateTabs ? "ON" : "OFF"}</span>
                   </button>
 
-                  <div className="h-4 w-px bg-white/10" />
+                  <div className="h-4 w-px bg-white/15" />
 
-                  <div className="relative flex items-center pr-1.5 pl-1">
+                  <div className="relative flex items-center pr-2 pl-1.5">
                     <select
                       id="tab-rotation-interval-select"
                       aria-label="종목 탭 자동 순환 주기 선택"
@@ -7949,7 +7840,7 @@ export default function App() {
                         }
                       }}
                       className={cn(
-                        "bg-transparent text-xs font-mono font-bold focus:outline-none cursor-pointer py-1 px-1 rounded transition-all",
+                        "bg-transparent text-xs sm:text-sm font-mono font-bold focus:outline-none cursor-pointer py-1 px-1 rounded transition-all",
                         isAutoRotateTabs ? "text-purple-300 hover:text-purple-100" : "text-gray-400 hover:text-gray-200",
                         "[&>option]:bg-slate-900 [&>option]:text-white"
                       )}
@@ -7967,7 +7858,7 @@ export default function App() {
             </div>
 
             {/* Multi-Tab Bar for Independent Scalper Bot Trading */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2 pb-2 pt-1 border-b border-white/10 max-h-[280px] overflow-y-auto custom-scrollbar">
+            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2.5 pb-2.5 pt-1 border-b border-white/10 max-h-[280px] overflow-y-auto custom-scrollbar">
               {scalperTabs.filter(tab => {
                 const isUS = /^[A-Z]/.test(tab.symbol);
                 return marketType === 'US' ? isUS : !isUS;
@@ -7986,31 +7877,31 @@ export default function App() {
                     key={tab.id}
                     onClick={() => handleSwitchTab(tab.id)}
                     className={cn(
-                      "px-2.5 py-1.5 rounded-xl border flex items-center justify-between gap-1.5 cursor-pointer transition-all w-full min-w-0 text-xs font-mono select-none group min-h-[34px]",
+                      "px-3 py-2 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all w-full min-w-0 text-xs sm:text-sm font-mono select-none group min-h-[38px]",
                       isSelected
-                        ? "bg-sleek-blue/20 border-sleek-blue text-white shadow-md font-bold"
-                        : "bg-black/40 border-white/5 hover:bg-white/5 text-gray-400 hover:text-white"
+                        ? "bg-sleek-blue/20 border-sleek-blue text-white shadow-md font-bold ring-1 ring-sleek-blue/50"
+                        : "bg-black/40 border-white/10 hover:bg-white/10 text-gray-300 hover:text-white"
                     )}
                   >
                     {/* Left: Running Dot & Name */}
-                    <div className="flex items-center gap-1.5 min-w-0 truncate">
+                    <div className="flex items-center gap-2 min-w-0 truncate">
                       <span className={cn(
-                        "w-2 h-2 rounded-full shrink-0",
+                        "w-2.5 h-2.5 rounded-full shrink-0",
                         tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]" : "bg-gray-500"
                       )} />
-                      <span className="font-bold text-white text-xs truncate">{tabName}</span>
+                      <span className="font-bold text-white text-xs sm:text-sm truncate">{tabName}</span>
                     </div>
 
                     {/* Right: Price & Indicators & Close */}
-                    <div className="flex items-center gap-1 shrink-0 ml-auto">
+                    <div className="flex items-center gap-1.5 shrink-0 ml-auto">
                       {tabStock && (
-                        <span className={cn("text-[10px] font-mono hidden md:inline-block", tabStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
+                        <span className={cn("text-xs font-mono hidden md:inline-block font-semibold", tabStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
                           {formatCurrency(tabStock.price)}
                         </span>
                       )}
 
                       {tab.isBotActive && (
-                        <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/30 shrink-0">
+                        <span className="text-[10px] font-black bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/30 shrink-0">
                           ON
                         </span>
                       )}
@@ -8019,10 +7910,10 @@ export default function App() {
                         <button
                           type="button"
                           onClick={(e) => closeScalperTab(tab.id, e)}
-                          className="opacity-60 hover:opacity-100 hover:bg-rose-500/30 text-gray-400 hover:text-rose-300 rounded-full p-0.5 transition-all ml-0.5 shrink-0"
+                          className="opacity-60 hover:opacity-100 hover:bg-rose-500/30 text-gray-400 hover:text-rose-300 rounded-full p-1 transition-all ml-0.5 shrink-0 cursor-pointer"
                           title="탭 닫기"
                         >
-                          <X className="w-3 h-3" />
+                          <X className="w-3.5 h-3.5" />
                         </button>
                       )}
                     </div>
