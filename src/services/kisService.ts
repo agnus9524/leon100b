@@ -743,7 +743,7 @@ class KISService {
         CANO: this.config.accountNo,
         ACNT_PRDT_CD: this.config.accountCode,
         SORT_DVSN: sortDvsn,
-        PDNO: symbol,
+        PDNO: symbol || '',
         INQR_STRT_DT: startDate,
         INQR_END_DT: endDate,
         CTX_AREA_NK100: '',
@@ -751,7 +751,7 @@ class KISService {
         CTX_AREA_FK100: ''
       };
 
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params, timeout: 5000 });
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params, timeout: 8000 });
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Period Trade Profit Exception safely caught:", error?.response?.data || error?.message);
@@ -793,13 +793,13 @@ class KISService {
         INQR_DVSN_1: '00',
         INQR_DVSN_2: '00',
         COST_ICLD_YN: 'N',
-        PRCS_DVSN: '00',
+        PRCS_DVSN: '00', // 00: 가결제포함 (당일/최근 체결 매매 전체 포함)
         CTX_AREA_FK100: '',
         CTX_AREA_NK100: '',
         CANO_PWD: this.config.accountPw || ''
       };
 
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params, timeout: 5000 });
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params, timeout: 8000 });
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Period Realized PnL Exception safely caught:", error?.response?.data || error?.message);
