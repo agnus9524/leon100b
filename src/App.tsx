@@ -1014,7 +1014,11 @@ export default function App() {
   const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
   const [orderableKrw, setOrderableKrw] = useState<number>(() => {
     const saved = localStorage.getItem('sleek_orderable_krw');
-    return saved !== null && !isNaN(Number(saved)) ? Number(saved) : 154000;
+    if (saved === '154000' || saved === '980543') {
+      try { localStorage.removeItem('sleek_orderable_krw'); } catch {}
+      return 0;
+    }
+    return saved !== null && !isNaN(Number(saved)) ? Number(saved) : 0;
   });
   const [orderableUsd, setOrderableUsd] = useState<number>(() => {
     const saved = localStorage.getItem('sleek_orderable_usd');
@@ -3802,11 +3806,24 @@ export default function App() {
           domesticSuccess = true;
           const out2 = Array.isArray(domesticBalanceData.output2) ? (domesticBalanceData.output2[0] || {}) : domesticBalanceData.output2;
           const dnclAmt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.prsm_dncl_amt || out2.cma_evlu_amt || 0);
-          const ordPsblCash = Number(out2.ord_psbl_cash || out2.ord_psbl_amt || out2.nrcy_ord_psbl_amt || 0);
+          let ordPsblCash = Number(out2.ord_psbl_cash || out2.nrcy_ord_psbl_amt || out2.ord_psbl_amt || 0);
           const domesticPurchase = Number(out2.pchs_amt_smtl_amt || 0);
           const actualPurchaseCost = Math.max(domesticPurchase, totalStockPurchaseCost);
 
-          // Direct deposit/cash balance in account (Prioritize immediate orderable cash)
+          // Direct inquiry to KIS TTTC8908R for exact real-time orderable cash (ord_psbl_cash)
+          try {
+            const symForQuery = (selectedStock?.market === 'KR' && selectedStock.symbol) 
+              ? selectedStock.symbol 
+              : (Object.keys(newHoldings)[0] || '005930');
+            const cashInquiry = await kisService.getDomesticOrderableCash(symForQuery);
+            if (cashInquiry && cashInquiry.rt_cd === '0' && cashInquiry.orderableKrw > 0) {
+              ordPsblCash = cashInquiry.orderableKrw;
+            }
+          } catch (inqErr) {
+            console.warn("Direct orderable cash inquiry skip:", inqErr);
+          }
+
+          // Exact orderable cash prioritized: ord_psbl_cash > nrcy_ord_psbl_amt > dnclAmt
           const domesticCash = ordPsblCash > 0 ? ordPsblCash : (dnclAmt > 0 ? dnclAmt : (Number(out2.nass_amt || 0) > actualPurchaseCost ? Number(out2.nass_amt) - actualPurchaseCost : 0));
           if (domesticCash > 0) {
             setOrderableKrw(domesticCash);
@@ -3917,19 +3934,19 @@ export default function App() {
         const assetStatus = await kisService.getInvestmentAssetStatus();
         if (assetStatus?.output2) {
           const out2 = Array.isArray(assetStatus.output2) ? (assetStatus.output2[0] || {}) : assetStatus.output2;
-          const dncl_amt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.ord_psbl_cash || 0);
+          const ord_psbl = Number(out2.ord_psbl_cash || out2.nrcy_ord_psbl_amt || out2.dncl_amt || out2.d2_dncl_amt || 0);
           const tot_asst_amt = Number(out2.tot_asst_amt || 0);
           
           if (tot_asst_amt > 0) {
             if (tot_asst_amt > totalConvertedPrincipal) {
               totalConvertedPrincipal = Math.round(tot_asst_amt);
             }
-            if (dncl_amt > 0 && totalConvertedBalance === 0) {
-              totalConvertedBalance = Math.round(dncl_amt);
+            if (ord_psbl > 0 && totalConvertedBalance === 0) {
+              totalConvertedBalance = Math.round(ord_psbl);
             }
           }
-          if (dncl_amt > 0) {
-            setOrderableKrw(prev => (prev === 0 ? dncl_amt : prev));
+          if (ord_psbl > 0) {
+            setOrderableKrw(prev => (prev === 0 ? ord_psbl : prev));
           }
         }
       } catch (err) {

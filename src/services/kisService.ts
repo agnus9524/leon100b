@@ -568,9 +568,9 @@ class KISService {
     }
   }
 
-  public async getDomesticBuyableAmount(symbol: string, price: string = '0', ordDvsn: string = '01') {
-    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0' } };
-    if (!symbol || !/^\d{6}$/.test(symbol)) return { rt_cd: '0', output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0' } };
+  public async getDomesticBuyableAmount(symbol: string = '005930', price: string = '0', ordDvsn: string = '01') {
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', ord_psbl_amt: '0', nrcy_ord_psbl_amt: '0' } };
+    const querySymbol = (symbol && /^\d{6}$/.test(symbol)) ? symbol : '005930';
     try {
       await this.throttleRequest();
       const token = await this.getAccessToken();
@@ -596,10 +596,10 @@ class KISService {
       const params = {
         CANO: this.config.accountNo,
         ACNT_PRDT_CD: this.config.accountCode,
-        PDNO: symbol,
+        PDNO: querySymbol,
         ORD_UNPR: effectivePrice,
         ORD_DVSN: effectiveOrdDvsn,
-        CMA_EVLU_AMT_ICLD_YN: 'N',
+        CMA_EVLU_AMT_ICLD_YN: 'Y',
         OVRS_ICLD_YN: 'N',
         CANO_PWD: this.config.accountPw || ''
       };
@@ -607,12 +607,41 @@ class KISService {
       const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
       if (res.data.rt_cd && res.data.rt_cd !== '0') {
         console.warn(`[KIS Service] Domestic Buyable Amount Error: ${res.data.msg1} (${res.data.msg_cd})`);
-        return { rt_cd: res.data.rt_cd || '1', msg1: res.data.msg1 || 'Domestic buyable error', output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0' } };
+        return { rt_cd: res.data.rt_cd || '1', msg1: res.data.msg1 || 'Domestic buyable error', output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', ord_psbl_amt: '0', nrcy_ord_psbl_amt: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0' } };
       }
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Domestic Buyable Amount Exception safely caught:", error?.response?.data || error?.message);
-      return { rt_cd: '1', msg1: error?.message || 'Domestic buyable exception', output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0' } };
+      return { rt_cd: '1', msg1: error?.message || 'Domestic buyable exception', output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', ord_psbl_amt: '0', nrcy_ord_psbl_amt: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0' } };
+    }
+  }
+
+  public async getDomesticOrderableCash(targetSymbol?: string) {
+    if (!this.config) return { orderableKrw: 0, ord_psbl_cash: 0, ord_psbl_amt: 0, nrcy_ord_psbl_amt: 0, rt_cd: '1', msg1: "KIS Config not initialized" };
+    try {
+      const sym = (targetSymbol && /^\d{6}$/.test(targetSymbol)) ? targetSymbol : '005930';
+      const buyableRes = await this.getDomesticBuyableAmount(sym, '0', '01');
+      if (buyableRes && buyableRes.rt_cd === '0' && buyableRes.output) {
+        const out = buyableRes.output;
+        // KIS exact API fields: ord_psbl_cash (주문가능현금), nrcy_ord_psbl_amt (비대면주문가능금액), ord_psbl_amt (주문가능금액)
+        const ord_psbl_cash = Number(out.ord_psbl_cash || 0);
+        const nrcy_ord_psbl_amt = Number(out.nrcy_ord_psbl_amt || 0);
+        const ord_psbl_amt = Number(out.ord_psbl_amt || 0);
+        
+        // Exact real-time orderable KRW priority: ord_psbl_cash > nrcy_ord_psbl_amt > ord_psbl_amt
+        const exactCash = ord_psbl_cash > 0 ? ord_psbl_cash : (nrcy_ord_psbl_amt > 0 ? nrcy_ord_psbl_amt : ord_psbl_amt);
+        return {
+          orderableKrw: exactCash,
+          ord_psbl_cash,
+          ord_psbl_amt,
+          nrcy_ord_psbl_amt,
+          rt_cd: '0',
+          msg1: 'OK'
+        };
+      }
+      return { orderableKrw: 0, ord_psbl_cash: 0, ord_psbl_amt: 0, nrcy_ord_psbl_amt: 0, rt_cd: buyableRes?.rt_cd || '1', msg1: buyableRes?.msg1 || 'No data' };
+    } catch (e: any) {
+      return { orderableKrw: 0, ord_psbl_cash: 0, ord_psbl_amt: 0, nrcy_ord_psbl_amt: 0, rt_cd: '1', msg1: e.message };
     }
   }
 
