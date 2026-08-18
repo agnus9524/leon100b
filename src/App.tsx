@@ -1043,6 +1043,9 @@ export default function App() {
     try { return JSON.parse(localStorage.getItem('sleek_holdings') || '{}'); } catch { return {}; }
   });
 
+  // Track recently traded symbols to prevent race conditions during KIS balance polling lag
+  const recentLocalTradesRef = useRef<Record<string, { timestamp: number; quantity: number; avgPrice: number }>>({});
+
   useEffect(() => {
     try {
       localStorage.setItem('sleek_holdings', JSON.stringify(holdings));
@@ -1255,6 +1258,8 @@ export default function App() {
 
   // Gap Trading States
   const [isFetchingMarketPrices, setIsFetchingMarketPrices] = useState<boolean>(false);
+  const [isSyncingKIS, setIsSyncingKIS] = useState<boolean>(false);
+  const [holdingsTabFilter, setHoldingsTabFilter] = useState<'AUTO' | 'ALL' | 'KR' | 'US'>('AUTO');
   const [gapBuyPrice, setGapBuyPrice] = useState<number>(0);
   const [gapSellPrice, setGapSellPrice] = useState<number>(0);
   const [tradeQuantity, setTradeQuantity] = useState<number>(1);
@@ -2810,36 +2815,35 @@ export default function App() {
 
   const effectiveHoldings = useMemo(() => {
     const result: Record<string, number> = {};
+    const now = Date.now();
 
-    if (kisConfig.isConnected) {
-      // When KIS is connected, strictly use real confirmed KIS holdings from account
-      Object.entries(holdings).forEach(([sym, qty]) => {
-        const numQty = Number(qty);
-        if (numQty > 0 && !isNaN(numQty)) {
-          result[sym] = numQty;
-        }
-      });
-    } else {
-      // In simulation mode, use holdings combined with any active tab inventory
-      Object.entries(holdings).forEach(([sym, qty]) => {
-        const numQty = Number(qty);
-        if (numQty > 0 && !isNaN(numQty)) {
-          result[sym] = numQty;
-        }
-      });
+    // 1. Incorporate all positive holdings from holdings state
+    Object.entries(holdings).forEach(([sym, qty]) => {
+      const numQty = Number(qty);
+      if (numQty > 0 && !isNaN(numQty)) {
+        result[sym] = numQty;
+      }
+    });
 
-      scalperTabs.forEach(tab => {
-        if (tab.gapInventory && tab.gapInventory.length > 0) {
-          const tabQty = tab.gapInventory.reduce((acc, slot) => {
-            const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
-            return acc + (typeof q === 'number' && !isNaN(q) && q > 0 ? q : 0);
-          }, 0);
-          if (tabQty > 0) {
-            result[tab.symbol] = Math.max(result[tab.symbol] || 0, tabQty);
-          }
+    // 2. Incorporate newly bought stocks from recent local trades (within 45s) for instant UI display
+    Object.entries(recentLocalTradesRef.current || {}).forEach(([sym, trade]) => {
+      if (trade && now - trade.timestamp < 45000 && trade.quantity > 0) {
+        result[sym] = Math.max(result[sym] || 0, trade.quantity);
+      }
+    });
+
+    // 3. In both modes, also reflect active scalper tab inventory slots if any
+    scalperTabs.forEach(tab => {
+      if (tab.gapInventory && tab.gapInventory.length > 0) {
+        const tabQty = tab.gapInventory.reduce((acc, slot) => {
+          const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
+          return acc + (typeof q === 'number' && !isNaN(q) && q > 0 ? q : 0);
+        }, 0);
+        if (tabQty > 0) {
+          result[tab.symbol] = Math.max(result[tab.symbol] || 0, tabQty);
         }
-      });
-    }
+      }
+    });
 
     Object.keys(result).forEach(sym => {
       if (!result[sym] || Number(result[sym]) <= 0 || isNaN(Number(result[sym]))) {
@@ -2849,6 +2853,58 @@ export default function App() {
 
     return result;
   }, [holdings, scalperTabs, kisConfig.isConnected]);
+
+  // Auto-fetch real-time price & metadata for any stock in effectiveHoldings that lacks price data
+  useEffect(() => {
+    const heldSymbols = Object.keys(effectiveHoldings);
+    if (heldSymbols.length === 0) return;
+
+    heldSymbols.forEach(async (sym) => {
+      const isStockUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
+      const market = isStockUS ? 'US' : 'KR';
+      const st = stocks.find(s => s.symbol === sym) || stocksCache[market]?.find(s => s.symbol === sym);
+      
+      if (!st || !st.price || st.price <= 0) {
+        if (kisConfig.isConnected) {
+          try {
+            const pData = await kisService.getPrice(sym);
+            if (pData && pData.current > 0) {
+              const liveName = pData.name || sym;
+              const newStock: Stock = {
+                symbol: sym,
+                name: liveName,
+                price: pData.current,
+                change: pData.change || 0,
+                changePercent: pData.changePercent || 0,
+                volume: pData.volume || 0,
+                history: Array.from({ length: 40 }, (_, i) => ({ 
+                  time: `${i}:00`, 
+                  price: pData.current * (0.98 + Math.random() * 0.04) 
+                })),
+                market,
+                isAI: false
+              };
+              setStocks(prev => {
+                if (prev.some(s => s.symbol === sym)) {
+                  return prev.map(s => s.symbol === sym ? { ...s, price: pData.current, name: liveName } : s);
+                }
+                return [newStock, ...prev];
+              });
+              setStocksCache(prev => {
+                const list = prev[market] || [];
+                if (list.some(s => s.symbol === sym)) {
+                  return { ...prev, [market]: list.map(s => s.symbol === sym ? { ...s, price: pData.current, name: liveName } : s) };
+                }
+                return { ...prev, [market]: [newStock, ...list] };
+              });
+            }
+          } catch (err) {
+            console.warn(`[Holdings Price Fetch] Error for ${sym}:`, err);
+          }
+        }
+      }
+    });
+  }, [effectiveHoldings, kisConfig.isConnected]);
 
   const assetAnalysis = useMemo(() => {
     const isUSD = displayCurrency === 'USD';
@@ -4176,6 +4232,7 @@ export default function App() {
     }
 
     try {
+      setIsSyncingKIS(true);
       setBotStatus("실거래 계좌 동기화 중...");
       
       const newHoldings: Record<string, number> = {};
@@ -4453,23 +4510,36 @@ export default function App() {
         setPrincipal(totalConvertedPrincipal);
       }
       
-      // Smart Holdings Merge: Preserve non-synced market holdings if one market failed
+      // Smart Holdings Merge: Preserve non-synced market holdings if one market failed, AND preserve recent local buys (< 45s) while KIS balance settles
       setHoldings(prevHoldings => {
         const merged = { ...prevHoldings };
+        const now = Date.now();
         
-        // If domestic synced successfully, clear old KR holdings and update with new
+        // If domestic synced successfully, clear old KR holdings except those bought very recently (< 45s)
         if (domesticSuccess) {
           Object.keys(merged).forEach(sym => {
             const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
-            if (!isUS) delete merged[sym];
+            if (!isUS) {
+              const recentTrade = recentLocalTradesRef.current[sym];
+              const isRecentlyTraded = recentTrade && (now - recentTrade.timestamp < 45000) && recentTrade.quantity > 0;
+              if (!isRecentlyTraded) {
+                delete merged[sym];
+              }
+            }
           });
         }
         
-        // If overseas synced successfully, clear old US holdings and update with new
+        // If overseas synced successfully, clear old US holdings except those bought very recently (< 45s)
         if (overseasSuccess) {
           Object.keys(merged).forEach(sym => {
             const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
-            if (isUS) delete merged[sym];
+            if (isUS) {
+              const recentTrade = recentLocalTradesRef.current[sym];
+              const isRecentlyTraded = recentTrade && (now - recentTrade.timestamp < 45000) && recentTrade.quantity > 0;
+              if (!isRecentlyTraded) {
+                delete merged[sym];
+              }
+            }
           });
         }
         
@@ -4478,6 +4548,8 @@ export default function App() {
           const numQty = Number(qty);
           if (numQty > 0 && !isNaN(numQty)) {
             merged[sym] = numQty;
+            // Once KIS confirms the holding in balance API, remove from temporary recentLocalTradesRef
+            delete recentLocalTradesRef.current[sym];
           }
         });
 
@@ -4503,10 +4575,13 @@ export default function App() {
 
       setAvgPrices(prev => {
         const nextAvg = { ...prev, ...newAvgPrices };
+        const now = Date.now();
         if (domesticSuccess) {
           Object.keys(nextAvg).forEach(sym => {
             const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
-            if (!isUS && (!newHoldings[sym] || newHoldings[sym] <= 0)) {
+            const recentTrade = recentLocalTradesRef.current[sym];
+            const isRecentlyTraded = recentTrade && (now - recentTrade.timestamp < 45000) && recentTrade.quantity > 0;
+            if (!isUS && (!newHoldings[sym] || newHoldings[sym] <= 0) && !isRecentlyTraded) {
               delete nextAvg[sym];
             }
           });
@@ -4514,7 +4589,9 @@ export default function App() {
         if (overseasSuccess) {
           Object.keys(nextAvg).forEach(sym => {
             const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
-            if (isUS && (!newHoldings[sym] || newHoldings[sym] <= 0)) {
+            const recentTrade = recentLocalTradesRef.current[sym];
+            const isRecentlyTraded = recentTrade && (now - recentTrade.timestamp < 45000) && recentTrade.quantity > 0;
+            if (isUS && (!newHoldings[sym] || newHoldings[sym] <= 0) && !isRecentlyTraded) {
               delete nextAvg[sym];
             }
           });
@@ -4632,6 +4709,7 @@ export default function App() {
       const msg = e.response?.data?.msg1 || e.message;
       setBotStatus(`증권사 동기화 실패: ${msg}`);
     } finally {
+      setIsSyncingKIS(false);
       setIsAppInitialized(true);
     }
   };
@@ -5344,11 +5422,22 @@ export default function App() {
             // Fill simulated order
             const oldQty = holdings[order.symbol] || 0;
             const oldAvg = avgPrices[order.symbol] || orderPrice;
-            const newQty = oldQty + order.quantity;
+            const newQty = Number((oldQty + order.quantity).toFixed(4));
             const newAvg = newQty > 0 ? Math.round(((oldQty * oldAvg) + (order.quantity * orderPrice)) / newQty) : orderPrice;
-            const newHoldings = { ...holdings, [order.symbol]: Number(newQty.toFixed(4)) };
+            
+            recentLocalTradesRef.current[order.symbol] = {
+              timestamp: Date.now(),
+              quantity: newQty,
+              avgPrice: newAvg
+            };
+
+            const newHoldings = { ...holdings, [order.symbol]: newQty };
             setHoldings(newHoldings);
             setAvgPrices(prev => ({ ...prev, [order.symbol]: newAvg }));
+            try {
+              localStorage.setItem('sleek_holdings', JSON.stringify(newHoldings));
+              localStorage.setItem('sleek_avg_prices', JSON.stringify({ ...avgPrices, [order.symbol]: newAvg }));
+            } catch (e) {}
             if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
             
             // Add to gapInventory and update ref
@@ -5379,12 +5468,22 @@ export default function App() {
                 });
                 const oldQty = holdings[order.symbol] || 0;
                 const oldAvg = avgPrices[order.symbol] || orderPrice;
-                const newQty = oldQty + (status.ordQty || order.quantity);
+                const newQty = Number((oldQty + (status.ordQty || order.quantity)).toFixed(4));
                 const newAvg = newQty > 0 ? Math.round(((oldQty * oldAvg) + ((status.ordQty || order.quantity) * orderPrice)) / newQty) : orderPrice;
                 
-                const newHoldings = { ...holdings, [order.symbol]: Number(newQty.toFixed(4)) };
+                recentLocalTradesRef.current[order.symbol] = {
+                  timestamp: Date.now(),
+                  quantity: newQty,
+                  avgPrice: newAvg
+                };
+
+                const newHoldings = { ...holdings, [order.symbol]: newQty };
                 setHoldings(newHoldings);
                 setAvgPrices(prev => ({ ...prev, [order.symbol]: newAvg }));
+                try {
+                  localStorage.setItem('sleek_holdings', JSON.stringify(newHoldings));
+                  localStorage.setItem('sleek_avg_prices', JSON.stringify({ ...avgPrices, [order.symbol]: newAvg }));
+                } catch (e) {}
                 if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
                 
                 addLog(order.symbol, '매수', orderPrice, order.quantity, `[실제체결] 주문가 ${formatCurrency(orderPrice)} 전량 체결 완료`);
@@ -5411,8 +5510,19 @@ export default function App() {
                     gapInventoryRef.current = next;
                     return next;
                   });
-                  const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + status.ccldQty).toFixed(4)) };
+                  const oldQty = holdings[order.symbol] || 0;
+                  const newQty = Number((oldQty + status.ccldQty).toFixed(4));
+                  const oldAvg = avgPrices[order.symbol] || orderPrice;
+                  recentLocalTradesRef.current[order.symbol] = {
+                    timestamp: Date.now(),
+                    quantity: newQty,
+                    avgPrice: oldAvg
+                  };
+                  const newHoldings = { ...holdings, [order.symbol]: newQty };
                   setHoldings(newHoldings);
+                  try {
+                    localStorage.setItem('sleek_holdings', JSON.stringify(newHoldings));
+                  } catch (e) {}
                   if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
                   addLog(order.symbol, '매수', orderPrice, status.ccldQty, `[일부체결] KIS 일부 체결 완료 (${status.ccldQty}주 / 남은 수량: ${remainingQty}주)`);
                 }
@@ -5435,12 +5545,22 @@ export default function App() {
                   updated = true;
                    const oldQty = holdings[order.symbol] || 0;
                    const oldAvg = avgPrices[order.symbol] || orderPrice;
-                   const newQty = oldQty + (status.ordQty || order.quantity);
+                   const newQty = Number((oldQty + (status.ordQty || order.quantity)).toFixed(4));
                    const newAvg = newQty > 0 ? Math.round(((oldQty * oldAvg) + ((status.ordQty || order.quantity) * orderPrice)) / newQty) : orderPrice;
                    
-                   const newHoldings = { ...holdings, [order.symbol]: Number(newQty.toFixed(4)) };
+                   recentLocalTradesRef.current[order.symbol] = {
+                     timestamp: Date.now(),
+                     quantity: newQty,
+                     avgPrice: newAvg
+                   };
+
+                   const newHoldings = { ...holdings, [order.symbol]: newQty };
                    setHoldings(newHoldings);
                    setAvgPrices(prev => ({ ...prev, [order.symbol]: newAvg }));
+                   try {
+                     localStorage.setItem('sleek_holdings', JSON.stringify(newHoldings));
+                     localStorage.setItem('sleek_avg_prices', JSON.stringify({ ...avgPrices, [order.symbol]: newAvg }));
+                   } catch (e) {}
                    if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
                   
                   addLog(order.symbol, '매수', orderPrice, order.quantity, `[실제체결] 체결 완료`);
@@ -6388,14 +6508,44 @@ export default function App() {
       const createdSlotId = slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
 
       setBalance(prev => Math.max(0, prev - cost));
+      
       const oldQty = holdings[stock.symbol] || 0;
       const oldAvg = avgPrices[stock.symbol] || tradePrice;
-      const newQty = oldQty + finalAmount;
+      const newQty = Number((oldQty + finalAmount).toFixed(4));
       const newAvg = newQty > 0 ? Math.round(((oldQty * oldAvg) + (finalAmount * tradePrice)) / newQty) : tradePrice;
-      const newHoldings = { ...holdings, [stock.symbol]: Number(newQty.toFixed(4)) };
+
+      // Immediate protection against KIS polling settlement lag
+      recentLocalTradesRef.current[stock.symbol] = {
+        timestamp: Date.now(),
+        quantity: newQty,
+        avgPrice: newAvg
+      };
+
+      const newHoldings = { ...holdings, [stock.symbol]: newQty };
       setHoldings(newHoldings);
       setAvgPrices(prev => ({ ...prev, [stock.symbol]: newAvg }));
+      try {
+        localStorage.setItem('sleek_holdings', JSON.stringify(newHoldings));
+        localStorage.setItem('sleek_avg_prices', JSON.stringify({ ...avgPrices, [stock.symbol]: newAvg }));
+      } catch (e) {}
       if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
+
+      // Ensure stock is in stocks state and stocksCache with live price
+      const isStockUS = /^[A-Za-z]/.test(stock.symbol) && !/^\d+$/.test(stock.symbol);
+      const stockMarket = isStockUS ? 'US' : 'KR';
+      setStocks(prev => {
+        if (prev.some(s => s.symbol === stock.symbol)) {
+          return prev.map(s => s.symbol === stock.symbol ? { ...s, price: tradePrice || s.price } : s);
+        }
+        return [{ ...stock, price: tradePrice || stock.price, market: stockMarket }, ...prev];
+      });
+      setStocksCache(prev => {
+        const list = prev[stockMarket] || [];
+        if (list.some(s => s.symbol === stock.symbol)) {
+          return { ...prev, [stockMarket]: list.map(s => s.symbol === stock.symbol ? { ...s, price: tradePrice || s.price } : s) };
+        }
+        return { ...prev, [stockMarket]: [{ ...stock, price: tradePrice || stock.price, market: stockMarket }, ...list] };
+      });
       
       // Add to gapInventory and update ref for immediate fill
       const newSlot = { id: createdSlotId, price: tradePrice, quantity: finalAmount, symbol: stock.symbol };
@@ -6418,9 +6568,11 @@ export default function App() {
       triggerAutoSell(stock.symbol, tradePrice, finalAmount, newAvg, newQty, createdSlotId);
 
       // KIS API 연결 상태이고 실제 주문 전송이 활성화된 경우 실제 계좌 잔고를 비동기로 동기화
-      setTimeout(() => {
-        handleSyncKIS();
-      }, 1000);
+      if (kisConfig.isConnected) {
+        setTimeout(() => {
+          handleSyncKIS();
+        }, 2500);
+      }
       return finalAmount;
     } else if (action === 'SELL') {
       try {
@@ -9225,174 +9377,272 @@ export default function App() {
 
                     {/* 3. Bottom Full Width Window: 보유 주식 현황 (Directly below graph from left to right: xl:col-span-12) */}
                     <div className="xl:col-span-12 bg-black/40 border border-white/10 rounded-2xl p-3.5 flex flex-col justify-between space-y-2.5 w-full min-w-0">
-                      <div className="flex items-center justify-between pb-2 border-b border-white/10">
-                        <div className="flex items-center gap-2">
-                          <Briefcase className="w-4 h-4 text-amber-400" />
-                          <h4 className="text-xs font-black text-white uppercase tracking-wider">보유 주식 현황</h4>
-                          <span className="text-[10px] font-mono text-amber-300 font-bold px-2 py-0.5 bg-amber-500/10 rounded-md border border-amber-500/20">
-                            {marketType === 'KR' ? '국내 주식' : '미국 주식'}
-                          </span>
-                        </div>
-                        <span className="text-[10px] text-slate-400 font-sans">
-                          * 순익: 제세금(0.2%) 및 왕복 수수료 공제 후 실질 순손익
-                        </span>
-                      </div>
+                      {(() => {
+                        const allHeldEntries = Object.entries(effectiveHoldings).filter(([_, qty]) => Number(qty) > 0);
+                        const krHeldCount = allHeldEntries.filter(([sym]) => !/^[A-Za-z]/.test(sym) || /^\d+$/.test(sym)).length;
+                        const usHeldCount = allHeldEntries.filter(([sym]) => /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym)).length;
+                        const allHeldCount = allHeldEntries.length;
 
-                      <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-0.5">
-                        {(() => {
-                          const filteredHoldings = Object.entries(effectiveHoldings).filter(([sym, qty]) => {
-                            if (Number(qty) <= 0) return false;
-                            const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
-                            const isKR = !isUS;
-                            return marketType === 'KR' ? isKR : isUS;
-                          });
+                        const effectiveFilter = holdingsTabFilter === 'AUTO' ? marketType : holdingsTabFilter;
+                        
+                        const filteredHoldings = allHeldEntries.filter(([sym]) => {
+                          const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
+                          if (effectiveFilter === 'ALL') return true;
+                          if (effectiveFilter === 'KR') return !isUS;
+                          if (effectiveFilter === 'US') return isUS;
+                          return true;
+                        });
 
-                          if (filteredHoldings.length === 0) {
-                            return (
-                              <div className="bg-white/5 border border-white/5 rounded-2xl p-6 text-center flex items-center justify-center">
-                                <p className="text-xs text-sleek-text-secondary font-medium">
-                                  {marketType === 'KR' ? '현재 보유 중인 국내 주식이 없습니다.' : '현재 보유 중인 미국 주식이 없습니다.'}
-                                </p>
-                              </div>
-                            );
-                          }
-
-                          return (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
-                              {filteredHoldings.map(([sym, rawQty], idx) => {
-                                const qty = Number(rawQty);
-                                const st = stocks.find(s => s.symbol === sym) || 
-                                           stocksCache.KR?.find(s => s.symbol === sym) ||
-                                           stocksCache.US?.find(s => s.symbol === sym) ||
-                                           INITIAL_STOCKS_KR.find(s => s.symbol === sym) || 
-                                           INITIAL_STOCKS.find(s => s.symbol === sym) || 
-                                           { name: sym, symbol: sym, price: 0, changePercent: 0 };
-
-                                const stockDisplayName = getResolvedStockName(sym, st);
+                        return (
+                          <>
+                            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-white/10">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <Briefcase className="w-4 h-4 text-amber-400" />
+                                <h4 className="text-xs font-black text-white uppercase tracking-wider">보유 주식 현황</h4>
                                 
-                                let avgPrice = avgPrices[sym] || 0;
-                                if (avgPrice <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
-                                  const totalCost = gapInventory.reduce((acc, slot) => {
-                                    const p = typeof slot === 'number' ? slot : (slot.price || 0);
-                                    const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
-                                    return acc + (p * q);
-                                  }, 0);
-                                  const totalQty = gapInventory.reduce((acc, slot) => {
-                                    return acc + (typeof slot === 'number' ? 1 : (slot.quantity || 1));
-                                  }, 0);
-                                  avgPrice = totalQty > 0 ? Math.floor(totalCost / totalQty) : 0;
-                                }
-                                if (avgPrice <= 0) avgPrice = st.price || 0;
-
-                                const isStockUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
-                                const currentPrice = st.price || 0;
-                                const { netProfit } = calculateNetProfitAmount(avgPrice, currentPrice, qty, isStockUS ? 'US' : 'KR');
-                                const profitRatio = avgPrice > 0 ? calculateNetProfitPercent(avgPrice, currentPrice, isStockUS ? 'US' : 'KR') : 0;
-                                const isSelected = selectedSymbol === sym;
-
-                                const formattedNetProfit = netProfit > 0 
-                                  ? `+${formatCurrency(netProfit)}` 
-                                  : netProfit < 0 
-                                    ? `-${formatCurrency(Math.abs(netProfit))}` 
-                                    : formatCurrency(0);
-
-                                return (
-                                  <div 
-                                    key={`${sym}-${idx}`}
-                                    onClick={() => openOrSwitchScalperTab(sym)}
+                                {/* Market Filter Pills */}
+                                <div className="flex items-center gap-1 bg-white/5 p-0.5 rounded-lg border border-white/5">
+                                  <button
+                                    type="button"
+                                    onClick={() => setHoldingsTabFilter('AUTO')}
                                     className={cn(
-                                      "p-3 rounded-2xl border flex flex-col justify-between gap-2.5 font-mono cursor-pointer transition-all group shadow-sm",
-                                      isSelected
-                                        ? "bg-sleek-blue/20 border-sleek-blue text-white ring-1 ring-sleek-blue/50"
-                                        : "bg-white/[0.04] border-white/10 hover:bg-white/[0.08] hover:border-sleek-blue/40 text-slate-200"
+                                      "px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer",
+                                      holdingsTabFilter === 'AUTO' 
+                                        ? "bg-amber-500/30 text-amber-300 border border-amber-500/40" 
+                                        : "text-slate-400 hover:text-white"
                                     )}
                                   >
-                                    {/* Header Row: Stock Name, Symbol, Quantity, Sell Button */}
-                                    <div className="flex items-center justify-between gap-2">
-                                      <div className="flex items-center gap-1.5 min-w-0">
-                                        <span className="font-black text-xs text-white group-hover:text-sleek-blue transition-colors truncate max-w-[110px] sm:max-w-[130px]" title={`${stockDisplayName} (${sym})`}>
-                                          {stockDisplayName}
-                                        </span>
-                                        <span className="text-[10px] text-slate-400 font-mono shrink-0">
-                                          ({sym})
-                                        </span>
-                                      </div>
+                                    현재 시장 ({marketType === 'KR' ? krHeldCount : usHeldCount})
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setHoldingsTabFilter('ALL')}
+                                    className={cn(
+                                      "px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer",
+                                      holdingsTabFilter === 'ALL' 
+                                        ? "bg-amber-500/30 text-amber-300 border border-amber-500/40" 
+                                        : "text-slate-400 hover:text-white"
+                                    )}
+                                  >
+                                    전체 ({allHeldCount})
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setHoldingsTabFilter('KR')}
+                                    className={cn(
+                                      "px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer",
+                                      holdingsTabFilter === 'KR' 
+                                        ? "bg-amber-500/30 text-amber-300 border border-amber-500/40" 
+                                        : "text-slate-400 hover:text-white"
+                                    )}
+                                  >
+                                    국내 ({krHeldCount})
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => setHoldingsTabFilter('US')}
+                                    className={cn(
+                                      "px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer",
+                                      holdingsTabFilter === 'US' 
+                                        ? "bg-amber-500/30 text-amber-300 border border-amber-500/40" 
+                                        : "text-slate-400 hover:text-white"
+                                    )}
+                                  >
+                                    미국 ({usHeldCount})
+                                  </button>
+                                </div>
+                              </div>
 
-                                      <div className="flex items-center gap-1.5 shrink-0">
-                                        <span className="px-2 py-0.5 rounded-lg bg-black/50 border border-white/10 text-white font-black text-xs">
-                                          {qty}주
-                                        </span>
-                                        <button
-                                          type="button"
-                                          onClick={(e) => {
-                                            e.stopPropagation();
-                                            const targetStockObj: Stock = {
-                                              symbol: sym,
-                                              name: stockDisplayName,
-                                              price: currentPrice,
-                                              change: st.change || 0,
-                                              changePercent: st.changePercent || 0,
-                                              volume: st.volume || '0',
-                                              history: st.history || [],
-                                              market: isStockUS ? 'US' : 'KR'
-                                            };
-                                            setManualSellStock(targetStockObj);
-                                            setManualSellPrice(currentPrice);
-                                            setManualSellQty(qty > 0 ? qty : 1);
-                                            setManualSellModalOpen(true);
-                                          }}
-                                          className="px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/40 rounded-lg text-[10.5px] font-black transition-all shadow-sm flex items-center gap-1 active:scale-95 cursor-pointer"
-                                          title={`${stockDisplayName} 수동 지정가 매도`}
-                                        >
-                                          매도
-                                        </button>
-                                      </div>
-                                    </div>
-
-                                    {/* Middle Row: Current Price vs Avg Price */}
-                                    <div className="grid grid-cols-2 gap-2 text-[11px] bg-black/35 p-2 rounded-xl border border-white/5">
-                                      <div>
-                                        <span className="text-[10px] text-slate-400 block font-sans">현재가</span>
-                                        <span className="font-bold text-white text-xs">{formatCurrency(currentPrice)}</span>
-                                      </div>
-                                      <div className="text-right">
-                                        <span className="text-[10px] text-slate-400 block font-sans">매수평단</span>
-                                        <span className="font-bold text-amber-300 text-xs">{formatCurrency(avgPrice)}</span>
-                                      </div>
-                                    </div>
-
-                                    {/* Bottom Row: Net Profit Amount and % */}
-                                    <div className="flex items-center justify-between gap-1 pt-1 border-t border-white/5">
-                                      <div className="flex items-center gap-1 min-w-0">
-                                        <span className="text-[9.5px] text-slate-400 shrink-0 font-sans">순손익</span>
-                                        <span className={cn(
-                                          "font-black text-xs font-mono truncate",
-                                          netProfit > 0 ? "text-rose-400" : netProfit < 0 ? "text-sky-400" : "text-slate-300"
-                                        )}>
-                                          {formattedNetProfit}
-                                        </span>
-                                      </div>
-
-                                      <div className="flex items-center gap-1 shrink-0">
-                                        <span className={cn(
-                                          "px-2 py-0.5 rounded-md font-black text-xs font-mono",
-                                          profitRatio > 0 
-                                            ? "bg-rose-500/15 text-rose-400 border border-rose-500/30" 
-                                            : profitRatio < 0 
-                                              ? "bg-sky-500/15 text-sky-400 border border-sky-500/30" 
-                                              : "bg-white/5 text-slate-400 border border-white/10"
-                                        )}>
-                                          {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(2)}%
-                                        </span>
-                                      </div>
-                                    </div>
-                                  </div>
-                                );
-                              })}
+                              <div className="flex items-center gap-2">
+                                <span className="text-[10px] text-slate-400 font-sans hidden sm:inline">
+                                  * 제세금 및 수수료 반영 실질 손익
+                                </span>
+                                {kisConfig.isConnected && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSyncKIS()}
+                                    disabled={isSyncingKIS}
+                                    className={cn(
+                                      "flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10.5px] font-black border transition-all cursor-pointer active:scale-95",
+                                      isSyncingKIS
+                                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40 opacity-70"
+                                        : "bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border-white/10 hover:border-white/20"
+                                    )}
+                                    title="증권사 실계좌 잔고 즉시 동기화"
+                                  >
+                                    <RefreshCw className={cn("w-3 h-3 text-amber-400", isSyncingKIS && "animate-spin")} />
+                                    <span>{isSyncingKIS ? "동기화 중..." : "잔고 새로고침"}</span>
+                                  </button>
+                                )}
+                              </div>
                             </div>
-                          );
-                        })()}
-                      </div>
+
+                            <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-0.5">
+                              {filteredHoldings.length === 0 ? (
+                                <div className="bg-white/5 border border-white/5 rounded-2xl p-6 text-center flex flex-col items-center justify-center gap-2">
+                                  <p className="text-xs text-sleek-text-secondary font-medium">
+                                    {effectiveFilter === 'KR' 
+                                      ? '현재 보유 중인 국내 주식이 없습니다.' 
+                                      : effectiveFilter === 'US' 
+                                        ? '현재 보유 중인 미국 주식이 없습니다.' 
+                                        : '현재 보유 중인 주식이 없습니다.'}
+                                  </p>
+                                  {kisConfig.isConnected && (
+                                    <button
+                                      type="button"
+                                      onClick={() => handleSyncKIS()}
+                                      className="text-[11px] text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
+                                    >
+                                      증권사 잔고 다시 조회하기
+                                    </button>
+                                  )}
+                                </div>
+                              ) : (
+                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
+                                  {filteredHoldings.map(([sym, rawQty], idx) => {
+                                    const qty = Number(rawQty);
+                                    const st = stocks.find(s => s.symbol === sym) || 
+                                               stocksCache.KR?.find(s => s.symbol === sym) ||
+                                               stocksCache.US?.find(s => s.symbol === sym) ||
+                                               INITIAL_STOCKS_KR.find(s => s.symbol === sym) || 
+                                               INITIAL_STOCKS.find(s => s.symbol === sym) || 
+                                               { name: sym, symbol: sym, price: 0, changePercent: 0 };
+
+                                    const stockDisplayName = getResolvedStockName(sym, st);
+                                    
+                                    let avgPrice = avgPrices[sym] || 0;
+                                    if (avgPrice <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
+                                      const totalCost = gapInventory.reduce((acc, slot) => {
+                                        const p = typeof slot === 'number' ? slot : (slot.price || 0);
+                                        const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
+                                        return acc + (p * q);
+                                      }, 0);
+                                      const totalQty = gapInventory.reduce((acc, slot) => {
+                                        return acc + (typeof slot === 'number' ? 1 : (slot.quantity || 1));
+                                      }, 0);
+                                      avgPrice = totalQty > 0 ? Math.floor(totalCost / totalQty) : 0;
+                                    }
+                                    if (avgPrice <= 0) avgPrice = st.price || 0;
+
+                                    const isStockUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
+                                    const currentPrice = st.price || 0;
+                                    const { netProfit } = calculateNetProfitAmount(avgPrice, currentPrice, qty, isStockUS ? 'US' : 'KR');
+                                    const profitRatio = avgPrice > 0 ? calculateNetProfitPercent(avgPrice, currentPrice, isStockUS ? 'US' : 'KR') : 0;
+                                    const isSelected = selectedSymbol === sym;
+
+                                    const formattedNetProfit = netProfit > 0 
+                                      ? `+${formatCurrency(netProfit)}` 
+                                      : netProfit < 0 
+                                        ? `-${formatCurrency(Math.abs(netProfit))}` 
+                                        : formatCurrency(0);
+
+                                    const recentTrade = recentLocalTradesRef.current[sym];
+                                    const isRecentlyBought = recentTrade && (Date.now() - recentTrade.timestamp < 45000);
+
+                                    return (
+                                      <div 
+                                        key={`${sym}-${idx}`}
+                                        onClick={() => openOrSwitchScalperTab(sym)}
+                                        className={cn(
+                                          "p-3 rounded-2xl border flex flex-col justify-between gap-2.5 font-mono cursor-pointer transition-all group shadow-sm relative overflow-hidden",
+                                          isSelected
+                                            ? "bg-sleek-blue/20 border-sleek-blue text-white ring-1 ring-sleek-blue/50"
+                                            : "bg-white/[0.04] border-white/10 hover:bg-white/[0.08] hover:border-sleek-blue/40 text-slate-200"
+                                        )}
+                                      >
+                                        {/* Header Row: Stock Name, Symbol, Quantity, Sell Button */}
+                                        <div className="flex items-center justify-between gap-2">
+                                          <div className="flex items-center gap-1.5 min-w-0">
+                                            <span className="font-black text-xs text-white group-hover:text-sleek-blue transition-colors truncate max-w-[110px] sm:max-w-[130px]" title={`${stockDisplayName} (${sym})`}>
+                                              {stockDisplayName}
+                                            </span>
+                                            <span className="text-[10px] text-slate-400 font-mono shrink-0">
+                                              ({sym})
+                                            </span>
+                                            {isRecentlyBought && (
+                                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse shrink-0">
+                                                방금 매수
+                                              </span>
+                                            )}
+                                          </div>
+
+                                          <div className="flex items-center gap-1.5 shrink-0">
+                                            <span className="px-2 py-0.5 rounded-lg bg-black/50 border border-white/10 text-white font-black text-xs">
+                                              {qty}주
+                                            </span>
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                const targetStockObj: Stock = {
+                                                  symbol: sym,
+                                                  name: stockDisplayName,
+                                                  price: currentPrice,
+                                                  change: st.change || 0,
+                                                  changePercent: st.changePercent || 0,
+                                                  volume: st.volume || '0',
+                                                  history: st.history || [],
+                                                  market: isStockUS ? 'US' : 'KR'
+                                                };
+                                                setManualSellStock(targetStockObj);
+                                                setManualSellPrice(currentPrice);
+                                                setManualSellQty(qty > 0 ? qty : 1);
+                                                setManualSellModalOpen(true);
+                                              }}
+                                              className="px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/40 rounded-lg text-[10.5px] font-black transition-all shadow-sm flex items-center gap-1 active:scale-95 cursor-pointer"
+                                              title={`${stockDisplayName} 수동 지정가 매도`}
+                                            >
+                                              매도
+                                            </button>
+                                          </div>
+                                        </div>
+
+                                        {/* Middle Row: Current Price vs Avg Price */}
+                                        <div className="grid grid-cols-2 gap-2 text-[11px] bg-black/35 p-2 rounded-xl border border-white/5">
+                                          <div>
+                                            <span className="text-[10px] text-slate-400 block font-sans">현재가</span>
+                                            <span className="font-bold text-white text-xs">{formatCurrency(currentPrice)}</span>
+                                          </div>
+                                          <div className="text-right">
+                                            <span className="text-[10px] text-slate-400 block font-sans">매수평단</span>
+                                            <span className="font-bold text-amber-300 text-xs">{formatCurrency(avgPrice)}</span>
+                                          </div>
+                                        </div>
+
+                                        {/* Bottom Row: Net Profit Amount and % */}
+                                        <div className="flex items-center justify-between gap-1 pt-1 border-t border-white/5">
+                                          <div className="flex items-center gap-1 min-w-0">
+                                            <span className="text-[9.5px] text-slate-400 shrink-0 font-sans">순손익</span>
+                                            <span className={cn(
+                                              "font-black text-xs font-mono truncate",
+                                              netProfit > 0 ? "text-rose-400" : netProfit < 0 ? "text-sky-400" : "text-slate-300"
+                                            )}>
+                                              {formattedNetProfit}
+                                            </span>
+                                          </div>
+
+                                          <div className="flex items-center gap-1 shrink-0">
+                                            <span className={cn(
+                                              "px-2 py-0.5 rounded-md font-black text-xs font-mono",
+                                              profitRatio > 0 
+                                                ? "bg-rose-500/15 text-rose-400 border border-rose-500/30" 
+                                                : profitRatio < 0 
+                                                  ? "bg-sky-500/15 text-sky-400 border border-sky-500/30" 
+                                                  : "bg-white/5 text-slate-400 border border-white/10"
+                                            )}>
+                                              {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(2)}%
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </>
+                        );
+                      })()}
                     </div>
                   </div>
                 );
