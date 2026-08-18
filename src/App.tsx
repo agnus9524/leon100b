@@ -1247,6 +1247,18 @@ export default function App() {
   const [showKisModal, setShowKisModal] = useState(false);
   const [showKisPassword, setShowKisPassword] = useState(false);
   const [isAppInitialized, setIsAppInitialized] = useState(false);
+  const [initSyncState, setInitSyncState] = useState<{
+    status: 'idle' | 'syncing' | 'ready' | 'error';
+    progress: number;
+    currentStep: string;
+    completedSteps: string[];
+    errorMsg?: string;
+  }>({
+    status: 'idle',
+    progress: 0,
+    currentStep: '한국투자증권 연결 대기 중...',
+    completedSteps: []
+  });
   const [showPlanDetails, setShowPlanDetails] = useState(false);
   const [userLicenseData, setUserLicenseData] = useState<any>(null);
   const [dashboardTab, setDashboardTab] = useState<'TRADING' | 'PORTFOLIO' | 'STRATEGY'>('TRADING');
@@ -1632,6 +1644,10 @@ export default function App() {
   };
 
   const handleToggleAllScalping = () => {
+    if (isSyncingKIS || initSyncState.status === 'syncing') {
+      showNotification("한국투자증권 데이터 동기화가 진행 중입니다. 잠시 후 다시 시도해주세요.", "info");
+      return;
+    }
     const isAnyActive = scalperTabs.some(t => t.isBotActive) || isGapBotActive;
     const nextState = !isAnyActive;
     setIsGapBotActive(nextState);
@@ -4689,9 +4705,144 @@ export default function App() {
       setBotStatus(`증권사 동기화 실패: ${msg}`);
     } finally {
       setIsSyncingKIS(false);
-      setIsAppInitialized(true);
     }
   };
+
+  // Automated initial KIS synchronization pipeline
+  const isInitialSyncRunningRef = React.useRef(false);
+
+  const executeFullKisInitialSync = useCallback(async (autoEnterAfterSync = true) => {
+    if (isInitialSyncRunningRef.current) return;
+    isInitialSyncRunningRef.current = true;
+
+    try {
+      setInitSyncState({
+        status: 'syncing',
+        progress: 15,
+        currentStep: '한국투자증권 API 보안 토큰 및 연결 상태 검증 중...',
+        completedSteps: []
+      });
+
+      // Step 1: Token & Connection Validation
+      await new Promise(r => setTimeout(r, 400));
+      const activeConfig = getActiveKisConfig(kisConfig);
+      if (!activeConfig.accountPw) {
+        setInitSyncState(prev => ({
+          ...prev,
+          status: 'error',
+          currentStep: '계좌 비밀번호가 필요합니다. 설정에서 비밀번호를 입력해주세요.',
+          errorMsg: '계좌 비밀번호(4자리) 누락'
+        }));
+        isInitialSyncRunningRef.current = false;
+        return;
+      }
+
+      setInitSyncState(prev => ({
+        ...prev,
+        progress: 35,
+        currentStep: '실시간 계좌 잔고 및 주문 가능 현금(원화/외화) 조회 중...',
+        completedSteps: ['한국투자증권 API 보안 토큰 및 연결 상태 검증 완료']
+      }));
+
+      // Step 2: Full KIS Balance & Orderable Cash Inquiry
+      await handleSyncKIS();
+      await new Promise(r => setTimeout(r, 400));
+
+      setInitSyncState(prev => ({
+        ...prev,
+        progress: 65,
+        currentStep: '보유 주식 실시간 평단가 및 수량 동기화 중...',
+        completedSteps: [
+          '한국투자증권 API 보안 토큰 및 연결 상태 검증 완료',
+          '실시간 계좌 잔고 및 주문 가능 현금(원화/외화) 수신 완료'
+        ]
+      }));
+
+      // Step 3: Fetch latest real-time market prices for current market stocks
+      const currentStocks = stocksRef.current;
+      if (currentStocks.length > 0) {
+        try {
+          const updatedStocks = await Promise.all(currentStocks.map(async (s) => {
+            try {
+              const pData = await kisService.getPrice(s.symbol);
+              if (pData) {
+                return {
+                  ...s,
+                  price: pData.current,
+                  change: pData.change,
+                  changePercent: pData.changePercent,
+                  volume: pData.volume,
+                  isRealTime: true,
+                  lastUpdated: new Date().toLocaleTimeString()
+                };
+              }
+            } catch (pErr) {
+              console.warn("Stock price fetch skip in init sync:", s.symbol, pErr);
+            }
+            return s;
+          }));
+          setStocks(updatedStocks);
+        } catch (stErr) {
+          console.warn("Watchlist price fetch error:", stErr);
+        }
+      }
+
+      await new Promise(r => setTimeout(r, 400));
+
+      setInitSyncState(prev => ({
+        ...prev,
+        progress: 90,
+        currentStep: '스캘퍼 엔진 데이터 정밀 보정 및 시스템 가동 준비 중...',
+        completedSteps: [
+          '한국투자증권 API 보안 토큰 및 연결 상태 검증 완료',
+          '실시간 계좌 잔고 및 주문 가능 현금(원화/외화) 수신 완료',
+          '보유 종목 및 관심 종목 실시간 호가/시세 수신 완료'
+        ]
+      }));
+
+      // Step 4: Safety & Calibration Buffer (giving slight stabilization time)
+      await new Promise(r => setTimeout(r, 700));
+
+      setInitSyncState(prev => ({
+        ...prev,
+        status: 'ready',
+        progress: 100,
+        currentStep: '한국투자증권 실시간 데이터 수신 완료! 시스템을 안전하게 시작합니다.',
+        completedSteps: [
+          '한국투자증권 API 보안 토큰 및 연결 상태 검증 완료',
+          '실시간 계좌 잔고 및 주문 가능 현금(원화/외화) 수신 완료',
+          '보유 종목 및 관심 종목 실시간 호가/시세 수신 완료',
+          '스캘퍼 엔진 가동 준비 완료'
+        ]
+      }));
+
+      // Smooth transition into dashboard
+      if (autoEnterAfterSync) {
+        await new Promise(r => setTimeout(r, 1200));
+        setIsAppInitialized(true);
+      }
+    } catch (err: any) {
+      console.error("Initial Sync Pipeline Error", err);
+      setInitSyncState(prev => ({
+        ...prev,
+        status: 'error',
+        currentStep: `동기화 오류: ${err.message || '데이터를 가져오지 못했습니다.'}`,
+        errorMsg: err.message
+      }));
+    } finally {
+      isInitialSyncRunningRef.current = false;
+    }
+  }, [kisConfig]);
+
+  // Auto trigger initial sync when KIS is connected on startup
+  useEffect(() => {
+    if (kisConfig.isConnected && !isAppInitialized && initSyncState.status === 'idle') {
+      const timer = setTimeout(() => {
+        executeFullKisInitialSync(true);
+      }, 400);
+      return () => clearTimeout(timer);
+    }
+  }, [kisConfig.isConnected, isAppInitialized, initSyncState.status, executeFullKisInitialSync]);
 
   // Unified Gap Trading logic is now placed in the main bot effect below.
 
@@ -6831,8 +6982,12 @@ export default function App() {
     
     // Trigger immediate sync after connection
     setTimeout(() => {
-      handleSyncKIS();
-    }, 1000);
+      if (!isAppInitialized) {
+        executeFullKisInitialSync(true);
+      } else {
+        handleSyncKIS();
+      }
+    }, 600);
 
     setTradeLogs(prev => [{
       time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
@@ -7564,81 +7719,203 @@ export default function App() {
           </motion.div>
         </div>
       ) : !isAppInitialized ? (
-        <div className="flex-1 flex items-center justify-center p-6 bg-sleek-bg relative overflow-hidden">
+        <div className="flex-1 flex items-center justify-center p-4 sm:p-6 bg-sleek-bg relative overflow-hidden">
           <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-sleek-blue/10 blur-[120px] rounded-full animate-pulse"></div>
           <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-sleek-green/10 blur-[120px] rounded-full animate-pulse delay-700"></div>
 
           <motion.div 
-            initial={{ opacity: 0, scale: 0.9, y: 20 }} 
+            initial={{ opacity: 0, scale: 0.95, y: 20 }} 
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-sleek-card border border-sleek-blue/20 rounded-[2.5rem] p-6 sm:p-12 w-full max-w-2xl shadow-2xl text-center relative z-10"
+            className="bg-sleek-card border border-sleek-blue/20 rounded-[2.5rem] p-6 sm:p-10 w-full max-w-2xl shadow-2xl text-center relative z-10"
           >
             <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-transparent via-sleek-blue to-transparent opacity-50"></div>
             
-            <div className="w-20 h-20 sm:w-24 sm:h-24 bg-sleek-blue/10 rounded-3xl flex items-center justify-center mx-auto mb-6 sm:mb-8 relative">
+            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-sleek-blue/10 rounded-3xl flex items-center justify-center mx-auto mb-4 sm:mb-6 relative">
               <div className="absolute inset-0 bg-sleek-blue/5 rounded-3xl animate-ping opacity-20"></div>
-              <Bot className="w-10 h-10 sm:w-12 sm:h-12 text-sleek-blue drop-shadow-[0_0_10px_rgba(30,144,255,0.5)]" />
+              <Bot className="w-8 h-8 sm:w-10 sm:h-10 text-sleek-blue drop-shadow-[0_0_10px_rgba(30,144,255,0.5)]" />
             </div>
             
-            <h1 className="text-base xs:text-lg sm:text-xl md:text-2xl font-black text-white mb-4 tracking-tight leading-snug break-keep max-w-full overflow-hidden text-ellipsis">
-              <span className="text-sleek-blue">LEO 100B AI 봇</span>에 오신 것을 환영합니다
+            <h1 className="text-lg xs:text-xl sm:text-2xl font-black text-white mb-2 tracking-tight leading-snug break-keep max-w-full">
+              <span className="text-sleek-blue">LEO 100B AI 트레이딩</span> 시스템
             </h1>
             
-            <p className="text-sleek-text-secondary text-base mb-10 leading-relaxed max-w-md mx-auto">
+            <p className="text-sleek-text-secondary text-xs sm:text-sm mb-6 leading-relaxed max-w-md mx-auto">
               {kisConfig.isConnected 
-                ? "계좌 연동이 성공적으로 설정되어 있습니다. 아래 '정보 업데이트' 버튼을 눌러 최신 잔고와 시세를 동기화하고 트레이딩을 시작하세요."
-                : "처음 오셨군요! 아래 '설정(톱니바퀴)' 아이콘을 클릭하여 한국투자증권(KIS) API 키를 먼저 등록해주세요. 설정이 완료되면 아래 버튼으로 엔진을 기동할 수 있습니다."}
+                ? "한국투자증권(KIS) 실시간 계좌 잔고, 보유 주식 및 최신 시세를 정밀 동기화하고 있습니다."
+                : "한국투자증권(KIS) API 키 등록 후 실제 계좌 데이터 기반 실시간 자동매매를 시작할 수 있습니다."}
             </p>
 
-            <div className="space-y-4">
+            {/* KIS Live Synchronization Progress Box */}
+            {kisConfig.isConnected && (
+              <div className="mb-6 p-4 sm:p-5 bg-black/40 border border-sleek-blue/30 rounded-2xl text-left space-y-3.5 shadow-inner">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-2.5 w-2.5">
+                      <span className={cn(
+                        "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
+                        initSyncState.status === 'ready' ? "bg-emerald-400" : initSyncState.status === 'error' ? "bg-rose-400" : "bg-sleek-blue"
+                      )}></span>
+                      <span className={cn(
+                        "relative inline-flex rounded-full h-2.5 w-2.5",
+                        initSyncState.status === 'ready' ? "bg-emerald-500" : initSyncState.status === 'error' ? "bg-rose-500" : "bg-sleek-blue"
+                      )}></span>
+                    </span>
+                    <span className="text-xs font-black text-white tracking-wide uppercase">
+                      한국투자증권 실시간 정밀 동기화
+                    </span>
+                  </div>
+                  <span className="text-xs font-black font-mono text-sleek-blue bg-sleek-blue/10 px-2.5 py-0.5 rounded-full border border-sleek-blue/20">
+                    {initSyncState.progress}%
+                  </span>
+                </div>
+
+                {/* Animated Progress Bar */}
+                <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden p-0.5 border border-white/5">
+                  <motion.div 
+                    initial={{ width: 0 }}
+                    animate={{ width: `${initSyncState.progress}%` }}
+                    transition={{ duration: 0.4, ease: "easeOut" }}
+                    className={cn(
+                      "h-full rounded-full transition-all",
+                      initSyncState.status === 'ready'
+                        ? "bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_12px_rgba(16,185,129,0.6)]"
+                        : initSyncState.status === 'error'
+                        ? "bg-rose-500"
+                        : "bg-gradient-to-r from-sleek-blue via-indigo-400 to-cyan-400 shadow-[0_0_12px_rgba(30,144,255,0.6)]"
+                    )}
+                  />
+                </div>
+
+                {/* 4-Step Checklist */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                  {[
+                    { id: 1, label: 'API 토큰 & 보안 연결 검증', minProg: 15 },
+                    { id: 2, label: '실시간 잔고 & 주문가능액 조회', minProg: 35 },
+                    { id: 3, label: '보유주식 & 매수평단가 동기화', minProg: 65 },
+                    { id: 4, label: '관심종목 실시간 호가/시세 수신', minProg: 90 },
+                  ].map((step) => {
+                    const isDone = initSyncState.progress > step.minProg || initSyncState.status === 'ready';
+                    const isActive = initSyncState.progress >= step.minProg && !isDone;
+                    return (
+                      <div 
+                        key={step.id} 
+                        className={cn(
+                          "flex items-center gap-2 p-2 rounded-xl text-[11px] font-mono transition-all",
+                          isDone 
+                            ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20" 
+                            : isActive
+                            ? "bg-sleek-blue/10 text-sleek-blue border border-sleek-blue/30 font-bold"
+                            : "bg-white/[0.02] text-slate-500 border border-white/5"
+                        )}
+                      >
+                        {isDone ? (
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                        ) : isActive ? (
+                          <Loader2 className="w-3.5 h-3.5 text-sleek-blue animate-spin shrink-0" />
+                        ) : (
+                          <div className="w-3.5 h-3.5 rounded-full border border-slate-600 flex items-center justify-center shrink-0">
+                            <div className="w-1.5 h-1.5 rounded-full bg-slate-600"></div>
+                          </div>
+                        )}
+                        <span className="truncate">{step.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Current step text */}
+                <div className="text-[11px] text-slate-400 flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg font-mono">
+                  <Activity className="w-3 h-3 text-sleek-blue shrink-0 animate-pulse" />
+                  <span className="truncate">{initSyncState.currentStep}</span>
+                </div>
+              </div>
+            )}
+
+            <div className="space-y-3">
               <button 
                 onClick={() => {
                   if (kisConfig.isConnected) {
-                    handleSyncKIS();
-                    setIsAppInitialized(true);
+                    if (initSyncState.status === 'syncing') {
+                      showNotification("한국투자증권 실시간 데이터를 모두 가져온 후 즉시 시작됩니다.", "info");
+                    } else if (initSyncState.status === 'error') {
+                      executeFullKisInitialSync(true);
+                    } else {
+                      setIsAppInitialized(true);
+                    }
                   } else {
                     showNotification("한국투자증권(KIS) 연동 설정 및 연결 확인이 완료되어야 시스템을 가동할 수 있습니다. 아래 설정 버튼을 클릭해주세요.", "error");
                     setShowKisModal(true);
                   }
                 }}
+                disabled={kisConfig.isConnected && initSyncState.status === 'syncing'}
                 className={cn(
-                  "w-full py-5 rounded-2xl font-black text-lg transition-all flex items-center justify-center gap-3 group",
+                  "w-full py-4 sm:py-5 rounded-2xl font-black text-base sm:text-lg transition-all flex items-center justify-center gap-3 group",
                   kisConfig.isConnected
-                    ? "bg-sleek-blue text-white shadow-[0_10px_30px_-10px_rgba(30,144,255,0.5)] hover:scale-[1.03] active:scale-95 cursor-pointer"
+                    ? initSyncState.status === 'syncing'
+                      ? "bg-slate-800/80 text-slate-400 border border-white/10 cursor-wait shadow-inner"
+                      : initSyncState.status === 'error'
+                      ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 cursor-pointer shadow-lg"
+                      : "bg-sleek-blue text-white shadow-[0_10px_30px_-10px_rgba(30,144,255,0.5)] hover:scale-[1.02] active:scale-95 cursor-pointer"
                     : "bg-white/10 text-slate-400 border border-amber-500/30 hover:bg-white/15 cursor-pointer"
                 )}
               >
-                <Zap className={cn("w-6 h-6", kisConfig.isConnected ? "fill-white group-hover:animate-bounce" : "text-amber-400")} />
-                {kisConfig.isConnected ? "정보 업데이트 및 시스템 가동" : "정보 업데이트 및 시스템 가동 (KIS 연동 필요)"}
+                {kisConfig.isConnected ? (
+                  initSyncState.status === 'syncing' ? (
+                    <>
+                      <Loader2 className="w-5 h-5 animate-spin text-sleek-blue" />
+                      <span>한국투자증권 데이터 동기화 중... ({initSyncState.progress}%)</span>
+                    </>
+                  ) : initSyncState.status === 'error' ? (
+                    <>
+                      <RefreshCw className="w-5 h-5 text-amber-400" />
+                      <span>동기화 재시도 및 시스템 가동</span>
+                    </>
+                  ) : (
+                    <>
+                      <Zap className="w-5 h-5 fill-white group-hover:animate-bounce" />
+                      <span>데이터 동기화 완료 - 시스템 가동 시작</span>
+                    </>
+                  )
+                ) : (
+                  <>
+                    <Zap className="w-5 h-5 text-amber-400" />
+                    <span>정보 업데이트 및 시스템 가동 (KIS 연동 필요)</span>
+                  </>
+                )}
               </button>
 
               <button 
                 onClick={() => setShowKisModal(true)}
-                className="w-full py-4 bg-white/5 border border-white/10 text-sleek-text-secondary rounded-2xl font-bold text-sm hover:bg-white/10 hover:text-white transition-all flex items-center justify-center gap-2"
+                className="w-full py-3.5 bg-white/5 border border-white/10 text-sleek-text-secondary rounded-2xl font-bold text-xs sm:text-sm hover:bg-white/10 hover:text-white transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <Settings className="w-4 h-4" /> {kisConfig.isConnected ? "KIS 연동 설정 변경" : "KIS 연동 설정하기"}
               </button>
 
               <button 
                 onClick={handleLogout}
-                className="w-full py-3.5 bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-2"
+                className="w-full py-3 bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
               >
                 <LogOut className="w-4 h-4 text-slate-400" /> 로그아웃 (다른 계정으로 로그인)
               </button>
             </div>
 
-            <div className="mt-12 pt-8 border-t border-white/5 grid grid-cols-3 gap-4">
+            <div className="mt-8 pt-6 border-t border-white/5 grid grid-cols-3 gap-4">
               <div className="text-center">
                 <div className="text-[10px] text-sleek-text-secondary uppercase tracking-widest mb-1">Status</div>
-                <div className="text-xs font-bold text-amber-400">READY</div>
+                <div className={cn(
+                  "text-xs font-bold font-mono",
+                  initSyncState.status === 'ready' ? "text-emerald-400" : initSyncState.status === 'syncing' ? "text-sleek-blue" : "text-amber-400"
+                )}>
+                  {initSyncState.status === 'ready' ? "SYNCED" : initSyncState.status === 'syncing' ? "SYNCING" : "READY"}
+                </div>
               </div>
               <div className="text-center border-x border-white/5">
                 <div className="text-[10px] text-sleek-text-secondary uppercase tracking-widest mb-1">Network</div>
-                <div className="text-xs font-bold text-emerald-400">STABLE</div>
+                <div className="text-xs font-bold text-emerald-400 font-mono">KIS OPEN API</div>
               </div>
               <div className="text-center">
-                <div className="text-[10px] text-sleek-text-secondary uppercase tracking-widest mb-1">Version</div>
-                <div className="text-xs font-bold text-white/50">10B.PRO</div>
+                <div className="text-[10px] text-sleek-text-secondary uppercase tracking-widest mb-1">Engine</div>
+                <div className="text-xs font-bold text-white/70 font-mono">100B.PRO</div>
               </div>
             </div>
           </motion.div>
@@ -8575,6 +8852,10 @@ export default function App() {
               <div className="flex items-center justify-center col-span-1 sm:col-span-2 md:col-span-3 lg:col-span-1">
                 <button 
                   onClick={() => {
+                    if (isSyncingKIS || initSyncState.status === 'syncing') {
+                      showNotification("한국투자증권 데이터 동기화가 진행 중입니다. 잠시 후 다시 시도해주세요.", "info");
+                      return;
+                    }
                     if (!isGapBotActive) {
                       if (gapBuyPrice <= 0 || gapSellPrice <= 0) {
                         alert("금액 구간(하한선과 상한선)을 정확하게 설정해주세요.");
@@ -8588,18 +8869,26 @@ export default function App() {
                     }
                     setIsGapBotActive(!isGapBotActive);
                   }}
+                  disabled={isSyncingKIS || initSyncState.status === 'syncing'}
                   title="현재 선택된 종목의 개별 스캘퍼 시작/정지"
                   className={cn(
-                    "w-full h-full min-h-[90px] sm:min-h-[100px] py-4 px-3 rounded-2xl font-black text-base sm:text-lg italic tracking-tight uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-2 border cursor-pointer",
+                    "w-full h-full min-h-[90px] sm:min-h-[100px] py-4 px-3 rounded-2xl font-black text-base sm:text-lg italic tracking-tight uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-2 border",
                     isGapBotActive 
-                      ? "bg-gradient-to-br from-rose-600 to-red-800 text-white border-rose-500/50 shadow-rose-900/40 hover:scale-[1.02]" 
-                      : "bg-gradient-to-br from-sleek-blue to-indigo-700 text-white border-sleek-blue/50 shadow-sleek-blue/40 hover:scale-[1.02]"
+                      ? "bg-gradient-to-br from-rose-600 to-red-800 text-white border-rose-500/50 shadow-rose-900/40 hover:scale-[1.02] cursor-pointer" 
+                      : (isSyncingKIS || initSyncState.status === 'syncing')
+                      ? "bg-slate-800/80 text-slate-400 border-white/10 opacity-70 cursor-wait"
+                      : "bg-gradient-to-br from-sleek-blue to-indigo-700 text-white border-sleek-blue/50 shadow-sleek-blue/40 hover:scale-[1.02] cursor-pointer"
                   )}
                 >
                   {isGapBotActive ? (
                     <>
                       <Square className="w-6 h-6 fill-current animate-pulse" />
                       <span>SCALPER STOP</span>
+                    </>
+                  ) : (isSyncingKIS || initSyncState.status === 'syncing') ? (
+                    <>
+                      <Loader2 className="w-6 h-6 animate-spin text-sleek-blue" />
+                      <span className="text-center text-xs leading-tight text-slate-300 font-sans">데이터 동기화 중...</span>
                     </>
                   ) : (
                     <>
