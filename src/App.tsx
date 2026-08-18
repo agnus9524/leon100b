@@ -1044,7 +1044,7 @@ export default function App() {
   });
 
   // Track recently traded symbols to prevent race conditions during KIS balance polling lag
-  const recentLocalTradesRef = useRef<Record<string, { timestamp: number; quantity: number; avgPrice: number }>>({});
+  const recentLocalTradesRef = React.useRef<Record<string, { timestamp: number; quantity: number; avgPrice: number }>>({});
 
   useEffect(() => {
     try {
@@ -2826,7 +2826,7 @@ export default function App() {
     });
 
     // 2. Incorporate newly bought stocks from recent local trades (within 45s) for instant UI display
-    Object.entries(recentLocalTradesRef.current || {}).forEach(([sym, trade]) => {
+    Object.entries(recentLocalTradesRef.current || {}).forEach(([sym, trade]: [string, any]) => {
       if (trade && now - trade.timestamp < 45000 && trade.quantity > 0) {
         result[sym] = Math.max(result[sym] || 0, trade.quantity);
       }
@@ -2876,7 +2876,7 @@ export default function App() {
                 price: pData.current,
                 change: pData.change || 0,
                 changePercent: pData.changePercent || 0,
-                volume: pData.volume || 0,
+                volume: String(pData.volume || '0'),
                 history: Array.from({ length: 40 }, (_, i) => ({ 
                   time: `${i}:00`, 
                   price: pData.current * (0.98 + Math.random() * 0.04) 
