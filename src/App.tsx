@@ -2817,7 +2817,7 @@ export default function App() {
     const result: Record<string, number> = {};
     const now = Date.now();
 
-    // 1. Incorporate all positive holdings from holdings state
+    // 1. Incorporate all positive holdings from authoritative holdings state
     Object.entries(holdings).forEach(([sym, qty]) => {
       const numQty = Number(qty);
       if (numQty > 0 && !isNaN(numQty)) {
@@ -2825,26 +2825,14 @@ export default function App() {
       }
     });
 
-    // 2. Incorporate newly bought stocks from recent local trades (within 45s) for instant UI display
+    // 2. Incorporate newly bought stocks from recent local trades (within 45s) for instant UI responsiveness
     Object.entries(recentLocalTradesRef.current || {}).forEach(([sym, trade]: [string, any]) => {
       if (trade && now - trade.timestamp < 45000 && trade.quantity > 0) {
         result[sym] = Math.max(result[sym] || 0, trade.quantity);
       }
     });
 
-    // 3. In both modes, also reflect active scalper tab inventory slots if any
-    scalperTabs.forEach(tab => {
-      if (tab.gapInventory && tab.gapInventory.length > 0) {
-        const tabQty = tab.gapInventory.reduce((acc, slot) => {
-          const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
-          return acc + (typeof q === 'number' && !isNaN(q) && q > 0 ? q : 0);
-        }, 0);
-        if (tabQty > 0) {
-          result[tab.symbol] = Math.max(result[tab.symbol] || 0, tabQty);
-        }
-      }
-    });
-
+    // Clean up any zero/negative/NaN values
     Object.keys(result).forEach(sym => {
       if (!result[sym] || Number(result[sym]) <= 0 || isNaN(Number(result[sym]))) {
         delete result[sym];
@@ -2852,7 +2840,7 @@ export default function App() {
     });
 
     return result;
-  }, [holdings, scalperTabs, kisConfig.isConnected]);
+  }, [holdings]);
 
   // Auto-fetch real-time price & metadata for any stock in effectiveHoldings that lacks price data
   useEffect(() => {
@@ -4602,12 +4590,11 @@ export default function App() {
         return nextAvg;
       });
 
-      // Auto-activate and Self-Healing Slot Matching for all held stocks
+      // Tab and inventory synchronization for held stocks (Never auto-activate bot)
       const updatedTabs = [...scalperTabsRef.current];
       let tabsChanged = false;
-      let isGapBotActivated = false;
 
-      // Step 1: Ensure all held stocks have an active tab
+      // Step 1: Ensure all held stocks have a tab with isBotActive: false by default
       for (const [symbol, qty] of Object.entries(newHoldings)) {
         if (qty > 0) {
           let tabIndex = updatedTabs.findIndex(t => t.symbol === symbol);
@@ -4620,7 +4607,7 @@ export default function App() {
                 id: symbol,
                 symbol,
                 name: stockInfo.name || symbol,
-                isBotActive: true,
+                isBotActive: false, // Explicitly keep inactive unless user starts it
                 gapBuyPrice: limits.lowerLimit,
                 gapSellPrice: limits.upperLimit,
                 tradeQuantity: 1,
@@ -4637,14 +4624,6 @@ export default function App() {
               updatedTabs.push(newTab);
               tabsChanged = true;
             }
-          } else if (!updatedTabs[tabIndex].isBotActive) {
-            updatedTabs[tabIndex] = { ...updatedTabs[tabIndex], isBotActive: true };
-            tabsChanged = true;
-          }
-
-          if (symbol === selectedSymbol && !isGapBotActive) {
-            isGapBotActivated = true;
-            setIsGapBotActive(true);
           }
         }
       }
@@ -6605,72 +6584,89 @@ export default function App() {
       }
 
       if (finalAmount > 0) {
-        if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
-          const currentHeld = holdings[stock.symbol] || 0;
-          const newQty = Math.max(0, currentHeld - finalAmount);
-          const revenue = priceInKrw * finalAmount;
-          
-          setBalance(prev => prev + revenue);
-          
-          setHoldings(prev => {
-            const updated = { ...prev };
-            if (newQty <= 0) {
-              delete updated[stock.symbol];
-            } else {
-              updated[stock.symbol] = Number(newQty.toFixed(4));
-            }
-            try {
-              localStorage.setItem('sleek_holdings', JSON.stringify(updated));
-            } catch (e) {}
-            if (currentUser) saveUserHoldings(currentUser.uid, updated);
-            return updated;
-          });
-
-          // Trim/clear gapInventory for active tab
-          if (stock.symbol === selectedStock?.symbol) {
-            setGapInventory(prev => {
-              let rem = finalAmount;
-              const next: typeof prev = [];
-              for (const slot of prev) {
-                if (rem <= 0) {
-                  next.push(slot);
-                } else if (slot.quantity > rem) {
-                  next.push({ ...slot, quantity: slot.quantity - rem });
-                  rem = 0;
-                } else {
-                  rem -= slot.quantity;
-                }
-              }
-              gapInventoryRef.current = next;
-              return next;
-            });
+        // Immediate local cleanup of recent trades tracking
+        if (recentLocalTradesRef.current[stock.symbol]) {
+          const curTrade = recentLocalTradesRef.current[stock.symbol];
+          const remainingTradeQty = Math.max(0, (curTrade.quantity || 0) - finalAmount);
+          if (remainingTradeQty <= 0) {
+            delete recentLocalTradesRef.current[stock.symbol];
+          } else {
+            recentLocalTradesRef.current[stock.symbol].quantity = remainingTradeQty;
           }
-
-          setScalperTabs(prev => prev.map(t => {
-            if (t.symbol === stock.symbol) {
-              let rem = finalAmount;
-              const nextInv: typeof t.gapInventory = [];
-              for (const slot of (t.gapInventory || [])) {
-                if (rem <= 0) {
-                  nextInv.push(slot);
-                } else if (slot.quantity > rem) {
-                  nextInv.push({ ...slot, quantity: slot.quantity - rem });
-                  rem = 0;
-                } else {
-                  rem -= slot.quantity;
-                }
-              }
-              return { ...t, gapInventory: nextInv };
-            }
-            return t;
-          }));
         }
 
+        const currentHeld = holdings[stock.symbol] || 0;
+        const newQty = Math.max(0, currentHeld - finalAmount);
+        const revenue = priceInKrw * finalAmount;
+
+        if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled) {
+          setBalance(prev => prev + revenue);
+        }
+
+        // Immediately update holdings state
+        setHoldings(prev => {
+          const updated = { ...prev };
+          if (newQty <= 0) {
+            delete updated[stock.symbol];
+            setAvgPrices(ap => {
+              const nextAp = { ...ap };
+              delete nextAp[stock.symbol];
+              try { localStorage.setItem('sleek_avg_prices', JSON.stringify(nextAp)); } catch (e) {}
+              return nextAp;
+            });
+          } else {
+            updated[stock.symbol] = Number(newQty.toFixed(4));
+          }
+          try {
+            localStorage.setItem('sleek_holdings', JSON.stringify(updated));
+          } catch (e) {}
+          if (currentUser) saveUserHoldings(currentUser.uid, updated);
+          return updated;
+        });
+
+        // Trim/clear gapInventory for active tab
+        if (stock.symbol === selectedStock?.symbol) {
+          setGapInventory(prev => {
+            let rem = finalAmount;
+            const next: typeof prev = [];
+            for (const slot of prev) {
+              if (rem <= 0) {
+                next.push(slot);
+              } else if (slot.quantity > rem) {
+                next.push({ ...slot, quantity: slot.quantity - rem });
+                rem = 0;
+              } else {
+                rem -= slot.quantity;
+              }
+            }
+            gapInventoryRef.current = next;
+            return next;
+          });
+        }
+
+        setScalperTabs(prev => prev.map(t => {
+          if (t.symbol === stock.symbol) {
+            let rem = finalAmount;
+            const nextInv: typeof t.gapInventory = [];
+            for (const slot of (t.gapInventory || [])) {
+              if (rem <= 0) {
+                nextInv.push(slot);
+              } else if (slot.quantity > rem) {
+                nextInv.push({ ...slot, quantity: slot.quantity - rem });
+                rem = 0;
+              } else {
+                rem -= slot.quantity;
+              }
+            }
+            return { ...t, gapInventory: nextInv };
+          }
+          return t;
+        }));
+
         if (kisConfig.isConnected) {
-          handleSyncKIS();
           setTimeout(() => {
             handleSyncKIS();
-          }, 1000);
+          }, 1500);
         }
         return finalAmount;
       }
