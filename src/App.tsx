@@ -3654,7 +3654,31 @@ export default function App() {
   };
 
   const handleAddStock = async (customSymbol?: string, recommendedStock?: Stock, customName?: string) => {
-    const symbolToUse = customSymbol || searchSymbol.trim().toUpperCase();
+    let symbolToUse = customSymbol || searchSymbol.trim().toUpperCase();
+    let resolvedName = customName;
+
+    // If user typed into input and pressed Enter without selecting from dropdown, resolve from suggestions/popular stocks
+    if (!customSymbol && searchSymbol.trim()) {
+      const trimmedLower = searchSymbol.trim().toLowerCase();
+      const matched = searchSuggestions.find(s => 
+        s.symbol.toLowerCase() === trimmedLower || 
+        s.name.toLowerCase() === trimmedLower || 
+        s.name.toLowerCase().includes(trimmedLower) ||
+        s.symbol.toLowerCase().startsWith(trimmedLower)
+      ) || POPULAR_STOCKS.find(s => 
+        (s.market === marketType) && (
+          s.symbol.toLowerCase() === trimmedLower || 
+          s.name.toLowerCase() === trimmedLower || 
+          s.name.toLowerCase().includes(trimmedLower)
+        )
+      );
+
+      if (matched) {
+        symbolToUse = matched.symbol.toUpperCase();
+        resolvedName = resolvedName || matched.name;
+      }
+    }
+
     if (!symbolToUse && !recommendedStock) return;
     
     setShowSuggestions(false);
@@ -3662,7 +3686,7 @@ export default function App() {
     setSearchSuggestions([]);
     
     if (recommendedStock) {
-      if (stocks.some(s => s.symbol === recommendedStock.symbol)) {
+      if (stocks.some(s => s.symbol.toUpperCase() === recommendedStock.symbol.toUpperCase())) {
         openOrSwitchScalperTab(recommendedStock.symbol, recommendedStock.name);
         return;
       }
@@ -3678,8 +3702,8 @@ export default function App() {
       return;
     }
 
-    if (stocks.some(s => s.symbol === symbolToUse)) {
-      openOrSwitchScalperTab(symbolToUse, customName);
+    if (stocks.some(s => s.symbol.toUpperCase() === symbolToUse.toUpperCase())) {
+      openOrSwitchScalperTab(symbolToUse, resolvedName);
       return;
     }
 
@@ -3861,12 +3885,14 @@ export default function App() {
       return;
     }
 
-    // 1. Instantly show local filtered popular stocks first for speed!
+    const lowerTerm = term.toLowerCase();
+
+    // 1. Instantly show local filtered popular stocks first for speed (case-insensitive for both symbol and name)
     const localFiltered = POPULAR_STOCKS.filter(s => 
       (s.market === marketType) && 
-      (s.name.includes(term) || s.symbol.includes(term.toUpperCase()))
+      (s.name.toLowerCase().includes(lowerTerm) || s.symbol.toLowerCase().includes(lowerTerm))
     );
-    setSearchSuggestions(localFiltered.slice(0, 8));
+    setSearchSuggestions(localFiltered.slice(0, 10));
     setShowSuggestions(localFiltered.length > 0);
 
     // 2. Fetch comprehensive search results from our backend in real-time
@@ -3883,11 +3909,11 @@ export default function App() {
               // Filter out stocks with 0 price if price is provided
               if (item.price !== undefined && item.price <= 0) return;
               
-              if (!merged.some(m => m.symbol === item.symbol)) {
+              if (!merged.some(m => m.symbol.toLowerCase() === item.symbol.toLowerCase() && m.market === item.market)) {
                 merged.push(item);
               }
             });
-            return merged.slice(0, 15);
+            return merged.slice(0, 20);
           });
           setShowSuggestions(true);
         }
@@ -7566,8 +7592,8 @@ export default function App() {
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_360px] gap-px bg-sleek-border overflow-y-auto lg:overflow-hidden">
         {/* Main Terminal (Full Width Center & Left) */}
         <section className="bg-sleek-bg overflow-y-auto custom-scrollbar p-3 sm:p-4 md:p-5 space-y-4">
-          {/* 0. 종목 선택 및 입력 영역 (AI SCALPING CONFIG 상단 배치) */}
-          <div className="bg-sleek-card border border-sleek-border p-4 sm:p-5 rounded-3xl shadow-xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 backdrop-blur-md">
+          {/* 0. 종목 선택 및 입력 영역 (AI SCALPING CONFIG 상단 배치 & 최상단 z-index 보장) */}
+          <div className="relative z-[90] bg-sleek-card border border-sleek-border p-4 sm:p-5 rounded-3xl shadow-xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 backdrop-blur-md">
             <div className="flex items-center gap-3 shrink-0">
               <div className="p-2.5 rounded-2xl bg-sleek-blue/20 border border-sleek-blue/40 text-sleek-blue shadow-inner">
                 <Search className="w-5 h-5" />
@@ -7585,13 +7611,16 @@ export default function App() {
               </div>
             </div>
 
-            <div ref={searchRef} className="relative flex-1 max-w-2xl">
+            <div ref={searchRef} className="relative z-[100] flex-1 max-w-2xl">
               <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
               <input 
                 ref={searchInputRef}
                 type="text" 
                 value={searchSymbol}
                 onChange={(e) => setSearchSymbol(e.target.value)}
+                onFocus={() => {
+                  if (searchSuggestions.length > 0) setShowSuggestions(true);
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') {
                     handleAddStock();
@@ -7608,33 +7637,67 @@ export default function App() {
                 추가
               </button>
               
-              {/* Search Suggestions */}
+              {/* Search Suggestions Dropdown - 최상단 z-[200] 레이어 배치로 하단 창에 가려지지 않도록 보장 */}
               <AnimatePresence>
-                {showSuggestions && (
+                {showSuggestions && searchSuggestions.length > 0 && (
                   <motion.div 
-                    initial={{ opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 5 }}
-                    className="absolute top-full left-0 right-0 mt-2 z-50 bg-slate-900/95 backdrop-blur-xl border border-white/20 rounded-2xl shadow-2xl overflow-hidden max-h-[320px] overflow-y-auto custom-scrollbar"
+                    initial={{ opacity: 0, y: -4, scale: 0.98 }} 
+                    animate={{ opacity: 1, y: 0, scale: 1 }} 
+                    exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                    transition={{ duration: 0.15 }}
+                    className="absolute top-full left-0 right-0 mt-2 z-[200] bg-slate-900/98 backdrop-blur-2xl border-2 border-sleek-blue/50 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.95)] ring-2 ring-sleek-blue/30 overflow-hidden"
                   >
-                    {searchSuggestions.map((s, idx) => (
-                      <button 
-                        key={`${s.symbol}-${idx}`}
-                        onClick={() => handleAddStock(s.symbol, undefined, s.name)}
-                        className="w-full flex items-center justify-between p-3.5 hover:bg-white/10 transition-colors border-b border-white/5 last:border-0 text-left cursor-pointer"
-                      >
-                        <div className="flex flex-col gap-0.5">
-                          <div className="flex items-center gap-2.5">
-                            <div className="text-sm sm:text-base font-bold text-white">{s.name}</div>
-                            {s.price !== undefined && (
-                              <span className="text-xs sm:text-sm text-sleek-blue font-black font-mono">
-                                {formatCurrency(s.price)}
-                              </span>
-                            )}
-                          </div>
-                          <div className="text-xs text-slate-400 font-mono">{s.symbol}</div>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-slate-400 opacity-60" />
-                      </button>
-                    ))}
+                    {/* 상단 안내 바 */}
+                    <div className="px-4 py-2 bg-slate-950/90 border-b border-white/10 flex items-center justify-between text-xs text-slate-400 font-bold uppercase tracking-wider">
+                      <span className="flex items-center gap-1.5 text-sleek-blue">
+                        <Search className="w-3.5 h-3.5" /> 실시간 검색 종목 ({searchSuggestions.length}개)
+                      </span>
+                      <span className="text-[11px] text-emerald-400 font-medium">클릭 시 즉시 스캘핑 탭 추가</span>
+                    </div>
+
+                    <div className="max-h-[340px] overflow-y-auto custom-scrollbar divide-y divide-white/5">
+                      {searchSuggestions.map((s, idx) => {
+                        const isUS = s.market === 'US' || /^[A-Za-z]/.test(s.symbol);
+                        return (
+                          <button 
+                            key={`${s.symbol}-${idx}`}
+                            onClick={() => handleAddStock(s.symbol, undefined, s.name)}
+                            className="w-full flex items-center justify-between p-3.5 hover:bg-sleek-blue/20 active:bg-sleek-blue/30 transition-colors text-left cursor-pointer group"
+                          >
+                            <div className="flex flex-col gap-1">
+                              <div className="flex items-center gap-2.5">
+                                <div className="text-sm sm:text-base font-extrabold text-white group-hover:text-sleek-blue transition-colors">
+                                  {s.name}
+                                </div>
+                                <span className={cn(
+                                  "text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border",
+                                  isUS 
+                                    ? "bg-amber-500/15 text-amber-300 border-amber-500/30" 
+                                    : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
+                                )}>
+                                  {isUS ? '미국' : '국내'}
+                                </span>
+                              </div>
+                              <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+                                <span className="text-slate-300 font-semibold">{s.symbol}</span>
+                                {s.price !== undefined && s.price > 0 && (
+                                  <>
+                                    <span>•</span>
+                                    <span className="text-sleek-blue font-bold">
+                                      {formatCurrency(s.price, false, isUS ? 'US' : 'KR')}
+                                    </span>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <div className="flex items-center gap-2 text-xs font-bold text-sleek-blue opacity-80 group-hover:opacity-100 group-hover:translate-x-1 transition-all">
+                              <span>탭 추가</span>
+                              <ChevronRight className="w-4 h-4" />
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </motion.div>
                 )}
               </AnimatePresence>
