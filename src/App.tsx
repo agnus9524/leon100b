@@ -1687,8 +1687,8 @@ export default function App() {
   }, [gapInventory]);
 
   // Automated Scalping Configuration States
-  const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.5); // Scalping net target profit (+0.5% default)
-  const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-1.5); // -1.5% standard stop loss
+  const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.3); // Scalping net target profit (+0.3% default)
+  const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-0.9); // Scalping stop loss (-0.9% default, range -0.5% ~ -0.9%)
   const [scalpingSpeed, setScalpingSpeed] = useState<number>(300); // 300ms (0.3s) fast execution speed
   const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(false);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
@@ -8636,9 +8636,9 @@ export default function App() {
                     value={scalpingTargetProfit}
                     onChange={(e) => setScalpingTargetProfit(Number(e.target.value))}
                     className="bg-black/50 border border-emerald-500/40 rounded-xl p-1.5 text-xs sm:text-sm font-mono outline-none text-emerald-400 text-center font-bold appearance-none cursor-pointer"
-                    title="목표 순수익률 (제세금 0.20% 및 왕복 수수료 공제 후 실질 순수익)"
+                    title="목표 순수익률 (0.05% ~ 0.3% 선택 가능)"
                   >
-                    {[0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0, 5.0].map(val => (
+                    {[0.05, 0.1, 0.15, 0.2, 0.25, 0.3].map(val => (
                       <option key={val} value={val} className="bg-sleek-bg text-emerald-400">+{val}% (순익)</option>
                     ))}
                   </select>
@@ -8646,8 +8646,9 @@ export default function App() {
                     value={scalpingStopLoss}
                     onChange={(e) => setScalpingStopLoss(Number(e.target.value))}
                     className="bg-black/50 border border-rose-500/40 rounded-xl p-1.5 text-xs sm:text-sm font-mono outline-none text-rose-400 text-center font-bold appearance-none cursor-pointer"
+                    title="손절 기준률 (-0.5% ~ -0.9% 선택 가능)"
                   >
-                    {Array.from({ length: 50 }, (_, i) => Math.round(-(i + 1) * 0.1 * 10) / 10).map(val => (
+                    {[-0.5, -0.6, -0.7, -0.8, -0.9].map(val => (
                       <option key={val} value={val} className="bg-sleek-bg text-rose-400">{val}%</option>
                     ))}
                   </select>
