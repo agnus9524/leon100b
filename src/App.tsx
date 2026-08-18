@@ -2812,10 +2812,10 @@ export default function App() {
     const result: Record<string, number> = {};
 
     if (kisConfig.isConnected) {
-      // When KIS is connected, strictly use real KIS holdings
+      // When KIS is connected, strictly use real confirmed KIS holdings from account
       Object.entries(holdings).forEach(([sym, qty]) => {
         const numQty = Number(qty);
-        if (numQty > 0) {
+        if (numQty > 0 && !isNaN(numQty)) {
           result[sym] = numQty;
         }
       });
@@ -2823,7 +2823,7 @@ export default function App() {
       // In simulation mode, use holdings combined with any active tab inventory
       Object.entries(holdings).forEach(([sym, qty]) => {
         const numQty = Number(qty);
-        if (numQty > 0) {
+        if (numQty > 0 && !isNaN(numQty)) {
           result[sym] = numQty;
         }
       });
@@ -2832,17 +2832,17 @@ export default function App() {
         if (tab.gapInventory && tab.gapInventory.length > 0) {
           const tabQty = tab.gapInventory.reduce((acc, slot) => {
             const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
-            return acc + q;
+            return acc + (typeof q === 'number' && !isNaN(q) && q > 0 ? q : 0);
           }, 0);
-          if (tabQty > 0 && result[tab.symbol]) {
-            result[tab.symbol] = Math.max(result[tab.symbol], tabQty);
+          if (tabQty > 0) {
+            result[tab.symbol] = Math.max(result[tab.symbol] || 0, tabQty);
           }
         }
       });
     }
 
     Object.keys(result).forEach(sym => {
-      if (!result[sym] || Number(result[sym]) <= 0) {
+      if (!result[sym] || Number(result[sym]) <= 0 || isNaN(Number(result[sym]))) {
         delete result[sym];
       }
     });
@@ -4193,24 +4193,26 @@ export default function App() {
         const domesticBalanceData = await kisService.getDomesticBalance();
         let totalStockPurchaseCost = 0;
 
-        if (domesticBalanceData?.rt_cd === '0' && domesticBalanceData.output1 && Array.isArray(domesticBalanceData.output1)) {
+        if (domesticBalanceData?.rt_cd === '0') {
           foundAnyData = true;
           domesticSuccess = true;
           const newSellable: Record<string, number> = {};
-          for (const item of domesticBalanceData.output1) {
-            if (item.pdno && item.pdno !== '000000') {
-              const qty = Number(item.hldg_qty || item.hldg_qty_2 || 0);
-              const avgP = Number(item.pchs_avg_pric || item.pchs_unpr || item.pchs_avg_price || (item.pchs_amt && qty ? item.pchs_amt / qty : 0) || 0);
-              const name = item.prdt_name;
-              if (qty > 0) {
-                newHoldings[item.pdno] = qty;
-                if (avgP > 0) newAvgPrices[item.pdno] = avgP;
-                if (name) newStockNames[item.pdno] = name;
-                
-                totalStockPurchaseCost += (qty * (avgP > 0 ? avgP : 0));
+          if (domesticBalanceData.output1 && Array.isArray(domesticBalanceData.output1)) {
+            for (const item of domesticBalanceData.output1) {
+              if (item.pdno && item.pdno !== '000000') {
+                const qty = Number(item.hldg_qty || item.hldg_qty_2 || 0);
+                const avgP = Number(item.pchs_avg_pric || item.pchs_unpr || item.pchs_avg_price || (item.pchs_amt && qty ? item.pchs_amt / qty : 0) || 0);
+                const name = item.prdt_name;
+                if (qty > 0 && !isNaN(qty)) {
+                  newHoldings[item.pdno] = qty;
+                  if (avgP > 0) newAvgPrices[item.pdno] = avgP;
+                  if (name) newStockNames[item.pdno] = name;
+                  
+                  totalStockPurchaseCost += (qty * (avgP > 0 ? avgP : 0));
 
-                const sellableQty = Number(item.ord_psbl_qty || item.nrc_psbl_qty || item.hldg_qty || qty);
-                newSellable[item.pdno] = sellableQty;
+                  const sellableQty = Number(item.ord_psbl_qty || item.nrc_psbl_qty || item.hldg_qty || qty);
+                  newSellable[item.pdno] = sellableQty;
+                }
               }
             }
           }
@@ -4260,19 +4262,21 @@ export default function App() {
         const overseasBalanceData = await kisService.getOverseasBalance();
         let totalOverseasPurchaseCostUSD = 0;
 
-        if (overseasBalanceData?.rt_cd === '0' && overseasBalanceData.output1 && Array.isArray(overseasBalanceData.output1)) {
+        if (overseasBalanceData?.rt_cd === '0') {
           foundAnyData = true;
           overseasSuccess = true;
-          for (const item of overseasBalanceData.output1) {
-            if (item.pdno) {
-              const qty = Number(item.hldg_qty || 0);
-              const avgP = Number(item.pchs_avg_pric || 0);
-              const name = item.prdt_name || item.ovrs_item_name;
-              if (qty > 0) {
-                newHoldings[item.pdno] = qty;
-                if (avgP > 0) newAvgPrices[item.pdno] = avgP;
-                if (name) newStockNames[item.pdno] = name;
-                totalOverseasPurchaseCostUSD += (qty * avgP);
+          if (overseasBalanceData.output1 && Array.isArray(overseasBalanceData.output1)) {
+            for (const item of overseasBalanceData.output1) {
+              if (item.pdno) {
+                const qty = Number(item.hldg_qty || 0);
+                const avgP = Number(item.pchs_avg_pric || 0);
+                const name = item.prdt_name || item.ovrs_item_name;
+                if (qty > 0 && !isNaN(qty)) {
+                  newHoldings[item.pdno] = qty;
+                  if (avgP > 0) newAvgPrices[item.pdno] = avgP;
+                  if (name) newStockNames[item.pdno] = name;
+                  totalOverseasPurchaseCostUSD += (qty * avgP);
+                }
               }
             }
           }
@@ -4469,16 +4473,17 @@ export default function App() {
           });
         }
         
-        // Add all newly fetched holdings
+        // Add all newly fetched confirmed holdings
         Object.entries(newHoldings).forEach(([sym, qty]) => {
-          if (qty > 0) {
-            merged[sym] = qty;
+          const numQty = Number(qty);
+          if (numQty > 0 && !isNaN(numQty)) {
+            merged[sym] = numQty;
           }
         });
 
-        // Ensure invalid or 0/negative quantities are removed
+        // Ensure invalid or 0/negative/NaN quantities are strictly removed
         Object.keys(merged).forEach(sym => {
-          if (!merged[sym] || Number(merged[sym]) <= 0) {
+          if (!merged[sym] || Number(merged[sym]) <= 0 || isNaN(Number(merged[sym]))) {
             delete merged[sym];
           }
         });
@@ -4496,7 +4501,29 @@ export default function App() {
         return merged;
       });
 
-      setAvgPrices(prev => ({ ...prev, ...newAvgPrices }));
+      setAvgPrices(prev => {
+        const nextAvg = { ...prev, ...newAvgPrices };
+        if (domesticSuccess) {
+          Object.keys(nextAvg).forEach(sym => {
+            const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
+            if (!isUS && (!newHoldings[sym] || newHoldings[sym] <= 0)) {
+              delete nextAvg[sym];
+            }
+          });
+        }
+        if (overseasSuccess) {
+          Object.keys(nextAvg).forEach(sym => {
+            const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
+            if (isUS && (!newHoldings[sym] || newHoldings[sym] <= 0)) {
+              delete nextAvg[sym];
+            }
+          });
+        }
+        try {
+          localStorage.setItem('sleek_avg_prices', JSON.stringify(nextAvg));
+        } catch (e) {}
+        return nextAvg;
+      });
 
       // Auto-activate and Self-Healing Slot Matching for all held stocks
       const updatedTabs = [...scalperTabsRef.current];
@@ -4697,11 +4724,10 @@ export default function App() {
       syncSelectedPrice();
       fastInterval = setInterval(syncSelectedPrice, 2000);
 
-      if (isGapBotActive) {
-        kisSyncInterval = setInterval(() => {
-          handleSyncKIS();
-        }, 10000);
-      }
+      // Regular KIS Balance & Holdings sync (every 10 seconds while connected to keep portfolio 100% accurate)
+      kisSyncInterval = setInterval(() => {
+        handleSyncKIS();
+      }, 10000);
     }
     return () => {
       if (slowInterval) clearInterval(slowInterval);
@@ -4710,14 +4736,15 @@ export default function App() {
     };
   }, [kisConfig.isConnected, marketType, selectedSymbol, isGapBotActive, isAppInitialized]);
 
-  // Auto KIS initial sync on connection with delay
+  // Auto KIS initial sync on connection
   const initialKisSyncTriggeredRef = React.useRef(false);
   useEffect(() => {
     if (kisConfig.isConnected && !initialKisSyncTriggeredRef.current) {
       initialKisSyncTriggeredRef.current = true;
+      handleSyncKIS();
       const autoSyncTimer = setTimeout(() => {
         handleSyncKIS();
-      }, 1500);
+      }, 1000);
       return () => clearTimeout(autoSyncTimer);
     }
   }, [kisConfig.isConnected]);
@@ -5534,7 +5561,7 @@ export default function App() {
                 showNotification(`${currentStock.name} 리스크 관리 매도 체결 완료 (${netProfitPct.toFixed(2)}%)`, "info");
               }
 
-              // [중요] 매도가 실제로 체결되었으므로 해당 슬롯을 비움 (gapInventory 업데이트)
+              // [중요] 매도가 실제로 체결되었으므로 해당 슬롯을 비움 (gapInventory 및 scalperTabs 업데이트)
               if (order.slotId) {
                 const updatedInv = gapInventoryRef.current.filter(s => s.id !== order.slotId);
                 gapInventoryRef.current = updatedInv;
@@ -5549,14 +5576,49 @@ export default function App() {
                   setGapInventory(updatedInv);
                 }
               }
+
+              setScalperTabs(prev => prev.map(t => {
+                if (t.symbol === order.symbol) {
+                  let prevInv = t.gapInventory || [];
+                  if (order.slotId) {
+                    prevInv = prevInv.filter(s => s.id !== order.slotId);
+                  } else if (order.buyPrice) {
+                    const idx = prevInv.findIndex(s => s.price === order.buyPrice);
+                    if (idx !== -1) {
+                      const updatedInv = [...prevInv];
+                      updatedInv.splice(idx, 1);
+                      prevInv = updatedInv;
+                    }
+                  }
+                  return { ...t, gapInventory: prevInv };
+                }
+                return t;
+              }));
             } else {
               showNotification(`${currentStock.name} 대기 주문 체결 완료 (${formatCurrency(currentStock.price)}, ${formatQuantity(order.quantity)})`, "success");
             }
 
-            // Update holdings
+            // Update holdings: delete key completely if quantity reaches 0
             const heldQty = holdings[order.symbol] || 0;
-            const newHoldings = { ...holdings, [order.symbol]: Number(Math.max(0, heldQty - order.quantity).toFixed(4)) };
+            const nextQty = Math.max(0, heldQty - order.quantity);
+            const newHoldings = { ...holdings };
+            if (nextQty <= 0) {
+              delete newHoldings[order.symbol];
+              setAvgPrices(prev => {
+                const nextAvg = { ...prev };
+                delete nextAvg[order.symbol];
+                try {
+                  localStorage.setItem('sleek_avg_prices', JSON.stringify(nextAvg));
+                } catch (e) {}
+                return nextAvg;
+              });
+            } else {
+              newHoldings[order.symbol] = Number(nextQty.toFixed(4));
+            }
             setHoldings(newHoldings);
+            try {
+              localStorage.setItem('sleek_holdings', JSON.stringify(newHoldings));
+            } catch (e) {}
             if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
 
             playScalpingSound('SELL');
