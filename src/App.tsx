@@ -1316,7 +1316,7 @@ export default function App() {
           gapBuyPrice: krLimits.lowerLimit,
           gapSellPrice: krLimits.upperLimit,
           tradeQuantity: 1,
-          maxSlots: 3,
+          maxSlots: 10,
           gapInventory: [],
           gapTradingProfit: 0,
           gapTradeCount: 0,
@@ -1334,7 +1334,7 @@ export default function App() {
           gapBuyPrice: usLimits.lowerLimit,
           gapSellPrice: usLimits.upperLimit,
           tradeQuantity: 1,
-          maxSlots: 3,
+          maxSlots: 10,
           gapInventory: [],
           gapTradingProfit: 0,
           gapTradeCount: 0,
@@ -1350,7 +1350,7 @@ export default function App() {
     // Sanitize any previously contaminated slots or undefined maxSlots from saved localStorage
     saved = saved.map(t => ({
       ...t,
-      maxSlots: t.maxSlots || 3,
+      maxSlots: t.maxSlots || 10,
       gapInventory: (t.gapInventory || [])
         .filter(s => {
           if (!s) return false;
@@ -1378,7 +1378,7 @@ export default function App() {
         gapBuyPrice: usLimits.lowerLimit,
         gapSellPrice: usLimits.upperLimit,
         tradeQuantity: 1,
-        maxSlots: 3,
+        maxSlots: 10,
         gapInventory: [],
         gapTradingProfit: 0,
         gapTradeCount: 0,
@@ -1404,7 +1404,7 @@ export default function App() {
         gapBuyPrice: krLimits.lowerLimit,
         gapSellPrice: krLimits.upperLimit,
         tradeQuantity: 1,
-        maxSlots: 3,
+        maxSlots: 10,
         gapInventory: [],
         gapTradingProfit: 0,
         gapTradeCount: 0,
@@ -1581,7 +1581,7 @@ export default function App() {
       gapBuyPrice: limits.lowerLimit,
       gapSellPrice: limits.upperLimit,
       tradeQuantity: 1,
-      maxSlots: 3,
+      maxSlots: 10,
       gapInventory: [],
       gapTradingProfit: 0,
       gapTradeCount: 0,
@@ -1693,7 +1693,7 @@ export default function App() {
   const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(false);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
-  const [maxSlots, setMaxSlots] = useState<number>(3);
+  const [maxSlots, setMaxSlots] = useState<number>(10);
   const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(true); // Default true: 중복/동일가 매수 차단 해제
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
@@ -1930,7 +1930,7 @@ export default function App() {
         gapBuyPrice,
         gapSellPrice,
         tradeQuantity,
-        maxSlots: maxSlots || 3,
+        maxSlots: maxSlots || 10,
         gapInventory: (gapInventory || []).filter(s => !s.symbol || s.symbol === tab.symbol),
         gapTradingProfit,
         gapTradeCount,
@@ -3527,7 +3527,7 @@ export default function App() {
           gapBuyPrice: limits.lowerLimit,
           gapSellPrice: limits.upperLimit,
           tradeQuantity: 1,
-          maxSlots: 3,
+          maxSlots: 10,
           gapInventory: [],
           gapTradingProfit: 0,
           gapTradeCount: 0,
@@ -4627,7 +4627,7 @@ export default function App() {
                 gapBuyPrice: limits.lowerLimit,
                 gapSellPrice: limits.upperLimit,
                 tradeQuantity: 1,
-                maxSlots: 3,
+                maxSlots: 10,
                 gapInventory: [],
                 gapTradingProfit: 0,
                 gapTradeCount: 0,
@@ -6095,7 +6095,7 @@ export default function App() {
         }
 
         const itemTradeQty = tabItem.tradeQuantity || (isSelected ? tradeQuantity : 1);
-        const itemMaxSlots = tabItem.maxSlots || (isSelected ? maxSlots : 3);
+        const itemMaxSlots = tabItem.maxSlots || (isSelected ? maxSlots : 10);
         const itemEntryMode = tabItem.entryPriceMode || (isSelected ? entryPriceMode : 'BID2');
 
         const isOverSold = rsi < 35;
@@ -8650,17 +8650,17 @@ export default function App() {
                     <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1.5">
                       <Layers className="w-3.5 h-3.5 text-emerald-400" /> 최대 분할 슬롯
                     </label>
-                    <span className="text-xs font-bold text-emerald-400 font-mono">추천: 3개</span>
+                    <span className="text-xs font-bold text-emerald-400 font-mono">기본: 10개</span>
                   </div>
                   <select 
                     value={maxSlots}
                     onChange={(e) => setMaxSlots(Number(e.target.value))}
                     className="w-full bg-black/50 border border-emerald-500/30 rounded-xl p-1.5 text-center text-xs sm:text-sm font-bold outline-none text-emerald-300 font-mono appearance-none cursor-pointer"
-                    title="최대 분할 매수 슬롯 개수 (추천: 3회 분할 진입)"
+                    title="최대 분할 매수 슬롯 개수 (기본: 10회 분할 진입)"
                   >
-                    {[1, 2, 3, 4, 5].map(val => (
+                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20].map(val => (
                       <option key={val} value={val} className="bg-sleek-bg text-white">
-                        {val}개 슬롯 {val === 3 ? '(추천★)' : ''}
+                        {val}개 슬롯 {val === 10 ? '(설정/기본★)' : ''}
                       </option>
                     ))}
                   </select>
@@ -10124,7 +10124,7 @@ export default function App() {
                     <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">
                       {enableCombinedAvgProfitExit 
                         ? (currentInventory.length > 0 ? "통합 (1/1)" : "통합 (대기)") 
-                        : `체결 (${currentInventory.length} / ${maxSlots || 3})`
+                        : `체결 (${currentInventory.length} / ${maxSlots || 10})`
                       }
                     </span>
                   </div>
