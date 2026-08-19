@@ -8588,17 +8588,17 @@ export default function App() {
                     <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1">
                       <Layers className="w-3.5 h-3.5 text-emerald-400" /> 최대 분할 슬롯
                     </label>
-                    <span className="text-xs font-bold text-emerald-400 font-mono">기본: 10개</span>
+                    <span className="text-xs font-bold text-emerald-400 font-mono">10개★</span>
                   </div>
                   <select 
                     value={maxSlots}
                     onChange={(e) => setMaxSlots(Number(e.target.value))}
                     className="w-full bg-black/50 border border-emerald-500/30 rounded-xl p-1.5 text-center text-xs sm:text-sm font-bold outline-none text-emerald-300 font-mono appearance-none cursor-pointer"
-                    title="최대 분할 매수 슬롯 개수 (기본: 10회 분할 진입)"
+                    title="최대 분할 매수 개수 (기본: 10개)"
                   >
                     {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20].map(val => (
                       <option key={val} value={val} className="bg-sleek-bg text-white">
-                        {val}개 슬롯 {val === 10 ? '(설정/기본★)' : ''}
+                        {val === 10 ? '10개★' : `${val}개`}
                       </option>
                     ))}
                   </select>
@@ -8622,7 +8622,7 @@ export default function App() {
                   >
                     {[0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1.0].map(val => (
                       <option key={val} value={val} className="bg-sleek-bg text-emerald-400">
-                        +{val}% {val === 0.2 ? '(기본★)' : '(순익)'}
+                        +{val}%{val === 0.2 ? '★' : ''}
                       </option>
                     ))}
                   </select>
@@ -8634,7 +8634,7 @@ export default function App() {
                   >
                     {[-0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9, -1.0].map(val => (
                       <option key={val} value={val} className="bg-sleek-bg text-rose-400">
-                        {val}% {val === -0.5 ? '(기본★)' : ''}
+                        {val}%{val === -0.5 ? '★' : ''}
                       </option>
                     ))}
                   </select>
@@ -8688,91 +8688,44 @@ export default function App() {
                   </select>
                 </div>
 
-                {/* 진입 호가 방식 */}
+                {/* 진입 호가 방식 드롭다운 */}
                 <div className="pt-1.5 border-t border-white/10">
-                  <span className="text-[11px] font-bold text-white flex items-center gap-1 mb-1">
-                    <TrendingDown className="w-3 h-3 text-amber-400" /> 진입 호가 방식
-                  </span>
-                  <div className="grid grid-cols-4 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => setEntryPriceMode('BID1')}
-                      className={cn(
-                        "py-1 rounded-lg text-[11px] font-bold border text-center transition-all cursor-pointer",
-                        entryPriceMode === 'BID1' ? "bg-blue-500/20 border-blue-500/40 text-blue-300 font-black" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
-                      )}
-                      title="매수 1호가 지정가 진입"
-                    >
-                      1호가
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEntryPriceMode('BID2')}
-                      className={cn(
-                        "py-1 rounded-lg text-[11px] font-bold border text-center transition-all cursor-pointer",
-                        entryPriceMode === 'BID2' ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-black" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
-                      )}
-                      title="기본 매수 2호가 진입 (스캘퍼 권장)"
-                    >
-                      2호가★
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEntryPriceMode('BID4')}
-                      className={cn(
-                        "py-1 rounded-lg text-[11px] font-bold border text-center transition-all cursor-pointer",
-                        entryPriceMode === 'BID4' ? "bg-amber-500/20 border-amber-500/40 text-amber-300 font-black" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
-                      )}
-                      title="매수 4호가 지정가 진입"
-                    >
-                      4호가
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEntryPriceMode('CURRENT')}
-                      className={cn(
-                        "py-1 rounded-lg text-[11px] font-bold border text-center transition-all cursor-pointer",
-                        entryPriceMode === 'CURRENT' ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue font-black" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
-                      )}
-                      title="현재 시장 체결가 진입"
-                    >
-                      현재가
-                    </button>
+                  <div className="flex items-center justify-between mb-0.5">
+                    <span className="text-[11px] font-bold text-white flex items-center gap-1">
+                      <TrendingDown className="w-3 h-3 text-amber-400" /> 진입 호가 방식
+                    </span>
                   </div>
+                  <select
+                    value={entryPriceMode}
+                    onChange={(e) => setEntryPriceMode(e.target.value as any)}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-2 py-1 text-xs font-bold text-white outline-none cursor-pointer appearance-none"
+                    title="진입 호가 방식 선택"
+                  >
+                    <option value="BID1" className="bg-sleek-bg text-white">매수1호가</option>
+                    <option value="BID2" className="bg-sleek-bg text-emerald-400 font-bold">매수2호가★</option>
+                    <option value="BID4" className="bg-sleek-bg text-white">매수4호가</option>
+                    <option value="CURRENT" className="bg-sleek-bg text-white">현재가</option>
+                  </select>
                 </div>
 
-                {/* 실행 속도 */}
+                {/* 실행 속도 드롭다운 */}
                 <div className="pt-1.5 border-t border-white/10">
-                  <div className="flex justify-between items-center mb-1">
+                  <div className="flex items-center justify-between mb-0.5">
                     <span className="text-[11px] font-bold text-slate-300 uppercase flex items-center gap-1">
                       <Activity className="w-3 h-3 text-amber-400" /> 실행 속도
                     </span>
-                    <span className="text-[11px] font-mono font-bold text-amber-300">
-                      {(scalpingSpeed / 1000).toFixed(1)}초
-                    </span>
                   </div>
-                  <div className="grid grid-cols-4 gap-1">
-                    {[
-                      { label: '0.1s', value: 100 },
-                      { label: '0.2s', value: 200 },
-                      { label: '0.3s', value: 300 },
-                      { label: '0.5s', value: 500 }
-                    ].map(opt => (
-                      <button
-                        key={opt.value}
-                        type="button"
-                        onClick={() => setScalpingSpeed(opt.value)}
-                        className={cn(
-                          "py-1 rounded-lg text-[11px] font-mono font-bold transition-all text-center cursor-pointer border",
-                          scalpingSpeed === opt.value
-                            ? "bg-amber-500/20 text-amber-300 border-amber-500/40 font-black"
-                            : "bg-black/30 text-slate-400 border-white/5 hover:bg-white/10"
-                        )}
-                      >
-                        {opt.label}
-                      </button>
-                    ))}
-                  </div>
+                  <select
+                    value={scalpingSpeed}
+                    onChange={(e) => setScalpingSpeed(Number(e.target.value))}
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-2 py-1 text-xs font-mono font-bold text-amber-300 outline-none cursor-pointer appearance-none"
+                    title="스캘핑 실행 주기 (체결 속도)"
+                  >
+                    <option value={100} className="bg-sleek-bg text-white">0.1s</option>
+                    <option value={200} className="bg-sleek-bg text-white">0.2s</option>
+                    <option value={300} className="bg-sleek-bg text-amber-300 font-bold">0.3s★</option>
+                    <option value={500} className="bg-sleek-bg text-white">0.5s</option>
+                  </select>
                 </div>
               </div>
 
