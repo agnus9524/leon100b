@@ -1701,8 +1701,8 @@ export default function App() {
   }, [gapInventory]);
 
   // Automated Scalping Configuration States
-  const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.3); // Scalping net target profit (+0.3% default)
-  const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-0.9); // Scalping stop loss (-0.9% default, range -0.5% ~ -0.9%)
+  const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.2); // Scalping net target profit (+0.2% default)
+  const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-0.5); // Scalping stop loss (-0.5% default)
   const [scalpingSpeed, setScalpingSpeed] = useState<number>(300); // 300ms (0.3s) fast execution speed
   const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(false);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
@@ -8346,153 +8346,124 @@ export default function App() {
             }
 
             return (
-              <div className="bg-gradient-to-br from-slate-900/90 via-slate-900/95 to-slate-950/90 border border-slate-700/60 p-4 sm:p-5 rounded-3xl shadow-2xl backdrop-blur-xl space-y-3.5">
-                {/* 상단 종목 헤더 & 시세 바 */}
-                <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-white/10">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-sleek-blue/30 to-indigo-600/30 border border-sleek-blue/40 flex items-center justify-center text-sleek-blue font-black font-mono shadow-inner text-base">
+              <div className="bg-gradient-to-br from-slate-900/90 via-slate-900/95 to-slate-950/90 border border-slate-700/60 p-3.5 sm:p-4 rounded-3xl shadow-2xl backdrop-blur-xl">
+                {/* 상단 통합 시세 & 종목 종합 지표 바 (한 줄 일체형 배치) */}
+                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3.5">
+                  {/* 좌측: 종목 아이콘 + 종목명 + 종목코드 + [현재 체결가 & 전일 대비] + [보유수량 및 주문가능수량] */}
+                  <div className="flex items-center gap-3.5 flex-wrap">
+                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-sleek-blue/30 to-indigo-600/30 border border-sleek-blue/40 flex items-center justify-center text-sleek-blue font-black font-mono shadow-inner text-base shrink-0">
                       {selectedStock.symbol.slice(0, 3)}
                     </div>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                    
+                    <div className="flex flex-col justify-center">
+                      {/* 1행: 종목명 + 종목코드 + [현재 체결가 & 전일 대비] */}
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
                           {selectedStock.name}
                         </h2>
-                        <span className="text-xs sm:text-sm font-mono font-bold text-slate-400 bg-black/40 px-2.5 py-0.5 rounded-lg border border-white/10">
+                        <span className="text-xs font-mono font-bold text-slate-400 bg-black/40 px-2 py-0.5 rounded-lg border border-white/10">
                           {selectedStock.symbol}
                         </span>
-                        <span className="text-xs font-mono font-extrabold text-amber-400 bg-amber-500/15 px-2 py-0.5 rounded-md border border-amber-500/30">
-                          {isUS ? '미국 주식' : '국내 주식'}
+
+                        {/* 현재 체결가 & 전일 대비 ('국내 주식' 배지 위치에 인라인 배치) */}
+                        <div className="flex items-center gap-2 bg-black/50 px-2.5 py-1 rounded-xl border border-white/10">
+                          <span className="text-[11px] font-bold text-slate-400">현재 체결가:</span>
+                          <span className="text-sm sm:text-base font-black text-white font-mono">
+                            {formatCurrency(price, false, isUS ? 'US' : 'KR')}
+                          </span>
+                          <div className="h-3 w-px bg-white/20" />
+                          <span className="text-[11px] font-bold text-slate-400">전일 대비:</span>
+                          <span className={cn("text-xs sm:text-sm font-black font-mono flex items-center gap-0.5", isUp ? "text-rose-400" : "text-sky-400")}>
+                            {isUp ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                            <span>{isUp ? '+' : ''}{formatCurrency(changeVal, false, isUS ? 'US' : 'KR')}</span>
+                            <span className="text-[11px]">({isUp ? '+' : ''}{changePct.toFixed(2)}%)</span>
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* 2행: 보유 수량 & 주문 가능 수량 (보유 수량 아래쪽에 주문 가능 배치) */}
+                      <div className="text-xs text-slate-400 mt-1 flex flex-col gap-0.5 font-mono">
+                        <div>보유 수량: <strong className="text-white font-bold">{heldQty.toLocaleString()}주</strong></div>
+                        <div>주문 가능: <strong className="text-sleek-blue font-bold">{displayBuyableQty.toLocaleString()}주</strong></div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 우측: 위로 올려서 한 줄로 통합 배치된 4대 핵심 지표 카드 */}
+                  <div className="flex items-center gap-2.5 flex-wrap grow justify-end">
+                    {/* 1. 당일 가격 제한폭 카드 */}
+                    <div className="bg-black/40 px-3 py-2 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[145px] text-xs">
+                      <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
+                        <Layers className="w-3 h-3 text-slate-400" /> 당일 가격 제한폭
+                      </span>
+                      <div className="flex items-center justify-between font-mono pt-1 text-[11px]">
+                        <span className="text-rose-400 font-bold flex items-center gap-0.5">
+                          <TrendingUp className="w-2.5 h-2.5" /> 상한 (+30%):
+                        </span>
+                        <strong className="text-rose-400 font-black">{formatCurrency(upperLimit, false, isUS ? 'US' : 'KR')}</strong>
+                      </div>
+                      <div className="flex items-center justify-between font-mono pt-0.5 border-t border-white/5 text-[11px]">
+                        <span className="text-sky-400 font-bold flex items-center gap-0.5">
+                          <TrendingDown className="w-2.5 h-2.5" /> 하한 (-30%):
+                        </span>
+                        <strong className="text-sky-400 font-black">{formatCurrency(lowerLimit, false, isUS ? 'US' : 'KR')}</strong>
+                      </div>
+                    </div>
+
+                    {/* 2. 호가창 총 잔량 비율 */}
+                    <div className="bg-black/40 px-3 py-2 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[170px] text-xs">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="font-bold text-slate-400 flex items-center gap-1">
+                          <Activity className="w-3 h-3 text-sleek-blue" /> 호가창 총 잔량 비율
+                        </span>
+                        <span className="font-mono font-bold text-slate-300">
+                          {bidShare}% / {askShare}%
                         </span>
                       </div>
-                      <div className="text-xs text-slate-400 mt-0.5 flex items-center gap-3">
-                        <span>보유 수량: <strong className="text-white font-bold">{heldQty.toLocaleString()}주</strong></span>
-                        <span>•</span>
-                        <span>주문 가능: <strong className="text-sleek-blue font-bold">{displayBuyableQty.toLocaleString()}주</strong></span>
+                      <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden flex my-1">
+                        <div style={{ width: `${bidShare}%` }} className="bg-rose-500 h-full transition-all" title={`매수잔량: ${bidTotal.toLocaleString()}주`} />
+                        <div style={{ width: `${askShare}%` }} className="bg-sky-500 h-full transition-all" title={`매도잔량: ${askTotal.toLocaleString()}주`} />
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] font-mono pt-0.5 border-t border-white/5">
+                        <span className="text-rose-300">매수: <strong>{bidTotal.toLocaleString()}주</strong></span>
+                        <span className="text-sky-300">매도: <strong>{askTotal.toLocaleString()}주</strong></span>
                       </div>
                     </div>
-                  </div>
 
-                  {/* 현재가 및 등락률 */}
-                  <div className="flex items-center gap-4 bg-black/40 px-4 py-2 rounded-2xl border border-white/10 self-start lg:self-auto">
-                    <div className="text-right">
-                      <div className="text-xs font-bold text-slate-400">현재 체결가</div>
-                      <div className="text-xl sm:text-2xl font-black text-white font-mono tracking-tight">
-                        {formatCurrency(price, false, isUS ? 'US' : 'KR')}
+                    {/* 3. 실시간 누적 거래량 */}
+                    <div className="bg-black/40 px-3 py-2 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[145px] text-xs">
+                      <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
+                        <Zap className="w-3 h-3 text-amber-400" /> 실시간 누적 거래량
+                      </span>
+                      <div className="text-sm font-black text-white font-mono my-0.5">
+                        {typeof selectedStock.volume === 'number' ? selectedStock.volume.toLocaleString() : selectedStock.volume}
+                      </div>
+                      <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-0.5 border-t border-white/5">
+                        <span>체결 강도:</span>
+                        <strong className={cn("font-bold", bidShare >= 50 ? "text-rose-400" : "text-sky-400")}>
+                          {Math.round((bidTotal / (askTotal || 1)) * 100)}%
+                        </strong>
                       </div>
                     </div>
-                    <div className="h-8 w-px bg-white/10" />
-                    <div className="text-right">
-                      <div className="text-xs font-bold text-slate-400">전일 대비</div>
-                      <div className={cn("text-base sm:text-lg font-black font-mono flex items-center justify-end gap-1", isUp ? "text-rose-400" : "text-sky-400")}>
-                        {isUp ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-                        <span>{isUp ? '+' : ''}{formatCurrency(changeVal, false, isUS ? 'US' : 'KR')}</span>
-                        <span className="text-xs">({isUp ? '+' : ''}{changePct.toFixed(2)}%)</span>
-                      </div>
-                    </div>
-                  </div>
-                </div>
 
-                {/* 그리드 1: 상한가/하한가, 호가 물량 잔량, 누적 거래량 */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                  {/* 상한가 & 하한가 카드 */}
-                  <div className="bg-black/30 p-3 rounded-2xl border border-white/5 flex flex-col justify-between space-y-1.5">
-                    <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
-                      <Layers className="w-3.5 h-3.5 text-slate-400" /> 당일 가격 제한폭
-                    </span>
-                    <div className="flex items-center justify-between text-xs sm:text-sm font-mono pt-1">
-                      <span className="text-rose-400 font-bold flex items-center gap-1">
-                        <TrendingUp className="w-3 h-3" /> 상한가 (+30%):
+                    {/* 4. AI 스캘핑 종합 점수 */}
+                    <div className="bg-black/40 px-3 py-2 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[140px] text-xs">
+                      <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3 text-purple-400" /> AI 스캘핑 종합 점수
                       </span>
-                      <strong className="text-rose-400 font-black">{formatCurrency(upperLimit, false, isUS ? 'US' : 'KR')}</strong>
-                    </div>
-                    <div className="flex items-center justify-between text-xs sm:text-sm font-mono pt-1 border-t border-white/5">
-                      <span className="text-sky-400 font-bold flex items-center gap-1">
-                        <TrendingDown className="w-3 h-3" /> 하한가 (-30%):
-                      </span>
-                      <strong className="text-sky-400 font-black">{formatCurrency(lowerLimit, false, isUS ? 'US' : 'KR')}</strong>
-                    </div>
-                  </div>
-
-                  {/* 호가 매수/매도 물량 잔량 */}
-                  <div className="bg-black/30 p-3 rounded-2xl border border-white/5 flex flex-col justify-between space-y-1.5">
-                    <div className="flex items-center justify-between">
-                      <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
-                        <Activity className="w-3.5 h-3.5 text-sleek-blue" /> 호가창 총 잔량 비율
-                      </span>
-                      <span className="text-xs font-mono font-bold text-slate-300">
-                        매수 {bidShare}% / 매도 {askShare}%
-                      </span>
-                    </div>
-                    <div className="w-full bg-slate-800 h-2.5 rounded-full overflow-hidden flex">
-                      <div style={{ width: `${bidShare}%` }} className="bg-rose-500 h-full transition-all" title={`매수잔량: ${bidTotal.toLocaleString()}주`} />
-                      <div style={{ width: `${askShare}%` }} className="bg-sky-500 h-full transition-all" title={`매도잔량: ${askTotal.toLocaleString()}주`} />
-                    </div>
-                    <div className="flex items-center justify-between text-xs font-mono pt-1 border-t border-white/5">
-                      <span className="text-rose-300">매수총잔량: <strong>{bidTotal.toLocaleString()}주</strong></span>
-                      <span className="text-sky-300">매도총잔량: <strong>{askTotal.toLocaleString()}주</strong></span>
-                    </div>
-                  </div>
-
-                  {/* 거래량 및 거래대금 추정 */}
-                  <div className="bg-black/30 p-3 rounded-2xl border border-white/5 flex flex-col justify-between space-y-1.5">
-                    <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
-                      <Zap className="w-3.5 h-3.5 text-amber-400" /> 실시간 누적 거래량
-                    </span>
-                    <div className="text-base sm:text-lg font-black text-white font-mono">
-                      {typeof selectedStock.volume === 'number' ? selectedStock.volume.toLocaleString() : selectedStock.volume}
-                    </div>
-                    <div className="flex items-center justify-between text-xs text-slate-400 font-mono pt-1 border-t border-white/5">
-                      <span>체결 강도:</span>
-                      <strong className={cn("font-bold", bidShare >= 50 ? "text-rose-400" : "text-sky-400")}>
-                        {Math.round((bidTotal / (askTotal || 1)) * 100)}%
-                      </strong>
-                    </div>
-                  </div>
-
-                  {/* 스캘핑 적합도 & 모멘텀 점수 */}
-                  <div className="bg-black/30 p-3 rounded-2xl border border-white/5 flex flex-col justify-between space-y-1.5">
-                    <span className="text-xs font-bold text-slate-400 flex items-center gap-1.5">
-                      <Sparkles className="w-3.5 h-3.5 text-purple-400" /> AI 스캘핑 종합 점수
-                    </span>
-                    <div className="flex items-center justify-between">
-                      <span className="text-xl sm:text-2xl font-black font-mono text-emerald-400">
-                        {signalScore}점
-                      </span>
-                      <span className="text-xs font-bold text-purple-300 bg-purple-500/20 px-2 py-0.5 rounded-lg border border-purple-500/30">
-                        초단타 최적
-                      </span>
-                    </div>
-                    <div className="text-xs text-slate-400 pt-1 border-t border-white/5 flex items-center justify-between">
-                      <span>권장 손익비:</span>
-                      <strong className="text-emerald-400 font-mono">+0.5% / -0.3%</strong>
-                    </div>
-                  </div>
-                </div>
-
-                {/* 그리드 2: AI 실시간 시세 분석 보고서 */}
-                <div className="bg-black/40 p-3.5 sm:p-4 rounded-2xl border border-sleek-blue/30 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                  <div className="flex items-start gap-3">
-                    <div className="p-2 rounded-xl bg-purple-500/20 text-purple-300 border border-purple-500/40 shrink-0 mt-0.5">
-                      <Sparkles className="w-4 h-4 animate-pulse" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs sm:text-sm font-black text-white uppercase tracking-wider">
-                          AI 시세 진단 및 향후 방향성 보고
+                      <div className="flex items-center justify-between my-0.5">
+                        <span className="text-base font-black font-mono text-emerald-400">
+                          {signalScore}점
                         </span>
-                        <span className={cn("text-xs font-bold px-2 py-0.5 rounded-md border", aiBadgeColor)}>
-                          {trendOutlook}
+                        <span className="text-[10px] font-bold text-purple-300 bg-purple-500/20 px-1.5 py-0.5 rounded border border-purple-500/30">
+                          초단타 최적
                         </span>
                       </div>
-                      <p className="text-xs sm:text-sm text-slate-300 mt-1 leading-relaxed">
-                        {reportDetail}
-                      </p>
+                      <div className="text-[10px] text-slate-400 pt-0.5 border-t border-white/5 flex items-center justify-between font-mono">
+                        <span>권장 손익:</span>
+                        <strong className="text-emerald-400">+0.2% / -0.5%</strong>
+                      </div>
                     </div>
-                  </div>
-                  <div className="shrink-0 text-right self-end sm:self-center">
-                    <span className="text-[11px] text-slate-500 block font-mono">Real-time AI Engine</span>
-                    <span className="text-xs font-bold text-sleek-blue font-mono">자동 타점 동기화 활성</span>
                   </div>
                 </div>
               </div>
@@ -8687,7 +8658,7 @@ export default function App() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3 items-stretch text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-stretch text-xs">
               {/* 1. Trade Quantity & Target Profit / Stop Loss */}
               <div className="bg-black/30 p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-2">
                 <div className="flex items-center justify-between">
@@ -8741,26 +8712,30 @@ export default function App() {
                     value={scalpingTargetProfit}
                     onChange={(e) => setScalpingTargetProfit(Number(e.target.value))}
                     className="bg-black/50 border border-emerald-500/40 rounded-xl p-1.5 text-xs sm:text-sm font-mono outline-none text-emerald-400 text-center font-bold appearance-none cursor-pointer"
-                    title="목표 순수익률 (0.05% ~ 0.3% 선택 가능)"
+                    title="목표 순수익률 (기본 +0.2%)"
                   >
-                    {[0.05, 0.1, 0.15, 0.2, 0.25, 0.3].map(val => (
-                      <option key={val} value={val} className="bg-sleek-bg text-emerald-400">+{val}% (순익)</option>
+                    {[0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1.0].map(val => (
+                      <option key={val} value={val} className="bg-sleek-bg text-emerald-400">
+                        +{val}% {val === 0.2 ? '(기본★)' : '(순익)'}
+                      </option>
                     ))}
                   </select>
                   <select 
                     value={scalpingStopLoss}
                     onChange={(e) => setScalpingStopLoss(Number(e.target.value))}
                     className="bg-black/50 border border-rose-500/40 rounded-xl p-1.5 text-xs sm:text-sm font-mono outline-none text-rose-400 text-center font-bold appearance-none cursor-pointer"
-                    title="손절 기준률 (-0.5% ~ -0.9% 선택 가능)"
+                    title="손절 기준률 (기본 -0.5%)"
                   >
-                    {[-0.5, -0.6, -0.7, -0.8, -0.9].map(val => (
-                      <option key={val} value={val} className="bg-sleek-bg text-rose-400">{val}%</option>
+                    {[-0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9, -1.0].map(val => (
+                      <option key={val} value={val} className="bg-sleek-bg text-rose-400">
+                        {val}% {val === -0.5 ? '(기본★)' : ''}
+                      </option>
                     ))}
                   </select>
                 </div>
               </div>
 
-              {/* 3. Smart Scalper Configuration */}
+              {/* 2. Smart Scalper Configuration */}
               <div className="bg-sleek-blue/5 border border-sleek-blue/20 p-3 rounded-2xl flex flex-col justify-between space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1 group relative">
@@ -8829,8 +8804,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 4. Entry Mode & Auto Cancel Drop */}
-              <div className="bg-white/5 p-3 rounded-2xl border border-white/10 flex flex-col justify-between space-y-2">
+              {/* 3. Entry Price Mode & Execution Speed (Placed below Entry Mode) */}
+              <div className="bg-white/5 p-3 rounded-2xl border border-white/10 flex flex-col justify-between space-y-2.5">
                 <div>
                   <span className="text-xs font-bold text-white flex items-center gap-1 mb-1.5">
                     <TrendingDown className="w-3.5 h-3.5 text-amber-400" /> 진입 호가 방식
@@ -8883,35 +8858,15 @@ export default function App() {
                   </div>
                 </div>
 
-                <div>
-                  <div className="flex justify-between items-center mb-1">
-                    <span className="text-xs font-bold text-white flex items-center gap-1">
-                      <Trash2 className="w-3.5 h-3.5 text-rose-400" /> 자동 취소 낙폭
+                <div className="pt-2 border-t border-white/10">
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-xs font-bold text-slate-300 uppercase flex items-center gap-1">
+                      <Activity className="w-3.5 h-3.5 text-amber-400" /> 실행 속도
                     </span>
-                    <span className="text-xs sm:text-sm font-bold text-rose-400 font-mono">-{autoCancelThreshold}%</span>
+                    <span className="text-xs font-mono font-bold text-amber-300">
+                      {(scalpingSpeed / 1000).toFixed(1)}초
+                    </span>
                   </div>
-                  <div className="grid grid-cols-4 gap-1">
-                    {[ 0.1, 0.2, 0.3, 0.5 ].map(pct => (
-                      <button
-                        key={pct}
-                        type="button"
-                        onClick={() => setAutoCancelThreshold(pct)}
-                        className={cn(
-                          "py-1 rounded-lg text-xs font-bold font-mono border text-center transition-all cursor-pointer",
-                          autoCancelThreshold === pct ? "bg-rose-500/20 border-rose-500/40 text-rose-300" : "bg-black/30 border-white/5 text-gray-400"
-                        )}
-                      >
-                        {pct}%
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              </div>
-
-              {/* 5. Speed & Immediate Entry */}
-              <div className="bg-white/5 p-3 rounded-2xl border border-white/10 flex flex-col justify-between space-y-2">
-                <div>
-                  <span className="text-xs font-bold text-slate-300 uppercase block mb-1.5">실행 속도</span>
                   <div className="grid grid-cols-4 gap-1">
                     {[
                       { label: '0.1s', value: 100 },
@@ -8924,10 +8879,10 @@ export default function App() {
                         type="button"
                         onClick={() => setScalpingSpeed(opt.value)}
                         className={cn(
-                          "py-1.5 rounded-lg text-xs font-mono font-bold transition-all text-center cursor-pointer",
+                          "py-1.5 rounded-lg text-xs font-mono font-bold transition-all text-center cursor-pointer border",
                           scalpingSpeed === opt.value
-                            ? "bg-amber-500/20 text-amber-300 border border-amber-500/40"
-                            : "bg-white/5 text-slate-400 hover:bg-white/10"
+                            ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                            : "bg-black/30 text-slate-400 border-white/5 hover:bg-white/10"
                         )}
                       >
                         {opt.label}
@@ -8935,27 +8890,10 @@ export default function App() {
                     ))}
                   </div>
                 </div>
-
-                <div className="pt-1.5 border-t border-white/10">
-                  <button
-                    type="button"
-                    onClick={() => setImmediateEntry(!immediateEntry)}
-                    className={cn(
-                      "w-full py-1.5 px-2 rounded-xl text-xs font-bold border flex items-center justify-center gap-1.5 transition-all cursor-pointer",
-                      immediateEntry 
-                        ? "bg-rose-500/25 border-rose-500/50 text-rose-300 shadow-[0_0_8px_rgba(244,63,94,0.3)] animate-pulse" 
-                        : "bg-black/40 border-white/10 text-gray-400 hover:text-white"
-                    )}
-                    title="전략 조건 충족을 기다리지 않고 즉시 매수 진입합니다."
-                  >
-                    <Zap className="w-3.5 h-3.5 text-amber-400" />
-                    <span>{immediateEntry ? "⚡ 즉시 강제 진입 ON" : "조건포착 후 매수"}</span>
-                  </button>
-                </div>
               </div>
 
-              {/* 6. Big Action Button (Column 6) */}
-              <div className="flex items-center justify-center col-span-1 sm:col-span-2 md:col-span-3 lg:col-span-1">
+              {/* 4. Big Action Button (Column 4) */}
+              <div className="flex items-center justify-center">
                 <button 
                   onClick={() => {
                     if (isSyncingKIS || initSyncState.status === 'syncing') {
