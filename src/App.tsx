@@ -8184,287 +8184,250 @@ export default function App() {
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_360px] gap-px bg-sleek-border overflow-y-auto lg:overflow-hidden">
         {/* Main Terminal (Full Width Center & Left) */}
         <section className="bg-sleek-bg overflow-y-auto custom-scrollbar p-3 sm:p-4 md:p-5 space-y-4">
-          {/* 0. 종목 선택 및 입력 영역 (AI SCALPING CONFIG 상단 배치 & 최상단 z-index 보장) */}
-          <div className="relative z-[90] bg-sleek-card border border-sleek-border p-4 sm:p-5 rounded-3xl shadow-xl flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4 backdrop-blur-md">
-            <div className="flex items-center gap-3 shrink-0">
-              <div className="p-2.5 rounded-2xl bg-sleek-blue/20 border border-sleek-blue/40 text-sleek-blue shadow-inner">
-                <Search className="w-5 h-5" />
-              </div>
-              <div>
-                <h2 className="text-base sm:text-lg font-black text-white uppercase tracking-wider flex items-center gap-2">
-                  종목 선택 &amp; 추가
-                  <span className="text-xs font-mono font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                    실시간 연동
-                  </span>
-                </h2>
-                <p className="text-xs sm:text-sm text-sleek-text-secondary mt-0.5">
-                  종목코드(6자리) 또는 종목명을 입력 후 Enter를 누르면 스캘핑 탭이 즉시 생성됩니다.
-                </p>
-              </div>
-            </div>
-
-            <div ref={searchRef} className="relative z-[100] flex-1 max-w-2xl">
-              <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-              <input 
-                ref={searchInputRef}
-                type="text" 
-                value={searchSymbol}
-                onChange={(e) => setSearchSymbol(e.target.value)}
-                onFocus={() => {
-                  if (searchSuggestions.length > 0) setShowSuggestions(true);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    handleAddStock();
-                  }
-                }}
-                className="w-full bg-black/50 border border-white/15 focus:border-sleek-blue rounded-2xl py-3 pl-11 pr-24 text-sm sm:text-base font-semibold text-white placeholder:text-slate-500 outline-none transition-all shadow-inner" 
-                placeholder="종목코드 또는 이름 입력 (예: 005930, 셀트리온, 이구산업, NVDA)"
-              />
-              <button
-                type="button"
-                onClick={() => handleAddStock()}
-                className="absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 bg-sleek-blue hover:bg-blue-600 active:scale-95 text-white text-xs sm:text-sm font-bold rounded-xl transition-all shadow-md cursor-pointer"
-              >
-                추가
-              </button>
-              
-              {/* Search Suggestions Dropdown - 최상단 z-[200] 레이어 배치로 하단 창에 가려지지 않도록 보장 */}
-              <AnimatePresence>
-                {showSuggestions && searchSuggestions.length > 0 && (
-                  <motion.div 
-                    initial={{ opacity: 0, y: -4, scale: 0.98 }} 
-                    animate={{ opacity: 1, y: 0, scale: 1 }} 
-                    exit={{ opacity: 0, y: -4, scale: 0.98 }}
-                    transition={{ duration: 0.15 }}
-                    className="absolute top-full left-0 right-0 mt-2 z-[200] bg-slate-900/98 backdrop-blur-2xl border-2 border-sleek-blue/50 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.95)] ring-2 ring-sleek-blue/30 overflow-hidden"
-                  >
-                    {/* 상단 안내 바 */}
-                    <div className="px-4 py-2 bg-slate-950/90 border-b border-white/10 flex items-center justify-between text-xs text-slate-400 font-bold uppercase tracking-wider">
-                      <span className="flex items-center gap-1.5 text-sleek-blue">
-                        <Search className="w-3.5 h-3.5" /> 실시간 검색 종목 ({searchSuggestions.length}개)
-                      </span>
-                      <span className="text-[11px] text-emerald-400 font-medium">클릭 시 즉시 스캘핑 탭 추가</span>
-                    </div>
-
-                    <div className="max-h-[340px] overflow-y-auto custom-scrollbar divide-y divide-white/5">
-                      {searchSuggestions.map((s, idx) => {
-                        const isUS = s.market === 'US' || /^[A-Za-z]/.test(s.symbol);
-                        return (
-                          <button 
-                            key={`${s.symbol}-${idx}`}
-                            onClick={() => handleAddStock(s.symbol, undefined, s.name)}
-                            className="w-full flex items-center justify-between p-3.5 hover:bg-sleek-blue/20 active:bg-sleek-blue/30 transition-colors text-left cursor-pointer group"
-                          >
-                            <div className="flex flex-col gap-1">
-                              <div className="flex items-center gap-2.5">
-                                <div className="text-sm sm:text-base font-extrabold text-white group-hover:text-sleek-blue transition-colors">
-                                  {s.name}
-                                </div>
-                                <span className={cn(
-                                  "text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border",
-                                  isUS 
-                                    ? "bg-amber-500/15 text-amber-300 border-amber-500/30" 
-                                    : "bg-emerald-500/15 text-emerald-300 border-emerald-500/30"
-                                )}>
-                                  {isUS ? '미국' : '국내'}
-                                </span>
-                              </div>
-                              <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-                                <span className="text-slate-300 font-semibold">{s.symbol}</span>
-                                {s.price !== undefined && s.price > 0 && (
-                                  <>
-                                    <span>•</span>
-                                    <span className="text-sleek-blue font-bold">
-                                      {formatCurrency(s.price, false, isUS ? 'US' : 'KR')}
-                                    </span>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2 text-xs font-bold text-sleek-blue opacity-80 group-hover:opacity-100 group-hover:translate-x-1 transition-all">
-                              <span>탭 추가</span>
-                              <ChevronRight className="w-4 h-4" />
-                            </div>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
-            </div>
-          </div>
-
-          {/* 0-1. 선택된 종목 종합 정보 & 실시간 AI 분석 보고 패널 */}
-          {selectedStock && (() => {
-            const isUS = selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US';
-            const price = selectedStock.price || 0;
-            const limitPct = isUS ? 0.30 : 0.30;
+          {/* 0. 종목 검색/추가 및 실시간 시세·스캘핑 종합 지표 일체형 통합 바 */}
+          {(() => {
+            const isUS = selectedStock ? (selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US') : false;
+            const price = selectedStock?.price || 0;
+            const limitPct = 0.30;
             const upperLimit = isUS ? Math.round(price * (1 + limitPct) * 100) / 100 : Math.floor(price * (1 + limitPct));
             const lowerLimit = isUS ? Math.round(price * (1 - limitPct) * 100) / 100 : Math.ceil(price * (1 - limitPct));
-            const changeVal = selectedStock.change || 0;
-            const changePct = selectedStock.changePercent || 0;
+            const changeVal = selectedStock?.change || 0;
+            const changePct = selectedStock?.changePercent || 0;
             const isUp = changeVal >= 0;
-            const heldQty = holdings[selectedStock.symbol] || 0;
+            const heldQty = selectedStock ? (holdings[selectedStock.symbol] || 0) : 0;
             
             // 호가 잔량 계산
-            const symHash = selectedStock.symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-            const baseMultiplier = isUS ? 15 : 450;
+            const symHash = selectedStock ? selectedStock.symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) : 100;
             const bidTotal = Math.max(50, Math.floor(((symHash * 17) % 800 + 350) * (isUS ? 1 : 12)));
             const askTotal = Math.max(50, Math.floor(((symHash * 29) % 750 + 300) * (isUS ? 1 : 12)));
             const totalDepth = bidTotal + askTotal || 1;
             const bidShare = Math.round((bidTotal / totalDepth) * 100);
             const askShare = 100 - bidShare;
 
-            // AI 단기/향후 시세 예측 및 수급 평가 생성
-            let trendOutlook = "상승 탄력 지속 예상 (매수세 우위)";
-            let aiBadgeColor = "text-emerald-300 bg-emerald-500/15 border-emerald-500/30";
             let signalScore = 88;
-            let reportDetail = "";
-
-            if (changePct > 5) {
-              trendOutlook = "강한 모멘텀 급등 구간 · 전고점 돌파 시세 분출 중";
-              aiBadgeColor = "text-rose-300 bg-rose-500/15 border-rose-500/30";
-              signalScore = 94;
-              reportDetail = "거래량 및 체결 강도가 강하게 유지되며 상단 매도 벽을 연속 체결 중입니다. 눌림목 지지 시 +0.5~1.2% 단타 익절 구간이 유효합니다.";
-            } else if (changePct > 0) {
-              trendOutlook = "우상향 수급 유입 · 계단식 상승 지지선 형성";
-              aiBadgeColor = "text-emerald-300 bg-emerald-500/15 border-emerald-500/30";
-              signalScore = 86;
-              reportDetail = "매수 잔량이 안정적으로 받쳐주며 라운드피겨 부근에서 2~3호가 매수 진입 시 높은 체결 승률이 예상됩니다.";
-            } else if (changePct > -3) {
-              trendOutlook = "단기 눌림목 반등 구간 · 기술적 매수 타점 탐색";
-              aiBadgeColor = "text-cyan-300 bg-cyan-500/15 border-cyan-500/30";
-              signalScore = 78;
-              reportDetail = "일시적 매도 압력 출회 후 하단 지지선(VWAP) 테스트 중입니다. 과매도 턴어라운드 시그널 발생 시 0.2~0.5% 빠른 스캘핑 반등을 노릴 수 있습니다.";
-            } else {
-              trendOutlook = "하락 진정 국면 확인 필요 · 리스크 관리 권장";
-              aiBadgeColor = "text-amber-300 bg-amber-500/15 border-amber-500/30";
-              signalScore = 65;
-              reportDetail = "하방 변동성이 확대되어 있으므로 고정 수량 및 엄격한 손절(-0.5%) 설정 하에 보수적인 분할 진입을 권장합니다.";
-            }
+            if (changePct > 5) signalScore = 94;
+            else if (changePct > 0) signalScore = 86;
+            else if (changePct > -3) signalScore = 78;
+            else signalScore = 65;
 
             return (
-              <div className="bg-gradient-to-br from-slate-900/90 via-slate-900/95 to-slate-950/90 border border-slate-700/60 p-3.5 sm:p-4 rounded-3xl shadow-2xl backdrop-blur-xl">
-                {/* 상단 통합 시세 & 종목 종합 지표 바 (한 줄 일체형 배치) */}
-                <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-3.5">
-                  {/* 좌측: 종목 아이콘 + 종목명 + 종목코드 + [현재 체결가 & 전일 대비] + [보유수량 및 주문가능수량] */}
-                  <div className="flex items-center gap-3.5 flex-wrap">
-                    <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-sleek-blue/30 to-indigo-600/30 border border-sleek-blue/40 flex items-center justify-center text-sleek-blue font-black font-mono shadow-inner text-base shrink-0">
-                      {selectedStock.symbol.slice(0, 3)}
-                    </div>
-                    
-                    <div className="flex flex-col justify-center">
-                      {/* 1행: 종목명 + 종목코드 + [현재 체결가 & 전일 대비] */}
-                      <div className="flex items-center gap-2.5 flex-wrap">
-                        <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
-                          {selectedStock.name}
-                        </h2>
-                        <span className="text-xs font-mono font-bold text-slate-400 bg-black/40 px-2 py-0.5 rounded-lg border border-white/10">
-                          {selectedStock.symbol}
-                        </span>
+              <div className="relative z-[90] bg-gradient-to-br from-slate-900/95 via-slate-900/98 to-slate-950/95 border border-slate-700/60 p-3 sm:p-3.5 rounded-3xl shadow-2xl backdrop-blur-xl">
+                <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3">
+                  {/* 좌측: 종목 검색 & 추가 + 선택된 종목명, 코드, 현재 체결가, 전일 대비, 보유/주문가능수량 */}
+                  <div className="flex items-center gap-3.5 flex-wrap grow">
+                    {/* 종목 검색 & 추가 인풋 */}
+                    <div ref={searchRef} className="relative z-[100] w-full sm:w-72 lg:w-80 shrink-0">
+                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                      <input 
+                        ref={searchInputRef}
+                        type="text" 
+                        value={searchSymbol}
+                        onChange={(e) => setSearchSymbol(e.target.value)}
+                        onFocus={() => {
+                          if (searchSuggestions.length > 0) setShowSuggestions(true);
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') {
+                            handleAddStock();
+                          }
+                        }}
+                        className="w-full bg-black/50 border border-white/15 focus:border-sleek-blue rounded-2xl py-2.5 pl-10 pr-20 text-xs sm:text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition-all shadow-inner" 
+                        placeholder="종목코드/명 입력 (Enter 추가)"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleAddStock()}
+                        className="absolute right-1.5 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-sleek-blue hover:bg-blue-600 active:scale-95 text-white text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer"
+                      >
+                        추가
+                      </button>
+                      
+                      {/* Search Suggestions Dropdown - '국내' 텍스트 제거 */}
+                      <AnimatePresence>
+                        {showSuggestions && searchSuggestions.length > 0 && (
+                          <motion.div 
+                            initial={{ opacity: 0, y: -4, scale: 0.98 }} 
+                            animate={{ opacity: 1, y: 0, scale: 1 }} 
+                            exit={{ opacity: 0, y: -4, scale: 0.98 }}
+                            transition={{ duration: 0.15 }}
+                            className="absolute top-full left-0 right-0 mt-2 z-[200] bg-slate-900/98 backdrop-blur-2xl border-2 border-sleek-blue/50 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.95)] ring-2 ring-sleek-blue/30 overflow-hidden"
+                          >
+                            {/* 상단 안내 바 */}
+                            <div className="px-4 py-2 bg-slate-950/90 border-b border-white/10 flex items-center justify-between text-xs text-slate-400 font-bold uppercase tracking-wider">
+                              <span className="flex items-center gap-1.5 text-sleek-blue">
+                                <Search className="w-3.5 h-3.5" /> 실시간 검색 종목 ({searchSuggestions.length}개)
+                              </span>
+                              <span className="text-[11px] text-emerald-400 font-medium">클릭 시 즉시 스캘핑 탭 추가</span>
+                            </div>
 
-                        {/* 현재 체결가 & 전일 대비 ('국내 주식' 배지 위치에 인라인 배치) */}
-                        <div className="flex items-center gap-2 bg-black/50 px-2.5 py-1 rounded-xl border border-white/10">
-                          <span className="text-[11px] font-bold text-slate-400">현재 체결가:</span>
-                          <span className="text-sm sm:text-base font-black text-white font-mono">
-                            {formatCurrency(price, false, isUS ? 'US' : 'KR')}
-                          </span>
-                          <div className="h-3 w-px bg-white/20" />
-                          <span className="text-[11px] font-bold text-slate-400">전일 대비:</span>
-                          <span className={cn("text-xs sm:text-sm font-black font-mono flex items-center gap-0.5", isUp ? "text-rose-400" : "text-sky-400")}>
-                            {isUp ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
-                            <span>{isUp ? '+' : ''}{formatCurrency(changeVal, false, isUS ? 'US' : 'KR')}</span>
-                            <span className="text-[11px]">({isUp ? '+' : ''}{changePct.toFixed(2)}%)</span>
-                          </span>
+                            <div className="max-h-[340px] overflow-y-auto custom-scrollbar divide-y divide-white/5">
+                              {searchSuggestions.map((s, idx) => {
+                                const isStockUS = s.market === 'US' || /^[A-Za-z]/.test(s.symbol);
+                                return (
+                                  <button 
+                                    key={`${s.symbol}-${idx}`}
+                                    onClick={() => handleAddStock(s.symbol, undefined, s.name)}
+                                    className="w-full flex items-center justify-between p-3.5 hover:bg-sleek-blue/20 active:bg-sleek-blue/30 transition-colors text-left cursor-pointer group"
+                                  >
+                                    <div className="flex flex-col gap-1">
+                                      <div className="flex items-center gap-2.5">
+                                        <div className="text-sm sm:text-base font-extrabold text-white group-hover:text-sleek-blue transition-colors">
+                                          {s.name}
+                                        </div>
+                                        {isStockUS && (
+                                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-300 border-amber-500/30">
+                                            미국
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
+                                        <span className="text-slate-300 font-semibold">{s.symbol}</span>
+                                        {s.price !== undefined && s.price > 0 && (
+                                          <>
+                                            <span>•</span>
+                                            <span className="text-sleek-blue font-bold">
+                                              {formatCurrency(s.price, false, isStockUS ? 'US' : 'KR')}
+                                            </span>
+                                          </>
+                                        )}
+                                      </div>
+                                    </div>
+                                    <div className="flex items-center gap-2 text-xs font-bold text-sleek-blue opacity-80 group-hover:opacity-100 group-hover:translate-x-1 transition-all">
+                                      <span>탭 추가</span>
+                                      <ChevronRight className="w-4 h-4" />
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </div>
+
+                    <div className="hidden lg:block h-9 w-px bg-white/10 shrink-0" />
+
+                    {/* 선택된 종목 기본 정보 (종목명, 코드, 현재 체결가, 전일 대비, 보유/주문가능수량) */}
+                    {selectedStock && (
+                      <div className="flex items-center gap-3.5 flex-wrap">
+                        <div className="w-11 h-11 rounded-2xl bg-gradient-to-br from-sleek-blue/30 to-indigo-600/30 border border-sleek-blue/40 flex items-center justify-center text-sleek-blue font-black font-mono shadow-inner text-base shrink-0">
+                          {selectedStock.symbol.slice(0, 3)}
+                        </div>
+                        
+                        <div className="flex flex-col justify-center">
+                          {/* 1행: 종목명 + 종목코드 + [현재 체결가 & 전일 대비] */}
+                          <div className="flex items-center gap-2.5 flex-wrap">
+                            <h2 className="text-lg sm:text-xl font-black text-white tracking-tight">
+                              {selectedStock.name}
+                            </h2>
+                            <span className="text-xs font-mono font-bold text-slate-400 bg-black/40 px-2 py-0.5 rounded-lg border border-white/10">
+                              {selectedStock.symbol}
+                            </span>
+
+                            {/* 현재 체결가 & 전일 대비 */}
+                            <div className="flex items-center gap-2 bg-black/50 px-2.5 py-1 rounded-xl border border-white/10">
+                              <span className="text-[11px] font-bold text-slate-400">현재 체결가:</span>
+                              <span className="text-sm sm:text-base font-black text-white font-mono">
+                                {formatCurrency(price, false, isUS ? 'US' : 'KR')}
+                              </span>
+                              <div className="h-3 w-px bg-white/20" />
+                              <span className="text-[11px] font-bold text-slate-400">전일 대비:</span>
+                              <span className={cn("text-xs sm:text-sm font-black font-mono flex items-center gap-0.5", isUp ? "text-rose-400" : "text-sky-400")}>
+                                {isUp ? <TrendingUp className="w-3.5 h-3.5" /> : <TrendingDown className="w-3.5 h-3.5" />}
+                                <span>{isUp ? '+' : ''}{formatCurrency(changeVal, false, isUS ? 'US' : 'KR')}</span>
+                                <span className="text-[11px]">({isUp ? '+' : ''}{changePct.toFixed(2)}%)</span>
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* 2행: 보유 수량 & 주문 가능 수량 */}
+                          <div className="text-xs text-slate-400 mt-1 flex flex-col gap-0.5 font-mono">
+                            <div>보유 수량: <strong className="text-white font-bold">{heldQty.toLocaleString()}주</strong></div>
+                            <div>주문 가능: <strong className="text-sleek-blue font-bold">{displayBuyableQty.toLocaleString()}주</strong></div>
+                          </div>
                         </div>
                       </div>
-
-                      {/* 2행: 보유 수량 & 주문 가능 수량 (보유 수량 아래쪽에 주문 가능 배치) */}
-                      <div className="text-xs text-slate-400 mt-1 flex flex-col gap-0.5 font-mono">
-                        <div>보유 수량: <strong className="text-white font-bold">{heldQty.toLocaleString()}주</strong></div>
-                        <div>주문 가능: <strong className="text-sleek-blue font-bold">{displayBuyableQty.toLocaleString()}주</strong></div>
-                      </div>
-                    </div>
+                    )}
                   </div>
 
                   {/* 우측: 위로 올려서 한 줄로 통합 배치된 4대 핵심 지표 카드 */}
-                  <div className="flex items-center gap-2.5 flex-wrap grow justify-end">
-                    {/* 1. 당일 가격 제한폭 카드 */}
-                    <div className="bg-black/40 px-3 py-2 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[145px] text-xs">
-                      <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
-                        <Layers className="w-3 h-3 text-slate-400" /> 당일 가격 제한폭
-                      </span>
-                      <div className="flex items-center justify-between font-mono pt-1 text-[11px]">
-                        <span className="text-rose-400 font-bold flex items-center gap-0.5">
-                          <TrendingUp className="w-2.5 h-2.5" /> 상한 (+30%):
+                  {selectedStock && (
+                    <div className="flex items-center gap-2.5 flex-wrap grow justify-start 2xl:justify-end">
+                      {/* 1. 당일 가격 제한폭 카드 */}
+                      <div className="bg-black/40 px-3 py-2 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[145px] text-xs">
+                        <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
+                          <Layers className="w-3 h-3 text-slate-400" /> 당일 가격 제한폭
                         </span>
-                        <strong className="text-rose-400 font-black">{formatCurrency(upperLimit, false, isUS ? 'US' : 'KR')}</strong>
+                        <div className="flex items-center justify-between font-mono pt-1 text-[11px]">
+                          <span className="text-rose-400 font-bold flex items-center gap-0.5">
+                            <TrendingUp className="w-2.5 h-2.5" /> 상한 (+30%):
+                          </span>
+                          <strong className="text-rose-400 font-black">{formatCurrency(upperLimit, false, isUS ? 'US' : 'KR')}</strong>
+                        </div>
+                        <div className="flex items-center justify-between font-mono pt-0.5 border-t border-white/5 text-[11px]">
+                          <span className="text-sky-400 font-bold flex items-center gap-0.5">
+                            <TrendingDown className="w-2.5 h-2.5" /> 하한 (-30%):
+                          </span>
+                          <strong className="text-sky-400 font-black">{formatCurrency(lowerLimit, false, isUS ? 'US' : 'KR')}</strong>
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between font-mono pt-0.5 border-t border-white/5 text-[11px]">
-                        <span className="text-sky-400 font-bold flex items-center gap-0.5">
-                          <TrendingDown className="w-2.5 h-2.5" /> 하한 (-30%):
-                        </span>
-                        <strong className="text-sky-400 font-black">{formatCurrency(lowerLimit, false, isUS ? 'US' : 'KR')}</strong>
-                      </div>
-                    </div>
 
-                    {/* 2. 호가창 총 잔량 비율 */}
-                    <div className="bg-black/40 px-3 py-2 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[170px] text-xs">
-                      <div className="flex items-center justify-between text-[11px]">
-                        <span className="font-bold text-slate-400 flex items-center gap-1">
-                          <Activity className="w-3 h-3 text-sleek-blue" /> 호가창 총 잔량 비율
-                        </span>
-                        <span className="font-mono font-bold text-slate-300">
-                          {bidShare}% / {askShare}%
-                        </span>
+                      {/* 2. 호가창 총 잔량 비율 */}
+                      <div className="bg-black/40 px-3 py-2 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[170px] text-xs">
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="font-bold text-slate-400 flex items-center gap-1">
+                            <Activity className="w-3 h-3 text-sleek-blue" /> 호가창 총 잔량 비율
+                          </span>
+                          <span className="font-mono font-bold text-slate-300">
+                            {bidShare}% / {askShare}%
+                          </span>
+                        </div>
+                        <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden flex my-1">
+                          <div style={{ width: `${bidShare}%` }} className="bg-rose-500 h-full transition-all" title={`매수잔량: ${bidTotal.toLocaleString()}주`} />
+                          <div style={{ width: `${askShare}%` }} className="bg-sky-500 h-full transition-all" title={`매도잔량: ${askTotal.toLocaleString()}주`} />
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] font-mono pt-0.5 border-t border-white/5">
+                          <span className="text-rose-300">매수: <strong>{bidTotal.toLocaleString()}주</strong></span>
+                          <span className="text-sky-300">매도: <strong>{askTotal.toLocaleString()}주</strong></span>
+                        </div>
                       </div>
-                      <div className="w-full bg-slate-800 h-2 rounded-full overflow-hidden flex my-1">
-                        <div style={{ width: `${bidShare}%` }} className="bg-rose-500 h-full transition-all" title={`매수잔량: ${bidTotal.toLocaleString()}주`} />
-                        <div style={{ width: `${askShare}%` }} className="bg-sky-500 h-full transition-all" title={`매도잔량: ${askTotal.toLocaleString()}주`} />
-                      </div>
-                      <div className="flex items-center justify-between text-[10px] font-mono pt-0.5 border-t border-white/5">
-                        <span className="text-rose-300">매수: <strong>{bidTotal.toLocaleString()}주</strong></span>
-                        <span className="text-sky-300">매도: <strong>{askTotal.toLocaleString()}주</strong></span>
-                      </div>
-                    </div>
 
-                    {/* 3. 실시간 누적 거래량 */}
-                    <div className="bg-black/40 px-3 py-2 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[145px] text-xs">
-                      <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
-                        <Zap className="w-3 h-3 text-amber-400" /> 실시간 누적 거래량
-                      </span>
-                      <div className="text-sm font-black text-white font-mono my-0.5">
-                        {typeof selectedStock.volume === 'number' ? selectedStock.volume.toLocaleString() : selectedStock.volume}
+                      {/* 3. 실시간 누적 거래량 */}
+                      <div className="bg-black/40 px-3 py-2 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[145px] text-xs">
+                        <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
+                          <Zap className="w-3 h-3 text-amber-400" /> 실시간 누적 거래량
+                        </span>
+                        <div className="text-sm font-black text-white font-mono my-0.5">
+                          {typeof selectedStock.volume === 'number' ? selectedStock.volume.toLocaleString() : selectedStock.volume}
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-0.5 border-t border-white/5">
+                          <span>체결 강도:</span>
+                          <strong className={cn("font-bold", bidShare >= 50 ? "text-rose-400" : "text-sky-400")}>
+                            {Math.round((bidTotal / (askTotal || 1)) * 100)}%
+                          </strong>
+                        </div>
                       </div>
-                      <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-0.5 border-t border-white/5">
-                        <span>체결 강도:</span>
-                        <strong className={cn("font-bold", bidShare >= 50 ? "text-rose-400" : "text-sky-400")}>
-                          {Math.round((bidTotal / (askTotal || 1)) * 100)}%
-                        </strong>
-                      </div>
-                    </div>
 
-                    {/* 4. AI 스캘핑 종합 점수 */}
-                    <div className="bg-black/40 px-3 py-2 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[140px] text-xs">
-                      <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
-                        <Sparkles className="w-3 h-3 text-purple-400" /> AI 스캘핑 종합 점수
-                      </span>
-                      <div className="flex items-center justify-between my-0.5">
-                        <span className="text-base font-black font-mono text-emerald-400">
-                          {signalScore}점
+                      {/* 4. AI 스캘핑 종합 점수 */}
+                      <div className="bg-black/40 px-3 py-2 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[140px] text-xs">
+                        <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
+                          <Sparkles className="w-3 h-3 text-purple-400" /> AI 스캘핑 종합 점수
                         </span>
-                        <span className="text-[10px] font-bold text-purple-300 bg-purple-500/20 px-1.5 py-0.5 rounded border border-purple-500/30">
-                          초단타 최적
-                        </span>
-                      </div>
-                      <div className="text-[10px] text-slate-400 pt-0.5 border-t border-white/5 flex items-center justify-between font-mono">
-                        <span>권장 손익:</span>
-                        <strong className="text-emerald-400">+0.2% / -0.5%</strong>
+                        <div className="flex items-center justify-between my-0.5">
+                          <span className="text-base font-black font-mono text-emerald-400">
+                            {signalScore}점
+                          </span>
+                          <span className="text-[10px] font-bold text-purple-300 bg-purple-500/20 px-1.5 py-0.5 rounded border border-purple-500/30">
+                            초단타 최적
+                          </span>
+                        </div>
+                        <div className="text-[10px] text-slate-400 pt-0.5 border-t border-white/5 flex items-center justify-between font-mono">
+                          <span>권장 손익:</span>
+                          <strong className="text-emerald-400">+0.2% / -0.5%</strong>
+                        </div>
                       </div>
                     </div>
-                  </div>
+                  )}
                 </div>
               </div>
             );
