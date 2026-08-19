@@ -8309,19 +8309,19 @@ export default function App() {
 
                     {/* 선택된 종목 기본 정보 & 4대 핵심 지표 인라인 배치 */}
                     {selectedStock && (
-                      <div className="flex items-center gap-3 flex-wrap grow">
+                      <div className="flex items-center gap-3 flex-wrap grow min-w-0">
                         {/* 종목 아이콘 */}
                         <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-sleek-blue/30 to-indigo-600/30 border border-sleek-blue/40 flex items-center justify-center text-sleek-blue font-black font-mono shadow-inner text-sm shrink-0">
                           {selectedStock.symbol.slice(0, 3)}
                         </div>
                         
-                        {/* 종목명 & 종목코드 & (보유/주문가능수량) */}
-                        <div className="flex flex-col justify-center min-w-[130px]">
-                          <div className="flex items-center gap-1.5 flex-wrap">
-                            <h2 className="text-base sm:text-lg font-black text-white tracking-tight leading-none">
+                        {/* 종목명 & 종목코드 & (보유/주문가능수량) - 고정 폭 적용으로 종목명 길이에 따른 흔들림 완벽 방지 */}
+                        <div className="w-[180px] sm:w-[220px] md:w-[240px] shrink-0 flex flex-col justify-center overflow-hidden">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            <h2 className="text-base sm:text-lg font-black text-white tracking-tight leading-none truncate" title={selectedStock.name}>
                               {selectedStock.name}
                             </h2>
-                            <span className="text-[10px] font-mono font-bold text-slate-400 bg-black/40 px-1.5 py-0.5 rounded border border-white/10">
+                            <span className="text-[10px] font-mono font-bold text-slate-400 bg-black/40 px-1.5 py-0.5 rounded border border-white/10 shrink-0">
                               {selectedStock.symbol}
                             </span>
                           </div>
@@ -8331,17 +8331,17 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* 현재 체결가 및 그 바로 밑 전일 대비 */}
-                        <div className="bg-black/50 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-center gap-0.5 min-w-[140px]">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[11px] font-bold text-slate-400">현재 체결가:</span>
-                            <span className="text-sm font-black text-white font-mono">
+                        {/* 현재 체결가 및 그 바로 밑 전일 대비 (고정 폭) */}
+                        <div className="w-[145px] shrink-0 bg-black/50 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-center gap-0.5">
+                          <div className="flex items-center justify-between gap-1.5">
+                            <span className="text-[11px] font-bold text-slate-400 shrink-0">현재 체결가:</span>
+                            <span className="text-sm font-black text-white font-mono truncate text-right">
                               {formatCurrency(price, false, isUS ? 'US' : 'KR')}
                             </span>
                           </div>
-                          <div className="flex items-center justify-between gap-2 pt-0.5 border-t border-white/5">
-                            <span className="text-[11px] font-bold text-slate-400">전일 대비:</span>
-                            <span className={cn("text-xs font-black font-mono flex items-center gap-0.5", isUp ? "text-rose-400" : "text-sky-400")}>
+                          <div className="flex items-center justify-between gap-1.5 pt-0.5 border-t border-white/5">
+                            <span className="text-[11px] font-bold text-slate-400 shrink-0">전일 대비:</span>
+                            <span className={cn("text-xs font-black font-mono flex items-center gap-0.5 shrink-0", isUp ? "text-rose-400" : "text-sky-400")}>
                               {isUp ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
                               <span>{isUp ? '+' : ''}{formatCurrency(changeVal, false, isUS ? 'US' : 'KR')}</span>
                               <span className="text-[10px]">({isUp ? '+' : ''}{changePct.toFixed(2)}%)</span>
@@ -8349,9 +8349,9 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* 4대 핵심 지표 카드 (현재 체결가 바로 옆에 배치) */}
+                        {/* 4대 핵심 지표 카드 (현재 체결가 바로 옆에 배치, shrink-0으로 고정) */}
                         {/* 1. 당일 가격 제한폭 카드 */}
-                        <div className="bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[140px] text-xs">
+                        <div className="shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[140px] text-xs">
                           <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
                             <Layers className="w-3 h-3 text-slate-400" /> 당일 가격 제한폭
                           </span>
@@ -8370,7 +8370,7 @@ export default function App() {
                         </div>
 
                         {/* 2. 호가창 총 잔량 비율 */}
-                        <div className="bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[160px] text-xs">
+                        <div className="shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[160px] text-xs">
                           <div className="flex items-center justify-between text-[11px]">
                             <span className="font-bold text-slate-400 flex items-center gap-1">
                               <Activity className="w-3 h-3 text-sleek-blue" /> 호가 총 잔량 비율
@@ -8390,7 +8390,7 @@ export default function App() {
                         </div>
 
                         {/* 3. 실시간 누적 거래량 */}
-                        <div className="bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[135px] text-xs">
+                        <div className="shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[135px] text-xs">
                           <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
                             <Zap className="w-3 h-3 text-amber-400" /> 실시간 누적 거래량
                           </span>
@@ -8406,7 +8406,7 @@ export default function App() {
                         </div>
 
                         {/* 4. AI 스캘핑 종합 점수 */}
-                        <div className="bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[130px] text-xs">
+                        <div className="shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[130px] text-xs">
                           <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
                             <Sparkles className="w-3 h-3 text-purple-400" /> AI 스캘핑 점수
                           </span>
@@ -8431,34 +8431,16 @@ export default function App() {
             );
           })()}
 
-          {/* 1. AI SCALPING CONFIG (Moved Below Search) */}
-          <div id="ai-scalping-config-panel" className="bg-sleek-card border border-sleek-border p-4 sm:p-5 rounded-3xl shadow-xl space-y-3.5">
-            <div className="flex flex-wrap items-center justify-between pb-2.5 border-b border-white/5 gap-2">
-              <div className="flex flex-col">
-                <div className="flex items-center gap-2.5">
-                  <h2 className="text-base sm:text-lg font-black text-white italic uppercase tracking-tight">AI SCALPING CONFIG</h2>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] sm:text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
-                    스캘핑 5대 원칙 100% 검증 완료
-                  </span>
-                </div>
-                <span className="text-xs sm:text-sm text-sleek-text-secondary mt-0.5">초단기 자동 스캘퍼 전략 및 위험 관리 엔진</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <div className="flex items-center gap-1.5 bg-black/40 px-2.5 py-1 rounded-xl border border-white/10">
-                  <span className="w-2 h-2 rounded-full bg-sleek-blue animate-ping"></span>
-                  <span className="text-xs font-bold text-sleek-blue uppercase">Live Engine</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Strategy Selection Mode Bar (Scalper Rules 2 & 3) */}
-            <div className="bg-black/40 p-3 rounded-2xl border border-white/10 flex flex-col xl:flex-row items-center justify-between gap-3">
-              <div className="flex items-center gap-2.5 shrink-0">
+          {/* 1. AI SCALPING CONFIG - 일체형 컴팩트 섹터 */}
+          <div id="ai-scalping-config-panel" className="bg-sleek-card border border-sleek-border p-3.5 sm:p-4 rounded-3xl shadow-xl space-y-3">
+            {/* 상단 라인: 스캘퍼 AI 실시간 전략 감지 센서 & 6대 전략 선택 모드 */}
+            <div className="bg-black/40 p-2.5 sm:p-3 rounded-2xl border border-white/10 flex flex-col lg:flex-row items-center justify-between gap-2.5">
+              <div className="flex items-center gap-2 shrink-0 flex-wrap">
                 <span className="text-xs sm:text-sm font-black text-slate-200 flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-amber-400 animate-spin" /> 스캘퍼 AI 실시간 전략 감지 센서:
                 </span>
                 <span className={cn(
-                  "px-3 py-1 rounded-full text-xs font-extrabold border transition-all flex items-center gap-1.5 shrink-0",
+                  "px-2.5 py-0.5 rounded-full text-xs font-extrabold border transition-all flex items-center gap-1.5 shrink-0",
                   activeStrategyDetection.activeCount > 0
                     ? "bg-amber-500/25 text-amber-300 border-amber-400/80 shadow-[0_0_12px_rgba(245,158,11,0.5)]"
                     : "bg-white/5 text-slate-500 border-white/5 opacity-60"
@@ -8472,28 +8454,28 @@ export default function App() {
                   실시간 {activeStrategyDetection.activeCount}개 전략 조건 포착!
                 </span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-2 w-full xl:w-auto">
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-1.5 w-full lg:w-auto">
                 <button
                   type="button"
                   onClick={() => setScalperStrategyMode('AI_MAX_YIELD')}
                   className={cn(
-                    "px-3 py-2 rounded-xl text-xs sm:text-sm font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1 shadow-lg",
+                    "px-2.5 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1 shadow-md",
                     scalperStrategyMode === 'AI_MAX_YIELD'
-                      ? "bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white border-amber-300 shadow-[0_0_18px_rgba(245,158,11,0.7)] animate-pulse"
+                      ? "bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white border-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.6)] animate-pulse"
                       : "bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border-amber-500/30"
                   )}
                   title="AI가 전략 감시 센서와 모멘텀을 기반으로 진입 수량과 호가 타점을 자율 조절하고, 설정된 목표수익률에 맞춰 정확히 익절 매도하는 최고수익 전용 모드"
                 >
-                  <Zap className="w-4 h-4 text-amber-300 fill-amber-300 animate-bounce" />
+                  <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
                   <span>⚡ 최고수익 AI★</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setScalperStrategyMode('ALL_SENSORS_4')}
                   className={cn(
-                    "relative px-2.5 py-2 rounded-xl text-xs sm:text-sm font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
                     activeStrategyDetection.activeCount === 4
-                      ? "bg-gradient-to-r from-emerald-500/40 via-cyan-500/40 to-blue-500/40 text-emerald-200 border-emerald-400 shadow-[0_0_16px_rgba(16,185,129,0.6)] animate-pulse"
+                      ? "bg-gradient-to-r from-emerald-500/40 via-cyan-500/40 to-blue-500/40 text-emerald-200 border-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.5)] animate-pulse"
                       : scalperStrategyMode === 'ALL_SENSORS_4'
                       ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-md"
                       : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-80"
@@ -8503,7 +8485,7 @@ export default function App() {
                   <span className={cn(
                     "w-2 h-2 rounded-full transition-all shrink-0",
                     activeStrategyDetection.activeCount === 4
-                      ? "bg-emerald-400 shadow-[0_0_10px_#10b981] animate-ping"
+                      ? "bg-emerald-400 shadow-[0_0_8px_#10b981] animate-ping"
                       : "bg-slate-600/60 border border-slate-700"
                   )} />
                   <span>🎯 4/4 올-그린</span>
@@ -8512,9 +8494,9 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('PULLBACK')}
                   className={cn(
-                    "relative px-2.5 py-2 rounded-xl text-xs sm:text-sm font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
+                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
                     activeStrategyDetection.isPullback
-                      ? "bg-cyan-500/30 text-cyan-200 border-cyan-400 shadow-[0_0_15px_rgba(6,182,212,0.5)]"
+                      ? "bg-cyan-500/30 text-cyan-200 border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]"
                       : scalperStrategyMode === 'PULLBACK'
                       ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-md"
                       : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
@@ -8524,7 +8506,7 @@ export default function App() {
                   <span className={cn(
                     "w-2 h-2 rounded-full transition-all shrink-0",
                     activeStrategyDetection.isPullback
-                      ? "bg-cyan-400 shadow-[0_0_10px_#06b6d4] animate-pulse"
+                      ? "bg-cyan-400 shadow-[0_0_8px_#06b6d4] animate-pulse"
                       : "bg-slate-600/60 border border-slate-700"
                   )} />
                   <span>① 눌림목</span>
@@ -8533,9 +8515,9 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('BREAKOUT')}
                   className={cn(
-                    "relative px-2.5 py-2 rounded-xl text-xs sm:text-sm font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
+                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
                     activeStrategyDetection.isBreakout
-                      ? "bg-amber-500/30 text-amber-200 border-amber-400 shadow-[0_0_15px_rgba(245,158,11,0.5)]"
+                      ? "bg-amber-500/30 text-amber-200 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
                       : scalperStrategyMode === 'BREAKOUT'
                       ? "bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-md"
                       : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
@@ -8545,7 +8527,7 @@ export default function App() {
                   <span className={cn(
                     "w-2 h-2 rounded-full transition-all shrink-0",
                     activeStrategyDetection.isBreakout
-                      ? "bg-amber-400 shadow-[0_0_10px_#f59e0b] animate-pulse"
+                      ? "bg-amber-400 shadow-[0_0_8px_#f59e0b] animate-pulse"
                       : "bg-slate-600/60 border border-slate-700"
                   )} />
                   <span>② 돌파</span>
@@ -8554,9 +8536,9 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('VWAP_SUPPORT')}
                   className={cn(
-                    "relative px-2.5 py-2 rounded-xl text-xs sm:text-sm font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
+                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
                     activeStrategyDetection.isVwapSupport
-                      ? "bg-indigo-500/30 text-indigo-200 border-indigo-400 shadow-[0_0_15px_rgba(99,102,241,0.5)]"
+                      ? "bg-indigo-500/30 text-indigo-200 border-indigo-400 shadow-[0_0_12px_rgba(99,102,241,0.4)]"
                       : scalperStrategyMode === 'VWAP_SUPPORT'
                       ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/50 shadow-md"
                       : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
@@ -8566,7 +8548,7 @@ export default function App() {
                   <span className={cn(
                     "w-2 h-2 rounded-full transition-all shrink-0",
                     activeStrategyDetection.isVwapSupport
-                      ? "bg-indigo-400 shadow-[0_0_10px_#6366f1] animate-pulse"
+                      ? "bg-indigo-400 shadow-[0_0_8px_#6366f1] animate-pulse"
                       : "bg-slate-600/60 border border-slate-700"
                   )} />
                   <span>③ VWAP</span>
@@ -8575,9 +8557,9 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('VOLUME_PROFILE_CVD')}
                   className={cn(
-                    "relative px-2.5 py-2 rounded-xl text-xs sm:text-sm font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5",
+                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
                     activeStrategyDetection.isVolumeProfile
-                      ? "bg-purple-500/30 text-purple-200 border-purple-400 shadow-[0_0_15px_rgba(168,85,247,0.5)]"
+                      ? "bg-purple-500/30 text-purple-200 border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.4)]"
                       : scalperStrategyMode === 'VOLUME_PROFILE_CVD'
                       ? "bg-purple-500/20 text-purple-300 border-purple-500/50 shadow-md"
                       : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
@@ -8587,7 +8569,7 @@ export default function App() {
                   <span className={cn(
                     "w-2 h-2 rounded-full transition-all shrink-0",
                     activeStrategyDetection.isVolumeProfile
-                      ? "bg-purple-400 shadow-[0_0_10px_#a855f7] animate-pulse"
+                      ? "bg-purple-400 shadow-[0_0_8px_#a855f7] animate-pulse"
                       : "bg-slate-600/60 border border-slate-700"
                   )} />
                   <span>④ VP/CVD</span>
@@ -8595,35 +8577,12 @@ export default function App() {
               </div>
             </div>
 
-            {/* 전략별 호가 타점 시스템 안내 배지 */}
-            <div className="bg-gradient-to-r from-blue-950/40 via-purple-950/30 to-black/40 p-2.5 rounded-2xl border border-blue-500/20 flex flex-wrap items-center justify-between gap-2 text-xs">
-              <div className="flex items-center gap-2 text-blue-300 font-bold">
-                <span className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-pulse"></span>
-                <span className="font-extrabold">전략별 맞춤 진입 타점:</span>
-                <span className="text-white font-mono text-xs sm:text-sm">
-                  {scalperStrategyMode === 'AI_MAX_YIELD'
-                    ? "⚡ 최고수익 AI → [센서 강도 연동] 수량 가변 + 타점 자율결정 + 설정 목표수익률 매도 & 최고점 추적 스탑"
-                    : scalperStrategyMode === 'BREAKOUT' 
-                    ? "🚀 돌파 매매 → [매도1호가 / 현재가] 즉시 체결 타점" 
-                    : scalperStrategyMode === 'PULLBACK' 
-                    ? "📉 눌림목 매매 → [매수1~2호가] 지지 대기 타점" 
-                    : scalperStrategyMode === 'VWAP_SUPPORT' 
-                    ? "📊 VWAP 지지 → [VWAP선 / 매수1호가] 받쳐두기" 
-                    : scalperStrategyMode === 'VOLUME_PROFILE_CVD' 
-                    ? "🌊 VP/CVD 유동성 → [POC / 라운드피겨 지지선] 받쳐두기" 
-                    : "🤖 AI 종합 → 포착 시그널(돌파=현재가, 눌림목=매수1~2호가) 자동 분기 체결"}
-                </span>
-              </div>
-              <div className="text-xs text-slate-400 font-sans">
-                호가창 수급(매도잔량&gt;매수잔량) &amp; 라운드피겨 지지선 자동 분석 적용
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-stretch text-xs">
-              {/* 1. Trade Quantity & Target Profit / Stop Loss */}
-              <div className="bg-black/30 p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-2">
+            {/* 핵심 스캘퍼 설정 4열 컴팩트 그리드 */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 items-stretch text-xs">
+              {/* 1. 1회 거래수량, 최대 분할 슬롯, 목표순익 & 손절 */}
+              <div className="bg-black/30 p-2.5 sm:p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-2">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1.5">
+                  <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1">
                     <Layers className="w-3.5 h-3.5 text-sleek-blue" /> 1회 거래수량
                   </label>
                   <span className="text-xs sm:text-sm font-bold text-white font-mono">{tradeQuantity}주</span>
@@ -8640,7 +8599,7 @@ export default function App() {
 
                 <div className="pt-1.5 border-t border-white/10">
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1.5">
+                    <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1">
                       <Layers className="w-3.5 h-3.5 text-emerald-400" /> 최대 분할 슬롯
                     </label>
                     <span className="text-xs font-bold text-emerald-400 font-mono">기본: 10개</span>
@@ -8696,8 +8655,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 2. Smart Scalper Configuration */}
-              <div className="bg-sleek-blue/5 border border-sleek-blue/20 p-3 rounded-2xl flex flex-col justify-between space-y-2">
+              {/* 2. SMART SCALPER & 추가 매수 간격 Gap % */}
+              <div className="bg-sleek-blue/5 border border-sleek-blue/20 p-2.5 sm:p-3 rounded-2xl flex flex-col justify-between space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1 group relative">
                     <Zap className="w-3.5 h-3.5" /> SMART SCALPER
@@ -8729,7 +8688,7 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="text-[10px] sm:text-xs font-black text-slate-300 uppercase block mb-1">추가 매수 간격 (Gap %)</label>
+                  <label className="text-[11px] font-black text-slate-300 uppercase block mb-1">추가 매수 간격 (Gap %)</label>
                   <select 
                     value={minGapBetweenSlots}
                     onChange={(e) => setMinGapBetweenSlots(Number(e.target.value))}
@@ -8741,32 +8700,20 @@ export default function App() {
                   </select>
                 </div>
 
-                <div>
-                  <label className="text-[10px] sm:text-xs font-black text-slate-300 uppercase block mb-1">동일/중복가 매수 설정</label>
-                  <button
-                    type="button"
-                    onClick={() => setAllowSamePriceEntry(!allowSamePriceEntry)}
-                    className={cn(
-                      "w-full py-1.5 px-2 rounded-xl text-xs font-bold border transition-all cursor-pointer flex items-center justify-center gap-1",
-                      allowSamePriceEntry
-                        ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300"
-                        : "bg-rose-500/20 border-rose-500/40 text-rose-300"
-                    )}
-                  >
-                    {allowSamePriceEntry ? "✓ 동일가 매수 허용" : "✕ 동일가 중복 차단"}
-                  </button>
-                </div>
-
-                <div>
-                  <label className="text-[10px] sm:text-xs font-black text-slate-300 uppercase block mb-1">진입 수량 방식</label>
-                  <div className="w-full py-1.5 px-2 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs font-bold text-center">
-                    ✓ 고정 수량 (물타기 금지)
+                <div className="bg-black/30 p-2 rounded-xl border border-white/5 text-[11px] text-slate-400 space-y-1 font-mono">
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span>초단타 엔진:</span>
+                    <strong className="text-emerald-400">초고속 체결</strong>
+                  </div>
+                  <div className="flex justify-between items-center text-slate-300">
+                    <span>리스크 관리:</span>
+                    <strong className="text-sleek-blue">자동 슬롯 분할</strong>
                   </div>
                 </div>
               </div>
 
-              {/* 3. Entry Price Mode & Execution Speed (Placed below Entry Mode) */}
-              <div className="bg-white/5 p-3 rounded-2xl border border-white/10 flex flex-col justify-between space-y-2.5">
+              {/* 3. 진입 호가 방식 & 실행 속도 */}
+              <div className="bg-white/5 p-2.5 sm:p-3 rounded-2xl border border-white/10 flex flex-col justify-between space-y-2">
                 <div>
                   <span className="text-xs font-bold text-white flex items-center gap-1 mb-1.5">
                     <TrendingDown className="w-3.5 h-3.5 text-amber-400" /> 진입 호가 방식
@@ -8820,7 +8767,7 @@ export default function App() {
                 </div>
 
                 <div className="pt-2 border-t border-white/10">
-                  <div className="flex justify-between items-center mb-1.5">
+                  <div className="flex justify-between items-center mb-1">
                     <span className="text-xs font-bold text-slate-300 uppercase flex items-center gap-1">
                       <Activity className="w-3.5 h-3.5 text-amber-400" /> 실행 속도
                     </span>
@@ -8853,7 +8800,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 4. Big Action Button (Column 4) */}
+              {/* 4. START AI SCALPER 큰 실행 버튼 */}
               <div className="flex items-center justify-center">
                 <button 
                   onClick={() => {
@@ -8877,7 +8824,7 @@ export default function App() {
                   disabled={isSyncingKIS || initSyncState.status === 'syncing'}
                   title="현재 선택된 종목의 개별 스캘퍼 시작/정지"
                   className={cn(
-                    "w-full h-full min-h-[90px] sm:min-h-[100px] py-4 px-3 rounded-2xl font-black text-base sm:text-lg italic tracking-tight uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-2 border",
+                    "w-full h-full min-h-[95px] sm:min-h-[105px] py-3 px-3 rounded-2xl font-black text-base sm:text-lg italic tracking-tight uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-1.5 border",
                     isGapBotActive 
                       ? "bg-gradient-to-br from-rose-600 to-red-800 text-white border-rose-500/50 shadow-rose-900/40 hover:scale-[1.02] cursor-pointer" 
                       : (isSyncingKIS || initSyncState.status === 'syncing')
@@ -8887,17 +8834,17 @@ export default function App() {
                 >
                   {isGapBotActive ? (
                     <>
-                      <Square className="w-6 h-6 fill-current animate-pulse" />
+                      <Square className="w-5 h-5 fill-current animate-pulse" />
                       <span>SCALPER STOP</span>
                     </>
                   ) : (isSyncingKIS || initSyncState.status === 'syncing') ? (
                     <>
-                      <Loader2 className="w-6 h-6 animate-spin text-sleek-blue" />
-                      <span className="text-center text-xs leading-tight text-slate-300 font-sans">데이터 동기화 중...</span>
+                      <Loader2 className="w-5 h-5 animate-spin text-sleek-blue" />
+                      <span className="text-center text-xs leading-tight text-slate-300 font-sans">동기화 중...</span>
                     </>
                   ) : (
                     <>
-                      <Play className="w-6 h-6 fill-current" />
+                      <Play className="w-5 h-5 fill-current" />
                       <span className="text-center leading-tight">START AI<br />SCALPER</span>
                     </>
                   )}
