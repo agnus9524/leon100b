@@ -850,19 +850,36 @@ class KISService {
     }
   }
 
+  public async cancelOrder(symbol: string, orgNo: string, ordNo: string, qty: string) {
+    const isKR = /^\d{6}$/.test(symbol);
+    if (isKR) {
+      return this.cancelDomesticOrder(orgNo, ordNo, qty);
+    } else {
+      return this.cancelOverseasOrder(orgNo, ordNo, symbol, qty);
+    }
+  }
+
   public async checkOrderExecution(odno: string) {
     if (!this.config) throw new Error("KIS Config not initialized");
+    if (!odno) return { found: false, isFullyFilled: false, isPartiallyFilled: false, isUnfilled: true, price: 0 };
     
     const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const cleanOdno = odno.toString().trim().replace(/^0+/, '');
+    const paddedOdno = odno.toString().trim().padStart(10, '0');
+
     try {
       const res = await this.getDomesticOrderExecutions(todayStr, todayStr);
       if (res && res.rt_cd === '0' && res.output1 && Array.isArray(res.output1)) {
-        const order = res.output1.find((item: any) => item.odno === odno);
+        const order = res.output1.find((item: any) => {
+          const itemOdno = (item.odno || item.ODNO || '').toString().trim();
+          const cleanItemOdno = itemOdno.replace(/^0+/, '');
+          return itemOdno === odno || itemOdno === paddedOdno || cleanItemOdno === cleanOdno;
+        });
         if (order) {
-          const ordQty = Number(order.ord_qty || 0);
-          const ccldQty = Number(order.tot_ccld_qty || 0);
-          const rmndQty = Number(order.rmnd_qty || 0);
-          const prpr = Number(order.avg_prvs || order.ord_unpr || 0);
+          const ordQty = Number(order.ord_qty || order.ORD_QTY || 0);
+          const ccldQty = Number(order.tot_ccld_qty || order.TOT_CCLD_QTY || 0);
+          const rmndQty = Number(order.rmnd_qty || order.RMND_QTY || 0);
+          const prpr = Number(order.avg_prvs || order.AVG_PRVS || order.ord_unpr || order.ORD_UNPR || 0);
           
           return {
             found: true,

@@ -5306,30 +5306,47 @@ export default function App() {
     if (!order) return;
 
     if (order.isSimulated) {
-      const priceInKrw = marketType === 'US' ? order.orderPrice * exchangeRate : order.orderPrice;
+      const isUS = order.symbol.length < 6 || /^[A-Za-z]/.test(order.symbol);
+      const priceInKrw = isUS ? order.orderPrice * exchangeRate : order.orderPrice;
       const refundAmount = priceInKrw * order.quantity;
       setBalance(prev => prev + refundAmount);
-    } else {
+      addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[모의 매수취소] 수동 취소 완료`);
+    } else if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
       try {
-        const cancelRes = marketType === 'US'
-          ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, (order.quantity || 1).toString())
-          : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, (order.quantity || 1).toString());
+        const cancelRes = await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString());
 
         if (cancelRes && cancelRes.rt_cd && cancelRes.rt_cd !== '0') {
-          showNotification(`[KIS 매수취소 실패] ${cancelRes.msg1 || '취소가 거부되었습니다.'}`, "error");
-          addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 매수취소 실패] ${cancelRes.msg1}`);
-          return;
+          const errMsg = cancelRes.msg1 || '취소가 거부되었습니다.';
+          const isAlreadyDone = /취소.*수량.*없|체결|기취소|기정정|존재하지.*않|거부|불가|처리완료/i.test(errMsg);
+          
+          if (isAlreadyDone) {
+            // Check if already filled
+            const status = await kisService.checkOrderExecution(order.id);
+            if (status.isFullyFilled) {
+              showNotification(`[체결 확인] ${order.symbol} 주문이 이미 체결 완료되었습니다.`, "success");
+              addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[체결완료] 취소 시도 중 이미 체결됨`);
+            } else {
+              showNotification(`[KIS 주문정리] ${order.symbol} ${errMsg}`, "info");
+              addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[주문정리] ${errMsg}`);
+            }
+            setTimeout(() => handleSyncKIS(), 500);
+          } else {
+            showNotification(`[KIS 매수취소 실패] ${errMsg}`, "error");
+            addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 매수취소 실패] ${errMsg}`);
+            return;
+          }
+        } else {
+          addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 매수취소] 수동 취소 완료`);
+          setTimeout(() => handleSyncKIS(), 500);
         }
-        addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 매수취소] 수동 취소 완료`);
       } catch (e: any) {
         console.error("Failed to cancel KIS pending buy order:", e);
-        showNotification(`KIS 매수 취소 실패: ${e.message}`, "error");
-        return;
+        showNotification(`KIS 매수 취소 처리: ${e.message}`, "info");
       }
     }
 
     setPendingBuyOrders(prev => prev.filter(o => o.id !== orderId));
-    showNotification(`${order.symbol} 대기 중인 매수 주문이 취소되었습니다.`, "info");
+    showNotification(`${order.symbol} 대기 중인 매수 주문이 정리/취소되었습니다.`, "info");
   };
 
   const cancelPendingSellOrder = async (orderId: string) => {
@@ -5338,20 +5355,27 @@ export default function App() {
 
     if (!order.isSimulated && kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
       try {
-        const cancelRes = marketType === 'US'
-          ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, (order.quantity || 1).toString())
-          : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, (order.quantity || 1).toString());
+        const cancelRes = await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString());
 
         if (cancelRes && cancelRes.rt_cd && cancelRes.rt_cd !== '0') {
-          showNotification(`[KIS 매도취소 실패] ${cancelRes.msg1 || '매도 취소가 거부되었습니다.'}`, "error");
-          addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소 실패] ${cancelRes.msg1}`);
-          return;
+          const errMsg = cancelRes.msg1 || '매도 취소가 거부되었습니다.';
+          const isAlreadyDone = /취소.*수량.*없|체결|기취소|기정정|존재하지.*않|거부|불가|처리완료/i.test(errMsg);
+          if (isAlreadyDone) {
+            showNotification(`[KIS 주문정리] ${order.symbol} ${errMsg}`, "info");
+            addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[주문정리] ${errMsg}`);
+            setTimeout(() => handleSyncKIS(), 500);
+          } else {
+            showNotification(`[KIS 매도취소 실패] ${errMsg}`, "error");
+            addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소 실패] ${errMsg}`);
+            return;
+          }
+        } else {
+          addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소] 수동 취소 완료`);
+          setTimeout(() => handleSyncKIS(), 500);
         }
-        addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소] 수동 취소 완료`);
       } catch (e: any) {
         console.error("Failed to cancel KIS pending sell order:", e);
-        showNotification(`KIS 매도 취소 실패: ${e.message}`, "error");
-        return;
+        showNotification(`KIS 매도 취소 처리: ${e.message}`, "info");
       }
     } else {
       addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[매도취소] 수동 취소`);
@@ -5386,16 +5410,13 @@ export default function App() {
 
     for (const order of buyOrdersToCancel) {
       if (order.isSimulated) {
-        const priceInKrw = marketType === 'US' ? order.orderPrice * exchangeRate : order.orderPrice;
+        const isUS = order.symbol.length < 6 || /^[A-Za-z]/.test(order.symbol);
+        const priceInKrw = isUS ? order.orderPrice * exchangeRate : order.orderPrice;
         const refundAmount = priceInKrw * order.quantity;
         setBalance(prev => prev + refundAmount);
-      } else {
+      } else if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
         try {
-          if (marketType === 'US') {
-            await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, (order.quantity || 1).toString());
-          } else {
-            await kisService.cancelDomesticOrder(order.orgNo || "", order.id, (order.quantity || 1).toString());
-          }
+          await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString());
           addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
         } catch (e) {
           console.error("Failed to cancel KIS pending order:", e);
@@ -5404,13 +5425,9 @@ export default function App() {
     }
 
     for (const order of sellOrdersToCancel) {
-      if (!order.isSimulated) {
+      if (!order.isSimulated && kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
         try {
-          if (marketType === 'US') {
-            await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, (order.quantity || 1).toString());
-          } else {
-            await kisService.cancelDomesticOrder(order.orgNo || "", order.id, (order.quantity || 1).toString());
-          }
+          await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString());
           addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매도 주문 일괄 취소`);
         } catch (e) {
           console.error("Failed to cancel KIS pending sell order:", e);
@@ -5421,7 +5438,8 @@ export default function App() {
     setPendingBuyOrders([]);
     setPendingSellOrders([]);
     showNotification("모든 대기 (매수/매도) 주문이 취소되었습니다.", "info");
-  }, [exchangeRate, marketType]);
+    setTimeout(() => handleSyncKIS(), 500);
+  }, [exchangeRate, marketType, kisConfig.isConnected, kisConfig.isRealOrderEnabled]);
 
   // Monitor Pending Buy Orders for Price Changes, Fills, and Auto-Cancellations
   useEffect(() => {
@@ -5450,13 +5468,12 @@ export default function App() {
         // Calculate ratios from orderPrice
         const dropPercent = ((orderPrice - currentPrice) / orderPrice) * 100;
         const risePercent = ((currentPrice - orderPrice) / orderPrice) * 100;
-        const elapsedSec = (Date.now() - (order.createdAt || Date.now())) / 1000;
 
-        // Smart Escape Criteria (자금 순환 및 미체결 방지):
-        // - Upward: 주가가 매수가 위로 상승(currentPrice > orderPrice), 1틱 이상 이탈, 0.05% 이상 상승, 또는 8초 이상 체결 미발생
-        // - Downward: 주가가 매수가 대비 2틱 이상 하락 또는 autoCancelThreshold 급락 (손실 방지)
-        const isRiseCancel = currentPrice > orderPrice || tickDiff >= 1 || risePercent >= 0.05 || elapsedSec >= 8;
-        const isDropCancel = tickDiff <= -2 || dropPercent >= autoCancelThreshold;
+        // Auto-Cancel Criteria:
+        // 1. Upward: 미체결 상태에서 주가가 매수 주문가 대비 0.5% 이상 상승 이탈 시 자동 취소 (자금 회수 및 재진입 준비)
+        // 2. Downward: 급락 시 손실 방지 (autoCancelThreshold 이상 급락 또는 -3틱 이하)
+        const isRiseCancel = risePercent >= 0.5;
+        const isDropCancel = tickDiff <= -3 || dropPercent >= autoCancelThreshold;
 
         if (isDropCancel || isRiseCancel) {
           // 1. CANCEL CONDITION TRIGGERED
@@ -5464,52 +5481,47 @@ export default function App() {
           
           const tickStr = Math.abs(Math.round(tickDiff)) > 0 ? `${Math.abs(Math.round(tickDiff))}틱` : '';
           const cancelReason = isDropCancel 
-            ? `주문가 대비 ${dropPercent.toFixed(2)}%${tickStr ? ` (${tickStr})` : ''} 급락 이탈 (손실 방지)`
-            : elapsedSec >= 8 && currentPrice <= orderPrice
-            ? `8초 체결 지연 타임아웃 (${elapsedSec.toFixed(0)}초 경과) -> 미체결 자금 순환 자동 취소`
-            : `주문가 대비 주가 상승 이탈 (${risePercent.toFixed(2)}%${tickStr ? ` +${tickStr}` : ''}) -> 미체결 자금 순환 자동 취소`;
+            ? `주문가 대비 ${dropPercent.toFixed(2)}%${tickStr ? ` (${tickStr})` : ''} 급락 이탈 (손실 방지 취소)`
+            : `주문가 대비 주가 +0.5% 이상 상승 이탈 (+${risePercent.toFixed(2)}%${tickStr ? ` +${tickStr}` : ''}) -> 미체결 자금 회수 자동 취소`;
           
-          if (!order.id) {
-            // Placeholder / in-flight order without ID: clean up silently without error warning
-            console.log(`[Auto-Cancel] In-flight order without ID cleared: ${formatCurrency(orderPrice)} (${cancelReason})`);
+          if (!order.id || order.id.startsWith('SLOT-')) {
+            // Placeholder / in-flight order without real KIS ID: clean up silently
+            console.log(`[Auto-Cancel] In-flight order cleared: ${formatCurrency(orderPrice)} (${cancelReason})`);
             continue;
           }
 
           if (order.isSimulated) {
             // Refund simulated balance
-            const priceInKrw = marketType === 'US' ? orderPrice * exchangeRate : orderPrice;
+            const priceInKrw = isUSStock ? orderPrice * exchangeRate : orderPrice;
             const refundAmount = priceInKrw * (order.quantity || 1);
             setBalance(prev => prev + refundAmount);
-            addLog(order.symbol, '매수', orderPrice, order.quantity, `[자금순환 취소] ${cancelReason}`);
+            addLog(order.symbol, '매수', orderPrice, order.quantity, `[자금회수 취소] ${cancelReason}`);
             if (currentStock.symbol === selectedStock?.symbol) {
-              setScalperMessage(`[자금 순환 취소] ${currentStock.name} 미체결 매수 주문 취소 -> 주문가능금액 ${formatCurrency(refundAmount)}원 복구`);
+              setScalperMessage(`[자금 회수 취소] ${currentStock.name} 0.5% 상승 미체결 매수 취소 -> 주문가능금액 ${formatCurrency(refundAmount)}원 복구`);
               setTimeout(() => {
                 setScalperMessage("대기 중...");
               }, 3000);
             }
-            showNotification(`[자금 순환 취소] ${currentStock.name} 매수가 대비 주가 상승 이탈로 미체결 매수 취소 (주문가능금액 원복)`, "info");
-          } else {
+            showNotification(`[자금 회수 취소] ${currentStock.name} 주가 0.5% 이상 상승으로 미체결 매수 자동 취소 (주문가능금액 원복)`, "info");
+          } else if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
             // Real KIS order cancel request!
             try {
-              setBotStatus(`[KIS API] 주문 번호(${order.id}) 자금 순환 자동 취소 요청 중...`);
-              const cancelRes = marketType === 'US' 
-                ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, (order.quantity || 1).toString())
-                : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, (order.quantity || 1).toString());
+              setBotStatus(`[KIS API] 주문 번호(${order.id}) 0.5% 상승 미체결 자동 취소 요청 중...`);
+              const cancelRes = await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString());
               
               if (cancelRes && cancelRes.rt_cd === '0') {
-                addLog(order.symbol, '매수', orderPrice, order.quantity, `[KIS 자금순환 취소] ${cancelReason}`);
-                showNotification(`${currentStock.name} KIS 매수 미체결 자동 취소 완료 (주문가능금액 환원)`, "info");
+                addLog(order.symbol, '매수', orderPrice, order.quantity, `[KIS 0.5%상승 취소] ${cancelReason}`);
+                showNotification(`${currentStock.name} KIS 매수 미체결 자동 취소 완료 (0.5% 상승 이탈, 주문가능금액 환원)`, "info");
                 if (currentStock.symbol === selectedStock?.symbol) {
-                  setScalperMessage(`[자금 순환 취소] ${currentStock.name} 미체결 매수 취소 완료 -> KIS 예수금/주문가능금액 원복`);
+                  setScalperMessage(`[자금 회수 취소] ${currentStock.name} 미체결 매수 취소 완료 -> KIS 예수금/주문가능금액 원복`);
                   setTimeout(() => {
                     setScalperMessage("대기 중...");
                   }, 3000);
                 }
-                setBotStatus(`[KIS 취소완료] ${formatCurrency(orderPrice)} 미체결 취소 및 자금 순환 완료`);
-                // Trigger KIS balance resync
+                setBotStatus(`[KIS 취소완료] ${formatCurrency(orderPrice)} 0.5% 상승 미체결 취소 및 자금 환원 완료`);
                 setTimeout(() => handleSyncKIS(), 300);
               } else {
-                const errMsg = cancelRes?.msg1 || "알 수 없는 오류";
+                const errMsg = cancelRes?.msg1 || "알 수 없는 응답";
                 
                 // Check if execution completed in the meantime
                 let isFilledInMeantime = false;
@@ -5521,8 +5533,8 @@ export default function App() {
                     const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + (status.ordQty || order.quantity)).toFixed(4)) };
                     setHoldings(newHoldings);
                     if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-                    addLog(order.symbol, '매수', orderPrice, order.quantity, `[체결완료/취소요청] 취소 요청 중 체결 완료`);
-                    showNotification(`${currentStock.name} 취소 전 체결 완료`, "success");
+                    addLog(order.symbol, '매수', orderPrice, order.quantity, `[체결완료] 취소 전 체결 완료됨`);
+                    showNotification(`${currentStock.name} 취소 전 이미 체결 완료`, "success");
                     isFilledInMeantime = true;
                   }
                 } catch (chkErr) {
@@ -5530,15 +5542,15 @@ export default function App() {
                 }
 
                 if (!isFilledInMeantime) {
-                  // Log status silently to trading logs without popping up user-facing error warnings
-                  addLog(order.symbol, '매수', orderPrice, order.quantity, `[자금순환 정리] 대기 주문 정리 (${errMsg})`);
+                  // Log status silently without alarming false errors
+                  addLog(order.symbol, '매수', orderPrice, order.quantity, `[주문정리] ${errMsg}`);
                   setBotStatus(`[자동취소 완료] ${formatCurrency(orderPrice)} 주문 정리됨`);
                   setTimeout(() => handleSyncKIS(), 500);
                 }
               }
             } catch (e: any) {
               console.error("[KIS Auto-Cancel Exception]:", e);
-              addLog(order.symbol, '매수', orderPrice, order.quantity, `[자동취소 완료] 대기 주문 정리 (${e?.message || '통신 완료'})`);
+              addLog(order.symbol, '매수', orderPrice, order.quantity, `[자동취소 처리] 대기 주문 정리 (${e?.message || '완료'})`);
               setBotStatus("대기 주문 정리 완료");
               setTimeout(() => handleSyncKIS(), 500);
             }
@@ -5763,12 +5775,10 @@ export default function App() {
             ? `목표가 대비 -${tickStr} 하향 이탈 (손절/슬롯 해제 자동 취소)`
             : `목표가 대비 +${tickStr} 상향 급등 이탈 (타점 재조정)`;
 
-          if (!order.isSimulated) {
+          if (!order.isSimulated && kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
             try {
               setBotStatus(`[KIS API] 매도 주문(${order.id}) 취소 요청 중...`);
-              const cancelRes = marketType === 'US'
-                ? await kisService.cancelOverseasOrder(order.orgNo || "", order.id, order.symbol, (order.quantity || 1).toString())
-                : await kisService.cancelDomesticOrder(order.orgNo || "", order.id, (order.quantity || 1).toString());
+              const cancelRes = await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString());
               
               if (cancelRes && cancelRes.rt_cd === '0') {
                 addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 스마트 매도취소] ${cancelReason}`);
@@ -6489,7 +6499,8 @@ export default function App() {
             );
             
             if (res.rt_cd === '0') {
-               const odno = res.output?.ODNO || res.output?.odno || res.output1?.odno || res.output1?.ODNO;
+               const rawOdno = res.output?.ODNO || res.output?.odno || res.output1?.odno || res.output1?.ODNO;
+               const odno = rawOdno ? rawOdno.toString().trim() : '';
                if (odno) {
                    setBotStatus(`[KIS API] 주문 번호(${odno}) 체결 대기 및 실시간 확인 중...`);
                    let filled = false;
