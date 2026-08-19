@@ -1429,8 +1429,8 @@ export default function App() {
     return lastMarket === 'US' ? lastUS : lastKR;
   });
 
-  // 🔄 스캘핑 종목 탭 자동 순환 상태 및 순환 주기 (1초~10초, 기본 5초)
-  const [isAutoRotateTabs, setIsAutoRotateTabs] = useState<boolean>(true);
+  // 🔄 스캘핑 종목 탭 자동 순환 상태 및 순환 주기 (1초~10초, 기본 OFF)
+  const [isAutoRotateTabs, setIsAutoRotateTabs] = useState<boolean>(false);
   const [tabRotationInterval, setTabRotationInterval] = useState<number>(() => {
     const saved = localStorage.getItem('sleek_tab_rotation_interval');
     return saved ? Math.max(1, Math.min(10, Number(saved))) : 5;
@@ -8214,10 +8214,10 @@ export default function App() {
               <div className="relative z-[90] bg-gradient-to-br from-slate-900/95 via-slate-900/98 to-slate-950/95 border border-slate-700/60 p-3 sm:p-3.5 rounded-3xl shadow-2xl backdrop-blur-xl">
                 <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3">
                   {/* 좌측: 종목 검색 & 추가 + 선택된 종목명, 코드, 현재 체결가, 전일 대비, 보유/주문가능수량 */}
-                  <div className="flex items-center gap-3.5 flex-wrap grow">
-                    {/* 종목 검색 & 추가 인풋 */}
-                    <div ref={searchRef} className="relative z-[100] w-full sm:w-72 lg:w-80 shrink-0">
-                      <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                  <div className="flex items-center gap-2.5 flex-nowrap overflow-x-auto custom-scrollbar grow py-0.5">
+                    {/* 종목 검색 & 추가 인풋 - 컴팩트 사이즈로 단일 라인 유지 */}
+                    <div ref={searchRef} className="relative z-[100] w-36 sm:w-44 md:w-48 shrink-0">
+                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
                       <input 
                         ref={searchInputRef}
                         type="text" 
@@ -8231,13 +8231,13 @@ export default function App() {
                             handleAddStock();
                           }
                         }}
-                        className="w-full bg-black/50 border border-white/15 focus:border-sleek-blue rounded-2xl py-2.5 pl-10 pr-20 text-xs sm:text-sm font-semibold text-white placeholder:text-slate-500 outline-none transition-all shadow-inner" 
-                        placeholder="종목코드/명 입력 (Enter 추가)"
+                        className="w-full bg-black/50 border border-white/15 focus:border-sleek-blue rounded-xl py-1.5 pl-7 pr-12 text-xs font-semibold text-white placeholder:text-slate-500 outline-none transition-all shadow-inner" 
+                        placeholder="종목코드/명"
                       />
                       <button
                         type="button"
                         onClick={() => handleAddStock()}
-                        className="absolute right-1.5 top-1/2 -translate-y-1/2 px-3 py-1.5 bg-sleek-blue hover:bg-blue-600 active:scale-95 text-white text-xs font-bold rounded-xl transition-all shadow-md cursor-pointer"
+                        className="absolute right-1 top-1/2 -translate-y-1/2 px-2 py-1 bg-sleek-blue hover:bg-blue-600 active:scale-95 text-white text-[11px] font-bold rounded-lg transition-all shadow-md cursor-pointer"
                       >
                         추가
                       </button>
@@ -8435,23 +8435,9 @@ export default function App() {
           <div id="ai-scalping-config-panel" className="bg-sleek-card border border-sleek-border p-3.5 sm:p-4 rounded-3xl shadow-xl space-y-3">
             {/* 상단 라인: 스캘퍼 AI 실시간 전략 감지 센서 & 6대 전략 선택 모드 */}
             <div className="bg-black/40 p-2.5 sm:p-3 rounded-2xl border border-white/10 flex flex-col lg:flex-row items-center justify-between gap-2.5">
-              <div className="flex items-center gap-2 shrink-0 flex-wrap">
+              <div className="flex items-center gap-2 shrink-0">
                 <span className="text-xs sm:text-sm font-black text-slate-200 flex items-center gap-1.5">
                   <Sparkles className="w-4 h-4 text-amber-400 animate-spin" /> 스캘퍼 AI 실시간 전략 감지 센서:
-                </span>
-                <span className={cn(
-                  "px-2.5 py-0.5 rounded-full text-xs font-extrabold border transition-all flex items-center gap-1.5 shrink-0",
-                  activeStrategyDetection.activeCount > 0
-                    ? "bg-amber-500/25 text-amber-300 border-amber-400/80 shadow-[0_0_12px_rgba(245,158,11,0.5)]"
-                    : "bg-white/5 text-slate-500 border-white/5 opacity-60"
-                )}>
-                  <span className={cn(
-                    "w-2 h-2 rounded-full transition-all shrink-0",
-                    activeStrategyDetection.activeCount > 0
-                      ? "bg-amber-400 shadow-[0_0_8px_#f59e0b] animate-ping"
-                      : "bg-slate-600"
-                  )} />
-                  실시간 {activeStrategyDetection.activeCount}개 전략 조건 포착!
                 </span>
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-1.5 w-full lg:w-auto">
@@ -8655,7 +8641,7 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 2. SMART SCALPER & 추가 매수 간격 Gap % */}
+              {/* 2. SMART SCALPER & 주문 실행 세부 설정 (추가 매수 간격, 진입 호가 방식, 실행 속도 통합) */}
               <div className="bg-sleek-blue/5 border border-sleek-blue/20 p-2.5 sm:p-3 rounded-2xl flex flex-col justify-between space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1 group relative">
@@ -8677,7 +8663,7 @@ export default function App() {
                     type="button"
                     onClick={() => setIsSmartScalperMode(!isSmartScalperMode)}
                     className={cn(
-                      "px-2.5 py-1 rounded-full text-[10px] font-black transition-all border cursor-pointer",
+                      "px-2 py-0.5 rounded-full text-[10px] font-black transition-all border cursor-pointer",
                       isSmartScalperMode
                         ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue"
                         : "bg-white/5 border-white/10 text-sleek-text-secondary opacity-60"
@@ -8688,11 +8674,13 @@ export default function App() {
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-black text-slate-300 uppercase block mb-1">추가 매수 간격 (Gap %)</label>
+                  <div className="flex items-center justify-between mb-0.5">
+                    <label className="text-[11px] font-black text-slate-300 uppercase">추가 매수 간격 (Gap %)</label>
+                  </div>
                   <select 
                     value={minGapBetweenSlots}
                     onChange={(e) => setMinGapBetweenSlots(Number(e.target.value))}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl px-2 py-1.5 text-xs sm:text-sm font-mono font-bold text-white outline-none cursor-pointer appearance-none"
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-2 py-1 text-xs font-mono font-bold text-white outline-none cursor-pointer appearance-none"
                   >
                     {[0.1, 0.2, 0.3, 0.4, 0.5, 0.8, 1.0, 1.5, 2.0, 3.0, 5.0].map(gap => (
                       <option key={gap} value={gap} className="bg-sleek-bg text-white">{gap}%</option>
@@ -8700,64 +8688,51 @@ export default function App() {
                   </select>
                 </div>
 
-                <div className="bg-black/30 p-2 rounded-xl border border-white/5 text-[11px] text-slate-400 space-y-1 font-mono">
-                  <div className="flex justify-between items-center text-slate-300">
-                    <span>초단타 엔진:</span>
-                    <strong className="text-emerald-400">초고속 체결</strong>
-                  </div>
-                  <div className="flex justify-between items-center text-slate-300">
-                    <span>리스크 관리:</span>
-                    <strong className="text-sleek-blue">자동 슬롯 분할</strong>
-                  </div>
-                </div>
-              </div>
-
-              {/* 3. 진입 호가 방식 & 실행 속도 */}
-              <div className="bg-white/5 p-2.5 sm:p-3 rounded-2xl border border-white/10 flex flex-col justify-between space-y-2">
-                <div>
-                  <span className="text-xs font-bold text-white flex items-center gap-1 mb-1.5">
-                    <TrendingDown className="w-3.5 h-3.5 text-amber-400" /> 진입 호가 방식
+                {/* 진입 호가 방식 */}
+                <div className="pt-1.5 border-t border-white/10">
+                  <span className="text-[11px] font-bold text-white flex items-center gap-1 mb-1">
+                    <TrendingDown className="w-3 h-3 text-amber-400" /> 진입 호가 방식
                   </span>
                   <div className="grid grid-cols-4 gap-1">
                     <button
                       type="button"
                       onClick={() => setEntryPriceMode('BID1')}
                       className={cn(
-                        "py-1.5 rounded-lg text-xs font-bold border text-center transition-all cursor-pointer",
-                        entryPriceMode === 'BID1' ? "bg-blue-500/20 border-blue-500/40 text-blue-300" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
+                        "py-1 rounded-lg text-[11px] font-bold border text-center transition-all cursor-pointer",
+                        entryPriceMode === 'BID1' ? "bg-blue-500/20 border-blue-500/40 text-blue-300 font-black" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
                       title="매수 1호가 지정가 진입"
                     >
-                      매수1호가
+                      1호가
                     </button>
                     <button
                       type="button"
                       onClick={() => setEntryPriceMode('BID2')}
                       className={cn(
-                        "py-1.5 rounded-lg text-xs font-bold border text-center transition-all cursor-pointer",
-                        entryPriceMode === 'BID2' ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
+                        "py-1 rounded-lg text-[11px] font-bold border text-center transition-all cursor-pointer",
+                        entryPriceMode === 'BID2' ? "bg-emerald-500/20 border-emerald-500/40 text-emerald-300 font-black" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
                       title="기본 매수 2호가 진입 (스캘퍼 권장)"
                     >
-                      매수2호가★
+                      2호가★
                     </button>
                     <button
                       type="button"
                       onClick={() => setEntryPriceMode('BID4')}
                       className={cn(
-                        "py-1.5 rounded-lg text-xs font-bold border text-center transition-all cursor-pointer",
-                        entryPriceMode === 'BID4' ? "bg-amber-500/20 border-amber-500/40 text-amber-300" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
+                        "py-1 rounded-lg text-[11px] font-bold border text-center transition-all cursor-pointer",
+                        entryPriceMode === 'BID4' ? "bg-amber-500/20 border-amber-500/40 text-amber-300 font-black" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
                       title="매수 4호가 지정가 진입"
                     >
-                      매수4호가
+                      4호가
                     </button>
                     <button
                       type="button"
                       onClick={() => setEntryPriceMode('CURRENT')}
                       className={cn(
-                        "py-1.5 rounded-lg text-xs font-bold border text-center transition-all cursor-pointer",
-                        entryPriceMode === 'CURRENT' ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
+                        "py-1 rounded-lg text-[11px] font-bold border text-center transition-all cursor-pointer",
+                        entryPriceMode === 'CURRENT' ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue font-black" : "bg-black/30 border-white/5 text-gray-400 hover:text-gray-200"
                       )}
                       title="현재 시장 체결가 진입"
                     >
@@ -8766,12 +8741,13 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="pt-2 border-t border-white/10">
+                {/* 실행 속도 */}
+                <div className="pt-1.5 border-t border-white/10">
                   <div className="flex justify-between items-center mb-1">
-                    <span className="text-xs font-bold text-slate-300 uppercase flex items-center gap-1">
-                      <Activity className="w-3.5 h-3.5 text-amber-400" /> 실행 속도
+                    <span className="text-[11px] font-bold text-slate-300 uppercase flex items-center gap-1">
+                      <Activity className="w-3 h-3 text-amber-400" /> 실행 속도
                     </span>
-                    <span className="text-xs font-mono font-bold text-amber-300">
+                    <span className="text-[11px] font-mono font-bold text-amber-300">
                       {(scalpingSpeed / 1000).toFixed(1)}초
                     </span>
                   </div>
@@ -8787,9 +8763,9 @@ export default function App() {
                         type="button"
                         onClick={() => setScalpingSpeed(opt.value)}
                         className={cn(
-                          "py-1.5 rounded-lg text-xs font-mono font-bold transition-all text-center cursor-pointer border",
+                          "py-1 rounded-lg text-[11px] font-mono font-bold transition-all text-center cursor-pointer border",
                           scalpingSpeed === opt.value
-                            ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
+                            ? "bg-amber-500/20 text-amber-300 border-amber-500/40 font-black"
                             : "bg-black/30 text-slate-400 border-white/5 hover:bg-white/10"
                         )}
                       >
@@ -8800,8 +8776,68 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 4. START AI SCALPER 큰 실행 버튼 */}
-              <div className="flex items-center justify-center">
+              {/* 3. 스캘퍼 선택 종목 리스트 버튼 (Profit Maximizer Engine의 등록 종목들을 위로 올려 배치) */}
+              <div className="bg-black/30 p-2.5 sm:p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5">
+                <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
+                  <span className="text-xs font-black text-slate-200 uppercase flex items-center gap-1.5">
+                    <TrendingUp className="w-3.5 h-3.5 text-sleek-blue" />
+                    스캘퍼 등록 종목
+                  </span>
+                  <span className="text-[10px] font-mono font-bold text-sleek-blue bg-sleek-blue/10 px-2 py-0.5 rounded border border-sleek-blue/20">
+                    {scalperTabs.filter(tab => {
+                      const isUS = /^[A-Z]/.test(tab.symbol);
+                      return marketType === 'US' ? isUS : !isUS;
+                    }).length}개 종목
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[175px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
+                  {scalperTabs.filter(tab => {
+                    const isUS = /^[A-Z]/.test(tab.symbol);
+                    return marketType === 'US' ? isUS : !isUS;
+                  }).map(tab => {
+                    const isSelected = tab.id === activeTabId;
+                    const tabStock = stocks.find(s => s.symbol === tab.symbol) || 
+                                     stocksCache.KR?.find(s => s.symbol === tab.symbol) ||
+                                     stocksCache.US?.find(s => s.symbol === tab.symbol) ||
+                                     (marketType === 'KR' 
+                                       ? INITIAL_STOCKS_KR.find(s => s.symbol === tab.symbol) 
+                                       : INITIAL_STOCKS.find(s => s.symbol === tab.symbol));
+                    const tabName = (tab.name && tab.name !== tab.symbol) ? tab.name : getResolvedStockName(tab.symbol, tabStock);
+
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => handleSwitchTab(tab.id)}
+                        className={cn(
+                          "px-2 py-1.5 rounded-xl border flex items-center justify-between gap-1.5 cursor-pointer transition-all w-full text-left min-w-0 font-mono select-none group",
+                          isSelected
+                            ? "bg-sleek-blue/25 border-sleek-blue text-white shadow-md font-black ring-1 ring-sleek-blue/60"
+                            : "bg-black/50 border-white/10 hover:bg-white/10 text-slate-300 hover:text-white"
+                        )}
+                        title={`${tabName} (${tab.symbol}) 탭으로 전환`}
+                      >
+                        <div className="flex items-center gap-1.5 min-w-0 truncate">
+                          <span className={cn(
+                            "w-2 h-2 rounded-full shrink-0",
+                            tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" : "bg-slate-500"
+                          )} />
+                          <span className="font-bold text-xs truncate">{tabName}</span>
+                        </div>
+                        {tab.isBotActive && (
+                          <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/30 shrink-0">
+                            ON
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* 4. START AI SCALPER 큰 실행 버튼 & 하단 탭 순환 컨트롤 */}
+              <div className="flex flex-col justify-between gap-2">
                 <button 
                   onClick={() => {
                     if (isSyncingKIS || initSyncState.status === 'syncing') {
@@ -8824,7 +8860,7 @@ export default function App() {
                   disabled={isSyncingKIS || initSyncState.status === 'syncing'}
                   title="현재 선택된 종목의 개별 스캘퍼 시작/정지"
                   className={cn(
-                    "w-full h-full min-h-[95px] sm:min-h-[105px] py-3 px-3 rounded-2xl font-black text-base sm:text-lg italic tracking-tight uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-1.5 border",
+                    "w-full grow min-h-[80px] py-2.5 px-3 rounded-2xl font-black text-base sm:text-lg italic tracking-tight uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-1 border",
                     isGapBotActive 
                       ? "bg-gradient-to-br from-rose-600 to-red-800 text-white border-rose-500/50 shadow-rose-900/40 hover:scale-[1.02] cursor-pointer" 
                       : (isSyncingKIS || initSyncState.status === 'syncing')
@@ -8845,10 +8881,64 @@ export default function App() {
                   ) : (
                     <>
                       <Play className="w-5 h-5 fill-current" />
-                      <span className="text-center leading-tight">START AI<br />SCALPER</span>
+                      <span className="text-center leading-tight text-sm sm:text-base">START AI SCALPER</span>
                     </>
                   )}
                 </button>
+
+                {/* 🔄 START AI SCALPER 버튼 바로 아래 배치된 탭 순환 ON/OFF 및 순환 주기 선택 */}
+                <div className={cn(
+                  "flex items-center justify-between rounded-xl border p-1 transition-all shadow-inner",
+                  isAutoRotateTabs 
+                    ? "bg-purple-500/15 border-purple-500/40 shadow-[0_0_12px_rgba(168,85,247,0.2)]" 
+                    : "bg-black/40 border-white/10"
+                )}>
+                  <button
+                    type="button"
+                    onClick={() => setIsAutoRotateTabs(prev => !prev)}
+                    className={cn(
+                      "flex items-center gap-1 px-2 py-1 text-xs font-mono font-bold transition-all cursor-pointer grow",
+                      isAutoRotateTabs 
+                        ? "text-purple-300 hover:text-purple-200" 
+                        : "text-gray-400 hover:text-white"
+                    )}
+                    title={`스캘핑 종목 탭 ${tabRotationInterval}초 간격 자동 순환 ON/OFF`}
+                  >
+                    <RefreshCw className={cn("w-3.5 h-3.5 text-purple-400", isAutoRotateTabs && "animate-spin-slow")} />
+                    <span>탭 순환 {isAutoRotateTabs ? "ON" : "OFF"}</span>
+                  </button>
+
+                  <div className="h-4 w-px bg-white/15 mx-1" />
+
+                  <div className="relative flex items-center pr-1">
+                    <select
+                      id="scalper-config-tab-rotation-interval-select"
+                      aria-label="종목 탭 자동 순환 주기 선택"
+                      value={tabRotationInterval}
+                      onChange={(e) => {
+                        const val = Number(e.target.value);
+                        setTabRotationInterval(val);
+                        try {
+                          localStorage.setItem('sleek_tab_rotation_interval', String(val));
+                        } catch (err) {
+                          console.error(err);
+                        }
+                      }}
+                      className={cn(
+                        "bg-transparent text-xs font-mono font-bold focus:outline-none cursor-pointer py-0.5 px-1 rounded transition-all",
+                        isAutoRotateTabs ? "text-purple-300 hover:text-purple-100" : "text-gray-400 hover:text-gray-200",
+                        "[&>option]:bg-slate-900 [&>option]:text-white"
+                      )}
+                      title="종목 탭 자동 순환 주기 선택 (1초~10초)"
+                    >
+                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(sec => (
+                        <option key={sec} value={sec}>
+                          {sec}초
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -8957,59 +9047,6 @@ export default function App() {
                   <span className="font-black text-sleek-blue italic text-xs sm:text-sm font-mono">
                     {formatCurrency(gapBuyPrice && gapSellPrice ? (gapSellPrice - gapBuyPrice) : 0)}
                   </span>
-                </div>
-                {/* 🔄 종목 탭 자동 순환 토글 및 주기 선택 드롭다운 (1초 ~ 10초) */}
-                <div className={cn(
-                  "flex items-center rounded-xl border transition-all shadow-inner",
-                  isAutoRotateTabs 
-                    ? "bg-purple-500/15 border-purple-500/40 shadow-[0_0_12px_rgba(168,85,247,0.2)]" 
-                    : "bg-black/40 border-white/10"
-                )}>
-                  <button
-                    type="button"
-                    onClick={() => setIsAutoRotateTabs(prev => !prev)}
-                    className={cn(
-                      "flex items-center gap-1.5 px-3 py-1.5 text-xs sm:text-sm font-mono font-bold transition-all cursor-pointer",
-                      isAutoRotateTabs 
-                        ? "text-purple-300 hover:text-purple-200" 
-                        : "text-gray-400 hover:text-white"
-                    )}
-                    title={`스캘핑 종목 탭 ${tabRotationInterval}초 간격 자동 순환 ON/OFF`}
-                  >
-                    <RefreshCw className={cn("w-4 h-4 text-purple-400", isAutoRotateTabs && "animate-spin-slow")} />
-                    <span>탭 순환 {isAutoRotateTabs ? "ON" : "OFF"}</span>
-                  </button>
-
-                  <div className="h-4 w-px bg-white/15" />
-
-                  <div className="relative flex items-center pr-2 pl-1.5">
-                    <select
-                      id="tab-rotation-interval-select"
-                      aria-label="종목 탭 자동 순환 주기 선택"
-                      value={tabRotationInterval}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        setTabRotationInterval(val);
-                        try {
-                          localStorage.setItem('sleek_tab_rotation_interval', String(val));
-                        } catch (err) {
-                          console.error(err);
-                        }
-                      }}
-                      className={cn(
-                        "bg-transparent text-xs sm:text-sm font-mono font-bold focus:outline-none cursor-pointer py-1 px-1 rounded transition-all",
-                        isAutoRotateTabs ? "text-purple-300 hover:text-purple-100" : "text-gray-400 hover:text-gray-200",
-                        "[&>option]:bg-slate-900 [&>option]:text-white"
-                      )}
-                      title="종목 탭 자동 순환 주기 선택 (1초~10초)"
-                    >
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(sec => (
-                        <option key={sec} value={sec}>
-                          {sec}초{sec === 5 ? " (기본)" : ""}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
                 </div>
               </div>
             </div>
