@@ -6008,6 +6008,82 @@ export default function App() {
     checkSellOrders();
   }, [pendingSellOrders, stocks, marketType, exchangeRate, holdings, currentUser, playScalpingSound]);
 
+  // Auto-Sell Order Enforcer & Average Down Target Price Sync
+  useEffect(() => {
+    const hasAnyActiveBot = isGapBotActive || scalperTabsRef.current.some(t => t.isBotActive);
+    if (!hasAnyActiveBot || scalpingTargetProfit <= 0) return;
+
+    const runAutoSellSync = async () => {
+      for (const [symbol, qtyVal] of Object.entries(holdings)) {
+        const numQty = Number(qtyVal) || 0;
+        if (numQty <= 0) continue;
+
+        const tabForSymbol = scalperTabsRef.current.find(t => t.symbol === symbol);
+        const isBotActiveForSymbol = (symbol === selectedSymbol) ? isGapBotActive : (tabForSymbol?.isBotActive || false);
+        if (!isBotActiveForSymbol) continue; // Only enforce for explicitly started bots
+
+        if (autoSellInFlightRef.current.has(symbol)) continue;
+
+        const stockObj = stocksRef.current.find(s => s.symbol === symbol) || stocks.find(s => s.symbol === symbol) || INITIAL_STOCKS_KR.find(s => s.symbol === symbol);
+        if (!stockObj) continue;
+
+        const avgP = avgPrices[symbol] || stockObj.price;
+        if (avgP <= 0) continue;
+
+        const targetSellPrice = calculateTargetSellPrice(avgP, scalpingTargetProfit);
+
+        const currentPendingSells = pendingSellOrdersRef.current.filter(o => o.symbol === symbol);
+        
+        let totalPendingQty = 0;
+        let needsCancelAndReplace = false;
+
+        for (const order of currentPendingSells) {
+          totalPendingQty += order.quantity;
+          if (order.orderPrice !== targetSellPrice) {
+            needsCancelAndReplace = true;
+          }
+        }
+
+        if (totalPendingQty !== numQty && totalPendingQty > 0) {
+          needsCancelAndReplace = true;
+        }
+
+        if (needsCancelAndReplace) {
+          autoSellInFlightRef.current.add(symbol);
+          try {
+            console.log(`[Auto-Sell Sync] Cancelling old sell orders for ${symbol} due to average down / price mismatch`);
+            for (const order of currentPendingSells) {
+               await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString()).catch(() => {});
+               setPendingSellOrders(prev => prev.filter(o => o.id !== order.id));
+               pendingSellOrdersRef.current = pendingSellOrdersRef.current.filter(o => o.id !== order.id);
+            }
+            
+            await new Promise(r => setTimeout(r, 400));
+            
+            await executeTrade('SELL', stockObj, numQty, `[자동 매도 정정] 평단가(${formatCurrency(avgP)}) 기준 +${scalpingTargetProfit}% 익절가(${formatCurrency(targetSellPrice)}) 정정 매도`, targetSellPrice, avgP);
+            showNotification(`[평단가 정정] ${stockObj.name} 평단가 하락으로 전체 매도 주문이 ${formatCurrency(targetSellPrice)}원으로 재접수되었습니다.`, "success");
+          } catch (err) {
+            console.error("Auto-sell cancel/replace error:", err);
+          } finally {
+            autoSellInFlightRef.current.delete(symbol);
+          }
+        } else if (totalPendingQty < numQty && !needsCancelAndReplace) {
+          const missingQty = numQty - totalPendingQty;
+          autoSellInFlightRef.current.add(symbol);
+          try {
+            await executeTrade('SELL', stockObj, missingQty, `[자동 매도] 평단가 대비 +${scalpingTargetProfit}% 익절 지정가 매도`, targetSellPrice, avgP);
+          } catch (err) {
+            console.error("Auto-sell executeTrade error:", err);
+          } finally {
+            autoSellInFlightRef.current.delete(symbol);
+          }
+        }
+      }
+    };
+
+    runAutoSellSync();
+  }, [holdings, avgPrices, scalpingTargetProfit, kisConfig.isConnected, kisConfig.isRealOrderEnabled, stocks, isGapBotActive, selectedSymbol, calculateTargetSellPrice]);
+
   const activeStrategyDetection = useMemo(() => {
     if (!selectedStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
     return detectStockStrategies(selectedStock);
@@ -6195,7 +6271,10 @@ export default function App() {
             currentWeightedAvg = totalQty > 0 ? (isUSStock ? Number((totalCost / totalQty).toFixed(4)) : Math.round(totalCost / totalQty)) : 0;
           }
           const isPositionInProfit = currentWeightedAvg > 0 && currentPrice >= currentWeightedAvg;
-          const isGapSatisfied = !isPositionInProfit && (!lastSlot || (currentPrice <= lastSlot.price * (1 - (minGapBetweenSlots / 100))));
+          
+          // [수정] 무분별한 추가 매수 방지: 평단가 대비 설정된 갭(예: -0.3%) 이상 하락했을 때만 추가 매수 허용
+          const isGapSatisfied = !isPositionInProfit && 
+            (currentWeightedAvg === 0 || currentPrice <= currentWeightedAvg * (1 - (minGapBetweenSlots / 100)));
 
           if ((isGapSatisfied || isAll4SensorsFullEntry) && (meetsBuyCriteria || (immediateEntry && totalOccupied < itemMaxSlots))) {
             if (isSamePriceBlocked) {
@@ -6297,9 +6376,24 @@ export default function App() {
             overallProfitRatio <= stopLossThreshold &&
             overallProfitRatio > -0.85
           ) {
-            // Standard mechanical stop loss execution (No popup modal)
+            // [수정] 기계적 손절 전 기존 미체결 매도 주문 취소 후 즉시 평단가+손절% 가격으로 매도 주문 실행
             if (isSelected) setScalperMessage(`[손절 실행] ${stockItem.name} ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (${(overallProfitRatio * 100).toFixed(2)}%)`);
-            await executeTrade('SELL', stockItem, totalHeldQty, `스캘핑 기계적 손절 (${(overallProfitRatio * 100).toFixed(2)}%)`, currentPrice, weightedAvgPrice);
+            
+            const pendingSellsForSymbol = pendingSellOrdersRef.current.filter(o => o.symbol === stockItem.symbol);
+            if (pendingSellsForSymbol.length > 0) {
+              for (const order of pendingSellsForSymbol) {
+                 await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString()).catch(() => {});
+                 setPendingSellOrders(prev => prev.filter(o => o.id !== order.id));
+                 pendingSellOrdersRef.current = pendingSellOrdersRef.current.filter(o => o.id !== order.id);
+              }
+              await new Promise(r => setTimeout(r, 200));
+            }
+
+            const tickSize = getTickSize(weightedAvgPrice, isStockUS ? 'US' : 'KR');
+            let stopLossPrice = weightedAvgPrice * (1 + stopLossThreshold);
+            stopLossPrice = isStockUS ? Number(stopLossPrice.toFixed(4)) : Math.round(stopLossPrice / tickSize) * tickSize;
+
+            await executeTrade('SELL', stockItem, totalHeldQty, `스캘핑 기계적 손절 (${(overallProfitRatio * 100).toFixed(2)}%)`, stopLossPrice, weightedAvgPrice);
 
             if (isSelected) {
               gapInventoryRef.current = [];
