@@ -1347,9 +1347,11 @@ export default function App() {
       ];
     }
 
-    // Sanitize any previously contaminated slots or undefined maxSlots from saved localStorage
+    // Sanitize any previously contaminated slots, ensure isBotActive is strictly false on load
     saved = saved.map(t => ({
       ...t,
+      isBotActive: false, // 프로그램 로딩 시 모든 탭은 항상 정지(OFF) 상태로 안전하게 시작
+      scalperMessage: "대기 중...",
       maxSlots: t.maxSlots || 10,
       gapInventory: (t.gapInventory || [])
         .filter(s => {
@@ -1445,11 +1447,23 @@ export default function App() {
   useEffect(() => {
     scalperTabsRef.current = scalperTabs;
     try {
-      localStorage.setItem('sleek_scalper_tabs', JSON.stringify(scalperTabs));
+      // Persist tabs but ensure isBotActive is stored as false to prevent auto-start on fresh reloads
+      const safeTabsToPersist = scalperTabs.map(t => ({
+        ...t,
+        isBotActive: false,
+        scalperMessage: "대기 중..."
+      }));
+      localStorage.setItem('sleek_scalper_tabs', JSON.stringify(safeTabsToPersist));
     } catch (e) {
       console.error("Failed to persist scalperTabs", e);
     }
   }, [scalperTabs]);
+
+  // 프로그램 초기 로딩 시 모든 스캘퍼 봇이 반드시 정지(STOP) 상태로 시작되도록 보장
+  useEffect(() => {
+    setIsGapBotActive(false);
+    setScalperTabs(prev => prev.map(t => ({ ...t, isBotActive: false, scalperMessage: "대기 중..." })));
+  }, []);
 
   // 🔄 종목 탭 자동 순환 (오른쪽 탭으로 연속 순환 - 수동 매도 모달 열림 시 일시 중지)
   useEffect(() => {
