@@ -5994,53 +5994,6 @@ export default function App() {
     checkSellOrders();
   }, [pendingSellOrders, stocks, marketType, exchangeRate, holdings, currentUser, playScalpingSound]);
 
-  // Auto-Sell Order Enforcer for Held Stocks (e.g. 동양 1주): Ensures all held stocks automatically register a target profit limit sell order
-  useEffect(() => {
-    const hasAnyActiveBot = isGapBotActive || scalperTabsRef.current.some(t => t.isBotActive);
-    if (!hasAnyActiveBot || scalpingTargetProfit <= 0) return;
-
-    const runAutoSell = async () => {
-      for (const [symbol, qtyVal] of Object.entries(holdings)) {
-        const numQty = Number(qtyVal) || 0;
-        if (numQty <= 0) continue;
-
-        const tabForSymbol = scalperTabsRef.current.find(t => t.symbol === symbol);
-        const isBotActiveForSymbol = (symbol === selectedSymbol) ? isGapBotActive : (tabForSymbol?.isBotActive || false);
-        if (!isBotActiveForSymbol) continue;
-
-        if (autoSellInFlightRef.current.has(symbol)) continue;
-
-        const stockObj = stocksRef.current.find(s => s.symbol === symbol) || stocks.find(s => s.symbol === symbol) || INITIAL_STOCKS_KR.find(s => s.symbol === symbol);
-        if (!stockObj) continue;
-
-        const currentPendingSellQty = pendingSellOrdersRef.current
-          .filter(o => o.symbol === symbol)
-          .reduce((acc, o) => acc + o.quantity, 0);
-
-        if (currentPendingSellQty < numQty) {
-          const missingQty = numQty - currentPendingSellQty;
-          const avgP = avgPrices[symbol] || stockObj.price;
-          if (avgP <= 0) continue;
-
-          const targetSellPrice = calculateTargetSellPrice(avgP, scalpingTargetProfit);
-
-          if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
-            autoSellInFlightRef.current.add(symbol);
-            try {
-              await executeTrade('SELL', stockObj, missingQty, `[자동 매도] 평단가 대비 +${scalpingTargetProfit}% 익절 지정가 매도`, targetSellPrice, avgP);
-            } catch (err) {
-              console.error("Auto-sell executeTrade error:", err);
-            } finally {
-              autoSellInFlightRef.current.delete(symbol);
-            }
-          }
-        }
-      }
-    };
-
-    runAutoSell();
-  }, [holdings, avgPrices, scalpingTargetProfit, kisConfig.isConnected, kisConfig.isRealOrderEnabled, stocks, isGapBotActive, selectedSymbol]);
-
   const activeStrategyDetection = useMemo(() => {
     if (!selectedStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
     return detectStockStrategies(selectedStock);
