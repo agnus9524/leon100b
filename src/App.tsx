@@ -8563,10 +8563,10 @@ export default function App() {
               </div>
             </div>
 
-            {/* 핵심 스캘퍼 설정 4열 컴팩트 그리드 */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 items-stretch text-xs">
-              {/* 1. 1회 거래수량, 최대 분할 슬롯, 목표순익 & 손절 */}
-              <div className="bg-black/30 p-2.5 sm:p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-2">
+            {/* 핵심 스캘퍼 설정 4열 컴팩트 그리드 (SMART SCALPER 축소 & 스캘퍼 등록 종목 3열 확장) */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-stretch text-xs">
+              {/* 1. 1회 거래수량, 최대 분할 슬롯, 목표순익 & 손절 (col-span-3) */}
+              <div className="lg:col-span-3 bg-black/30 p-2.5 sm:p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-2">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1">
                     <Layers className="w-3.5 h-3.5 text-sleek-blue" /> 1회 거래수량
@@ -8641,8 +8641,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 2. SMART SCALPER & 주문 실행 세부 설정 (추가 매수 간격, 진입 호가 방식, 실행 속도 통합) */}
-              <div className="bg-sleek-blue/5 border border-sleek-blue/20 p-2.5 sm:p-3 rounded-2xl flex flex-col justify-between space-y-2">
+              {/* 2. SMART SCALPER & 주문 실행 세부 설정 (col-span-2: 가로폭 축소 및 컴팩트화) */}
+              <div className="lg:col-span-2 bg-sleek-blue/5 border border-sleek-blue/20 p-2.5 sm:p-3 rounded-2xl flex flex-col justify-between space-y-2">
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1 group relative">
                     <Zap className="w-3.5 h-3.5" /> SMART SCALPER
@@ -8663,13 +8663,22 @@ export default function App() {
                     type="button"
                     onClick={() => setIsSmartScalperMode(!isSmartScalperMode)}
                     className={cn(
-                      "px-2 py-0.5 rounded-full text-[10px] font-black transition-all border cursor-pointer",
+                      "p-1 rounded-lg transition-all border cursor-pointer shrink-0",
                       isSmartScalperMode
                         ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue"
-                        : "bg-white/5 border-white/10 text-sleek-text-secondary opacity-60"
+                        : "bg-white/5 border-white/10 text-slate-400 opacity-60"
                     )}
+                    title={`스마트 스캘퍼 모드 ${isSmartScalperMode ? '활성화(ON)' : '비활성화(OFF)'}`}
                   >
-                    {isSmartScalperMode ? "SMART ACTIVE" : "SMART OFF"}
+                    <div className={cn(
+                      "w-7 h-3.5 rounded-full transition-colors relative p-0.5",
+                      isSmartScalperMode ? "bg-sleek-blue" : "bg-slate-700"
+                    )}>
+                      <div className={cn(
+                        "w-2.5 h-2.5 rounded-full bg-white transition-transform shadow",
+                        isSmartScalperMode ? "translate-x-3.5" : "translate-x-0"
+                      )} />
+                    </div>
                   </button>
                 </div>
 
@@ -8729,8 +8738,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 3. 스캘퍼 선택 종목 리스트 버튼 (Profit Maximizer Engine의 등록 종목들을 위로 올려 배치) */}
-              <div className="bg-black/30 p-2.5 sm:p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5">
+              {/* 3. 스캘퍼 선택 종목 리스트 버튼 (col-span-5: 3열 배치 지원) */}
+              <div className="lg:col-span-5 bg-black/30 p-2.5 sm:p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5">
                 <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
                   <span className="text-xs font-black text-slate-200 uppercase flex items-center gap-1.5">
                     <TrendingUp className="w-3.5 h-3.5 text-sleek-blue" />
@@ -8744,7 +8753,7 @@ export default function App() {
                   </span>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-[175px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-1.5 max-h-[175px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
                   {scalperTabs.filter(tab => {
                     const isUS = /^[A-Z]/.test(tab.symbol);
                     return marketType === 'US' ? isUS : !isUS;
@@ -8764,16 +8773,16 @@ export default function App() {
                         type="button"
                         onClick={() => handleSwitchTab(tab.id)}
                         className={cn(
-                          "px-2 py-1.5 rounded-xl border flex items-center justify-between gap-1.5 cursor-pointer transition-all w-full text-left min-w-0 font-mono select-none group",
+                          "px-2 py-1.5 rounded-xl border flex items-center justify-between gap-1 cursor-pointer transition-all w-full text-left min-w-0 font-mono select-none group",
                           isSelected
                             ? "bg-sleek-blue/25 border-sleek-blue text-white shadow-md font-black ring-1 ring-sleek-blue/60"
                             : "bg-black/50 border-white/10 hover:bg-white/10 text-slate-300 hover:text-white"
                         )}
                         title={`${tabName} (${tab.symbol}) 탭으로 전환`}
                       >
-                        <div className="flex items-center gap-1.5 min-w-0 truncate">
+                        <div className="flex items-center gap-1 min-w-0 truncate">
                           <span className={cn(
-                            "w-2 h-2 rounded-full shrink-0",
+                            "w-1.5 h-1.5 rounded-full shrink-0",
                             tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" : "bg-slate-500"
                           )} />
                           <span className="font-bold text-xs truncate">{tabName}</span>
@@ -8789,8 +8798,8 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 4. START AI SCALPER 큰 실행 버튼 & 하단 탭 순환 컨트롤 */}
-              <div className="flex flex-col justify-between gap-2">
+              {/* 4. START AI SCALPER 큰 실행 버튼 & 하단 탭 순환 컨트롤 (col-span-2) */}
+              <div className="lg:col-span-2 flex flex-col justify-between gap-2">
                 <button 
                   onClick={() => {
                     if (isSyncingKIS || initSyncState.status === 'syncing') {
