@@ -850,10 +850,10 @@ class KISService {
     }
   }
 
-  public async cancelOrder(symbol: string, orgNo: string, ordNo: string, qty: string) {
+  public async cancelOrder(symbol: string, orgNo: string, ordNo: string, qty: string, ordDvsn: string = '00') {
     const isKR = /^\d{6}$/.test(symbol);
     if (isKR) {
-      return this.cancelDomesticOrder(orgNo, ordNo, qty);
+      return this.cancelDomesticOrder(orgNo, ordNo, qty, ordDvsn);
     } else {
       return this.cancelOverseasOrder(orgNo, ordNo, symbol, qty);
     }
@@ -949,8 +949,8 @@ class KISService {
     });
   }
 
-  public async cancelDomesticOrder(orgNo: string, ordNo: string, qty: string) {
-    return this.reviseDomestic(orgNo, ordNo, qty, "0", '02');
+  public async cancelDomesticOrder(orgNo: string, ordNo: string, qty: string, ordDvsn: string = '00') {
+    return this.reviseDomestic(orgNo, ordNo, qty, "0", '02', ordDvsn);
   }
 
   public async reviseDomestic(orgNo: string, ordNo: string, qty: string, price: string, dvsn: '01' | '02' = '01', ordDvsn: string = '00') {

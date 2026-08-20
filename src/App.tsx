@@ -284,6 +284,7 @@ interface PendingBuyOrder {
   createdAt: number;
   isSimulated: boolean;
   slotId?: string; // Track which slot this order is for
+  ordDvsn?: string;
 }
 
 interface PendingSellOrder {
@@ -298,6 +299,7 @@ interface PendingSellOrder {
   reason?: string;
   buyPrice?: number; // Added to calculate profit upon fill
   slotId?: string; // Track which slot this order is for
+  ordDvsn?: string;
 }
 
 interface AIAnalysisResult {
@@ -2084,6 +2086,61 @@ export default function App() {
       return Math.floor(balance / (stockPriceInKRW || 1));
     }
   }, [selectedStock, kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisBuyableQty, orderableKrw, orderableUsd, balance, exchangeRate]);
+
+  const orderBookData = useMemo(() => {
+    if (!selectedStock) return null;
+    const isUSStock = selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US';
+    const currentPrice = selectedStock.price;
+    const tickSize = getTickSize(currentPrice, isUSStock ? 'US' : 'KR');
+    const askLevels = Array.from({ length: 4 }, (_, i) => 
+      isUSStock ? Number((currentPrice + (4 - i) * tickSize).toFixed(4)) : currentPrice + (4 - i) * tickSize
+    );
+    const bidLevels = Array.from({ length: 4 }, (_, i) => 
+      isUSStock ? Number((currentPrice - (i + 1) * tickSize).toFixed(4)) : currentPrice - (i + 1) * tickSize
+    );
+    const getLevelVolume = (priceLevel: number) => {
+      const intPrice = isUSStock ? Math.round(priceLevel * 100) : Math.round(priceLevel);
+      const symHash = (selectedStock?.symbol || '').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
+      
+      let scale = 1;
+      if (isUSStock) {
+        scale = currentPrice < 10 ? 50 : currentPrice < 100 ? 10 : currentPrice < 500 ? 3 : 1;
+      } else {
+        scale = currentPrice < 10000 ? 50 : currentPrice < 100000 ? 10 : 2;
+      }
+
+      const base = (Math.abs((intPrice * 37 + symHash * 13) % 800) + 120) * scale;
+      const timeStep = Math.floor(Date.now() / 2500);
+      const wiggle = Math.floor(Math.sin(timeStep + intPrice) * 35 * scale) + (35 * scale);
+      
+      return Math.max(10 * scale, Math.floor(base + wiggle));
+    };
+
+    const askVolumes = askLevels.map(p => getLevelVolume(p));
+    const bidVolumes = bidLevels.map(p => getLevelVolume(p));
+    const maxLevelVol = Math.max(...askVolumes, ...bidVolumes, 1);
+
+    const totalAskVolume = askVolumes.reduce((a, b) => a + b, 0);
+    const totalBidVolume = bidVolumes.reduce((a, b) => a + b, 0);
+    const totalDepthVolume = (totalAskVolume + totalBidVolume) || 1;
+    const askPctVal = ((totalAskVolume / totalDepthVolume) * 100).toFixed(1);
+    const bidPctVal = ((totalBidVolume / totalDepthVolume) * 100).toFixed(1);
+
+    return {
+      isUSStock,
+      currentPrice,
+      tickSize,
+      askLevels,
+      bidLevels,
+      askVolumes,
+      bidVolumes,
+      maxLevelVol,
+      totalAskVolume,
+      totalBidVolume,
+      askPctVal,
+      bidPctVal
+    };
+  }, [selectedStock, marketType]);
   const totalValue = useMemo(() => {
     // Total Asset Valuation = Cash Balance + Current Market Value of Stock Holdings + Pending Order Reserves
     let stockValue = 0;
@@ -5335,7 +5392,7 @@ export default function App() {
       addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[모의 매수취소] 수동 취소 완료`);
     } else if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
       try {
-        const cancelRes = await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString());
+        const cancelRes = await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString(), order.ordDvsn || kisConfig.domesticOrderType || "00");
 
         if (cancelRes && cancelRes.rt_cd && cancelRes.rt_cd !== '0') {
           const errMsg = cancelRes.msg1 || '취소가 거부되었습니다.';
@@ -5377,14 +5434,21 @@ export default function App() {
 
     if (!order.isSimulated && kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
       try {
-        const cancelRes = await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString());
+        const cancelRes = await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString(), order.ordDvsn || kisConfig.domesticOrderType || "00");
 
         if (cancelRes && cancelRes.rt_cd && cancelRes.rt_cd !== '0') {
           const errMsg = cancelRes.msg1 || '매도 취소가 거부되었습니다.';
           const isAlreadyDone = /취소.*수량.*없|체결|기취소|기정정|존재하지.*않|거부|불가|처리완료/i.test(errMsg);
           if (isAlreadyDone) {
-            showNotification(`[KIS 주문정리] ${order.symbol} ${errMsg}`, "info");
-            addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[주문정리] ${errMsg}`);
+            // Check if already filled
+            const status = await kisService.checkOrderExecution(order.id);
+            if (status.isFullyFilled) {
+              showNotification(`[체결 확인] ${order.symbol} 매도 주문이 이미 체결 완료되었습니다.`, "success");
+              addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[체결완료] 취소 시도 중 이미 체결됨`);
+            } else {
+              showNotification(`[KIS 주문정리] ${order.symbol} ${errMsg}`, "info");
+              addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[주문정리] ${errMsg}`);
+            }
             setTimeout(() => handleSyncKIS(), 500);
           } else {
             showNotification(`[KIS 매도취소 실패] ${errMsg}`, "error");
@@ -5438,7 +5502,7 @@ export default function App() {
         setBalance(prev => prev + refundAmount);
       } else if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
         try {
-          await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString());
+          await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString(), order.ordDvsn || kisConfig.domesticOrderType || "00");
           addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매수 주문 일괄 취소`);
         } catch (e) {
           console.error("Failed to cancel KIS pending order:", e);
@@ -5449,7 +5513,7 @@ export default function App() {
     for (const order of sellOrdersToCancel) {
       if (!order.isSimulated && kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
         try {
-          await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString());
+          await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString(), order.ordDvsn || kisConfig.domesticOrderType || "00");
           addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 주문취소] 봇 종료로 인한 미체결 매도 주문 일괄 취소`);
         } catch (e) {
           console.error("Failed to cancel KIS pending sell order:", e);
@@ -5529,7 +5593,7 @@ export default function App() {
             // Real KIS order cancel request!
             try {
               setBotStatus(`[KIS API] 주문 번호(${order.id}) 0.5% 상승 미체결 자동 취소 요청 중...`);
-              const cancelRes = await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString());
+              const cancelRes = await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString(), order.ordDvsn || kisConfig.domesticOrderType || "00");
               
               if (cancelRes && cancelRes.rt_cd === '0') {
                 addLog(order.symbol, '매수', orderPrice, order.quantity, `[KIS 0.5%상승 취소] ${cancelReason}`);
@@ -5800,7 +5864,7 @@ export default function App() {
           } else if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
             try {
               setBotStatus(`[KIS API] 주문 번호(${order.id}) 0.5% 하락 미체결 매도 자동 취소 요청 중...`);
-              const cancelRes = await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString());
+              const cancelRes = await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString(), order.ordDvsn || kisConfig.domesticOrderType || "00");
               
               if (cancelRes && cancelRes.rt_cd === '0') {
                 addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 0.5%하락 매도취소] ${cancelReason}`);
@@ -6102,7 +6166,7 @@ export default function App() {
           try {
             console.log(`[Auto-Sell Sync] Cancelling old sell orders for ${symbol} due to average down / price mismatch`);
             for (const order of currentPendingSells) {
-               await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString()).catch(() => {});
+               await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString(), order.ordDvsn || kisConfig.domesticOrderType || "00").catch(() => {});
                setPendingSellOrders(prev => prev.filter(o => o.id !== order.id));
                pendingSellOrdersRef.current = pendingSellOrdersRef.current.filter(o => o.id !== order.id);
             }
@@ -6431,7 +6495,7 @@ export default function App() {
             const pendingSellsForSymbol = pendingSellOrdersRef.current.filter(o => o.symbol === stockItem.symbol);
             if (pendingSellsForSymbol.length > 0) {
               for (const order of pendingSellsForSymbol) {
-                 await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString()).catch(() => {});
+                 await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString(), order.ordDvsn || kisConfig.domesticOrderType || "00").catch(() => {});
                  setPendingSellOrders(prev => prev.filter(o => o.id !== order.id));
                  pendingSellOrdersRef.current = pendingSellOrdersRef.current.filter(o => o.id !== order.id);
               }
@@ -6729,7 +6793,8 @@ export default function App() {
                            quantity: finalAmount,
                            createdAt: Date.now(),
                            isSimulated: false,
-                           slotId: createdSlotId
+                           slotId: createdSlotId,
+                           ordDvsn: kisConfig.domesticOrderType || '00'
                          };
                          setPendingBuyOrders(prev => [...prev, newPending]);
                        } else {
@@ -6742,7 +6807,8 @@ export default function App() {
                            createdAt: Date.now(),
                            isSimulated: false,
                            type: 'LIMIT_SELL',
-                           reason, buyPrice: buyPrice, slotId: slotId
+                           reason, buyPrice: buyPrice, slotId: slotId,
+                           ordDvsn: kisConfig.domesticOrderType || '00'
                          };
                          setPendingSellOrders(prev => [...prev, newPendingSell]);
                        }
@@ -8622,37 +8688,39 @@ export default function App() {
               </div>
             </div>
 
-            {/* 핵심 스캘퍼 설정 4열 컴팩트 그리드 (SMART SCALPER 축소 & 스캘퍼 등록 종목 3열 확장) */}
+            {/* 핵심 스캘퍼 5열 컴팩트 대시보드 */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-stretch text-xs">
-              {/* 1. 1회 거래수량, 최대 분할 슬롯, 목표순익 & 손절 (col-span-3) */}
-              <div className="lg:col-span-3 bg-black/30 p-2.5 sm:p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-2">
-                <div className="flex items-center justify-between">
-                  <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1">
-                    <Layers className="w-3.5 h-3.5 text-sleek-blue" /> 1회 거래수량
-                  </label>
-                  <span className="text-xs sm:text-sm font-bold text-white font-mono">{tradeQuantity}주</span>
-                </div>
-                <select 
-                  value={tradeQuantity}
-                  onChange={(e) => setTradeQuantity(Number(e.target.value))}
-                  className="w-full bg-black/50 border border-sleek-border rounded-xl p-1.5 text-center text-xs sm:text-sm font-bold outline-none text-white font-mono appearance-none cursor-pointer"
-                >
-                  {Array.from({ length: 100 }, (_, i) => i + 1).map(val => (
-                    <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
-                  ))}
-                </select>
-
-                <div className="pt-1.5 border-t border-white/10">
-                  <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-black text-slate-300 uppercase flex items-center gap-1">
-                      <Layers className="w-3.5 h-3.5 text-emerald-400" /> 최대 분할 슬롯
+              {/* 1. 1회 거래수량, 최대 분할 슬롯, 목표순익 & 손절 (가로폭 축소: col-span-2) */}
+              <div className="lg:col-span-2 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0">
+                <div>
+                  <div className="flex items-center justify-between mb-0.5">
+                    <label className="text-[11px] font-black text-slate-300 uppercase flex items-center gap-1">
+                      <Layers className="w-3 h-3 text-sleek-blue" /> 1회 거래수량
                     </label>
-                    <span className="text-xs font-bold text-emerald-400 font-mono">10개★</span>
+                    <span className="text-xs font-bold text-white font-mono">{tradeQuantity}주</span>
+                  </div>
+                  <select 
+                    value={tradeQuantity}
+                    onChange={(e) => setTradeQuantity(Number(e.target.value))}
+                    className="w-full bg-black/50 border border-sleek-border rounded-xl p-1 text-center text-xs font-bold outline-none text-white font-mono appearance-none cursor-pointer"
+                  >
+                    {Array.from({ length: 100 }, (_, i) => i + 1).map(val => (
+                      <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="pt-1 border-t border-white/10">
+                  <div className="flex items-center justify-between mb-0.5">
+                    <label className="text-[11px] font-black text-slate-300 uppercase flex items-center gap-1">
+                      <Layers className="w-3 h-3 text-emerald-400" /> 최대 분할 슬롯
+                    </label>
+                    <span className="text-[11px] font-bold text-emerald-400 font-mono">10개★</span>
                   </div>
                   <select 
                     value={maxSlots}
                     onChange={(e) => setMaxSlots(Number(e.target.value))}
-                    className="w-full bg-black/50 border border-emerald-500/30 rounded-xl p-1.5 text-center text-xs sm:text-sm font-bold outline-none text-emerald-300 font-mono appearance-none cursor-pointer"
+                    className="w-full bg-black/50 border border-emerald-500/30 rounded-xl p-1 text-center text-xs font-bold outline-none text-emerald-300 font-mono appearance-none cursor-pointer"
                     title="최대 분할 매수 개수 (기본: 10개)"
                   >
                     {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20].map(val => (
@@ -8663,66 +8731,54 @@ export default function App() {
                   </select>
                 </div>
 
-                <div className="pt-1.5 border-t border-white/10">
-                  <div className="text-xs font-black uppercase leading-tight space-y-0.5">
+                <div className="pt-1 border-t border-white/10">
+                  <div className="text-[10.5px] font-black uppercase leading-tight space-y-0.5 mb-1">
                     <div className="text-emerald-400 flex items-center justify-between">
                       <span>목표 순익 +{scalpingTargetProfit}%</span>
-                      <span className="text-[9px] font-normal text-emerald-400/80 font-sans">세금·수수료 차감후</span>
+                      <span className="text-[8.5px] font-normal text-emerald-400/80 font-sans">세후</span>
                     </div>
                     <div className="text-rose-400">손절 {scalpingStopLoss}%</div>
                   </div>
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <select 
-                    value={scalpingTargetProfit}
-                    onChange={(e) => setScalpingTargetProfit(Number(e.target.value))}
-                    className="bg-black/50 border border-emerald-500/40 rounded-xl p-1.5 text-xs sm:text-sm font-mono outline-none text-emerald-400 text-center font-bold appearance-none cursor-pointer"
-                    title="목표 순수익률 (기본 +0.2%)"
-                  >
-                    {[0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1.0].map(val => (
-                      <option key={val} value={val} className="bg-sleek-bg text-emerald-400">
-                        +{val}%{val === 0.2 ? '★' : ''}
-                      </option>
-                    ))}
-                  </select>
-                  <select 
-                    value={scalpingStopLoss}
-                    onChange={(e) => setScalpingStopLoss(Number(e.target.value))}
-                    className="bg-black/50 border border-rose-500/40 rounded-xl p-1.5 text-xs sm:text-sm font-mono outline-none text-rose-400 text-center font-bold appearance-none cursor-pointer"
-                    title="손절 기준률 (기본 -0.5%)"
-                  >
-                    {[-0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9, -1.0].map(val => (
-                      <option key={val} value={val} className="bg-sleek-bg text-rose-400">
-                        {val}%{val === -0.5 ? '★' : ''}
-                      </option>
-                    ))}
-                  </select>
+                  <div className="grid grid-cols-2 gap-1">
+                    <select 
+                      value={scalpingTargetProfit}
+                      onChange={(e) => setScalpingTargetProfit(Number(e.target.value))}
+                      className="bg-black/50 border border-emerald-500/40 rounded-xl p-1 text-xs font-mono outline-none text-emerald-400 text-center font-bold appearance-none cursor-pointer"
+                      title="목표 순수익률 (기본 +0.2%)"
+                    >
+                      {[0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1.0].map(val => (
+                        <option key={val} value={val} className="bg-sleek-bg text-emerald-400">
+                          +{val}%{val === 0.2 ? '★' : ''}
+                        </option>
+                      ))}
+                    </select>
+                    <select 
+                      value={scalpingStopLoss}
+                      onChange={(e) => setScalpingStopLoss(Number(e.target.value))}
+                      className="bg-black/50 border border-rose-500/40 rounded-xl p-1 text-xs font-mono outline-none text-rose-400 text-center font-bold appearance-none cursor-pointer"
+                      title="손절 기준률 (기본 -0.5%)"
+                    >
+                      {[-0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9, -1.0].map(val => (
+                        <option key={val} value={val} className="bg-sleek-bg text-rose-400">
+                          {val}%{val === -0.5 ? '★' : ''}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
-              {/* 2. SMART SCALPER & 주문 실행 세부 설정 (col-span-2: 가로폭 축소 및 컴팩트화) */}
-              <div className="lg:col-span-2 bg-sleek-blue/5 border border-sleek-blue/20 p-2.5 sm:p-3 rounded-2xl flex flex-col justify-between space-y-2">
+              {/* 2. SMART SCALPER & 세부 설정 (가로폭 축소: col-span-2) */}
+              <div className="lg:col-span-2 bg-sleek-blue/5 border border-sleek-blue/20 p-2.5 rounded-2xl flex flex-col justify-between space-y-1.5 min-w-0">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1 group relative">
-                    <Zap className="w-3.5 h-3.5" /> SMART SCALPER
-                    <HelpCircle className="w-3 h-3 text-sleek-blue/50 cursor-help hover:text-sleek-blue transition-colors" />
-                    
-                    {/* Help Tooltip */}
-                    <div className="absolute left-0 bottom-full mb-2 w-52 bg-slate-900 border border-sleek-blue/30 p-2.5 rounded-xl shadow-2xl opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 z-50 pointer-events-none">
-                      <div className="text-[10px] font-bold text-sleek-blue mb-1 flex items-center gap-1 uppercase tracking-tighter">
-                        <Sparkles className="w-3 h-3" /> Scalping Logic
-                      </div>
-                      <div className="text-xs leading-relaxed text-slate-200 font-medium normal-case tracking-normal">
-                        실시간 틱 데이터를 분석하여 <span className="text-sleek-blue font-bold">과매도/과매수</span> 지점의 기술적 반등을 포착하는 모드입니다. 지지/저항 돌파 시 자동으로 진입합니다.
-                      </div>
-                      <div className="absolute left-4 top-full w-2 h-2 bg-slate-900 border-r border-b border-sleek-blue/30 rotate-45 -translate-y-1/2" />
-                    </div>
+                  <span className="text-[11px] font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1 group relative">
+                    <Zap className="w-3 h-3" /> SMART SCALPER
                   </span>
                   <button
                     type="button"
                     onClick={() => setIsSmartScalperMode(!isSmartScalperMode)}
                     className={cn(
-                      "p-1 rounded-lg transition-all border cursor-pointer shrink-0",
+                      "p-0.5 rounded-lg transition-all border cursor-pointer shrink-0",
                       isSmartScalperMode
                         ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue"
                         : "bg-white/5 border-white/10 text-slate-400 opacity-60"
@@ -8730,12 +8786,12 @@ export default function App() {
                     title={`스마트 스캘퍼 모드 ${isSmartScalperMode ? '활성화(ON)' : '비활성화(OFF)'}`}
                   >
                     <div className={cn(
-                      "w-7 h-3.5 rounded-full transition-colors relative p-0.5",
+                      "w-6 h-3 rounded-full transition-colors relative p-0.5",
                       isSmartScalperMode ? "bg-sleek-blue" : "bg-slate-700"
                     )}>
                       <div className={cn(
-                        "w-2.5 h-2.5 rounded-full bg-white transition-transform shadow",
-                        isSmartScalperMode ? "translate-x-3.5" : "translate-x-0"
+                        "w-2 h-2 rounded-full bg-white transition-transform shadow",
+                        isSmartScalperMode ? "translate-x-3" : "translate-x-0"
                       )} />
                     </div>
                   </button>
@@ -8743,12 +8799,12 @@ export default function App() {
 
                 <div>
                   <div className="flex items-center justify-between mb-0.5">
-                    <label className="text-[11px] font-black text-slate-300 uppercase">추가 매수 간격 (Gap %)</label>
+                    <label className="text-[10px] font-black text-slate-300 uppercase">추가 매수 간격 (Gap %)</label>
                   </div>
                   <select 
                     value={minGapBetweenSlots}
                     onChange={(e) => setMinGapBetweenSlots(Number(e.target.value))}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl px-2 py-1 text-xs font-mono font-bold text-white outline-none cursor-pointer appearance-none"
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-1.5 py-1 text-xs font-mono font-bold text-white outline-none cursor-pointer appearance-none"
                   >
                     {[0.1, 0.2, 0.3, 0.4, 0.5, 0.8, 1.0, 1.5, 2.0, 3.0, 5.0].map(gap => (
                       <option key={gap} value={gap} className="bg-sleek-bg text-white">{gap}%</option>
@@ -8757,16 +8813,16 @@ export default function App() {
                 </div>
 
                 {/* 진입 호가 방식 드롭다운 */}
-                <div className="pt-1.5 border-t border-white/10">
+                <div className="pt-1 border-t border-white/10">
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[11px] font-bold text-white flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-white flex items-center gap-1">
                       <TrendingDown className="w-3 h-3 text-amber-400" /> 진입 호가 방식
                     </span>
                   </div>
                   <select
                     value={entryPriceMode}
                     onChange={(e) => setEntryPriceMode(e.target.value as any)}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl px-2 py-1 text-xs font-bold text-white outline-none cursor-pointer appearance-none"
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-1.5 py-1 text-xs font-bold text-white outline-none cursor-pointer appearance-none"
                     title="진입 호가 방식 선택"
                   >
                     <option value="BID1" className="bg-sleek-bg text-white">매수1호가</option>
@@ -8777,16 +8833,16 @@ export default function App() {
                 </div>
 
                 {/* 실행 속도 드롭다운 */}
-                <div className="pt-1.5 border-t border-white/10">
+                <div className="pt-1 border-t border-white/10">
                   <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[11px] font-bold text-slate-300 uppercase flex items-center gap-1">
+                    <span className="text-[10px] font-bold text-slate-300 uppercase flex items-center gap-1">
                       <Activity className="w-3 h-3 text-amber-400" /> 실행 속도
                     </span>
                   </div>
                   <select
                     value={scalpingSpeed}
                     onChange={(e) => setScalpingSpeed(Number(e.target.value))}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl px-2 py-1 text-xs font-mono font-bold text-amber-300 outline-none cursor-pointer appearance-none"
+                    className="w-full bg-black/50 border border-white/10 rounded-xl px-1.5 py-1 text-xs font-mono font-bold text-amber-300 outline-none cursor-pointer appearance-none"
                     title="스캘핑 실행 주기 (체결 속도)"
                   >
                     <option value={100} className="bg-sleek-bg text-white">0.1s</option>
@@ -8797,22 +8853,143 @@ export default function App() {
                 </div>
               </div>
 
-              {/* 3. 스캘퍼 선택 종목 리스트 버튼 (col-span-5: 3열 배치 지원) */}
-              <div className="lg:col-span-5 bg-black/30 p-2.5 sm:p-3 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5">
+              {/* 3. 실시간 잔량 호가창 (4호가) (smart scalper 우측 배치: col-span-3) */}
+              <div className="lg:col-span-3 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
+                <div>
+                  <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
+                    <span className="text-[10.5px] font-black text-slate-300 uppercase tracking-wider flex items-center gap-1">
+                      <Activity className="w-3 h-3 text-sleek-blue" />
+                      실시간 잔량 호가창 (4호가)
+                    </span>
+                    {selectedStock && (
+                      <span className="text-[9.5px] font-mono text-slate-400 truncate max-w-[80px]">
+                        {selectedStock.symbol}
+                      </span>
+                    )}
+                  </div>
+
+                  {orderBookData && selectedStock ? (
+                    <>
+                      {/* Ask Levels (매도 4~1호가) */}
+                      <div className="space-y-0.5">
+                        {orderBookData.askLevels.map((lvlPrice, idx) => {
+                          const vol = orderBookData.askVolumes[idx];
+                          const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
+                          const barPct = Math.min(100, Math.round((vol / orderBookData.maxLevelVol) * 100));
+                          return (
+                            <div key={`top-ask-${idx}`} className="flex items-center justify-between h-3.5 px-1 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
+                              <div className="absolute right-0 top-0 bottom-0 bg-sky-500/30 border-l border-sky-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
+                              <span className="w-11 shrink-0 text-[8.5px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}</span>
+                              <span className={cn(
+                                "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[9.5px] whitespace-nowrap px-0.5",
+                                isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-200"
+                              )}>
+                                {formatCurrency(lvlPrice)}
+                              </span>
+                              <span className="w-12 shrink-0 text-right text-sky-100 font-bold font-mono tabular-nums text-[8.5px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Spread Line (현재 체결가) */}
+                      <div className="my-0.5 h-4 px-1 bg-white/5 border-y border-white/10 flex items-center justify-between rounded font-mono tabular-nums">
+                        <span className="text-[8.5px] font-black text-slate-400 uppercase shrink-0">체결가</span>
+                        <span className={cn("font-black text-[10.5px] font-mono tabular-nums animate-pulse", (selectedStock.change || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
+                          {formatCurrency(selectedStock.price)}
+                        </span>
+                        <span className={cn("text-[8.5px] font-mono tabular-nums font-bold shrink-0", (selectedStock.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
+                          {(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%
+                        </span>
+                      </div>
+
+                      {/* Bid Levels (매수 1~4호가) */}
+                      <div className="space-y-0.5">
+                        {orderBookData.bidLevels.map((lvlPrice, idx) => {
+                          const vol = orderBookData.bidVolumes[idx];
+                          const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
+                          const barPct = Math.min(100, Math.round((vol / orderBookData.maxLevelVol) * 100));
+                          return (
+                            <div key={`top-bid-${idx}`} className="flex items-center justify-between h-3.5 px-1 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
+                              <div className="absolute right-0 top-0 bottom-0 bg-rose-500/30 border-l border-rose-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
+                              <span className="w-11 shrink-0 text-[8.5px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}</span>
+                              <span className={cn(
+                                "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[9.5px] whitespace-nowrap px-0.5",
+                                isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-200"
+                              )}>
+                                {formatCurrency(lvlPrice)}
+                              </span>
+                              <span className="w-12 shrink-0 text-right text-rose-100 font-bold font-mono tabular-nums text-[8.5px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="py-8 text-center text-slate-500 text-xs font-mono">
+                      종목 선택 대기 중
+                    </div>
+                  )}
+                </div>
+
+                {/* Order Book Pressure Gauge */}
+                {orderBookData && selectedStock && (
+                  <div className="pt-0.5 border-t border-white/5 space-y-0.5">
+                    <div className="flex justify-between text-[8px] text-slate-400 font-bold font-sans">
+                      <span className="text-sky-400">매도 {formatQuantity(orderBookData.totalAskVolume)} ({orderBookData.askPctVal}%)</span>
+                      <span className="text-rose-400">매수 {formatQuantity(orderBookData.totalBidVolume)} ({orderBookData.bidPctVal}%)</span>
+                    </div>
+                    <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex">
+                      <div className="h-full bg-sky-400 transition-all duration-300" style={{ width: `${orderBookData.askPctVal}%` }} />
+                      <div className="h-full bg-rose-400 transition-all duration-300" style={{ width: `${orderBookData.bidPctVal}%` }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* 4. 스캘퍼 등록 종목 (호가창 우측 배치 + 붉은 글씨 현재가 + 닫기 x 표시: col-span-3) */}
+              <div className="lg:col-span-3 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0 shadow-inner">
                 <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
                   <span className="text-xs font-black text-slate-200 uppercase flex items-center gap-1.5">
                     <TrendingUp className="w-3.5 h-3.5 text-sleek-blue" />
                     스캘퍼 등록 종목
                   </span>
-                  <span className="text-[10px] font-mono font-bold text-sleek-blue bg-sleek-blue/10 px-2 py-0.5 rounded border border-sleek-blue/20">
-                    {scalperTabs.filter(tab => {
-                      const isUS = /^[A-Z]/.test(tab.symbol);
-                      return marketType === 'US' ? isUS : !isUS;
-                    }).length}개 종목
-                  </span>
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[10px] font-mono font-bold text-sleek-blue bg-sleek-blue/10 px-1.5 py-0.5 rounded border border-sleek-blue/20">
+                      {scalperTabs.filter(tab => {
+                        const isUS = /^[A-Z]/.test(tab.symbol);
+                        return marketType === 'US' ? isUS : !isUS;
+                      }).length}개
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const currentMarketTabs = scalperTabs.filter(t => 
+                          marketType === 'US' ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol)
+                        );
+                        if (currentMarketTabs.length >= 25) {
+                          showNotification("최대 25개 종목까지 AI 분석 기반 스캘퍼 탭을 생성할 수 있습니다.", "info");
+                          return;
+                        }
+                        const pool = marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS;
+                        const poolAvailable = pool.find(s => !scalperTabs.some(t => t.symbol === s.symbol));
+                        if (poolAvailable) {
+                          if (!stocks.some(s => s.symbol === poolAvailable.symbol)) {
+                            setStocks(prev => [...prev, poolAvailable]);
+                          }
+                          openOrSwitchScalperTab(poolAvailable.symbol, poolAvailable.name);
+                          showNotification(`[스캘퍼 추가] ${poolAvailable.name}(${poolAvailable.symbol}) 추가`, "success");
+                        }
+                      }}
+                      className="p-1 rounded-md bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white border border-white/10 cursor-pointer transition-all"
+                      title="새 종목 추가"
+                    >
+                      <Plus className="w-3 h-3 text-sleek-blue" />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-1.5 max-h-[175px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
+                <div className="space-y-1 max-h-[175px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
                   {scalperTabs.filter(tab => {
                     const isUS = /^[A-Z]/.test(tab.symbol);
                     return marketType === 'US' ? isUS : !isUS;
@@ -8825,39 +9002,59 @@ export default function App() {
                                        ? INITIAL_STOCKS_KR.find(s => s.symbol === tab.symbol) 
                                        : INITIAL_STOCKS.find(s => s.symbol === tab.symbol));
                     const tabName = (tab.name && tab.name !== tab.symbol) ? tab.name : getResolvedStockName(tab.symbol, tabStock);
+                    const tabPrice = tabStock?.price || 0;
 
                     return (
-                      <button
+                      <div
                         key={tab.id}
-                        type="button"
                         onClick={() => handleSwitchTab(tab.id)}
                         className={cn(
-                          "px-2 py-1.5 rounded-xl border flex items-center justify-between gap-1 cursor-pointer transition-all w-full text-left min-w-0 font-mono select-none group",
+                          "px-2 py-1.5 rounded-xl border flex items-center justify-between gap-1.5 cursor-pointer transition-all w-full text-left min-w-0 font-mono select-none group",
                           isSelected
                             ? "bg-sleek-blue/25 border-sleek-blue text-white shadow-md font-black ring-1 ring-sleek-blue/60"
                             : "bg-black/50 border-white/10 hover:bg-white/10 text-slate-300 hover:text-white"
                         )}
                         title={`${tabName} (${tab.symbol}) 탭으로 전환`}
                       >
-                        <div className="flex items-center gap-1 min-w-0 truncate">
+                        {/* Left: Indicator & Stock Name */}
+                        <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
                           <span className={cn(
                             "w-1.5 h-1.5 rounded-full shrink-0",
                             tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" : "bg-slate-500"
                           )} />
-                          <span className="font-bold text-xs truncate">{tabName}</span>
+                          <span className="font-bold text-xs truncate text-white">{tabName}</span>
                         </div>
-                        {tab.isBotActive && (
-                          <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/30 shrink-0">
-                            ON
+
+                        {/* Right: Current price in RED + ON badge + X close button */}
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {/* 붉은 글씨 현재가 */}
+                          <span className="text-xs font-black font-mono text-rose-500 tabular-nums">
+                            {formatCurrency(tabPrice)}
                           </span>
-                        )}
-                      </button>
+
+                          {tab.isBotActive && (
+                            <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/30 shrink-0">
+                              ON
+                            </span>
+                          )}
+
+                          {/* 닫기 X 버튼 */}
+                          <button
+                            type="button"
+                            onClick={(e) => closeScalperTab(tab.id, e)}
+                            className="p-1 rounded-md text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 transition-all opacity-70 group-hover:opacity-100 cursor-pointer"
+                            title={`${tabName} 탭 닫기`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      </div>
                     );
                   })}
                 </div>
               </div>
 
-              {/* 4. START AI SCALPER 큰 실행 버튼 & 하단 탭 순환 컨트롤 (col-span-2) */}
+              {/* 5. START AI SCALPER 큰 실행 버튼 & 하단 탭 순환 컨트롤 (col-span-2) */}
               <div className="lg:col-span-2 flex flex-col justify-between gap-2">
                 <button 
                   onClick={() => {
@@ -9323,8 +9520,8 @@ export default function App() {
 
                 return (
                   <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 items-stretch">
-                    {/* 1. Chart Graph (xl:col-span-6) */}
-                    <div className="xl:col-span-6 flex flex-col min-w-0 bg-black/40 rounded-2xl border border-sleek-border p-3 justify-between space-y-2">
+                    {/* 1. Chart Graph (xl:col-span-12) */}
+                    <div className="xl:col-span-12 flex flex-col min-w-0 bg-black/40 rounded-2xl border border-sleek-border p-3 justify-between space-y-2">
                       <div>
                         {/* Header: Price & Moving Averages Legend */}
                         <div className="mb-2 flex items-center justify-between gap-2 flex-wrap pb-1.5 border-b border-white/5">
@@ -9373,7 +9570,7 @@ export default function App() {
                         </div>
 
                         {/* Main Candlestick + MA Lines Chart */}
-                        <div className="bg-slate-950/80 rounded-xl border border-white/5 p-1.5 relative shadow-inner w-full" style={{ height: 155 }}>
+                        <div className="bg-slate-950/80 rounded-xl border border-white/5 p-1.5 relative shadow-inner w-full" style={{ height: 165 }}>
                           {/* Chart Exchange Rate Overlay */}
                           <div className="absolute top-3 left-4 z-20 flex flex-col items-start pointer-events-none select-none">
                             <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/10">
@@ -9543,129 +9740,6 @@ export default function App() {
                         </div>
                         <div className="flex items-center gap-1 text-rose-400 font-bold text-xs">
                           <span>📊</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 2. Right Stack Group: Real-time Order Book + Real-time Interval Monitor */}
-                    <div className="xl:col-span-6 grid grid-cols-1 sm:grid-cols-2 gap-2.5 min-w-0">
-                      {/* Real-time Order Book (4호가) */}
-                      <div className="bg-black/40 rounded-2xl border border-sleek-border p-2.5 flex flex-col justify-between min-w-0 h-full">
-                        <div>
-                          <div className="text-center font-black text-sleek-text-secondary uppercase text-[10px] tracking-widest pb-1 border-b border-white/5 mb-1">
-                            실시간 잔량 호가창 (4호가)
-                          </div>
-                          
-                          {/* Ask Levels (매도 4~1호가) */}
-                          <div className="space-y-0.5">
-                            {askLevels.map((lvlPrice, idx) => {
-                              const vol = askVolumes[idx];
-                              const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
-                              const barPct = Math.min(100, Math.round((vol / maxLevelVol) * 100));
-                              return (
-                                <div key={`ask-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
-                                  {/* Brighter volume bar */}
-                                  <div className="absolute right-0 top-0 bottom-0 bg-sky-500/30 border-l border-sky-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
-                                  <span className="w-12 shrink-0 text-[9px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}호가</span>
-                                  <span className={cn(
-                                    "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
-                                    isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-200"
-                                  )}>
-                                    {formatCurrency(lvlPrice)}
-                                  </span>
-                                  <span className="w-14 shrink-0 text-right text-sky-100 font-bold font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-
-                          {/* Spread Line */}
-                          <div className="my-1 h-4.5 px-1.5 bg-white/5 border-y border-white/10 flex items-center justify-between rounded font-mono tabular-nums">
-                            <span className="text-[9px] font-black text-sleek-text-secondary uppercase shrink-0">현재 체결가</span>
-                            <span className={cn("font-black text-[11px] font-mono tabular-nums animate-pulse", (selectedStock.change || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
-                              {formatCurrency(currentPrice)}
-                            </span>
-                            <span className={cn("text-[9px] font-mono tabular-nums font-bold shrink-0", (selectedStock.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
-                              {(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%
-                            </span>
-                          </div>
-
-                          {/* Bid Levels (매수 1~4호가) */}
-                          <div className="space-y-0.5">
-                            {bidLevels.map((lvlPrice, idx) => {
-                              const vol = bidVolumes[idx];
-                              const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
-                              const barPct = Math.min(100, Math.round((vol / maxLevelVol) * 100));
-                              return (
-                                <div key={`bid-level-${idx}`} className="flex items-center justify-between h-4 px-1.5 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
-                                  {/* Brighter volume bar */}
-                                  <div className="absolute right-0 top-0 bottom-0 bg-rose-500/30 border-l border-rose-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
-                                  <span className="w-12 shrink-0 text-[9px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}호가</span>
-                                  <span className={cn(
-                                    "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[10px] whitespace-nowrap px-1",
-                                    isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-200"
-                                  )}>
-                                    {formatCurrency(lvlPrice)}
-                                  </span>
-                                  <span className="w-14 shrink-0 text-right text-rose-100 font-bold font-mono tabular-nums text-[9px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-
-                        {/* Order Book Pressure Gauge */}
-                        <div className="pt-1.5 border-t border-white/5 space-y-1 mt-1">
-                          <div className="flex justify-between text-[9px] text-sleek-text-secondary font-bold font-sans">
-                            <span className="text-sky-400">매도잔량 {formatQuantity(totalAskVolume)} ({askPctVal}%)</span>
-                            <span className="text-rose-400">매수잔량 {formatQuantity(totalBidVolume)} ({bidPctVal}%)</span>
-                          </div>
-                          <div className="w-full h-1.5 bg-white/10 rounded-full overflow-hidden flex">
-                            <div className="h-full bg-sky-400 transition-all duration-300" style={{ width: `${askPctVal}%` }} />
-                            <div className="h-full bg-rose-400 transition-all duration-300" style={{ width: `${bidPctVal}%` }} />
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Real-time Interval Monitor */}
-                      <div className="bg-black/40 border border-sleek-blue/30 rounded-2xl p-2.5 flex flex-col justify-between space-y-2 min-w-0 h-full">
-                        <div className="flex items-center justify-between pb-1 border-b border-white/5">
-                          <h4 className="text-xs font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1.5">
-                            <TrendingUp className="w-3.5 h-3.5 animate-bounce" /> 실시간 구간 모니터
-                          </h4>
-                          <span className="text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-2 py-0.5 rounded-full border border-emerald-500/20">
-                            MONITORING
-                          </span>
-                        </div>
-
-                        <div className="space-y-2 font-mono text-xs my-auto">
-                          <div className="flex justify-between text-[11px] text-sleek-text-secondary">
-                            <span>하한 {gapBuyPrice > 0 ? formatCurrency(gapBuyPrice) : '미설정'}</span>
-                            <span>상한 {gapSellPrice > 0 ? formatCurrency(gapSellPrice) : '미설정'}</span>
-                          </div>
-
-                          {/* Range Progress Bar */}
-                          <div className="relative w-full h-2.5 bg-white/5 rounded-full overflow-hidden border border-white/5">
-                            <motion.div 
-                              className="absolute top-0 bottom-0 bg-gradient-to-r from-sleek-blue to-emerald-400 rounded-full"
-                              style={{ width: `${rangePercentage}%` }}
-                              transition={{ type: "spring", stiffness: 80 }}
-                            />
-                            <div 
-                              className="absolute w-1 h-2.5 bg-white shadow-[0_0_8px_white] top-0 transition-all duration-300"
-                              style={{ left: `calc(${rangePercentage}% - 2px)` }}
-                            />
-                          </div>
-
-                          <div className="flex justify-between items-center pt-0.5">
-                            <span className="text-[10px] text-sleek-text-secondary uppercase">현재가 위치</span>
-                            <span className="text-xs font-black text-white italic font-mono">{rangePercentage.toFixed(1)}%</span>
-                          </div>
-                        </div>
-
-                        <div className="pt-1 border-t border-white/5 text-[9.5px] text-slate-400 flex justify-between items-center">
-                          <span>구간 진입 감시</span>
-                          <span className="text-emerald-400 font-bold">정상 작동 중</span>
                         </div>
                       </div>
                     </div>
