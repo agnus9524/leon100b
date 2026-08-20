@@ -1713,7 +1713,14 @@ export default function App() {
   const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(true); // Default true: 중복/동일가 매수 차단 해제
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
-  const [scalperStrategyMode, setScalperStrategyMode] = useState<'AUTO' | 'AI_MAX_YIELD' | 'ALL_SENSORS_4' | 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD'>('AI_MAX_YIELD');
+  const [scalperStrategyMode, setScalperStrategyMode] = useState<'AUTO' | 'AI_MAX_YIELD' | 'ALL_SENSORS_4' | 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD'>('ALL_SENSORS_4');
+  const [isMaxYieldModalOpen, setIsMaxYieldModalOpen] = useState<boolean>(false);
+  const [maxYieldBudget, setMaxYieldBudget] = useState<number>(1000000); // 최고수익 AI 한도 금액 (기본 100만원)
+  const [maxYieldInputStr, setMaxYieldInputStr] = useState<string>("1,000,000");
+  const maxYieldBudgetRef = React.useRef(maxYieldBudget);
+  useEffect(() => {
+    maxYieldBudgetRef.current = maxYieldBudget;
+  }, [maxYieldBudget]);
   const [minGapBetweenSlots, setMinGapBetweenSlots] = useState<number>(0.3); // 0.3% gap
   const [useFixedQuantity, setUseFixedQuantity] = useState<boolean>(true); 
   const [top3RefreshNonce, setTop3RefreshNonce] = useState<number>(0);
@@ -6407,7 +6414,14 @@ export default function App() {
                 if (currentTotalOccupied >= itemMaxSlots) break;
 
                 const currentStep = currentTotalOccupied + 1;
-                const scaledQuantity = itemTradeQty;
+                const isAiMaxYieldActive = scalperStrategyMode === 'AI_MAX_YIELD';
+                let scaledQuantity = itemTradeQty;
+                if (isAiMaxYieldActive && maxYieldBudgetRef.current > 0) {
+                  const currentPriceUnit = priceInKrw > 0 ? priceInKrw : 1;
+                  const totalAffordableQty = Math.max(1, Math.floor(maxYieldBudgetRef.current / currentPriceUnit));
+                  const remainingSlots = Math.max(1, itemMaxSlots - currentTotalOccupied);
+                  scaledQuantity = Math.max(1, Math.min(totalAffordableQty, Math.floor(totalAffordableQty / remainingSlots) || 1));
+                }
                 const scaledCost = priceInKrw * scaledQuantity;
 
                 if (balance < scaledCost) {
@@ -8565,26 +8579,33 @@ export default function App() {
                   <Sparkles className="w-4 h-4 text-amber-400 animate-spin" /> 스캘퍼 AI 실시간 전략 감지 센서:
                 </span>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-1.5 w-full lg:w-auto">
-                <button
-                  type="button"
-                  onClick={() => setScalperStrategyMode('AI_MAX_YIELD')}
-                  className={cn(
-                    "px-2.5 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1 shadow-md",
-                    scalperStrategyMode === 'AI_MAX_YIELD'
-                      ? "bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white border-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.6)] animate-pulse"
-                      : "bg-amber-500/10 text-amber-300 hover:bg-amber-500/20 border-amber-500/30"
-                  )}
-                  title="AI가 전략 감시 센서와 모멘텀을 기반으로 진입 수량과 호가 타점을 자율 조절하고, 설정된 목표수익률에 맞춰 정확히 익절 매도하는 최고수익 전용 모드"
-                >
-                  <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300" />
-                  <span>⚡ 최고수익 AI★</span>
-                </button>
+              <div className="flex flex-wrap items-center gap-1.5 w-full lg:w-auto">
+                {/* ⚡ 최고수익 AI★ 버튼 (독립적 간격 분리 배치) */}
+                <div className="pr-2 sm:pr-3 mr-1 sm:mr-2 border-r border-white/15">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMaxYieldModalOpen(true);
+                    }}
+                    className={cn(
+                      "px-3 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shadow-md",
+                      scalperStrategyMode === 'AI_MAX_YIELD'
+                        ? "bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white border-amber-300 shadow-[0_0_16px_rgba(245,158,11,0.6)] animate-pulse"
+                        : "bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 border-amber-500/40"
+                    )}
+                    title="⚡ 최고수익 AI 전자동 모드: 금액 한도 설정 후 모든 옵션 구속 없이 최적 종목 자동 선정 & 최고수익 자동매매 가동"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-bounce" />
+                    <span>⚡ 최고수익 AI★</span>
+                  </button>
+                </div>
+
+                {/* 🎯 4/4 올-그린 및 전략 모드 버튼 그룹 */}
                 <button
                   type="button"
                   onClick={() => setScalperStrategyMode('ALL_SENSORS_4')}
                   className={cn(
-                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    "relative px-2.5 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
                     activeStrategyDetection.activeCount === 4
                       ? "bg-gradient-to-r from-emerald-500/40 via-cyan-500/40 to-blue-500/40 text-emerald-200 border-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.5)] animate-pulse"
                       : scalperStrategyMode === 'ALL_SENSORS_4'
@@ -8685,6 +8706,19 @@ export default function App() {
                   )} />
                   <span>④ VP/CVD</span>
                 </button>
+              </div>
+            </div>
+
+            {/* 🔴 스캘퍼 AI 실시간 전략 감지 센서 바로 아래로 이동 배치된 실시간 상태 메시지 */}
+            <div className="text-xs sm:text-sm font-mono flex items-center bg-black/40 px-3.5 py-2.5 rounded-2xl border border-sleek-blue/30 shadow-inner">
+              <div className="flex items-center gap-2.5 w-full overflow-hidden">
+                <span className="text-xs sm:text-sm font-black text-slate-300 uppercase shrink-0 flex items-center gap-1.5">
+                  <Activity className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+                  실시간 상태 메시지:
+                </span>
+                <span className="font-bold text-sleek-blue text-xs sm:text-sm leading-snug truncate">
+                  {displayScalperMessage}
+                </span>
               </div>
             </div>
 
@@ -9057,11 +9091,8 @@ export default function App() {
               {/* 5. START AI SCALPER 큰 실행 버튼 & 하단 탭 순환 컨트롤 (col-span-2) */}
               <div className="lg:col-span-2 flex flex-col justify-between gap-2">
                 <button 
+                  type="button"
                   onClick={() => {
-                    if (isSyncingKIS || initSyncState.status === 'syncing') {
-                      showNotification("한국투자증권 데이터 동기화가 진행 중입니다. 잠시 후 다시 시도해주세요.", "info");
-                      return;
-                    }
                     if (!isGapBotActive) {
                       if (gapBuyPrice <= 0 || gapSellPrice <= 0) {
                         alert("금액 구간(하한선과 상한선)을 정확하게 설정해주세요.");
@@ -9075,30 +9106,22 @@ export default function App() {
                     }
                     setIsGapBotActive(!isGapBotActive);
                   }}
-                  disabled={isSyncingKIS || initSyncState.status === 'syncing'}
                   title="현재 선택된 종목의 개별 스캘퍼 시작/정지"
                   className={cn(
-                    "w-full grow min-h-[80px] py-2.5 px-3 rounded-2xl font-black text-base sm:text-lg italic tracking-tight uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-1 border",
+                    "w-full grow min-h-[80px] py-2.5 px-3 rounded-2xl font-black text-base sm:text-lg italic tracking-tight uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-1 border cursor-pointer",
                     isGapBotActive 
-                      ? "bg-gradient-to-br from-rose-600 to-red-800 text-white border-rose-500/50 shadow-rose-900/40 hover:scale-[1.02] cursor-pointer" 
-                      : (isSyncingKIS || initSyncState.status === 'syncing')
-                      ? "bg-slate-800/80 text-slate-400 border-white/10 opacity-70 cursor-wait"
-                      : "bg-gradient-to-br from-sleek-blue to-indigo-700 text-white border-sleek-blue/50 shadow-sleek-blue/40 hover:scale-[1.02] cursor-pointer"
+                      ? "bg-gradient-to-br from-rose-600 to-red-800 text-white border-rose-500/50 shadow-rose-900/40 hover:scale-[1.02] active:scale-95" 
+                      : "bg-gradient-to-br from-sleek-blue to-indigo-700 text-white border-sleek-blue/50 shadow-sleek-blue/40 hover:scale-[1.02] active:scale-95"
                   )}
                 >
                   {isGapBotActive ? (
                     <>
-                      <Square className="w-5 h-5 fill-current animate-pulse" />
+                      <Square className="w-5 h-5 fill-current animate-pulse text-white" />
                       <span>SCALPER STOP</span>
-                    </>
-                  ) : (isSyncingKIS || initSyncState.status === 'syncing') ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin text-sleek-blue" />
-                      <span className="text-center text-xs leading-tight text-slate-300 font-sans">동기화 중...</span>
                     </>
                   ) : (
                     <>
-                      <Play className="w-5 h-5 fill-current" />
+                      <Play className="w-5 h-5 fill-current text-white" />
                       <span className="text-center leading-tight text-sm sm:text-base">START AI SCALPER</span>
                     </>
                   )}
@@ -9218,18 +9241,6 @@ export default function App() {
                   <span className={cn("w-2.5 h-2.5 rounded-full", isGapBotActive ? "bg-emerald-400" : "bg-slate-500")} />
                   {isGapBotActive ? "ENGINE RUNNING" : "ENGINE STOPPED"}
                 </div>
-              </div>
-            </div>
-
-            <div className="pt-2.5 border-t border-white/10 text-xs sm:text-sm font-mono flex items-center bg-black/30 px-3.5 py-2.5 rounded-2xl border border-white/5">
-              <div className="flex items-center gap-2.5 w-full overflow-hidden">
-                <span className="text-xs sm:text-sm font-black text-slate-400 uppercase shrink-0 flex items-center gap-1">
-                  <Activity className="w-3.5 h-3.5 text-sleek-blue" />
-                  실시간 상태 메시지:
-                </span>
-                <span className="font-bold text-sleek-blue text-xs sm:text-sm leading-snug truncate">
-                  {displayScalperMessage}
-                </span>
               </div>
             </div>
           </div>
@@ -11737,6 +11748,207 @@ export default function App() {
                 >
                   <Zap className="w-3.5 h-3.5 fill-white" />
                   <span>🎯 AI 스캘핑 매수 실행</span>
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ⚡ LEO SCALPER BOT PRO 최고수익 AI 전자동 운용 설정 팝업 모달 */}
+      <AnimatePresence>
+        {isMaxYieldModalOpen && (
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[100] flex items-center justify-center p-3 sm:p-4 md:p-6">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 15 }}
+              className="bg-slate-900/95 border-2 border-amber-500/50 rounded-3xl max-w-xl w-full p-5 sm:p-6 space-y-4 sm:space-y-5 shadow-[0_0_60px_rgba(245,158,11,0.3)] relative text-white max-h-[92vh] flex flex-col overflow-hidden"
+            >
+              {/* Modal Header */}
+              <div className="flex items-center justify-between border-b border-amber-500/20 pb-3.5 shrink-0">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500 to-rose-600 text-white flex items-center justify-center shadow-lg shadow-amber-500/30">
+                    <Zap className="w-6 h-6 fill-current animate-bounce" />
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-base sm:text-lg font-black tracking-tight text-white flex items-center gap-1.5">
+                        LEO SCALPER BOT PRO
+                        <span className="text-[11px] font-black px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                          최고수익 AI★
+                        </span>
+                      </h3>
+                    </div>
+                    <p className="text-xs text-amber-200/80 font-medium">모든 옵션 구속 해제 · 시장 주도주 자동 선정 · 전자동 최고수익 실현</p>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => setIsMaxYieldModalOpen(false)}
+                  className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-slate-400 hover:text-white flex items-center justify-center transition-colors cursor-pointer text-sm"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Modal Body */}
+              <div className="space-y-4 overflow-y-auto pr-1 flex-1 custom-scrollbar text-xs">
+                {/* 1. 얼마까지 주문할 것인지 묻는 섹션 & 금액 입력 칸 */}
+                <div className="bg-black/50 p-4 rounded-2xl border border-amber-500/30 space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs sm:text-sm font-black text-amber-300 flex items-center gap-1.5">
+                      <CircleDollarSign className="w-4 h-4 text-amber-400" />
+                      얼마까지 주문하시겠습니까? (최고수익 주문 한도)
+                    </label>
+                    <span className="text-[11px] text-slate-400 font-mono">
+                      가용 예수금: <strong className="text-white font-bold">{formatCurrency(marketType === 'US' ? (orderableUsd > 0 ? orderableUsd : Math.round(balance / (exchangeRate || 1350))) : (orderableKrw > 0 ? orderableKrw : balance), false, marketType)}</strong>
+                    </span>
+                  </div>
+
+                  <div className="relative">
+                    <input
+                      type="text"
+                      value={maxYieldInputStr}
+                      onChange={(e) => {
+                        const raw = e.target.value.replace(/[^0-9]/g, '');
+                        if (!raw) {
+                          setMaxYieldInputStr('');
+                          setMaxYieldBudget(0);
+                        } else {
+                          const num = parseInt(raw, 10);
+                          setMaxYieldInputStr(num.toLocaleString());
+                          setMaxYieldBudget(num);
+                        }
+                      }}
+                      placeholder="주문 한도 금액을 입력하세요 (예: 1,000,000)"
+                      className="w-full bg-slate-950 border-2 border-amber-500/60 focus:border-amber-400 rounded-xl px-3.5 py-2.5 text-base sm:text-lg font-mono font-black text-amber-300 placeholder:text-slate-600 focus:outline-none shadow-inner"
+                    />
+                    <span className="absolute right-3.5 top-1/2 -translate-y-1/2 text-xs font-bold text-amber-400/80 font-mono">
+                      {marketType === 'US' ? 'USD ($)' : '원 (KRW)'}
+                    </span>
+                  </div>
+
+                  {/* 빠른 금액 선택 버튼 */}
+                  <div className="grid grid-cols-5 gap-1.5 pt-1">
+                    {marketType === 'US' ? (
+                      <>
+                        {[300, 500, 1000, 3000].map((amt) => (
+                          <button
+                            key={amt}
+                            type="button"
+                            onClick={() => {
+                              setMaxYieldInputStr(amt.toLocaleString());
+                              setMaxYieldBudget(amt);
+                            }}
+                            className="py-1.5 px-1 bg-white/5 hover:bg-amber-500/20 border border-white/10 hover:border-amber-500/40 rounded-lg text-slate-300 hover:text-amber-300 font-mono font-bold transition-all text-center cursor-pointer"
+                          >
+                            ${amt.toLocaleString()}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const avail = Math.max(100, Math.floor(orderableUsd > 0 ? orderableUsd : (balance / (exchangeRate || 1350))));
+                            setMaxYieldInputStr(avail.toLocaleString());
+                            setMaxYieldBudget(avail);
+                          }}
+                          className="py-1.5 px-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 rounded-lg text-amber-300 font-bold transition-all text-center cursor-pointer"
+                        >
+                          전액
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        {[300000, 500000, 1000000, 3000000].map((amt) => (
+                          <button
+                            key={amt}
+                            type="button"
+                            onClick={() => {
+                              setMaxYieldInputStr(amt.toLocaleString());
+                              setMaxYieldBudget(amt);
+                            }}
+                            className="py-1.5 px-1 bg-white/5 hover:bg-amber-500/20 border border-white/10 hover:border-amber-500/40 rounded-lg text-slate-300 hover:text-amber-300 font-mono font-bold transition-all text-center cursor-pointer"
+                          >
+                            {amt >= 10000 ? `${amt / 10000}만` : amt}
+                          </button>
+                        ))}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const avail = Math.max(10000, Math.floor(orderableKrw > 0 ? orderableKrw : balance));
+                            setMaxYieldInputStr(avail.toLocaleString());
+                            setMaxYieldBudget(avail);
+                          }}
+                          className="py-1.5 px-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 rounded-lg text-amber-300 font-bold transition-all text-center cursor-pointer"
+                        >
+                          전액
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {/* 2. 최고수익 AI 자율 운용 원칙 및 특징 상세 안내 (명시 내용) */}
+                <div className="p-4 rounded-2xl bg-gradient-to-br from-amber-950/40 via-purple-950/30 to-slate-900 border border-amber-500/30 space-y-2.5 shadow-md">
+                  <div className="flex items-center gap-2 text-amber-300 font-black text-xs sm:text-sm">
+                    <Sparkles className="w-4 h-4 text-amber-400 animate-spin-slow" />
+                    <span>LEO SCALPER BOT PRO 최고수익 AI 핵심 운용 원칙</span>
+                  </div>
+
+                  <div className="space-y-2 text-slate-300 text-[11px] sm:text-xs leading-relaxed font-sans">
+                    <div className="flex items-start gap-2 bg-black/40 p-2.5 rounded-xl border border-white/5">
+                      <span className="text-amber-400 font-bold shrink-0">1.</span>
+                      <div>
+                        <strong className="text-white font-bold">모든 옵션 구속 완전 해제:</strong> 거래수량, 슬롯 수, 목표순익, 추가매수 간격, 진입호가 등 기존의 모든 수동 설정 옵션에 구속받지 않고 AI가 자유롭게 최적의 매매를 주도합니다.
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2 bg-black/40 p-2.5 rounded-xl border border-white/5">
+                      <span className="text-amber-400 font-bold shrink-0">2.</span>
+                      <div>
+                        <strong className="text-white font-bold">현재 시장 최고 주도주 자동 선정:</strong> 실시간 거래대금, 체결강도, 매수 호가 잔량 우위, 4/4 올-그린 전략 센서 신호를 기반으로 현재 시장에서 가장 높은 수익이 기대되는 최적의 종목을 자동 탐색·선정합니다.
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2 bg-black/40 p-2.5 rounded-xl border border-white/5">
+                      <span className="text-amber-400 font-bold shrink-0">3.</span>
+                      <div>
+                        <strong className="text-white font-bold">한도 금액 내 전자동 매수 & 최고점 익절:</strong> 설정하신 주문 한도 금액 내에서 스마트 분할 매수와 마이크로 고점 트레일링 익절을 전자동으로 알아서 진행합니다.
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Modal Footer / Action Buttons */}
+              <div className="pt-2 border-t border-amber-500/20 flex items-center justify-between gap-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsMaxYieldModalOpen(false)}
+                  className="px-4 py-2.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white font-bold text-xs transition-all cursor-pointer border border-white/10"
+                >
+                  취소 / 닫기
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const budget = maxYieldBudget > 0 ? maxYieldBudget : (marketType === 'US' ? 1000 : 1000000);
+                    setMaxYieldBudget(budget);
+                    setScalperStrategyMode('AI_MAX_YIELD');
+                    setIsGapBotActive(true);
+                    setIsMaxYieldModalOpen(false);
+                    showNotification(
+                      `⚡ [LEO SCALPER BOT PRO] 최고수익 AI 전자동 모드가 가동되었습니다! (주문 한도: ${formatCurrency(budget, false, marketType)})`,
+                      "success"
+                    );
+                  }}
+                  className="grow py-3 px-4 rounded-xl bg-gradient-to-r from-amber-500 via-rose-600 to-purple-600 hover:from-amber-400 hover:to-purple-500 text-white font-black text-xs sm:text-sm tracking-wide transition-all shadow-lg shadow-amber-500/30 flex items-center justify-center gap-2 cursor-pointer active:scale-95 border border-amber-300/40 animate-pulse"
+                >
+                  <Zap className="w-4 h-4 fill-current" />
+                  <span>⚡ LEO SCALPER BOT PRO 최고수익 자동매매 가동</span>
                 </button>
               </div>
             </motion.div>
