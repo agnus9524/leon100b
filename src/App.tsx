@@ -8331,20 +8331,30 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* 현재 체결가 및 그 바로 밑 전일 대비 (고정 폭) */}
-                        <div className="w-[145px] shrink-0 bg-black/50 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-center gap-0.5">
-                          <div className="flex items-center justify-between gap-1.5">
-                            <span className="text-[11px] font-bold text-slate-400 shrink-0">현재 체결가:</span>
-                            <span className="text-sm font-black text-white font-mono truncate text-right">
+                        {/* 현재 체결가 및 그 바로 밑 전일 대비 (눈에 띄는 색상 & 확장된 박스) */}
+                        <div className="min-w-[195px] sm:min-w-[225px] shrink-0 bg-black/70 px-3 py-2 rounded-2xl border border-white/20 shadow-xl flex flex-col justify-center gap-1.5 backdrop-blur-md">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs sm:text-[13px] font-black text-amber-300 flex items-center gap-1 shrink-0">
+                              <Activity className="w-3.5 h-3.5 text-amber-400" />
+                              현재 체결가:
+                            </span>
+                            <span className="text-base sm:text-lg font-black text-white font-mono tracking-tight text-right drop-shadow-md">
                               {formatCurrency(price, false, isUS ? 'US' : 'KR')}
                             </span>
                           </div>
-                          <div className="flex items-center justify-between gap-1.5 pt-0.5 border-t border-white/5">
-                            <span className="text-[11px] font-bold text-slate-400 shrink-0">전일 대비:</span>
-                            <span className={cn("text-xs font-black font-mono flex items-center gap-0.5 shrink-0", isUp ? "text-rose-400" : "text-sky-400")}>
-                              {isUp ? <TrendingUp className="w-3 h-3" /> : <TrendingDown className="w-3 h-3" />}
-                              <span>{isUp ? '+' : ''}{formatCurrency(changeVal, false, isUS ? 'US' : 'KR')}</span>
-                              <span className="text-[10px]">({isUp ? '+' : ''}{changePct.toFixed(2)}%)</span>
+                          <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/10">
+                            <span className="text-xs sm:text-[12px] font-black text-slate-300 shrink-0">
+                              전일 대비:
+                            </span>
+                            <span className={cn(
+                              "text-xs sm:text-sm font-black font-mono flex items-center gap-1 shrink-0 px-2 py-0.5 rounded-lg border",
+                              isUp 
+                                ? "text-rose-400 bg-rose-500/15 border-rose-500/30" 
+                                : "text-sky-400 bg-sky-500/15 border-sky-500/30"
+                            )}>
+                              {isUp ? <TrendingUp className="w-3.5 h-3.5 shrink-0" /> : <TrendingDown className="w-3.5 h-3.5 shrink-0" />}
+                              <span className="font-extrabold">{isUp ? '+' : ''}{formatCurrency(changeVal, false, isUS ? 'US' : 'KR')}</span>
+                              <span className="text-[11px] font-bold">({isUp ? '+' : ''}{changePct.toFixed(2)}%)</span>
                             </span>
                           </div>
                         </div>
