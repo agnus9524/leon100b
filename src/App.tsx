@@ -2872,56 +2872,64 @@ export default function App() {
     return result;
   }, [holdings]);
 
-  // Auto-fetch real-time price & metadata for any stock in effectiveHoldings that lacks price data
+  // Auto-fetch real-time price & metadata for any stock in effectiveHoldings continuously
   useEffect(() => {
     const heldSymbols = Object.keys(effectiveHoldings);
     if (heldSymbols.length === 0) return;
 
-    heldSymbols.forEach(async (sym) => {
-      const isStockUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
-      const market = isStockUS ? 'US' : 'KR';
-      const st = stocks.find(s => s.symbol === sym) || stocksCache[market]?.find(s => s.symbol === sym);
-      
-      if (!st || !st.price || st.price <= 0) {
-        if (kisConfig.isConnected) {
-          try {
-            const pData = await kisService.getPrice(sym);
-            if (pData && pData.current > 0) {
-              const liveName = pData.name || sym;
-              const newStock: Stock = {
-                symbol: sym,
-                name: liveName,
-                price: pData.current,
-                change: pData.change || 0,
-                changePercent: pData.changePercent || 0,
-                volume: String(pData.volume || '0'),
-                history: Array.from({ length: 40 }, (_, i) => ({ 
-                  time: `${i}:00`, 
-                  price: pData.current * (0.98 + Math.random() * 0.04) 
-                })),
-                market,
-                isAI: false
-              };
-              setStocks(prev => {
-                if (prev.some(s => s.symbol === sym)) {
-                  return prev.map(s => s.symbol === sym ? { ...s, price: pData.current, name: liveName } : s);
-                }
-                return [newStock, ...prev];
-              });
-              setStocksCache(prev => {
-                const list = prev[market] || [];
-                if (list.some(s => s.symbol === sym)) {
-                  return { ...prev, [market]: list.map(s => s.symbol === sym ? { ...s, price: pData.current, name: liveName } : s) };
-                }
-                return { ...prev, [market]: [newStock, ...list] };
-              });
-            }
-          } catch (err) {
-            console.warn(`[Holdings Price Fetch] Error for ${sym}:`, err);
+    let isSubscribed = true;
+
+    const fetchHoldingsPrices = async () => {
+      if (!kisConfig.isConnected) return;
+      for (const sym of heldSymbols) {
+        if (!isSubscribed) break;
+        const isStockUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
+        const market = isStockUS ? 'US' : 'KR';
+        try {
+          const pData = await kisService.getPrice(sym);
+          if (pData && pData.current > 0 && isSubscribed) {
+            const liveName = pData.name || sym;
+            const newStock: Stock = {
+              symbol: sym,
+              name: liveName,
+              price: pData.current,
+              change: pData.change || 0,
+              changePercent: pData.changePercent || 0,
+              volume: String(pData.volume || '0'),
+              history: Array.from({ length: 40 }, (_, i) => ({ 
+                time: `${i}:00`, 
+                price: pData.current * (0.98 + Math.random() * 0.04) 
+              })),
+              market,
+              isAI: false
+            };
+            setStocks(prev => {
+              if (prev.some(s => s.symbol === sym)) {
+                return prev.map(s => s.symbol === sym ? { ...s, price: pData.current, change: pData.change || s.change, changePercent: pData.changePercent || s.changePercent, volume: String(pData.volume || s.volume), name: liveName } : s);
+              }
+              return [newStock, ...prev];
+            });
+            setStocksCache(prev => {
+              const list = prev[market] || [];
+              if (list.some(s => s.symbol === sym)) {
+                return { ...prev, [market]: list.map(s => s.symbol === sym ? { ...s, price: pData.current, change: pData.change || s.change, changePercent: pData.changePercent || s.changePercent, volume: String(pData.volume || s.volume), name: liveName } : s) };
+              }
+              return { ...prev, [market]: [newStock, ...list] };
+            });
           }
+        } catch (err) {
+          console.warn(`[Holdings Price Fetch] Error for ${sym}:`, err);
         }
       }
-    });
+    };
+
+    fetchHoldingsPrices();
+    const interval = setInterval(fetchHoldingsPrices, 4000);
+
+    return () => {
+      isSubscribed = false;
+      clearInterval(interval);
+    };
   }, [effectiveHoldings, kisConfig.isConnected]);
 
   const assetAnalysis = useMemo(() => {
@@ -5975,6 +5983,30 @@ export default function App() {
                 return t;
               }));
 
+              // Immediately update holdings and avgPrices in React state for instant UI reflection
+              const filledQty = status.ordQty || order.quantity;
+              const oldQty = holdings[order.symbol] || 0;
+              const nextQty = Math.max(0, oldQty - filledQty);
+              const newHoldings = { ...holdings };
+              if (nextQty <= 0) {
+                delete newHoldings[order.symbol];
+                setAvgPrices(prev => {
+                  const nextAvg = { ...prev };
+                  delete nextAvg[order.symbol];
+                  try { localStorage.setItem('sleek_avg_prices', JSON.stringify(nextAvg)); } catch (e) {}
+                  return nextAvg;
+                });
+                delete recentLocalTradesRef.current[order.symbol];
+              } else {
+                newHoldings[order.symbol] = Number(nextQty.toFixed(4));
+                if (recentLocalTradesRef.current[order.symbol]) {
+                  recentLocalTradesRef.current[order.symbol].quantity = nextQty;
+                }
+              }
+              setHoldings(newHoldings);
+              try { localStorage.setItem('sleek_holdings', JSON.stringify(newHoldings)); } catch (e) {}
+              if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
+
               playScalpingSound('SELL');
               setTimeout(() => handleSyncKIS(), 500);
             } else if (status.ccldQty > 0) {
@@ -5986,6 +6018,23 @@ export default function App() {
                   quantity: remainingQty
                 });
               }
+              // Immediately update holdings for partial sell
+              const oldQty = holdings[order.symbol] || 0;
+              const nextQty = Math.max(0, oldQty - status.ccldQty);
+              const newHoldings = { ...holdings };
+              if (nextQty <= 0) {
+                delete newHoldings[order.symbol];
+                delete recentLocalTradesRef.current[order.symbol];
+              } else {
+                newHoldings[order.symbol] = Number(nextQty.toFixed(4));
+                if (recentLocalTradesRef.current[order.symbol]) {
+                  recentLocalTradesRef.current[order.symbol].quantity = nextQty;
+                }
+              }
+              setHoldings(newHoldings);
+              try { localStorage.setItem('sleek_holdings', JSON.stringify(newHoldings)); } catch (e) {}
+              if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
+
               addLog(order.symbol, '매도', status.price || order.orderPrice, status.ccldQty, `[KIS 지정가 매도 일부체결] ${status.ccldQty}주 체결`);
               showNotification(`${currentStock.name} KIS 매도 주문 일부 체결 (${status.ccldQty}주)`, "info");
               playScalpingSound('SELL');
@@ -9645,6 +9694,11 @@ export default function App() {
                               <div className="flex items-center gap-2 flex-wrap">
                                 <Briefcase className="w-4 h-4 text-amber-400" />
                                 <h4 className="text-xs font-black text-white uppercase tracking-wider">보유 주식 현황</h4>
+                                
+                                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9.5px] font-bold">
+                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                                  <span>실시간 체결·잔고 연동</span>
+                                </div>
                                 
                                 {/* Market Filter Pills */}
                                 <div className="flex items-center gap-1 bg-white/5 p-0.5 rounded-lg border border-white/5">
