@@ -1585,6 +1585,16 @@ export default function App() {
                   INITIAL_STOCKS_KR.find(s => s.symbol === symbol) ||
                   INITIAL_STOCKS.find(s => s.symbol === symbol);
     const isUS = stock?.market === 'US' || /^[A-Za-z]/.test(symbol) || marketType === 'US';
+
+    // 8-tab limit check
+    const currentMarketTabs = scalperTabsRef.current.filter(t => 
+      (/^[A-Za-z]/.test(t.symbol)) === isUS
+    );
+    if (currentMarketTabs.length >= 8) {
+      showNotification("최대 8개 종목까지 스캘퍼 등록이 가능합니다.", "info");
+      return;
+    }
+
     const name = customName || stock?.name || symbol;
     const price = stock?.price || (isUS ? 10 : 1000);
     const limits = calculateStockLimits(price, stock?.changePercent || 0, isUS, stock?.basePrice);
@@ -8983,43 +8993,89 @@ export default function App() {
 
               {/* 4. 스캘퍼 등록 종목 (호가창 우측 배치 + 붉은 글씨 현재가 + 닫기 x 표시: col-span-3) */}
               <div className="lg:col-span-3 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0 shadow-inner">
-                <div className="flex items-center justify-between border-b border-white/10 pb-1.5">
-                  <span className="text-xs font-black text-slate-200 uppercase flex items-center gap-1.5">
-                    <TrendingUp className="w-3.5 h-3.5 text-sleek-blue" />
-                    스캘퍼 등록 종목
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[10px] font-mono font-bold text-sleek-blue bg-sleek-blue/10 px-1.5 py-0.5 rounded border border-sleek-blue/20">
-                      {scalperTabs.filter(tab => {
-                        const isUS = /^[A-Z]/.test(tab.symbol);
-                        return marketType === 'US' ? isUS : !isUS;
-                      }).length}개
+                <div className="flex items-center justify-between border-b border-white/10 pb-1.5 gap-1.5 flex-wrap">
+                  <div className="flex items-center gap-1.5 min-w-0">
+                    <span className="text-xs font-black text-slate-200 uppercase flex items-center gap-1 shrink-0">
+                      <TrendingUp className="w-3.5 h-3.5 text-sleek-blue" />
+                      스캘퍼 등록 종목
                     </span>
+                    
+                    {/* AI 분석 기반 종목 추가 (8개) 버튼 */}
                     <button
                       type="button"
                       onClick={() => {
                         const currentMarketTabs = scalperTabs.filter(t => 
                           marketType === 'US' ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol)
                         );
-                        if (currentMarketTabs.length >= 25) {
-                          showNotification("최대 25개 종목까지 AI 분석 기반 스캘퍼 탭을 생성할 수 있습니다.", "info");
+                        if (currentMarketTabs.length >= 8) {
+                          showNotification("최대 8개 종목까지 AI 분석 기반 스캘퍼 탭을 등록할 수 있습니다.", "info");
                           return;
                         }
+
+                        // 1. Prioritize AI recommended stocks first if not already in tabs
+                        const aiAvailable = aiRecommendations.find(s => 
+                          s.market === marketType && 
+                          !scalperTabs.some(t => t.symbol === s.symbol)
+                        );
+                        
+                        if (aiAvailable) {
+                          if (!stocks.some(s => s.symbol === aiAvailable.symbol)) {
+                            setStocks(prev => [...prev, aiAvailable]);
+                          }
+                          openOrSwitchScalperTab(aiAvailable.symbol, aiAvailable.name);
+                          showNotification(`[AI 분석 추천] ${aiAvailable.name}(${aiAvailable.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
+                          return;
+                        }
+
+                        // 2. Fallback to initial stock pool for current market
                         const pool = marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS;
                         const poolAvailable = pool.find(s => !scalperTabs.some(t => t.symbol === s.symbol));
+                        
                         if (poolAvailable) {
                           if (!stocks.some(s => s.symbol === poolAvailable.symbol)) {
                             setStocks(prev => [...prev, poolAvailable]);
                           }
                           openOrSwitchScalperTab(poolAvailable.symbol, poolAvailable.name);
-                          showNotification(`[스캘퍼 추가] ${poolAvailable.name}(${poolAvailable.symbol}) 추가`, "success");
+                          showNotification(`[AI 종목 추천] ${poolAvailable.name}(${poolAvailable.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
+                          return;
                         }
+
+                        // 3. Dynamic AI stock generator if all preset/AI stocks are used up to 8
+                        const tabIdx = currentMarketTabs.length + 1;
+                        const newSymbol = marketType === 'US' ? `AIUS${tabIdx}` : `099${String(tabIdx).padStart(3, '0')}`;
+                        const newName = marketType === 'US' ? `AI 추천 종목 ${tabIdx}` : `AI 최적추천주 ${tabIdx}`;
+                        const basePrice = marketType === 'US' ? 10 + Math.floor(Math.random() * 90) : 5000 + Math.floor(Math.random() * 45000);
+                        const dynamicStock: Stock = {
+                          symbol: newSymbol,
+                          name: newName,
+                          price: basePrice,
+                          change: Math.round(basePrice * 0.035),
+                          changePercent: 3.5,
+                          volume: '15.5M',
+                          history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: basePrice * (0.95 + (i/40)*0.1) })),
+                          market: marketType,
+                          isAI: true
+                        };
+
+                        setStocks(prev => [...prev, dynamicStock]);
+                        openOrSwitchScalperTab(dynamicStock.symbol, dynamicStock.name);
+                        showNotification(`[AI 분석 추천] ${dynamicStock.name}(${dynamicStock.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
                       }}
-                      className="p-1 rounded-md bg-white/5 hover:bg-white/15 text-slate-300 hover:text-white border border-white/10 cursor-pointer transition-all"
-                      title="새 종목 추가"
+                      className="px-2 py-0.5 rounded-lg bg-sleek-blue/20 hover:bg-sleek-blue/30 text-sleek-blue hover:text-white border border-sleek-blue/40 text-[10px] sm:text-[10.5px] font-black font-mono flex items-center gap-1 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
+                      title="새 스캘퍼 종목 탭 추가 (AI 분석 기반, 최대 8개)"
                     >
-                      <Plus className="w-3 h-3 text-sleek-blue" />
+                      <Sparkles className="w-3 h-3 text-sleek-blue" />
+                      <span>AI 분석 기반 종목 추가 (8개)</span>
                     </button>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className="text-[10px] font-mono font-bold text-sleek-blue bg-sleek-blue/10 px-1.5 py-0.5 rounded border border-sleek-blue/20">
+                      {scalperTabs.filter(tab => {
+                        const isUS = /^[A-Z]/.test(tab.symbol);
+                        return marketType === 'US' ? isUS : !isUS;
+                      }).length}/8
+                    </span>
                   </div>
                 </div>
 
@@ -9182,867 +9238,6 @@ export default function App() {
                 </div>
               </div>
             </div>
-          </div>
-
-          {/* 2. Header Engine & Stock Status Banner (스캘퍼 엔진 상태 창 - 전체 와이드 확장 및 가독성 극대화) */}
-          <div className="bg-sleek-card border border-sleek-blue/40 p-4 sm:p-5 rounded-3xl shadow-xl space-y-3">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <div className="flex items-center gap-3 flex-wrap min-w-0">
-                <div className="p-2 rounded-2xl bg-sleek-blue/20 border border-sleek-blue/40 text-sleek-blue shadow-inner flex items-center justify-center">
-                  <Zap className="w-5 h-5 animate-pulse" />
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-sm sm:text-base font-black text-white uppercase tracking-wider">스캘퍼 엔진 상태</span>
-                  <span className="text-xs sm:text-sm font-bold text-sleek-blue font-mono bg-sleek-blue/10 px-2.5 py-1 rounded-xl border border-sleek-blue/20">
-                    [{selectedStock?.name || '종목 미선택'} ({selectedStock?.symbol || '-'})]
-                  </span>
-                </div>
-                
-                {/* 수동 지정가 매도 버튼 */}
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (selectedStock) {
-                      const held = holdings[selectedStock.symbol] || 1;
-                      setManualSellStock(selectedStock);
-                      setManualSellPrice(selectedStock.price || 0);
-                      setManualSellQty(held > 0 ? held : 1);
-                    }
-                    setManualSellModalOpen(true);
-                  }}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs sm:text-sm bg-rose-500/20 text-rose-400 border border-rose-500/30 hover:bg-rose-500 hover:text-white transition-all shadow-sm shrink-0 cursor-pointer active:scale-95 ml-1"
-                >
-                  <CircleDollarSign className="w-4 h-4" />
-                  <span>수동 지정가 매도</span>
-                </button>
-
-                <button
-                  onClick={cancelAllOrders}
-                  className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl font-bold text-xs sm:text-sm bg-white/5 text-slate-300 border border-white/10 hover:bg-white/10 hover:text-white transition-all shadow-sm shrink-0 cursor-pointer"
-                >
-                  <Trash2 className="w-4 h-4" />
-                  <span>미체결 전체 취소</span>
-                </button>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <div className="hidden sm:flex items-center gap-2 text-xs sm:text-sm font-mono text-slate-400 bg-black/40 px-3 py-1.5 rounded-xl border border-white/5">
-                  <span>보유: <strong className="text-white font-bold">{holdings[selectedStock?.symbol || ''] || 0}주</strong></span>
-                  <span>|</span>
-                  <span>매수가능: <strong className="text-sleek-blue font-bold">{displayBuyableQty.toLocaleString()}주</strong></span>
-                </div>
-
-                <div className={cn(
-                  "px-3.5 py-1.5 rounded-full text-xs sm:text-sm font-black italic tracking-wider flex items-center gap-2 border shrink-0",
-                  isGapBotActive 
-                    ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 animate-pulse shadow-[0_0_12px_rgba(52,211,153,0.3)]" 
-                    : "bg-white/5 text-slate-400 border-white/10"
-                )}>
-                  <span className={cn("w-2.5 h-2.5 rounded-full", isGapBotActive ? "bg-emerald-400" : "bg-slate-500")} />
-                  {isGapBotActive ? "ENGINE RUNNING" : "ENGINE STOPPED"}
-                </div>
-              </div>
-            </div>
-          </div>
-
-          {/* 3. PROFIT MAXIMIZER ENGINE (Chart + Compact 4-Level Order Book) */}
-          <div className="bg-sleek-card border border-sleek-border p-4 sm:p-5 rounded-3xl shadow-2xl space-y-3.5">
-            <div className="flex items-center justify-between pb-2.5 border-b border-white/10">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 bg-sleek-card border border-sleek-border rounded-xl flex items-center justify-center shadow-md">
-                  <Activity className="w-5 h-5 text-sleek-blue animate-pulse" />
-                </div>
-                <div>
-                  <h3 className="text-base font-black text-white uppercase italic tracking-tight">PROFIT MAXIMIZER ENGINE</h3>
-                  <div className="flex items-center gap-1.5">
-                    <div className="w-2 h-2 rounded-full bg-sleek-green animate-pulse"></div>
-                    <span className="text-xs font-bold text-slate-400 uppercase">Real-time Trading Stage</span>
-                  </div>
-                </div>
-              </div>
-              <div className="text-right flex items-center gap-3 text-xs font-mono">
-                <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 shadow-inner">
-                  <span className="text-xs text-slate-400 uppercase font-black">RSI (14)</span>
-                  <span className={cn(
-                    "font-black italic text-xs sm:text-sm font-mono",
-                    calculateRSI(selectedStock?.history?.map(h => h.price) || []) < 30 ? "text-sleek-red" : 
-                    calculateRSI(selectedStock?.history?.map(h => h.price) || []) > 70 ? "text-sleek-green" : "text-sleek-blue"
-                  )}>
-                    {Math.round(calculateRSI(selectedStock?.history?.map(h => h.price) || []))}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 shadow-inner">
-                  <span className="text-xs text-slate-400 uppercase font-black">감시 구간 폭</span>
-                  <span className="font-black text-sleek-blue italic text-xs sm:text-sm font-mono">
-                    {formatCurrency(gapBuyPrice && gapSellPrice ? (gapSellPrice - gapBuyPrice) : 0)}
-                  </span>
-                </div>
-              </div>
-            </div>
-
-            {/* Multi-Tab Bar for Independent Scalper Bot Trading */}
-            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 gap-2.5 pb-2.5 pt-1 border-b border-white/10 max-h-[280px] overflow-y-auto custom-scrollbar">
-              {scalperTabs.filter(tab => {
-                const isUS = /^[A-Z]/.test(tab.symbol);
-                return marketType === 'US' ? isUS : !isUS;
-              }).map(tab => {
-                const isSelected = tab.id === activeTabId;
-                const tabStock = stocks.find(s => s.symbol === tab.symbol) || 
-                                 stocksCache.KR?.find(s => s.symbol === tab.symbol) ||
-                                 stocksCache.US?.find(s => s.symbol === tab.symbol) ||
-                                 (marketType === 'KR' 
-                                   ? INITIAL_STOCKS_KR.find(s => s.symbol === tab.symbol) 
-                                   : INITIAL_STOCKS.find(s => s.symbol === tab.symbol));
-                const tabName = (tab.name && tab.name !== tab.symbol) ? tab.name : getResolvedStockName(tab.symbol, tabStock);
-
-                return (
-                  <div
-                    key={tab.id}
-                    onClick={() => handleSwitchTab(tab.id)}
-                    className={cn(
-                      "px-3 py-2 rounded-xl border flex items-center justify-between gap-2 cursor-pointer transition-all w-full min-w-0 text-xs sm:text-sm font-mono select-none group min-h-[38px]",
-                      isSelected
-                        ? "bg-sleek-blue/20 border-sleek-blue text-white shadow-md font-bold ring-1 ring-sleek-blue/50"
-                        : "bg-black/40 border-white/10 hover:bg-white/10 text-gray-300 hover:text-white"
-                    )}
-                  >
-                    {/* Left: Running Dot & Name */}
-                    <div className="flex items-center gap-2 min-w-0 truncate">
-                      <span className={cn(
-                        "w-2.5 h-2.5 rounded-full shrink-0",
-                        tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_#34d399]" : "bg-gray-500"
-                      )} />
-                      <span className="font-bold text-white text-xs sm:text-sm truncate">{tabName}</span>
-                    </div>
-
-                    {/* Right: Price & Indicators & Close */}
-                    <div className="flex items-center gap-1.5 shrink-0 ml-auto">
-                      {tabStock && (
-                        <span className={cn("text-xs font-mono hidden md:inline-block font-semibold", tabStock.changePercent >= 0 ? "text-rose-400" : "text-sky-400")}>
-                          {formatCurrency(tabStock.price)}
-                        </span>
-                      )}
-
-                      {tab.isBotActive && (
-                        <span className="text-[10px] font-black bg-emerald-500/20 text-emerald-400 px-1.5 py-0.5 rounded border border-emerald-500/30 shrink-0">
-                          ON
-                        </span>
-                      )}
-
-                      {scalperTabs.length > 1 && (
-                        <button
-                          type="button"
-                          onClick={(e) => closeScalperTab(tab.id, e)}
-                          className="opacity-60 hover:opacity-100 hover:bg-rose-500/30 text-gray-400 hover:text-rose-300 rounded-full p-1 transition-all ml-0.5 shrink-0 cursor-pointer"
-                          title="탭 닫기"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-
-              <button
-                type="button"
-                onClick={() => {
-                  const currentMarketTabs = scalperTabs.filter(t => 
-                    marketType === 'US' ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol)
-                  );
-                  if (currentMarketTabs.length >= 25) {
-                    showNotification("최대 25개 종목까지 AI 분석 기반 스캘퍼 탭을 생성할 수 있습니다.", "info");
-                    return;
-                  }
-
-                  // 1. Prioritize AI recommended stocks first if not already in tabs
-                  const aiAvailable = aiRecommendations.find(s => 
-                    s.market === marketType && 
-                    !scalperTabs.some(t => t.symbol === s.symbol)
-                  );
-                  
-                  if (aiAvailable) {
-                    if (!stocks.some(s => s.symbol === aiAvailable.symbol)) {
-                      setStocks(prev => [...prev, aiAvailable]);
-                    }
-                    openOrSwitchScalperTab(aiAvailable.symbol, aiAvailable.name);
-                    showNotification(`[AI 분석 추천] ${aiAvailable.name}(${aiAvailable.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
-                    return;
-                  }
-
-                  // 2. Fallback to initial stock pool for current market
-                  const pool = marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS;
-                  const poolAvailable = pool.find(s => !scalperTabs.some(t => t.symbol === s.symbol));
-                  
-                  if (poolAvailable) {
-                    if (!stocks.some(s => s.symbol === poolAvailable.symbol)) {
-                      setStocks(prev => [...prev, poolAvailable]);
-                    }
-                    openOrSwitchScalperTab(poolAvailable.symbol, poolAvailable.name);
-                    showNotification(`[AI 종목 추천] ${poolAvailable.name}(${poolAvailable.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
-                    return;
-                  }
-
-                  // 3. Dynamic AI stock generator if all preset/AI stocks are used up to 25
-                  const tabIdx = currentMarketTabs.length + 1;
-                  const newSymbol = marketType === 'US' ? `AIUS${tabIdx}` : `099${String(tabIdx).padStart(3, '0')}`;
-                  const newName = marketType === 'US' ? `AI 추천 종목 ${tabIdx}` : `AI 최적추천주 ${tabIdx}`;
-                  const basePrice = marketType === 'US' ? 10 + Math.floor(Math.random() * 90) : 5000 + Math.floor(Math.random() * 45000);
-                  const dynamicStock: Stock = {
-                    symbol: newSymbol,
-                    name: newName,
-                    price: basePrice,
-                    change: Math.round(basePrice * 0.035),
-                    changePercent: 3.5,
-                    volume: '15.5M',
-                    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: basePrice * (0.95 + (i/40)*0.1) })),
-                    market: marketType,
-                    isAI: true
-                  };
-
-                  setStocks(prev => [...prev, dynamicStock]);
-                  openOrSwitchScalperTab(dynamicStock.symbol, dynamicStock.name);
-                  showNotification(`[AI 분석 추천] ${dynamicStock.name}(${dynamicStock.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
-                }}
-                className="px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 border border-white/10 hover:border-sleek-blue/50 text-gray-300 hover:text-white text-xs font-bold font-mono flex items-center justify-center gap-1 transition-all w-full min-h-[34px]"
-                title="새 스캘퍼 종목 탭 추가 (AI 분석 기반, 최대 25개)"
-              >
-                <Plus className="w-3.5 h-3.5 text-sleek-blue" />
-                <div className="flex flex-col items-start leading-tight">
-                  <span className="text-[10px]">AI 분석 기반</span>
-                  <span>+ 종목 추가 (25개)</span>
-                </div>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => triggerAiRecommendationPopup()}
-                className="px-2.5 py-1.5 rounded-xl bg-purple-500/10 hover:bg-purple-500/20 border border-purple-500/30 text-purple-300 hover:text-purple-200 text-xs font-bold font-mono flex items-center justify-center gap-1 transition-all w-full min-h-[34px] cursor-pointer shadow-[0_0_12px_rgba(168,85,247,0.15)]"
-                title="AI 실시간 수급 포착 추천 종목 팝업 보기"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-purple-400" />
-                <div className="flex flex-col items-start leading-tight">
-                  <span className="text-[10px] text-purple-400">실시간 수급포착</span>
-                  <span>🤖 AI 실시간 추천</span>
-                </div>
-              </button>
-            </div>
-
-            {selectedStock ? (
-              (() => {
-                const isUSStock = selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US';
-                const currentPrice = selectedStock.price;
-                const tickSize = getTickSize(currentPrice, isUSStock ? 'US' : 'KR');
-                const askLevels = Array.from({ length: 4 }, (_, i) => 
-                  isUSStock ? Number((currentPrice + (4 - i) * tickSize).toFixed(4)) : currentPrice + (4 - i) * tickSize
-                );
-                const bidLevels = Array.from({ length: 4 }, (_, i) => 
-                  isUSStock ? Number((currentPrice - (i + 1) * tickSize).toFixed(4)) : currentPrice - (i + 1) * tickSize
-                );
-                const getLevelVolume = (priceLevel: number) => {
-                  const intPrice = isUSStock ? Math.round(priceLevel * 100) : Math.round(priceLevel);
-                  const symHash = (selectedStock?.symbol || '').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-                  
-                  let scale = 1;
-                  if (isUSStock) {
-                    scale = currentPrice < 10 ? 50 : currentPrice < 100 ? 10 : currentPrice < 500 ? 3 : 1;
-                  } else {
-                    scale = currentPrice < 10000 ? 50 : currentPrice < 100000 ? 10 : 2;
-                  }
-
-                  const base = (Math.abs((intPrice * 37 + symHash * 13) % 800) + 120) * scale;
-                  const timeStep = Math.floor(Date.now() / 2500);
-                  const wiggle = Math.floor(Math.sin(timeStep + intPrice) * 35 * scale) + (35 * scale);
-                  
-                  return Math.max(10 * scale, Math.floor(base + wiggle));
-                };
-
-                const askVolumes = askLevels.map(p => getLevelVolume(p));
-                const bidVolumes = bidLevels.map(p => getLevelVolume(p));
-                const maxLevelVol = Math.max(...askVolumes, ...bidVolumes, 1);
-
-                const totalAskVolume = askVolumes.reduce((a, b) => a + b, 0);
-                const totalBidVolume = bidVolumes.reduce((a, b) => a + b, 0);
-                const totalDepthVolume = (totalAskVolume + totalBidVolume) || 1;
-                const askPctVal = ((totalAskVolume / totalDepthVolume) * 100).toFixed(1);
-                const bidPctVal = ((totalBidVolume / totalDepthVolume) * 100).toFixed(1);
-
-                // Prepare Chart Candle & Moving Averages (5, 20, 60, 120) Data
-                const groupSize = selectedTimeframeBar === '1m' ? 1 : selectedTimeframeBar === '3m' ? 2 : selectedTimeframeBar === '5m' ? 3 : 4;
-                const historyItems = selectedStock.history || [];
-                const candleData = [];
-
-                // Group from the END of historyItems backwards to anchor current time on the far right
-                const groups: typeof historyItems[] = [];
-                for (let i = historyItems.length; i > 0; i -= groupSize) {
-                  const start = Math.max(0, i - groupSize);
-                  groups.unshift(historyItems.slice(start, i));
-                }
-
-                groups.forEach((group, gIdx) => {
-                  const isLastGroup = gIdx === groups.length - 1;
-                  const open = group[0]?.price || selectedStock.price;
-                  const close = isLastGroup ? selectedStock.price : (group[group.length - 1]?.price || selectedStock.price);
-                  const prices = group.map(g => g.price);
-                  if (isLastGroup) prices.push(selectedStock.price);
-                  const high = Math.max(...prices);
-                  const low = Math.min(...prices);
-                  const isUp = close >= open;
-                  const volume = group.reduce((acc, g) => acc + (g.volume || Math.floor((g.price * 3) % 250) + 20), 0);
-
-                  const displayTime = isLastGroup ? '현재' : (group[0]?.time || `${gIdx + 1}`);
-
-                  candleData.push({
-                    time: displayTime,
-                    open,
-                    high,
-                    low,
-                    close,
-                    price: close,
-                    isUp,
-                    isLive: isLastGroup,
-                    volume
-                  });
-                });
-
-                // Calculate SMA Moving Averages
-                const closes = candleData.map(c => c.close);
-                const volumes = candleData.map(c => c.volume);
-
-                candleData.forEach((item, idx) => {
-                  const getSma = (arr: number[], period: number) => {
-                    const slice = arr.slice(Math.max(0, idx - period + 1), idx + 1);
-                    return slice.reduce((a, b) => a + b, 0) / (slice.length || 1);
-                  };
-                  item.ma5 = Math.round(getSma(closes, 5));
-                  item.ma20 = Math.round(getSma(closes, 20));
-                  item.ma60 = Math.round(getSma(closes, 60));
-                  item.ma120 = Math.round(getSma(closes, 120));
-                  item.volMa20 = Math.round(getSma(volumes, 20));
-                });
-
-                // Find peak (high) and trough (low) for annotations
-                let highCandle = candleData[0] || { high: currentPrice, time: '00:00' };
-                let lowCandle = candleData[0] || { low: currentPrice, time: '00:00' };
-                candleData.forEach(c => {
-                  if (c.high > highCandle.high) highCandle = c;
-                  if (c.low < lowCandle.low) lowCandle = c;
-                });
-
-                return (
-                  <div className="grid grid-cols-1 xl:grid-cols-12 gap-3 items-stretch">
-                    {/* 1. Chart Graph (xl:col-span-12) */}
-                    <div className="xl:col-span-12 flex flex-col min-w-0 bg-black/40 rounded-2xl border border-sleek-border p-3 justify-between space-y-2">
-                      <div>
-                        {/* Header: Price & Moving Averages Legend */}
-                        <div className="mb-2 flex items-center justify-between gap-2 flex-wrap pb-1.5 border-b border-white/5">
-                          <div>
-                            <div className="flex items-center gap-2">
-                              <span className="text-xl md:text-2xl font-black text-white italic tracking-tighter font-mono">
-                                {formatCurrency(selectedStock.price)}
-                              </span>
-                              <span className={cn(
-                                "text-xs font-black italic font-mono px-1.5 py-0.5 rounded flex items-center gap-1",
-                                (selectedStock.change || 0) >= 0 ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400"
-                              )}>
-                                <span>{(selectedStock.change || 0) >= 0 ? '▲ +' : '▼ '}{formatCurrency(selectedStock.change || 0)}</span>
-                                <span>({(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%)</span>
-                              </span>
-                            </div>
-                            
-                            {/* Moving Average Line Legend matching attached photo */}
-                            <div className="flex items-center gap-2 text-[11px] font-mono mt-0.5">
-                              <span className="text-gray-400 font-bold">이동평균선</span>
-                              <span className="text-[#10B981] font-black">5</span>
-                              <span className="text-[#EF4444] font-black">20</span>
-                              <span className="text-[#F59E0B] font-black">60</span>
-                              <span className="text-[#8B5CF6] font-black">120</span>
-                            </div>
-                          </div>
-
-                          {/* Timeframe Controls */}
-                          <div className="flex items-center gap-1 bg-black/60 border border-white/5 p-1 rounded-xl shrink-0">
-                            {(['1m', '3m', '5m', '10m'] as const).map(tf => (
-                              <button
-                                key={tf}
-                                type="button"
-                                onClick={() => setSelectedTimeframeBar(tf)}
-                                className={cn(
-                                  "px-2 py-0.5 rounded-lg text-xs font-bold transition-all font-mono",
-                                  selectedTimeframeBar === tf
-                                    ? "bg-sleek-blue text-white shadow-sm"
-                                    : "text-sleek-text-secondary hover:bg-white/5 hover:text-white"
-                                )}
-                              >
-                                {tf === '1m' ? '1분' : tf === '3m' ? '3분' : tf === '5m' ? '5분' : '10분'}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
-
-                        {/* Main Candlestick + MA Lines Chart */}
-                        <div className="bg-slate-950/80 rounded-xl border border-white/5 p-1.5 relative shadow-inner w-full" style={{ height: 165 }}>
-                          {/* Chart Exchange Rate Overlay */}
-                          <div className="absolute top-3 left-4 z-20 flex flex-col items-start pointer-events-none select-none">
-                            <div className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-black/40 backdrop-blur-md border border-white/10">
-                              <USAFlag />
-                              <span className="text-[10px] font-mono font-black text-white/40 tracking-widest uppercase">FX Context</span>
-                              <div className="h-2.5 w-px bg-white/10 mx-0.5" />
-                              <span className={cn(
-                                "text-[10px] font-mono font-black",
-                                exchangeRateTrend === 'UP' ? "text-sleek-red" : "text-sleek-green"
-                              )}>
-                                ₩{exchangeRate.toLocaleString()}
-                              </span>
-                              {exchangeRateTrend === 'UP' ? <TrendingUp className="w-2.5 h-2.5 text-sleek-red" /> : <TrendingDown className="w-2.5 h-2.5 text-sleek-green" />}
-                            </div>
-                          </div>
-
-                          {candleData && candleData.length > 0 ? (
-                            <ResponsiveContainer width="100%" height="100%">
-                              <ComposedChart data={candleData} margin={{ top: 15, right: 45, left: 0, bottom: 0 }}>
-                                <CartesianGrid strokeDasharray="2 2" vertical={true} opacity={0.06} stroke="#FFFFFF" />
-                                <XAxis 
-                                  dataKey="time" 
-                                  axisLine={false} 
-                                  tickLine={false} 
-                                  tick={{ fontSize: 10, fill: '#6B7280' }}
-                                />
-                                <YAxis 
-                                  domain={['auto', 'auto']} 
-                                  axisLine={false} 
-                                  tickLine={false} 
-                                  tick={{ fontSize: 10, fill: '#6B7280' }}
-                                  orientation="right"
-                                />
-                                <Tooltip 
-                                  content={({ active, payload }) => {
-                                    if (active && payload && payload.length) {
-                                      const data = payload[0].payload;
-                                      return (
-                                        <div className="bg-[#1A1D23] border border-[#2D3139] p-2 rounded-xl shadow-2xl space-y-1 text-xs font-mono">
-                                          <div className="flex items-center justify-between gap-2 border-b border-white/10 pb-1">
-                                            <span className="text-sleek-text-secondary font-bold">{data.time}</span>
-                                            <span className={cn("font-bold px-1 py-0.2 rounded text-[10px]", data.isUp ? "bg-rose-500/20 text-rose-400" : "bg-sky-500/20 text-sky-400")}>
-                                              {data.isUp ? "양봉" : "음봉"}
-                                            </span>
-                                          </div>
-                                          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[11px]">
-                                            <div>시가: <strong className="text-white">{formatCurrency(data.open)}</strong></div>
-                                            <div>고가: <strong className="text-rose-400">{formatCurrency(data.high)}</strong></div>
-                                            <div>저가: <strong className="text-sky-400">{formatCurrency(data.low)}</strong></div>
-                                            <div>종가: <strong className={data.close >= data.open ? "text-rose-400" : "text-sky-400"}>{formatCurrency(data.close)}</strong></div>
-                                          </div>
-                                        </div>
-                                      );
-                                    }
-                                    return null;
-                                  }}
-                                />
-
-                                {/* Candle Bars */}
-                                <Bar dataKey="close" radius={[2, 2, 0, 0]} isAnimationActive={false} animationDuration={0}>
-                                  {candleData.map((candle, idx) => (
-                                    <Cell 
-                                      key={`candle-${candle.time}-${idx}`} 
-                                      fill={candle.isUp ? '#EF4444' : '#3B82F6'} 
-                                      stroke={candle.isLive ? (candle.isUp ? '#F87171' : '#60A5FA') : 'none'}
-                                      strokeWidth={candle.isLive ? 1.5 : 0}
-                                    />
-                                  ))}
-                                </Bar>
-
-                                {/* Moving Average Lines (5, 20, 60, 120) */}
-                                <Line type="monotone" dataKey="ma5" stroke="#10B981" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                                <Line type="monotone" dataKey="ma20" stroke="#EF4444" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                                <Line type="monotone" dataKey="ma60" stroke="#F59E0B" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-                                <Line type="monotone" dataKey="ma120" stroke="#8B5CF6" strokeWidth={1.5} dot={false} isAnimationActive={false} />
-
-                                {/* High Point Marker with Down Arrow */}
-                                {highCandle && (
-                                  <ReferenceDot 
-                                    x={highCandle.time} 
-                                    y={highCandle.high} 
-                                    r={3} 
-                                    fill="#EF4444" 
-                                    stroke="#FFFFFF" 
-                                    strokeWidth={1}
-                                  >
-                                    <Label 
-                                      value={`${formatCurrency(highCandle.high)} (${(selectedStock?.price ? (((highCandle.high - selectedStock.price)/selectedStock.price)*100) : 0).toFixed(1)}%) ↓`} 
-                                      position="top" 
-                                      fill="#EF4444" 
-                                      fontSize={9} 
-                                      fontWeight="bold" 
-                                    />
-                                  </ReferenceDot>
-                                )}
-
-                                {/* Low Point Marker with Up Arrow */}
-                                {lowCandle && (
-                                  <ReferenceDot 
-                                    x={lowCandle.time} 
-                                    y={lowCandle.low} 
-                                    r={3} 
-                                    fill="#3B82F6" 
-                                    stroke="#FFFFFF" 
-                                    strokeWidth={1}
-                                  >
-                                    <Label 
-                                      value={`${formatCurrency(lowCandle.low)} (${(selectedStock?.price ? (((lowCandle.low - selectedStock.price)/selectedStock.price)*100) : 0).toFixed(1)}%) ↑`} 
-                                      position="bottom" 
-                                      fill="#3B82F6" 
-                                      fontSize={9} 
-                                      fontWeight="bold" 
-                                    />
-                                  </ReferenceDot>
-                                )}
-
-                                {/* Buy & Sell Boundary Lines */}
-                                {gapBuyPrice > 0 && (
-                                  <ReferenceLine y={gapBuyPrice} stroke="#EF4444" strokeDasharray="3 3" strokeWidth={1}>
-                                    <Label value="BUY" position="left" fill="#EF4444" fontSize={10} fontWeight="bold" />
-                                  </ReferenceLine>
-                                )}
-                                {gapSellPrice > 0 && (
-                                  <ReferenceLine y={gapSellPrice} stroke="#3B82F6" strokeDasharray="3 3" strokeWidth={1}>
-                                    <Label value="SELL" position="left" fill="#3B82F6" fontSize={10} fontWeight="bold" />
-                                  </ReferenceLine>
-                                )}
-                              </ComposedChart>
-                            </ResponsiveContainer>
-                          ) : null}
-
-                          {/* Solid Red Current Price Badge on Right Axis */}
-                          <div className="absolute right-0 top-1/2 -translate-y-1/2 bg-rose-600 text-white font-mono font-bold text-[10px] px-1.5 py-0.5 rounded-l shadow-lg border-l border-white/20 animate-pulse">
-                            {isUSStock ? (selectedStock?.price || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 4 }) : (selectedStock?.price || 0).toLocaleString()} <span className="text-[8px] opacity-80">00:18</span>
-                          </div>
-                        </div>
-
-                        {/* Sub-Pane: Trading Volume (거래량 (20)) */}
-                        <div className="mt-2 pt-1 border-t border-white/5">
-                          <div className="flex items-center justify-between text-[10px] text-gray-400 font-mono mb-0.5">
-                            <span className="font-bold">거래량 (20)</span>
-                            <span className="text-emerald-400 font-bold">1.48K / 1.00K</span>
-                          </div>
-                          <div className="h-10 w-full bg-slate-950/50 rounded-lg p-0.5 relative">
-                            <ResponsiveContainer width="100%" height="100%">
-                              <ComposedChart data={candleData} margin={{ top: 2, right: 35, left: 0, bottom: 0 }}>
-                                <Bar dataKey="volume" radius={[1, 1, 0, 0]} isAnimationActive={false} animationDuration={0}>
-                                  {candleData.map((c, idx) => (
-                                    <Cell key={`vol-${c.time}-${idx}`} fill={c.isUp ? '#EF4444' : '#3B82F6'} opacity={0.8} />
-                                  ))}
-                                </Bar>
-                                <Line type="monotone" dataKey="volMa20" stroke="#10B981" strokeWidth={1} dot={false} isAnimationActive={false} animationDuration={0} />
-                              </ComposedChart>
-                            </ResponsiveContainer>
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Bottom Timeframe Toolbar */}
-                      <div className="pt-1.5 border-t border-white/5 flex items-center justify-between text-[11px] text-gray-400 font-mono">
-                        <div className="flex items-center gap-1">
-                          <span className="px-2 py-0.5 rounded bg-white/10 text-white font-bold text-[10px] flex items-center gap-1">1분 ▼</span>
-                          <span className="px-2 py-0.5 rounded hover:bg-white/5 text-[10px] cursor-pointer">일</span>
-                          <span className="px-2 py-0.5 rounded hover:bg-white/5 text-[10px] cursor-pointer">주</span>
-                          <span className="px-2 py-0.5 rounded hover:bg-white/5 text-[10px] cursor-pointer">월</span>
-                          <span className="px-2 py-0.5 rounded hover:bg-white/5 text-[10px] cursor-pointer">년</span>
-                        </div>
-                        <div className="flex items-center gap-1 text-rose-400 font-bold text-xs">
-                          <span>📊</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* 3. Bottom Full Width Window: 보유 주식 현황 (Directly below graph from left to right: xl:col-span-12) */}
-                    <div className="xl:col-span-12 bg-black/40 border border-white/10 rounded-2xl p-3.5 flex flex-col justify-between space-y-2.5 w-full min-w-0">
-                      {(() => {
-                        const allHeldEntries = Object.entries(effectiveHoldings).filter(([_, qty]) => Number(qty) > 0);
-                        const krHeldCount = allHeldEntries.filter(([sym]) => !/^[A-Za-z]/.test(sym) || /^\d+$/.test(sym)).length;
-                        const usHeldCount = allHeldEntries.filter(([sym]) => /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym)).length;
-                        const allHeldCount = allHeldEntries.length;
-
-                        const effectiveFilter = holdingsTabFilter === 'AUTO' ? marketType : holdingsTabFilter;
-                        
-                        const filteredHoldings = allHeldEntries.filter(([sym]) => {
-                          const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
-                          if (effectiveFilter === 'ALL') return true;
-                          if (effectiveFilter === 'KR') return !isUS;
-                          if (effectiveFilter === 'US') return isUS;
-                          return true;
-                        });
-
-                        return (
-                          <>
-                            <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-white/10">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <Briefcase className="w-4 h-4 text-amber-400" />
-                                <h4 className="text-xs font-black text-white uppercase tracking-wider">보유 주식 현황</h4>
-                                
-                                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-[9.5px] font-bold">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                                  <span>실시간 체결·잔고 연동</span>
-                                </div>
-                                
-                                {/* Market Filter Pills */}
-                                <div className="flex items-center gap-1 bg-white/5 p-0.5 rounded-lg border border-white/5">
-                                  <button
-                                    type="button"
-                                    onClick={() => setHoldingsTabFilter('AUTO')}
-                                    className={cn(
-                                      "px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer",
-                                      holdingsTabFilter === 'AUTO' 
-                                        ? "bg-amber-500/30 text-amber-300 border border-amber-500/40" 
-                                        : "text-slate-400 hover:text-white"
-                                    )}
-                                  >
-                                    현재 시장 ({marketType === 'KR' ? krHeldCount : usHeldCount})
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setHoldingsTabFilter('ALL')}
-                                    className={cn(
-                                      "px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer",
-                                      holdingsTabFilter === 'ALL' 
-                                        ? "bg-amber-500/30 text-amber-300 border border-amber-500/40" 
-                                        : "text-slate-400 hover:text-white"
-                                    )}
-                                  >
-                                    전체 ({allHeldCount})
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setHoldingsTabFilter('KR')}
-                                    className={cn(
-                                      "px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer",
-                                      holdingsTabFilter === 'KR' 
-                                        ? "bg-amber-500/30 text-amber-300 border border-amber-500/40" 
-                                        : "text-slate-400 hover:text-white"
-                                    )}
-                                  >
-                                    국내 ({krHeldCount})
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => setHoldingsTabFilter('US')}
-                                    className={cn(
-                                      "px-2 py-0.5 rounded text-[10px] font-bold transition-all cursor-pointer",
-                                      holdingsTabFilter === 'US' 
-                                        ? "bg-amber-500/30 text-amber-300 border border-amber-500/40" 
-                                        : "text-slate-400 hover:text-white"
-                                    )}
-                                  >
-                                    미국 ({usHeldCount})
-                                  </button>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center gap-2">
-                                <span className="text-[10px] text-slate-400 font-sans hidden sm:inline">
-                                  * 제세금 및 수수료 반영 실질 손익
-                                </span>
-                                {kisConfig.isConnected && (
-                                  <button
-                                    type="button"
-                                    onClick={() => handleSyncKIS()}
-                                    disabled={isSyncingKIS}
-                                    className={cn(
-                                      "flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10.5px] font-black border transition-all cursor-pointer active:scale-95",
-                                      isSyncingKIS
-                                        ? "bg-amber-500/20 text-amber-300 border-amber-500/40 opacity-70"
-                                        : "bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white border-white/10 hover:border-white/20"
-                                    )}
-                                    title="증권사 실계좌 잔고 즉시 동기화"
-                                  >
-                                    <RefreshCw className={cn("w-3 h-3 text-amber-400", isSyncingKIS && "animate-spin")} />
-                                    <span>{isSyncingKIS ? "동기화 중..." : "잔고 새로고침"}</span>
-                                  </button>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="space-y-2 max-h-[300px] overflow-y-auto custom-scrollbar pr-0.5">
-                              {filteredHoldings.length === 0 ? (
-                                <div className="bg-white/5 border border-white/5 rounded-2xl p-6 text-center flex flex-col items-center justify-center gap-2">
-                                  <p className="text-xs text-sleek-text-secondary font-medium">
-                                    {effectiveFilter === 'KR' 
-                                      ? '현재 보유 중인 국내 주식이 없습니다.' 
-                                      : effectiveFilter === 'US' 
-                                        ? '현재 보유 중인 미국 주식이 없습니다.' 
-                                        : '현재 보유 중인 주식이 없습니다.'}
-                                  </p>
-                                  {kisConfig.isConnected && (
-                                    <button
-                                      type="button"
-                                      onClick={() => handleSyncKIS()}
-                                      className="text-[11px] text-amber-400 hover:text-amber-300 font-bold underline cursor-pointer"
-                                    >
-                                      증권사 잔고 다시 조회하기
-                                    </button>
-                                  )}
-                                </div>
-                              ) : (
-                                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2.5">
-                                  {filteredHoldings.map(([sym, rawQty], idx) => {
-                                    const qty = Number(rawQty);
-                                    const st = stocks.find(s => s.symbol === sym) || 
-                                               stocksCache.KR?.find(s => s.symbol === sym) ||
-                                               stocksCache.US?.find(s => s.symbol === sym) ||
-                                               INITIAL_STOCKS_KR.find(s => s.symbol === sym) || 
-                                               INITIAL_STOCKS.find(s => s.symbol === sym) || 
-                                               { name: sym, symbol: sym, price: 0, changePercent: 0 };
-
-                                    const stockDisplayName = getResolvedStockName(sym, st);
-                                    
-                                    let avgPrice = avgPrices[sym] || 0;
-                                    if (avgPrice <= 0 && gapInventory.length > 0 && selectedSymbol === sym) {
-                                      const totalCost = gapInventory.reduce((acc, slot) => {
-                                        const p = typeof slot === 'number' ? slot : (slot.price || 0);
-                                        const q = typeof slot === 'number' ? 1 : (slot.quantity || 1);
-                                        return acc + (p * q);
-                                      }, 0);
-                                      const totalQty = gapInventory.reduce((acc, slot) => {
-                                        return acc + (typeof slot === 'number' ? 1 : (slot.quantity || 1));
-                                      }, 0);
-                                      avgPrice = totalQty > 0 ? Math.floor(totalCost / totalQty) : 0;
-                                    }
-                                    if (avgPrice <= 0) avgPrice = st.price || 0;
-
-                                    const isStockUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
-                                    const currentPrice = st.price || 0;
-                                    const { netProfit } = calculateNetProfitAmount(avgPrice, currentPrice, qty, isStockUS ? 'US' : 'KR');
-                                    const profitRatio = avgPrice > 0 ? calculateNetProfitPercent(avgPrice, currentPrice, isStockUS ? 'US' : 'KR') : 0;
-                                    const isSelected = selectedSymbol === sym;
-
-                                    const formattedNetProfit = netProfit > 0 
-                                      ? `+${formatCurrency(netProfit)}` 
-                                      : netProfit < 0 
-                                        ? `-${formatCurrency(Math.abs(netProfit))}` 
-                                        : formatCurrency(0);
-
-                                    const recentTrade = recentLocalTradesRef.current[sym];
-                                    const isRecentlyBought = recentTrade && (Date.now() - recentTrade.timestamp < 45000);
-
-                                    return (
-                                      <div 
-                                        key={`${sym}-${idx}`}
-                                        onClick={() => openOrSwitchScalperTab(sym)}
-                                        className={cn(
-                                          "p-3 rounded-2xl border flex flex-col justify-between gap-2.5 font-mono cursor-pointer transition-all group shadow-sm relative overflow-hidden",
-                                          isSelected
-                                            ? "bg-sleek-blue/20 border-sleek-blue text-white ring-1 ring-sleek-blue/50"
-                                            : "bg-white/[0.04] border-white/10 hover:bg-white/[0.08] hover:border-sleek-blue/40 text-slate-200"
-                                        )}
-                                      >
-                                        {/* Header Row: Stock Name, Symbol, Quantity, Sell Button */}
-                                        <div className="flex items-center justify-between gap-2">
-                                          <div className="flex items-center gap-1.5 min-w-0">
-                                            <span className="font-black text-xs text-white group-hover:text-sleek-blue transition-colors truncate max-w-[110px] sm:max-w-[130px]" title={`${stockDisplayName} (${sym})`}>
-                                              {stockDisplayName}
-                                            </span>
-                                            <span className="text-[10px] text-slate-400 font-mono shrink-0">
-                                              ({sym})
-                                            </span>
-                                            {isRecentlyBought && (
-                                              <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 animate-pulse shrink-0">
-                                                방금 매수
-                                              </span>
-                                            )}
-                                          </div>
-
-                                          <div className="flex items-center gap-1.5 shrink-0">
-                                            <span className="px-2 py-0.5 rounded-lg bg-black/50 border border-white/10 text-white font-black text-xs">
-                                              {qty}주
-                                            </span>
-                                            <button
-                                              type="button"
-                                              onClick={(e) => {
-                                                e.stopPropagation();
-                                                const targetStockObj: Stock = {
-                                                  symbol: sym,
-                                                  name: stockDisplayName,
-                                                  price: currentPrice,
-                                                  change: st.change || 0,
-                                                  changePercent: st.changePercent || 0,
-                                                  volume: st.volume || '0',
-                                                  history: st.history || [],
-                                                  market: isStockUS ? 'US' : 'KR'
-                                                };
-                                                setManualSellStock(targetStockObj);
-                                                setManualSellPrice(currentPrice);
-                                                setManualSellQty(qty > 0 ? qty : 1);
-                                                setManualSellModalOpen(true);
-                                              }}
-                                              className="px-2.5 py-1 bg-rose-500/20 hover:bg-rose-500 text-rose-400 hover:text-white border border-rose-500/40 rounded-lg text-[10.5px] font-black transition-all shadow-sm flex items-center gap-1 active:scale-95 cursor-pointer"
-                                              title={`${stockDisplayName} 수동 지정가 매도`}
-                                            >
-                                              매도
-                                            </button>
-                                          </div>
-                                        </div>
-
-                                        {/* Middle Row: Current Price vs Avg Price */}
-                                        <div className="grid grid-cols-2 gap-2 text-[11px] bg-black/35 p-2 rounded-xl border border-white/5">
-                                          <div>
-                                            <span className="text-[10px] text-slate-400 block font-sans">현재가</span>
-                                            <span className="font-bold text-white text-xs">{formatCurrency(currentPrice)}</span>
-                                          </div>
-                                          <div className="text-right">
-                                            <span className="text-[10px] text-slate-400 block font-sans">매수평단</span>
-                                            <span className="font-bold text-amber-300 text-xs">{formatCurrency(avgPrice)}</span>
-                                          </div>
-                                        </div>
-
-                                        {/* Bottom Row: Net Profit Amount and % */}
-                                        <div className="flex items-center justify-between gap-1 pt-1 border-t border-white/5">
-                                          <div className="flex items-center gap-1 min-w-0">
-                                            <span className="text-[9.5px] text-slate-400 shrink-0 font-sans">순손익</span>
-                                            <span className={cn(
-                                              "font-black text-xs font-mono truncate",
-                                              netProfit > 0 ? "text-rose-400" : netProfit < 0 ? "text-sky-400" : "text-slate-300"
-                                            )}>
-                                              {formattedNetProfit}
-                                            </span>
-                                          </div>
-
-                                          <div className="flex items-center gap-1 shrink-0">
-                                            <span className={cn(
-                                              "px-2 py-0.5 rounded-md font-black text-xs font-mono",
-                                              profitRatio > 0 
-                                                ? "bg-rose-500/15 text-rose-400 border border-rose-500/30" 
-                                                : profitRatio < 0 
-                                                  ? "bg-sky-500/15 text-sky-400 border border-sky-500/30" 
-                                                  : "bg-white/5 text-slate-400 border border-white/10"
-                                            )}>
-                                              {profitRatio >= 0 ? '+' : ''}{profitRatio.toFixed(2)}%
-                                            </span>
-                                          </div>
-                                        </div>
-                                      </div>
-                                    );
-                                  })}
-                                </div>
-                              )}
-                            </div>
-                          </>
-                        );
-                      })()}
-                    </div>
-                  </div>
-                );
-              })()
-            ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-8 bg-sleek-card/20 rounded-3xl border border-dashed border-sleek-border">
-                <div className="p-4 bg-sleek-blue/10 rounded-full mb-3">
-                  <Search className="w-8 h-8 text-sleek-blue animate-pulse" />
-                </div>
-                <h4 className="text-base font-black text-white italic mb-1 uppercase tracking-tighter">No Stock Selected</h4>
-                <p className="text-xs text-sleek-text-secondary max-w-xs">
-                  왼쪽 사이드바에서 트레이딩을 진행할 종목을 먼저 선택해 주세요.
-                </p>
-              </div>
-            )}
           </div>
 
           {/* 4. Real-time Account Status Card (Single Row Dark Theme Layout) */}
