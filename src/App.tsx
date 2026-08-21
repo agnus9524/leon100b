@@ -1147,45 +1147,37 @@ export default function App() {
   const getResolvedStockName = useCallback((symbol: string, stockObj?: { name?: string }) => {
     if (!symbol) return '';
 
-    // 1. Check customStockNames state
-    if (customStockNames[symbol] && customStockNames[symbol] !== symbol) {
-      return customStockNames[symbol];
+    let resolved = symbol;
+
+    if (customStockNames[symbol] && customStockNames[symbol] !== symbol) resolved = customStockNames[symbol];
+    else if (stockObj?.name && stockObj.name !== symbol) resolved = stockObj.name;
+    else {
+      const foundInStocks = stocks.find(s => s.symbol === symbol);
+      if (foundInStocks?.name && foundInStocks.name !== symbol) resolved = foundInStocks.name;
+      else {
+        const foundInCacheKR = stocksCache?.KR?.find(s => s.symbol === symbol);
+        if (foundInCacheKR?.name && foundInCacheKR.name !== symbol) resolved = foundInCacheKR.name;
+        else {
+          const foundInCacheUS = stocksCache?.US?.find(s => s.symbol === symbol);
+          if (foundInCacheUS?.name && foundInCacheUS.name !== symbol) resolved = foundInCacheUS.name;
+          else {
+            const foundInInitKR = INITIAL_STOCKS_KR.find(s => s.symbol === symbol);
+            if (foundInInitKR?.name && foundInInitKR.name !== symbol) resolved = foundInInitKR.name;
+            else {
+              const foundInInitUS = INITIAL_STOCKS.find(s => s.symbol === symbol);
+              if (foundInInitUS?.name && foundInInitUS.name !== symbol) resolved = foundInInitUS.name;
+            }
+          }
+        }
+      }
     }
 
-    // 2. Check passed stock object name
-    if (stockObj?.name && stockObj.name !== symbol) {
-      return stockObj.name;
+    if (/^\d+$/.test(symbol) && resolved !== symbol) {
+      resolved = resolved.replace(/\s*\([A-Za-z0-9\s,.-]+\)\s*$/, '').trim();
+      resolved = resolved.replace(/\s+[A-Za-z]+(\s+[A-Za-z]+)*\s*$/, '').trim();
     }
-
-    // 3. Check current active stocks state
-    const foundInStocks = stocks.find(s => s.symbol === symbol);
-    if (foundInStocks?.name && foundInStocks.name !== symbol) {
-      return foundInStocks.name;
-    }
-
-    // 4. Check stocksCache KR and US
-    const foundInCacheKR = stocksCache?.KR?.find(s => s.symbol === symbol);
-    if (foundInCacheKR?.name && foundInCacheKR.name !== symbol) {
-      return foundInCacheKR.name;
-    }
-    const foundInCacheUS = stocksCache?.US?.find(s => s.symbol === symbol);
-    if (foundInCacheUS?.name && foundInCacheUS.name !== symbol) {
-      return foundInCacheUS.name;
-    }
-
-    // 5. Check INITIAL_STOCKS_KR
-    const foundInInitKR = INITIAL_STOCKS_KR.find(s => s.symbol === symbol);
-    if (foundInInitKR?.name && foundInInitKR.name !== symbol) {
-      return foundInInitKR.name;
-    }
-
-    // 6. Check INITIAL_STOCKS (US)
-    const foundInInitUS = INITIAL_STOCKS.find(s => s.symbol === symbol);
-    if (foundInInitUS?.name && foundInInitUS.name !== symbol) {
-      return foundInInitUS.name;
-    }
-
-    return symbol;
+    
+    return resolved;
   }, [customStockNames, stocks, stocksCache]);
 
   // Use a ref to always have the latest stocks for intervals
@@ -8350,10 +8342,10 @@ export default function App() {
             else signalScore = 65;
 
             return (
-              <div className="relative z-[90] bg-gradient-to-br from-slate-900/95 via-slate-900/98 to-slate-950/95 border border-slate-700/60 p-3 sm:p-3.5 rounded-3xl shadow-2xl backdrop-blur-xl">
+              <div className="relative z-[110] bg-gradient-to-br from-slate-900/95 via-slate-900/98 to-slate-950/95 border border-slate-700/60 p-3 sm:p-3.5 rounded-3xl shadow-2xl backdrop-blur-xl">
                 <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3">
                   {/* 좌측: 종목 검색 & 추가 + 선택된 종목명, 코드, 현재 체결가, 전일 대비, 보유/주문가능수량 */}
-                  <div className="flex items-center gap-2.5 flex-nowrap overflow-x-auto custom-scrollbar grow py-0.5">
+                  <div className="flex items-center gap-2.5 flex-wrap grow py-0.5 overflow-visible">
                     {/* 종목 검색 & 추가 인풋 - 컴팩트 사이즈로 단일 라인 유지 */}
                     <div ref={searchRef} className="relative z-[100] w-36 sm:w-44 md:w-48 shrink-0">
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
@@ -9239,6 +9231,47 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+              {/* Current Holdings Summary */}
+              {(() => {
+                const heldSymbols = Object.keys(holdings).filter(sym => holdings[sym] > 0);
+                if (heldSymbols.length === 0) return null;
+                
+                return (
+                  <div className="bg-black/40 rounded-2xl p-3 border border-slate-700/50 mt-2 shrink-0 w-full">
+                    <div className="text-xs font-bold text-slate-400 mb-2 px-1">보유 종목 현황</div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-2 overflow-y-auto max-h-[180px] custom-scrollbar pr-1">
+                      {heldSymbols.map(sym => {
+                        const qty = holdings[sym];
+                        const avgP = avgPrices[sym] || 0;
+                        const st = stocks.find(s => s.symbol === sym) || INITIAL_STOCKS_KR.find(s => s.symbol === sym) || INITIAL_STOCKS.find(s => s.symbol === sym);
+                        const currentP = st?.price || avgP;
+                        const pnlPct = avgP > 0 ? ((currentP - avgP) / avgP) * 100 : 0;
+                        const pnlAmt = (currentP - avgP) * qty;
+                        
+                        return (
+                          <div key={sym} className="flex items-center justify-between bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
+                            <div className="truncate pr-2">
+                              <div className="font-bold text-[13px] text-white truncate">{st?.name || sym}</div>
+                              <div className="text-[10px] text-slate-400 font-mono mt-0.5">{qty.toLocaleString()}주 · 평단 {formatCurrency(avgP)}</div>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <div className={cn("text-[11px] font-bold font-mono", pnlPct > 0 ? "text-rose-400" : pnlPct < 0 ? "text-sky-400" : "text-slate-300")}>
+                                {pnlPct > 0 ? "+" : ""}{formatCurrency(pnlAmt)}
+                              </div>
+                              <div className={cn("text-[10px] font-mono mt-0.5", pnlPct > 0 ? "text-rose-400/80" : pnlPct < 0 ? "text-sky-400/80" : "text-slate-400")}>
+                                {pnlPct > 0 ? "+" : ""}{pnlPct.toFixed(2)}%
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })()}
+
+
           </div>
 
           {/* 4. Real-time Account Status Card (Single Row Dark Theme Layout) */}
@@ -10219,44 +10252,6 @@ export default function App() {
               </div>
 
               
-              {/* Current Holdings Summary */}
-              {(() => {
-                const heldSymbols = Object.keys(holdings).filter(sym => holdings[sym] > 0);
-                if (heldSymbols.length === 0) return null;
-                
-                return (
-                  <div className="bg-slate-800/40 rounded-2xl p-3 border border-slate-700/50 mb-2 shrink-0">
-                    <div className="text-xs font-bold text-slate-400 mb-2 px-1">보유 종목 현황</div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2 overflow-y-auto max-h-[120px] custom-scrollbar pr-1">
-                      {heldSymbols.map(sym => {
-                        const qty = holdings[sym];
-                        const avgP = avgPrices[sym] || 0;
-                        const st = stocks.find(s => s.symbol === sym) || INITIAL_STOCKS_KR.find(s => s.symbol === sym) || INITIAL_STOCKS.find(s => s.symbol === sym);
-                        const currentP = st?.price || avgP;
-                        const pnlPct = avgP > 0 ? ((currentP - avgP) / avgP) * 100 : 0;
-                        const pnlAmt = (currentP - avgP) * qty;
-                        
-                        return (
-                          <div key={sym} className="flex items-center justify-between bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
-                            <div className="truncate pr-2">
-                              <div className="font-bold text-[13px] text-white truncate">{st?.name || sym}</div>
-                              <div className="text-[10px] text-slate-400 font-mono mt-0.5">{qty.toLocaleString()}주 · 평단 {formatCurrency(avgP)}</div>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <div className={cn("text-[11px] font-bold font-mono", pnlPct > 0 ? "text-rose-400" : pnlPct < 0 ? "text-sky-400" : "text-slate-300")}>
-                                {pnlPct > 0 ? "+" : ""}{formatCurrency(pnlAmt)}
-                              </div>
-                              <div className={cn("text-[10px] font-mono mt-0.5", pnlPct > 0 ? "text-rose-400/80" : pnlPct < 0 ? "text-sky-400/80" : "text-slate-400")}>
-                                {pnlPct > 0 ? "+" : ""}{pnlPct.toFixed(2)}%
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                );
-              })()}
 
               {/* Country Tabs (한국 | 미국 | 기타) */}
               <div className="flex items-center justify-between border-b border-slate-800/60 pb-2 shrink-0">

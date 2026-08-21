@@ -77,7 +77,9 @@ async function fetchKrxStocks() {
       timeout: 4000,
       responseType: 'arraybuffer',
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Referer': 'https://kind.krx.co.kr/corpgeneral/corpList.do?method=loadInitPage'
       }
     });
 
@@ -90,7 +92,9 @@ async function fetchKrxStocks() {
       const tr = trs[i];
       const tds = tr.match(/<td[\s\S]*?>([\s\S]*?)<\/td>/gi) || [];
       if (tds.length >= 2) {
-        const name = tds[0].replace(/<[^>]*>/g, '').trim();
+        let name = tds[0].replace(/<[^>]*>/g, '').trim();
+        name = name.replace(/\s*\([A-Za-z0-9\s,.-]+\)\s*$/, '').trim();
+        name = name.replace(/\s+[A-Za-z]+(\s+[A-Za-z]+)*\s*$/, '').trim();
         // Check both tds[1] and tds[2] as columns can vary by KIND export version
         let code1 = tds[1] ? tds[1].replace(/<[^>]*>/g, '').trim().replace(/[^0-9]/g, '') : '';
         let code2 = (tds.length >= 3) ? tds[2].replace(/<[^>]*>/g, '').trim().replace(/[^0-9]/g, '') : '';
