@@ -2039,18 +2039,16 @@ export default function App() {
     showNotification("모든 미체결 주문 및 스캘핑 엔진이 취소되었습니다.", "info");
   }, [showNotification]);
 
-  const handleRefreshScalperTop3 = useCallback(() => {
+  const handleRefreshScalperTop3 = useCallback(async () => {
     setIsRefreshingTop3(true);
     setTop3RefreshNonce(prev => prev + 1);
     
     // Trigger AI analysis on refresh
-    handleGetRecommendations();
+    await handleGetRecommendations();
 
-    setTimeout(() => {
-      setIsRefreshingTop3(false);
-      showNotification("[스캘퍼 최적 종목 분석] 현재 시장 데이터 기반 스캘핑 최적 종목 분석이 완료되었습니다.", "success");
-    }, 1500);
-  }, [showNotification, marketType]); // dependencies updated implicitly by handleGetRecommendations needing marketType
+    setIsRefreshingTop3(false);
+    showNotification("[스캘퍼 최적 종목 분석] 실시간 거래량 및 추세 분석 기반 딥 리서치가 완료되었습니다.", "success");
+  }, [showNotification, handleGetRecommendations]);
 
   // Confirmation Modal State
   const [confirmState, setConfirmState] = useState<{
@@ -3749,12 +3747,8 @@ export default function App() {
     setIsGettingRecommendations(true);
     setAiRecommendations([]);
     try {
-      const prompt = `현재 ${marketType === 'KR' ? '한국 KOSPI/KOSDAQ' : '미국 NYSE/NASDAQ'} 시장에서 주가 금액 제한 없이(가격 상관없이), 실시간 상승기류 및 1년 우상향 추세를 나타내며 스캘핑(초단타) 매매에 가장 적합한 AI 최적 종목 25개를 추천해주세요.
-      각 종목에 대해 심볼, 기업명(토스증권 기준 한글 이름), 현재 대략적인 가격 정보를 포함해야 합니다.
-      주의사항: "KODEX 200선물" 및 관련 레버리지/인버스 ETF 종목은 반드시 제외하세요.
-      반드시 다음 JSON 배열 형식으로만 응답하세요: [{"symbol": "심볼", "name": "기업명", "price": 숫자}]`;
-
-      const response = await axios.post('/api/ai/bot-decision', { prompt });
+      // Use the new deep recommendation endpoint that leverages Gemini 1.5 Pro and Google Search
+      const response = await axios.post('/api/ai/deep-recommend', { marketType });
       const data = JSON.parse(response.data.text);
       if (Array.isArray(data)) {
         setAiRecommendations(data.map(item => ({
@@ -8987,6 +8981,17 @@ export default function App() {
               <div className="lg:col-span-3 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0 shadow-inner">
                 <div className="flex items-center justify-between border-b border-white/10 pb-1.5 gap-1.5 flex-wrap">
                   <div className="flex items-center gap-1.5 min-w-0">
+                    {/* AI 추천종목 찾기 딥리서치 버튼 */}
+                    <button
+                      type="button"
+                      onClick={handleRefreshScalperTop3}
+                      disabled={isRefreshingTop3}
+                      className="px-2 py-0.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 hover:text-emerald-300 border border-emerald-500/40 text-[10.5px] font-black font-mono flex items-center gap-1 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 disabled:opacity-50"
+                      title="실시간 거래량 및 추세를 딥리서치 분석하여 AI 추천종목을 갱신합니다."
+                    >
+                      {isRefreshingTop3 ? <Loader2 className="w-3 h-3 animate-spin" /> : <BrainCircuit className="w-3 h-3" />}
+                      <span>{isRefreshingTop3 ? "딥리서치 분석중..." : "추천종목 찾기"}</span>
+                    </button>
                     {/* 종목추가 버튼 & 카운트 */}
                     <button
                       type="button"
@@ -9240,7 +9245,7 @@ export default function App() {
                 return (
                   <div className="bg-black/40 rounded-2xl p-3 border border-slate-700/50 mt-2 shrink-0 w-full">
                     <div className="text-xs font-bold text-slate-400 mb-2 px-1">보유 종목 현황</div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-2 overflow-y-auto max-h-[180px] custom-scrollbar pr-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 overflow-y-auto max-h-[180px] custom-scrollbar pr-1">
                       {heldSymbols.map(sym => {
                         const qty = holdings[sym];
                         const avgP = avgPrices[sym] || 0;
@@ -9252,7 +9257,7 @@ export default function App() {
                         return (
                           <div key={sym} className="flex items-center justify-between bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
                             <div className="truncate pr-2">
-                              <div className="font-bold text-[13px] text-white truncate">{st?.name || sym}</div>
+                              <div className="font-bold text-[13px] text-white truncate">{st?.name || sym}({sym})</div>
                               <div className="text-[10px] text-slate-400 font-mono mt-0.5">{qty.toLocaleString()}주 · 평단 {formatCurrency(avgP)}</div>
                             </div>
                             <div className="text-right shrink-0">
@@ -9386,7 +9391,7 @@ export default function App() {
         </section>
 
         {/* Right Aside: Real-time Status Window & Trade Logs */}
-        <aside className="w-[340px] border-l border-white/5 bg-black/30 flex flex-col p-6 gap-6 overflow-hidden hidden xl:flex">
+        <aside className="border-t lg:border-t-0 lg:border-l border-white/5 bg-black/30 flex flex-col p-4 sm:p-5 lg:p-6 gap-4 sm:gap-6 overflow-hidden">
             
             {/* 1. Trade Logs / Active Slot Monitor (Top Right) */}
             {(() => {
