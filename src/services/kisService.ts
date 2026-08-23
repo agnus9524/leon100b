@@ -404,7 +404,27 @@ class KISService {
     return this.getDomesticBalance();
   }
 
+  private static priceQueue: Promise<void> = Promise.resolve();
+
   public async getPrice(symbol: string): Promise<NormalizedPrice | null> {
+    // Serialize and throttle requests to prevent 429
+    const delay = () => new Promise(r => setTimeout(r, 200));
+    const release = await new Promise<() => void>(resolve => {
+      const next = () => resolve(() => {});
+      KISService.priceQueue = KISService.priceQueue.then(async () => {
+        next();
+        await delay();
+      });
+    });
+
+    try {
+      return await this._getPriceInternal(symbol);
+    } finally {
+      release();
+    }
+  }
+
+  private async _getPriceInternal(symbol: string): Promise<NormalizedPrice | null> {
     // Determine if KR or US (approximate)
     const isKR = /^\d{6}$/.test(symbol);
     try {
@@ -1431,8 +1451,13 @@ class KISService {
             return [{ fx_rt: rate.toString() }];
           }
         }
-      } catch (e) {
-        console.warn(`[KIS Service] Exchange rate trial failed for ${trial.endpoint} (${trial.trId})`, e);
+      } catch (e: any) {
+        if (e?.response?.status === 429) {
+          console.warn(`[KIS Service] 429 Rate Limit for ${trial.trId}. Waiting before next trial...`);
+          await new Promise(r => setTimeout(r, 2000));
+        } else {
+          console.warn(`[KIS Service] Exchange rate trial failed for ${trial.endpoint} (${trial.trId})`, e);
+        }
       }
     }
     

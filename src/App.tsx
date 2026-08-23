@@ -2975,6 +2975,7 @@ export default function App() {
         } catch (err) {
           console.warn(`[Holdings Price Fetch] Error for ${sym}:`, err);
         }
+        await new Promise(r => setTimeout(r, 200));
       }
     };
 

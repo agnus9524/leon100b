@@ -284,7 +284,7 @@ async function startServer() {
       }
 
       const model = genAI.getGenerativeModel({
-        model: "gemini-1.5-flash",
+        model: "gemini-2.5-flash",
         systemInstruction: "You are the XTX-PRO Predictive Engine. You output precise, cold-logical HFT analysis in JSON format."
       });
 
@@ -344,7 +344,7 @@ async function startServer() {
         throw new Error("GEMINI_API_KEY environment variable is not configured.");
       }
 
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
       const result = await generateContentWithRetry(model, `${systemPrompt}\n\nUser Request: ${prompt}`);
       const text = result.response.text();
       
@@ -381,7 +381,7 @@ async function startServer() {
         throw new Error("GEMINI_API_KEY environment variable is not configured.");
       }
 
-      const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
       const result = await generateContentWithRetry(model, prompt);
       return res.json(result.response.text());
     } catch (error: any) {
@@ -445,7 +445,7 @@ async function startServer() {
       }
 
       const model = genAI.getGenerativeModel({
-        model: "gemini-1.5-flash",
+        model: "gemini-2.5-flash",
         generationConfig: { responseMimeType: "application/json" }
       });
       const result = await generateContentWithRetry(model, prompt);
@@ -501,7 +501,7 @@ async function startServer() {
 
       // Use gemini-1.5-pro for deep reasoning and googleSearch for live data
       const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-pro",
+        model: "gemini-2.5-pro",
         tools: [{ googleSearchRetrieval: { dynamicRetrievalConfig: { mode: "MODE_DYNAMIC" as any, dynamicThreshold: 0.3 } } }]
       });
 
@@ -536,7 +536,7 @@ async function startServer() {
       }
 
       const model = genAI.getGenerativeModel({ 
-        model: "gemini-1.5-flash",
+        model: "gemini-2.5-flash",
         generationConfig: { responseMimeType: "application/json" }
       });
       const result = await generateContentWithRetry(model, prompt);
@@ -659,41 +659,52 @@ async function startServer() {
       headers['tr-id'] = finalTrId;
     }
 
-    try {
-      const axiosConfig: any = {
-        method: req.method,
-        url: fullUrl,
-        headers,
-        params: req.query,
-        httpsAgent: agent,
-        timeout: 8000
-      };
-
-      if (req.method !== 'GET' && req.method !== 'HEAD') {
-        axiosConfig.data = req.body;
+    let retries = 3;
+    let response: any;
+    for (let i = 0; i < retries; i++) {
+      try {
+        const axiosConfig: any = {
+          method: req.method,
+          url: fullUrl,
+          headers,
+          params: req.query,
+          httpsAgent: agent,
+          timeout: 8000
+        };
+        if (req.method !== 'GET' && req.method !== 'HEAD') {
+          axiosConfig.data = req.body;
+        }
+        response = await axios(axiosConfig);
+        break;
+      } catch (error: any) {
+        if (i < retries - 1 && (error.response?.status === 429 || error.response?.status >= 500 || error.code === 'ECONNRESET' || error.code === 'ETIMEDOUT')) {
+          console.warn(`[KIS Proxy Notice] ${error.response?.status || error.code} on ${fullUrl}. Retrying in ${Math.pow(2, i) * 1000}ms...`);
+          await new Promise(r => setTimeout(r, Math.pow(2, i) * 1000));
+        } else {
+          const errorData = error.response?.data;
+          const status = error.response?.status || 500;
+          
+          console.warn(`[KIS Proxy Notice] ${status} [${req.method}] ${fullUrl}: ${error.message}`);
+          
+          if (errorData) {
+            return res.status(200).json(errorData);
+          } else {
+            return res.status(200).json({ 
+               rt_cd: '-1', 
+               msg_cd: 'KIS_PROXY_NOTICE',
+              msg1: `KIS API 서버 응답 대기/오류 (${error.message})` 
+             });
+          }
+        }
       }
-
-      const response = await axios(axiosConfig);
+    }
+    
+    if (response) {
       if (isGetQuote && response.status === 200) {
         setCachedData(cacheKey, response.data, 2000); // 2 seconds cache
         res.setHeader('Cache-Control', 'public, max-age=2, s-maxage=2');
       }
       return res.status(response.status).json(response.data);
-    } catch (error: any) {
-      const errorData = error.response?.data;
-      const status = error.response?.status || 500;
-      
-      console.warn(`[KIS Proxy Notice] ${status} [${req.method}] ${fullUrl}: ${error.message}`);
-      
-      if (errorData) {
-        return res.status(200).json(errorData);
-      } else {
-        return res.status(200).json({ 
-          rt_cd: '-1', 
-          msg_cd: 'KIS_PROXY_NOTICE',
-          msg1: `KIS API 서버 응답 대기/오류 (${error.message})` 
-        });
-      }
     }
   });
 
