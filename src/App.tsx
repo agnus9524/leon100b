@@ -8582,16 +8582,16 @@ export default function App() {
                   <Sparkles className="w-4 h-4 text-amber-400 animate-spin" /> 스캘퍼 AI 실시간 전략 감지 센서:
                 </span>
               </div>
-              <div className="flex flex-wrap items-center gap-1.5 w-full lg:w-auto">
+              <div className="grid grid-cols-2 lg:flex lg:flex-row lg:items-center gap-1.5 lg:gap-1.5 w-full lg:w-auto">
                 {/* ⚡ 최고수익 AI★ 버튼 (독립적 간격 분리 배치) */}
-                <div className="pr-2 sm:pr-3 mr-1 sm:mr-2 border-r border-white/15">
+                <div className="col-span-1 lg:pr-2 lg:sm:pr-3 lg:mr-1 lg:sm:mr-2 lg:border-r lg:border-white/15 w-full flex">
                   <button
                     type="button"
                     onClick={() => {
                       setIsMaxYieldModalOpen(true);
                     }}
                     className={cn(
-                      "px-3 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shadow-md",
+                      "w-full px-3 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shadow-md",
                       scalperStrategyMode === 'AI_MAX_YIELD'
                         ? "bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white border-amber-300 shadow-[0_0_16px_rgba(245,158,11,0.6)] animate-pulse"
                         : "bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 border-amber-500/40"
@@ -8608,7 +8608,7 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('ALL_SENSORS_4')}
                   className={cn(
-                    "relative px-2.5 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    "col-span-1 w-full relative px-2.5 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
                     activeStrategyDetection.activeCount === 4
                       ? "bg-gradient-to-r from-emerald-500/40 via-cyan-500/40 to-blue-500/40 text-emerald-200 border-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.5)] animate-pulse"
                       : scalperStrategyMode === 'ALL_SENSORS_4'
@@ -8629,7 +8629,7 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('PULLBACK')}
                   className={cn(
-                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    "col-span-1 w-full relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
                     activeStrategyDetection.isPullback
                       ? "bg-cyan-500/30 text-cyan-200 border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]"
                       : scalperStrategyMode === 'PULLBACK'
@@ -8650,7 +8650,7 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('BREAKOUT')}
                   className={cn(
-                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    "col-span-1 w-full relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
                     activeStrategyDetection.isBreakout
                       ? "bg-amber-500/30 text-amber-200 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
                       : scalperStrategyMode === 'BREAKOUT'
@@ -8671,7 +8671,7 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('VWAP_SUPPORT')}
                   className={cn(
-                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    "col-span-1 w-full relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
                     activeStrategyDetection.isVwapSupport
                       ? "bg-indigo-500/30 text-indigo-200 border-indigo-400 shadow-[0_0_12px_rgba(99,102,241,0.4)]"
                       : scalperStrategyMode === 'VWAP_SUPPORT'
@@ -8692,7 +8692,7 @@ export default function App() {
                   type="button"
                   onClick={() => setScalperStrategyMode('VOLUME_PROFILE_CVD')}
                   className={cn(
-                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    "col-span-1 w-full relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
                     activeStrategyDetection.isVolumeProfile
                       ? "bg-purple-500/30 text-purple-200 border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.4)]"
                       : scalperStrategyMode === 'VOLUME_PROFILE_CVD'

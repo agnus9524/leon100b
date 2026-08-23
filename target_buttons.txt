@@ -1,0 +1,136 @@
+              <div className="flex items-center gap-2 shrink-0">
+                <span className="text-xs sm:text-sm font-black text-slate-200 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-400 animate-spin" /> 스캘퍼 AI 실시간 전략 감지 센서:
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5 w-full lg:w-auto">
+                {/* ⚡ 최고수익 AI★ 버튼 (독립적 간격 분리 배치) */}
+                <div className="pr-2 sm:pr-3 mr-1 sm:mr-2 border-r border-white/15">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setIsMaxYieldModalOpen(true);
+                    }}
+                    className={cn(
+                      "px-3 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shadow-md",
+                      scalperStrategyMode === 'AI_MAX_YIELD'
+                        ? "bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white border-amber-300 shadow-[0_0_16px_rgba(245,158,11,0.6)] animate-pulse"
+                        : "bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 border-amber-500/40"
+                    )}
+                    title="⚡ 최고수익 AI 전자동 모드: 금액 한도 설정 후 모든 옵션 구속 없이 최적 종목 자동 선정 & 최고수익 자동매매 가동"
+                  >
+                    <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-bounce" />
+                    <span>⚡ 최고수익 AI★</span>
+                  </button>
+                </div>
+
+                {/* 🎯 4/4 올-그린 및 전략 모드 버튼 그룹 */}
+                <button
+                  type="button"
+                  onClick={() => setScalperStrategyMode('ALL_SENSORS_4')}
+                  className={cn(
+                    "relative px-2.5 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    activeStrategyDetection.activeCount === 4
+                      ? "bg-gradient-to-r from-emerald-500/40 via-cyan-500/40 to-blue-500/40 text-emerald-200 border-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.5)] animate-pulse"
+                      : scalperStrategyMode === 'ALL_SENSORS_4'
+                      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-md"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-80"
+                  )}
+                  title="4개 실시간 전략 감지 센서가 모두 켜질 때만(4/4) 슬롯 전체를 가득 매수 진입하는 최고 신뢰도 전용 모드"
+                >
+                  <span className={cn(
+                    "w-2 h-2 rounded-full transition-all shrink-0",
+                    activeStrategyDetection.activeCount === 4
+                      ? "bg-emerald-400 shadow-[0_0_8px_#10b981] animate-ping"
+                      : "bg-slate-600/60 border border-slate-700"
+                  )} />
+                  <span>🎯 4/4 올-그린</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScalperStrategyMode('PULLBACK')}
+                  className={cn(
+                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    activeStrategyDetection.isPullback
+                      ? "bg-cyan-500/30 text-cyan-200 border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]"
+                      : scalperStrategyMode === 'PULLBACK'
+                      ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-md"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
+                  )}
+                  title="상승 추세(SMA5>=SMA20) 눌림목 후 반등 진입 (원칙 1,3)"
+                >
+                  <span className={cn(
+                    "w-2 h-2 rounded-full transition-all shrink-0",
+                    activeStrategyDetection.isPullback
+                      ? "bg-cyan-400 shadow-[0_0_8px_#06b6d4] animate-pulse"
+                      : "bg-slate-600/60 border border-slate-700"
+                  )} />
+                  <span>① 눌림목</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScalperStrategyMode('BREAKOUT')}
+                  className={cn(
+                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    activeStrategyDetection.isBreakout
+                      ? "bg-amber-500/30 text-amber-200 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
+                      : scalperStrategyMode === 'BREAKOUT'
+                      ? "bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-md"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
+                  )}
+                  title="거래량 급증 및 전고점 돌파 진입 (원칙 2)"
+                >
+                  <span className={cn(
+                    "w-2 h-2 rounded-full transition-all shrink-0",
+                    activeStrategyDetection.isBreakout
+                      ? "bg-amber-400 shadow-[0_0_8px_#f59e0b] animate-pulse"
+                      : "bg-slate-600/60 border border-slate-700"
+                  )} />
+                  <span>② 돌파</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScalperStrategyMode('VWAP_SUPPORT')}
+                  className={cn(
+                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    activeStrategyDetection.isVwapSupport
+                      ? "bg-indigo-500/30 text-indigo-200 border-indigo-400 shadow-[0_0_12px_rgba(99,102,241,0.4)]"
+                      : scalperStrategyMode === 'VWAP_SUPPORT'
+                      ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/50 shadow-md"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
+                  )}
+                  title="VWAP 평균가격 지지 및 지지선 반등 진입"
+                >
+                  <span className={cn(
+                    "w-2 h-2 rounded-full transition-all shrink-0",
+                    activeStrategyDetection.isVwapSupport
+                      ? "bg-indigo-400 shadow-[0_0_8px_#6366f1] animate-pulse"
+                      : "bg-slate-600/60 border border-slate-700"
+                  )} />
+                  <span>③ VWAP</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setScalperStrategyMode('VOLUME_PROFILE_CVD')}
+                  className={cn(
+                    "relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
+                    activeStrategyDetection.isVolumeProfile
+                      ? "bg-purple-500/30 text-purple-200 border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.4)]"
+                      : scalperStrategyMode === 'VOLUME_PROFILE_CVD'
+                      ? "bg-purple-500/20 text-purple-300 border-purple-500/50 shadow-md"
+                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
+                  )}
+                  title="볼륨 프로파일(POC) 최대 수평거래선 지지 & CVD 누적 거래량 다이버전스/유동성 흡수 진입 (하비어 발렌틴 전략)"
+                >
+                  <span className={cn(
+                    "w-2 h-2 rounded-full transition-all shrink-0",
+                    activeStrategyDetection.isVolumeProfile
+                      ? "bg-purple-400 shadow-[0_0_8px_#a855f7] animate-pulse"
+                      : "bg-slate-600/60 border border-slate-700"
+                  )} />
+                  <span>④ VP/CVD</span>
+                </button>
+              </div>
+            </div>
+
+            {/* 🔴 스캘퍼 AI 실시간 전략 감지 센서 바로 아래로 이동 배치된 실시간 상태 메시지 */}
