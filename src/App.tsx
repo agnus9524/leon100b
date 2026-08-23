@@ -3737,6 +3737,7 @@ export default function App() {
   const handleGetRecommendations = useCallback(async () => {
     setIsGettingRecommendations(true);
     setAiRecommendations([]);
+    let success = false;
     try {
       // Use the new deep recommendation endpoint that leverages Gemini 1.5 Pro and Google Search
       const response = await axios.post('/api/ai/deep-recommend', { marketType });
@@ -3751,6 +3752,7 @@ export default function App() {
           isAI: true,
           market: marketType
         })));
+        success = true;
       }
     } catch (error: any) {
       console.error("Failed to get recommendations:", error);
@@ -3762,17 +3764,20 @@ export default function App() {
     } finally {
       setIsGettingRecommendations(false);
     }
-  }, [marketType]);
+    return success;
+  }, [marketType, showNotification]);
 
   const handleRefreshScalperTop3 = useCallback(async () => {
     setIsRefreshingTop3(true);
     setTop3RefreshNonce(prev => prev + 1);
     
     // Trigger AI analysis on refresh
-    await handleGetRecommendations();
+    const success = await handleGetRecommendations();
 
     setIsRefreshingTop3(false);
-    showNotification("[스캘퍼 최적 종목 분석] 실시간 거래량 및 추세 분석 기반 딥 리서치가 완료되었습니다.", "success");
+    if (success) {
+      showNotification("[스캘퍼 최적 종목 분석] 실시간 거래량 및 추세 분석 기반 딥 리서치가 완료되었습니다.", "success");
+    }
   }, [showNotification, handleGetRecommendations]);
 
   // Trigger AI market analysis on mount and when market switch
