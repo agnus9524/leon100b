@@ -2960,14 +2960,14 @@ export default function App() {
             };
             setStocks(prev => {
               if (prev.some(s => s.symbol === sym)) {
-                return prev.map(s => s.symbol === sym ? { ...s, price: pData.current, change: pData.change || s.change, changePercent: pData.changePercent || s.changePercent, volume: String(pData.volume || s.volume), name: liveName } : s);
+                return prev.map(s => s.symbol === sym ? { ...s, price: pData.current, change: pData.change || s.change, changePercent: pData.changePercent || s.changePercent, volume: String(pData.volume || s.volume), name: pData.name || s.name || sym } : s);
               }
               return [newStock, ...prev];
             });
             setStocksCache(prev => {
               const list = prev[market] || [];
               if (list.some(s => s.symbol === sym)) {
-                return { ...prev, [market]: list.map(s => s.symbol === sym ? { ...s, price: pData.current, change: pData.change || s.change, changePercent: pData.changePercent || s.changePercent, volume: String(pData.volume || s.volume), name: liveName } : s) };
+                return { ...prev, [market]: list.map(s => s.symbol === sym ? { ...s, price: pData.current, change: pData.change || s.change, changePercent: pData.changePercent || s.changePercent, volume: String(pData.volume || s.volume), name: pData.name || s.name || sym } : s) };
               }
               return { ...prev, [market]: [newStock, ...list] };
             });
@@ -8348,7 +8348,7 @@ export default function App() {
                   {/* 좌측: 종목 검색 & 추가 + 선택된 종목명, 코드, 현재 체결가, 전일 대비, 보유/주문가능수량 */}
                   <div className="flex items-center gap-2.5 flex-wrap grow py-0.5 overflow-visible">
                     {/* 종목 검색 & 추가 인풋 - 컴팩트 사이즈로 단일 라인 유지 */}
-                    <div ref={searchRef} className="relative z-[100] w-36 sm:w-44 md:w-48 shrink-0">
+                    <div ref={searchRef} className="relative z-[100] w-full sm:w-44 md:w-48 shrink-0">
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
                       <input 
                         ref={searchInputRef}
@@ -8448,7 +8448,7 @@ export default function App() {
                         </div>
                         
                         {/* 종목명 & 종목코드 & (보유/주문가능수량) - 고정 폭 적용으로 종목명 길이에 따른 흔들림 완벽 방지 */}
-                        <div className="w-[180px] sm:w-[220px] md:w-[240px] shrink-0 flex flex-col justify-center overflow-hidden">
+                        <div className="w-full sm:w-[220px] md:w-[240px] shrink-0 flex flex-col justify-center overflow-hidden">
                           <div className="flex items-center gap-1.5 min-w-0">
                             <h2 className="text-base sm:text-lg font-black text-white tracking-tight leading-none truncate" title={selectedStock.name}>
                               {selectedStock.name}
@@ -8464,7 +8464,7 @@ export default function App() {
                         </div>
 
                         {/* 현재 체결가 및 그 바로 밑 전일 대비 (눈에 띄는 색상 & 확장된 박스) */}
-                        <div className="min-w-[195px] sm:min-w-[225px] shrink-0 bg-black/70 px-3 py-2 rounded-2xl border border-white/20 shadow-xl flex flex-col justify-center gap-1.5 backdrop-blur-md">
+                        <div className="w-full sm:w-auto sm:min-w-[225px] shrink-0 bg-black/70 px-3 py-2 rounded-2xl border border-white/20 shadow-xl flex flex-col justify-center gap-1.5 backdrop-blur-md">
                           <div className="flex items-center justify-between gap-2">
                             <span className="text-xs sm:text-[13px] font-black text-amber-300 flex items-center gap-1 shrink-0">
                               <Activity className="w-3.5 h-3.5 text-amber-400" />
@@ -8493,7 +8493,7 @@ export default function App() {
 
                         {/* 4대 핵심 지표 카드 (현재 체결가 바로 옆에 배치, shrink-0으로 고정) */}
                         {/* 1. 당일 가격 제한폭 카드 */}
-                        <div className="shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[140px] text-xs">
+                        <div className="w-full sm:w-auto shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[140px] text-xs">
                           <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
                             <Layers className="w-3 h-3 text-slate-400" /> 당일 가격 제한폭
                           </span>
@@ -8512,7 +8512,7 @@ export default function App() {
                         </div>
 
                         {/* 2. 호가창 총 잔량 비율 */}
-                        <div className="shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[160px] text-xs">
+                        <div className="w-full sm:w-auto shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[160px] text-xs">
                           <div className="flex items-center justify-between text-[11px]">
                             <span className="font-bold text-slate-400 flex items-center gap-1">
                               <Activity className="w-3 h-3 text-sleek-blue" /> 호가 총 잔량 비율
@@ -8532,7 +8532,7 @@ export default function App() {
                         </div>
 
                         {/* 3. 실시간 누적 거래량 */}
-                        <div className="shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[135px] text-xs">
+                        <div className="w-full sm:w-auto shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[135px] text-xs">
                           <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
                             <Zap className="w-3 h-3 text-amber-400" /> 실시간 누적 거래량
                           </span>
@@ -8548,7 +8548,7 @@ export default function App() {
                         </div>
 
                         {/* 4. AI 스캘핑 종합 점수 */}
-                        <div className="shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[130px] text-xs">
+                        <div className="w-full sm:w-auto shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[130px] text-xs">
                           <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
                             <Sparkles className="w-3 h-3 text-purple-400" /> AI 스캘핑 점수
                           </span>
