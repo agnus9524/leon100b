@@ -129,6 +129,27 @@ async function fetchKrxStocks() {
 const GEMINI_KEY = process.env.GEMINI_API_KEY || "";
 const genAI = GEMINI_KEY ? new GoogleGenerativeAI(GEMINI_KEY) : null;
 
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+async function generateContentWithRetry(model: any, prompt: any, retries = 4) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await model.generateContent(prompt);
+    } catch (error: any) {
+      const errMsg = error.message || '';
+      const isRateLimit = error.status === 429 || errMsg.includes('429') || errMsg.includes('Quota') || errMsg.includes('quota') || errMsg.includes('resource_exhausted') || errMsg.includes('Too Many Requests');
+      
+      if (isRateLimit && i < retries - 1) {
+        const waitTime = Math.pow(2, i) * 1500 + Math.random() * 1000;
+        console.warn(`[Gemini API] 429 Rate Limit/Quota Hit. Retrying in ${Math.round(waitTime)}ms... (Attempt ${i + 1}/${retries})`);
+        await delay(waitTime);
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+
+
 // In-Memory Revalidation & Edge Cache Store to minimize redundant requests
 const apiCache = new Map<string, { data: any; expiresAt: number }>();
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
@@ -267,7 +288,7 @@ async function startServer() {
         systemInstruction: "You are the XTX-PRO Predictive Engine. You output precise, cold-logical HFT analysis in JSON format."
       });
 
-      const result = await model.generateContent({
+      const result = await generateContentWithRetry(model, {
         contents: [{ role: 'user', parts: [{ text: prompt }] }],
         generationConfig: {
           responseMimeType: "application/json",
@@ -324,7 +345,7 @@ async function startServer() {
       }
 
       const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const result = await model.generateContent(`${systemPrompt}\n\nUser Request: ${prompt}`);
+      const result = await generateContentWithRetry(model, `${systemPrompt}\n\nUser Request: ${prompt}`);
       const text = result.response.text();
       
       const jsonMatch = text.match(/\{[\s\S]*\}/);
@@ -361,7 +382,7 @@ async function startServer() {
       }
 
       const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
-      const result = await model.generateContent(prompt);
+      const result = await generateContentWithRetry(model, prompt);
       return res.json(result.response.text());
     } catch (error: any) {
       console.warn("[Gemini Analysis Info] Falling back to standard market analysis:", error.message);
@@ -427,7 +448,7 @@ async function startServer() {
         model: "gemini-1.5-flash",
         generationConfig: { responseMimeType: "application/json" }
       });
-      const result = await model.generateContent(prompt);
+      const result = await generateContentWithRetry(model, prompt);
       const text = result.response.text();
       return res.json(JSON.parse(text));
     } catch (error: any) {
@@ -495,7 +516,7 @@ async function startServer() {
 [{"symbol": "심볼또는코드", "name": "기업명", "price": 현재대략적인가격(숫자)}]
       `;
 
-      const result = await model.generateContent(prompt);
+      const result = await generateContentWithRetry(model, prompt);
       let text = result.response.text();
       // clean markdown if any
       text = text.replace(/```json/g, '').replace(/```/g, '').trim();
@@ -518,7 +539,7 @@ async function startServer() {
         model: "gemini-1.5-flash",
         generationConfig: { responseMimeType: "application/json" }
       });
-      const result = await model.generateContent(prompt);
+      const result = await generateContentWithRetry(model, prompt);
       return res.json({ text: result.response.text() });
     } catch (error: any) {
       console.warn("[Gemini Bot Decision Info] Falling back to quant algorithm decision:", error.message);

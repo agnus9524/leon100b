@@ -2023,13 +2023,13 @@ export default function App() {
     }
   };
 
-  const showNotification = (message: string, type: 'success' | 'error' | 'info' = 'info') => {
+  const showNotification = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
     const id = Math.random().toString(36).substring(2, 9);
     setNotifications(prev => [...prev, { id, type, message }]);
     setTimeout(() => {
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 5000);
-  };
+  }, []);
 
   const cancelAllOrders = useCallback(() => {
     setIsGapBotActive(false);
@@ -3507,7 +3507,10 @@ export default function App() {
     }
   }, [kisConfig.isConnected, stocks.length, isAppInitialized]);
 
+  const isLoggingInRef = React.useRef(false);
   const handleLogin = async () => {
+    if (isLoggingInRef.current) return;
+    isLoggingInRef.current = true;
     try {
       await signInWithPopup(auth, googleProvider);
     } catch (error: any) {
@@ -3521,6 +3524,8 @@ export default function App() {
       } else {
         alert(`로그인 중 오류가 발생했습니다: ${error.message}\n\n* 만약 iFrame(AI Studio 프리뷰) 환경이라면 브라우저의 '3방 쿠키 차단(Third-Party Cookie Block)' 보안 정책으로 인해 구글 소셜 로그인이 차단되었을 수 있습니다. 오른쪽 상단의 '새 창에서 열기' 버튼을 클릭해 독립된 창에서 다시 시도해 주세요.`);
       }
+    } finally {
+      setTimeout(() => { isLoggingInRef.current = false; }, 1000);
     }
   };
 
