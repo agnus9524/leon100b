@@ -284,7 +284,7 @@ async function startServer() {
       }
 
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
+        model: process.env.GEMINI_MODEL || "gemini-3.6-flash",
         systemInstruction: "You are the XTX-PRO Predictive Engine. You output precise, cold-logical HFT analysis in JSON format."
       });
 
@@ -344,7 +344,7 @@ async function startServer() {
         throw new Error("GEMINI_API_KEY environment variable is not configured.");
       }
 
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || "gemini-3.6-flash" });
       const result = await generateContentWithRetry(model, `${systemPrompt}\n\nUser Request: ${prompt}`);
       const text = result.response.text();
       
@@ -381,7 +381,7 @@ async function startServer() {
         throw new Error("GEMINI_API_KEY environment variable is not configured.");
       }
 
-      const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const model = genAI.getGenerativeModel({ model: process.env.GEMINI_MODEL || "gemini-3.6-flash" });
       const result = await generateContentWithRetry(model, prompt);
       return res.json(result.response.text());
     } catch (error: any) {
@@ -445,7 +445,7 @@ async function startServer() {
       }
 
       const model = genAI.getGenerativeModel({
-        model: "gemini-2.5-flash",
+        model: process.env.GEMINI_MODEL || "gemini-3.6-flash",
         generationConfig: { responseMimeType: "application/json" }
       });
       const result = await generateContentWithRetry(model, prompt);
@@ -501,7 +501,7 @@ async function startServer() {
 
       // Use gemini-1.5-pro for deep reasoning and googleSearch for live data
       const model = genAI.getGenerativeModel({ 
-        model: "gemini-2.5-pro",
+        model: process.env.GEMINI_MODEL || "gemini-3.6-flash",
         tools: [{ googleSearchRetrieval: { dynamicRetrievalConfig: { mode: "MODE_DYNAMIC" as any, dynamicThreshold: 0.3 } } }]
       });
 
@@ -536,7 +536,7 @@ async function startServer() {
       }
 
       const model = genAI.getGenerativeModel({ 
-        model: "gemini-2.5-flash",
+        model: process.env.GEMINI_MODEL || "gemini-3.6-flash",
         generationConfig: { responseMimeType: "application/json" }
       });
       const result = await generateContentWithRetry(model, prompt);

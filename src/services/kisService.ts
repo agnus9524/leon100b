@@ -408,7 +408,7 @@ class KISService {
 
   public async getPrice(symbol: string): Promise<NormalizedPrice | null> {
     // Serialize and throttle requests to prevent 429
-    const delay = () => new Promise(r => setTimeout(r, 200));
+    const delay = () => new Promise(r => setTimeout(r, 600));
     const release = await new Promise<() => void>(resolve => {
       const next = () => resolve(() => {});
       KISService.priceQueue = KISService.priceQueue.then(async () => {

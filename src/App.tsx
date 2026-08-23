@@ -955,12 +955,8 @@ export function calculateStockLimits(price: number, changePercent: number = 0, i
 }
 
 export default function App() {
-  const [marketType, setMarketType] = useState<'KR' | 'US'>(() => {
-    return (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
-  });
-  const [holdingsViewTab, setHoldingsViewTab] = useState<'KR' | 'US'>(() => {
-    return (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
-  });
+  const [marketType, setMarketType] = useState<'KR' | 'US'>('KR');
+  const holdingsViewTab = 'KR';
 
   const [lastSelectedKR, setLastSelectedKR] = useState(() => {
     return localStorage.getItem('sleek_last_symbol_KR') || '073240';
@@ -2182,7 +2178,7 @@ export default function App() {
   const [showScalperGuide, setShowScalperGuide] = useState<boolean>(false);
   const [showAccountDropdown, setShowAccountDropdown] = useState<boolean>(false);
   const [showPnlDetailsModal, setShowPnlDetailsModal] = useState<boolean>(false);
-  const [pnlCountryTab, setPnlCountryTab] = useState<'KR' | 'US' | 'OTHER'>('KR');
+  const pnlCountryTab = 'KR';
   const [pnlActiveTab, setPnlActiveTab] = useState<'stock' | 'daily' | 'monthly' | 'yearly'>('daily');
   const [pnlViewMode, setPnlViewMode] = useState<'card' | 'table'>('card');
   const [pnlLoading, setPnlLoading] = useState<boolean>(false);
@@ -3295,6 +3291,10 @@ export default function App() {
 
   // Real-time Exchange Rate Fetcher & Simulator
   const fetchRealExchangeRate = React.useCallback(async () => {
+    // Disabled exchange rate
+  }, []);
+  
+  const dummy_fetchRealExchangeRate = React.useCallback(async () => {
     try {
       let realRate = 0;
       
@@ -10081,30 +10081,7 @@ export default function App() {
                         <Briefcase className="w-4 h-4 text-sleek-blue" />
                         보유 종목별 세부 평가 내역
                       </h4>
-                      <div className="flex items-center gap-1 bg-black/30 p-1 rounded-xl border border-white/10">
-                        <button
-                          onClick={() => setHoldingsViewTab('KR')}
-                          className={cn(
-                            "text-[10px] md:text-xs font-bold px-3 py-1 rounded-lg transition-all",
-                            holdingsViewTab === 'KR'
-                              ? "bg-sleek-blue text-white shadow-lg"
-                              : "text-slate-400 hover:text-white"
-                          )}
-                        >
-                          국내주식
-                        </button>
-                        <button
-                          onClick={() => setHoldingsViewTab('US')}
-                          className={cn(
-                            "text-[10px] md:text-xs font-bold px-3 py-1 rounded-lg transition-all",
-                            holdingsViewTab === 'US'
-                              ? "bg-sleek-blue text-white shadow-lg"
-                              : "text-slate-400 hover:text-white"
-                          )}
-                        >
-                          미국주식
-                        </button>
-                      </div>
+                      
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-[10px] md:text-xs text-slate-300 font-mono font-bold">
@@ -10270,28 +10247,8 @@ export default function App() {
                   </button>
                 </div>
               </div>
-
-              
-
-              {/* Country Tabs (한국 | 미국 | 기타) */}
               <div className="flex items-center justify-between border-b border-slate-800/60 pb-2 shrink-0">
-                <div className="flex items-center gap-1.5">
-                  {(['KR', 'US', 'OTHER'] as const).map(c => (
-                    <button
-                      key={c}
-                      onClick={() => setPnlCountryTab(c)}
-                      className={cn(
-                        "px-3.5 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer",
-                        pnlCountryTab === c
-                          ? "bg-slate-700 text-white font-black shadow"
-                          : "text-slate-400 hover:text-slate-200"
-                      )}
-                    >
-                      {c === 'KR' ? '🇰🇷 한국' : c === 'US' ? '🇺🇸 미국' : '🌐 기타'}
-                    </button>
-                  ))}
-                </div>
-
+                <div className="flex items-center gap-1.5"></div>
                 <div className="flex items-center gap-1 bg-slate-800/80 p-1 rounded-xl border border-slate-700/60 text-[11px]">
                   <button
                     onClick={() => setPnlViewMode('card')}
