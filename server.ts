@@ -481,7 +481,7 @@ async function startServer() {
       // Use gemini-1.5-pro for deep reasoning and googleSearch for live data
       const model = genAI.getGenerativeModel({ 
         model: "gemini-1.5-pro",
-        tools: [{ googleSearch: {} }]
+        tools: [{ googleSearchRetrieval: { dynamicRetrievalConfig: { mode: "MODE_DYNAMIC" as any, dynamicThreshold: 0.3 } } }]
       });
 
       const marketName = marketType === 'KR' ? '한국 KOSPI/KOSDAQ' : '미국 NYSE/NASDAQ';

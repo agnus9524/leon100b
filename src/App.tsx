@@ -2039,16 +2039,7 @@ export default function App() {
     showNotification("모든 미체결 주문 및 스캘핑 엔진이 취소되었습니다.", "info");
   }, [showNotification]);
 
-  const handleRefreshScalperTop3 = useCallback(async () => {
-    setIsRefreshingTop3(true);
-    setTop3RefreshNonce(prev => prev + 1);
-    
-    // Trigger AI analysis on refresh
-    await handleGetRecommendations();
-
-    setIsRefreshingTop3(false);
-    showNotification("[스캘퍼 최적 종목 분석] 실시간 거래량 및 추세 분석 기반 딥 리서치가 완료되었습니다.", "success");
-  }, [showNotification, handleGetRecommendations]);
+  
 
   // Confirmation Modal State
   const [confirmState, setConfirmState] = useState<{
@@ -3767,6 +3758,17 @@ export default function App() {
       setIsGettingRecommendations(false);
     }
   }, [marketType]);
+
+  const handleRefreshScalperTop3 = useCallback(async () => {
+    setIsRefreshingTop3(true);
+    setTop3RefreshNonce(prev => prev + 1);
+    
+    // Trigger AI analysis on refresh
+    await handleGetRecommendations();
+
+    setIsRefreshingTop3(false);
+    showNotification("[스캘퍼 최적 종목 분석] 실시간 거래량 및 추세 분석 기반 딥 리서치가 완료되었습니다.", "success");
+  }, [showNotification, handleGetRecommendations]);
 
   // Trigger AI market analysis on mount and when market switch
   useEffect(() => {
