@@ -8442,10 +8442,7 @@ export default function App() {
                     {/* 선택된 종목 기본 정보 & 4대 핵심 지표 인라인 배치 */}
                     {selectedStock && (
                       <div className="flex items-center gap-3 flex-wrap grow min-w-0">
-                        {/* 종목 아이콘 */}
-                        <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-sleek-blue/30 to-indigo-600/30 border border-sleek-blue/40 flex items-center justify-center text-sleek-blue font-black font-mono shadow-inner text-sm shrink-0">
-                          {selectedStock.symbol.slice(0, 3)}
-                        </div>
+
                         
                         {/* 종목명 & 종목코드 & (보유/주문가능수량) - 고정 폭 적용으로 종목명 길이에 따른 흔들림 완벽 방지 */}
                         <div className="w-full sm:w-[220px] md:w-[240px] shrink-0 flex flex-col justify-center overflow-hidden">
@@ -9662,7 +9659,7 @@ export default function App() {
           const expectedProfitPct = modalAvgPrice > 0 ? calculateNetProfitPercent(modalAvgPrice, manualSellPrice, isModalUS ? 'US' : 'KR') : 0;
 
           return (
-            <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
               <motion.div 
                 initial={{ opacity: 0, scale: 0.95, y: 10 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -9918,7 +9915,7 @@ export default function App() {
       {/* Total Asset Evaluation Analysis Modal (총 자산 평가 분석 팝업) */}
       <AnimatePresence>
         {isAssetAnalysisModalOpen && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -10216,7 +10213,7 @@ export default function App() {
       {/* Realized PnL Details Modal (한국투자증권 실현손익 세부내역 팝업: 종목별 / 일별 / 월별 / 연도별) */}
       <AnimatePresence>
         {showPnlDetailsModal && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-2.5 sm:p-4 md:p-6">
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[9999] flex items-center justify-center p-2.5 sm:p-4 md:p-6">
             <motion.div 
               initial={{ opacity: 0, scale: 0.96, y: 10 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -10737,7 +10734,7 @@ export default function App() {
       {/* 🤖 AI 실시간 추천 종목 팝업 모달 */}
       <AnimatePresence>
         {showAiRecPopup && aiRecPopupData && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[95] flex items-center justify-center p-3 sm:p-4">
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-3 sm:p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.92, y: 12 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -10877,7 +10874,7 @@ export default function App() {
       {/* ⚡ LEO SCALPER BOT PRO 최고수익 AI 전자동 운용 설정 팝업 모달 */}
       <AnimatePresence>
         {isMaxYieldModalOpen && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[100] flex items-center justify-center p-3 sm:p-4 md:p-6">
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[9999] flex items-center justify-center p-3 sm:p-4 md:p-6">
             <motion.div
               initial={{ opacity: 0, scale: 0.94, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
@@ -11079,7 +11076,7 @@ export default function App() {
       )}
       <AnimatePresence>
         {showScalperGuide && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6">
+          <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4 md:p-6">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
