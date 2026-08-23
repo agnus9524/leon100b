@@ -3752,8 +3752,13 @@ export default function App() {
           market: marketType
         })));
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error("Failed to get recommendations:", error);
+      if (error.response && error.response.data && error.response.data.error) {
+        showNotification("딥리서치 실패: " + error.response.data.error, "error");
+      } else {
+        showNotification("추천 종목을 불러오는데 실패했습니다. Gemini API 키를 확인해주세요.", "error");
+      }
     } finally {
       setIsGettingRecommendations(false);
     }
