@@ -9,6 +9,7 @@ import {
   getDocs, 
   updateDoc, 
   setDoc,
+  deleteDoc,
   query,
   orderBy,
   where,
@@ -136,6 +137,30 @@ export const updateLicense = async (userId: string, data: any) => {
     return true;
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, path);
+    return false;
+  }
+};
+
+export const deleteLicense = async (userId: string) => {
+  const path = `licenses/${userId}`;
+  try {
+    const docRef = doc(db, 'licenses', userId);
+    await deleteDoc(docRef);
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
+    return false;
+  }
+};
+
+export const deleteAuthKeyDoc = async (keyText: string) => {
+  const path = `authKeys/${keyText}`;
+  try {
+    const keyRef = doc(db, 'authKeys', keyText);
+    await deleteDoc(keyRef);
+    return true;
+  } catch (error) {
+    handleFirestoreError(error, OperationType.DELETE, path);
     return false;
   }
 };

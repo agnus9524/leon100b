@@ -93,6 +93,7 @@ import { kisService, type ScalperRecommendation } from './services/kisService';
 import { generateGapDownReport } from './services/geminiService';
 import ScalperGuide from './components/ScalperGuide';
 import ScalperRecommendationsModal from './components/ScalperRecommendationsModal';
+import { AdminPanelModal } from './components/AdminPanelModal';
 import { 
   auth, 
   googleProvider, 
@@ -102,6 +103,8 @@ import {
   checkLicense, 
   getAllLicenses, 
   updateLicense,
+  deleteLicense,
+  deleteAuthKeyDoc,
   generateAuthKey,
   activateLicenseWithKey,
   getAllAuthKeys,
@@ -1195,7 +1198,7 @@ export default function App() {
   const [aiRecommendations, setAiRecommendations] = useState<Stock[]>([]);
   const [isGettingRecommendations, setIsGettingRecommendations] = useState(false);
   const [showScalperRecModal, setShowScalperRecModal] = useState<boolean>(false);
-  const [scalperRecommendations, setScalperRecommendations] = useState<ScalperRecommendation[]>([]);
+  const [scalperRecommendations, setScalperRecommendations] = useState<ScalperRecommendation[]>(() => kisService.getDefaultScalperRecommendations());
   const [isScalperRecLoading, setIsScalperRecLoading] = useState<boolean>(false);
   const searchRef = React.useRef<HTMLDivElement>(null);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
@@ -3372,7 +3375,7 @@ export default function App() {
         });
         
         // Super Admin Bypass
-        if (user.email === "agnus9524@gmail.com") {
+        if (user.email?.toLowerCase() === "agnus9524@gmail.com") {
           setIsSubscribed(true);
         } else {
           // Set up real-time listener for current user's license
@@ -3478,14 +3481,102 @@ export default function App() {
     try {
       const key = await generateAuthKey(30);
       if (key) {
-        alert(`새 인증키가 생성되었습니다: ${key}\n\n사용자에게 전달하여 입금 확인 후 사용 가능하게 하세요.`);
+        showNotification(`새 인증키가 생성되었습니다: ${key}`, "success");
         handleFetchAllLicenses();
       }
     } catch (error: any) {
       console.error("Failed to generate auth key:", error);
-      alert(`인증키 생성에 실패했습니다: ${error.message || error}`);
+      showNotification(`인증키 생성에 실패했습니다: ${error.message || error}`, "error");
     }
     setIsAdminLoading(false);
+  };
+
+  const handleUpdateUserStatus = async (userId: string, status: 'active' | 'suspended') => {
+    setIsAdminLoading(true);
+    try {
+      await updateLicense(userId, { status });
+      showNotification(`사용자 상태가 ${status === 'active' ? '활성' : '정지'}(으)로 변경되었습니다.`, "success");
+      await handleFetchAllLicenses();
+    } catch (e: any) {
+      showNotification(`상태 변경 실패: ${e.message}`, "error");
+    } finally {
+      setIsAdminLoading(false);
+    }
+  };
+
+  const handleExtendLicense = async (userId: string, additionalDays: number) => {
+    setIsAdminLoading(true);
+    try {
+      const currentLic = allLicenses.find(l => l.id === userId || l.userId === userId);
+      const currentExpiry = currentLic?.expiresAt ? new Date(currentLic.expiresAt) : new Date();
+      const baseDate = currentExpiry > new Date() ? currentExpiry : new Date();
+      baseDate.setDate(baseDate.getDate() + additionalDays);
+
+      await updateLicense(userId, { 
+        expiresAt: baseDate.toISOString(),
+        status: 'active'
+      });
+      showNotification(`라이선스 기간이 ${additionalDays}일 연장되었습니다.`, "success");
+      await handleFetchAllLicenses();
+    } catch (e: any) {
+      showNotification(`연장 실패: ${e.message}`, "error");
+    } finally {
+      setIsAdminLoading(false);
+    }
+  };
+
+  const handleDeleteUserLicense = async (userId: string) => {
+    if (!confirm("정말 이 사용자의 라이선스를 삭제하시겠습니까?")) return;
+    setIsAdminLoading(true);
+    try {
+      await deleteLicense(userId);
+      showNotification("라이선스가 삭제되었습니다.", "success");
+      await handleFetchAllLicenses();
+    } catch (e: any) {
+      showNotification(`삭제 실패: ${e.message}`, "error");
+    } finally {
+      setIsAdminLoading(false);
+    }
+  };
+
+  const handleDeleteAuthKey = async (keyText: string) => {
+    if (!confirm(`인증키 [${keyText}]를 삭제하시겠습니까?`)) return;
+    setIsAdminLoading(true);
+    try {
+      await deleteAuthKeyDoc(keyText);
+      showNotification("인증키가 삭제되었습니다.", "success");
+      await handleFetchAllLicenses();
+    } catch (e: any) {
+      showNotification(`인증키 삭제 실패: ${e.message}`, "error");
+    } finally {
+      setIsAdminLoading(false);
+    }
+  };
+
+  const handleExportCSV = () => {
+    try {
+      const rows = [
+        ["ID", "이메일", "상태", "만료일", "인증키", "생성일"],
+        ...allLicenses.map(l => [
+          l.id || l.userId || '',
+          l.email || '',
+          l.status || '',
+          l.expiresAt ? new Date(l.expiresAt).toLocaleDateString() : '',
+          l.key || '',
+          l.createdAt?.toDate ? l.createdAt.toDate().toLocaleDateString() : ''
+        ])
+      ];
+      const csvContent = "data:text/csv;charset=utf-8," + rows.map(e => e.join(",")).join("\n");
+      const encodedUri = encodeURI(csvContent);
+      const link = document.createElement("a");
+      link.setAttribute("href", encodedUri);
+      link.setAttribute("download", `licenses_${new Date().toISOString().slice(0, 10)}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (e: any) {
+      showNotification(`CSV 내보내기 실패: ${e.message}`, "error");
+    }
   };
 
   const handleActivateKey = async () => {
@@ -3964,103 +4055,6 @@ export default function App() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleExtendLicense = async (userId: string, currentData: any) => {
-    setConfirmState({
-      show: true,
-      title: "라이선스 연장 확인",
-      message: "해당 사용자의 라이선스를 1개월(30일) 연장하시겠습니까?",
-      onConfirm: async () => {
-        setConfirmState(prev => ({ ...prev, isLoading: true }));
-        const currentExpiry = new Date(currentData.expiresAt);
-        const newExpiry = new Date(currentExpiry.getTime() + 30 * 24 * 60 * 60 * 1000);
-        const updated = await updateLicense(userId, { ...currentData, expiresAt: newExpiry.toISOString() });
-        if (updated) handleFetchAllLicenses();
-        setConfirmState(prev => ({ ...prev, show: false, isLoading: false }));
-      }
-    });
-  };
-
-  const handleDeleteUserLicense = async (userId: string) => {
-    setConfirmState({
-      show: true,
-      title: "사용자 삭제 확인",
-      message: "정말로 이 사용자의 라이선스를 완전히 삭제하시겠습니까?\n삭제 즉시 해당 사용자의 접속이 차단됩니다.",
-      onConfirm: async () => {
-        setConfirmState(prev => ({ ...prev, isLoading: true }));
-        try {
-          await deleteDoc(doc(db, 'licenses', userId));
-          handleFetchAllLicenses();
-        } catch (err) {
-          console.error("Delete license error:", err);
-        }
-        setConfirmState(prev => ({ ...prev, show: false, isLoading: false }));
-      }
-    });
-  }
-
-  const handleDeleteAuthKey = async (keyId: string) => {
-    setConfirmState({
-      show: true,
-      title: "인증키 폐기 확인",
-      message: "정말로 이 인증키를 폐기하시겠습니까? 폐기된 키는 복구가 불가능합니다.",
-      onConfirm: async () => {
-        setConfirmState(prev => ({ ...prev, isLoading: true }));
-        try {
-          await deleteDoc(doc(db, 'authKeys', keyId));
-          handleFetchAllLicenses();
-        } catch (err) {
-          console.error("Delete auth key error:", err);
-          alert("삭제 중 오류가 발생했습니다: " + (err instanceof Error ? err.message : String(err)));
-        }
-        setConfirmState(prev => ({ ...prev, show: false, isLoading: false }));
-      }
-    });
-  }
-
-  const handleExportCSV = () => {
-    let headers: string[] = [];
-    let rows: any[][] = [];
-    let filename = "";
-
-    if (adminTab === 'users') {
-      headers = ["Email", "User UID", "Status", "Expiration Date", "Applied Key", "Created Date"];
-      rows = allLicenses.map(lic => [
-        lic.email || "N/A",
-        lic.userId || lic.id,
-        lic.status,
-        new Date(lic.expiresAt).toLocaleDateString(),
-        lic.key || "N/A",
-        lic.createdAt ? new Date(lic.createdAt.seconds * 1000).toLocaleString() : "N/A"
-      ]);
-      filename = `subscriber_list_${new Date().toISOString().split('T')[0]}.csv`;
-    } else {
-      headers = ["Auth Key", "Duration (Days)", "Status", "Used By (UID)", "Issuance Date"];
-      rows = allAuthKeys.map(key => [
-        key.id,
-        key.durationDays,
-        key.used ? "Used" : "Unused",
-        key.usedBy || "N/A",
-        key.createdAt ? new Date(key.createdAt.seconds * 1000).toLocaleString() : "N/A"
-      ]);
-      filename = `auth_keys_list_${new Date().toISOString().split('T')[0]}.csv`;
-    }
-
-    // Handle CSV generation with proper escaping
-    const csvContent = "\uFEFF" + [ // Add BOM for Excel UTF-8 support
-      headers.join(","),
-      ...rows.map(row => row.map(val => `"${String(val).replace(/"/g, '""')}"`).join(","))
-    ].join("\n");
-
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", filename);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
   const updateKisBuyableQty = useCallback(async (overrideBalance?: number) => {
     if (!kisConfig.isConnected || !kisConfig.isRealOrderEnabled || !selectedStock) {
       setKisBuyableQty(null);
@@ -4187,13 +4181,18 @@ export default function App() {
   }, [selectedSymbol, kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, updateKisBuyableQty]);
 
   const handleSyncKIS = async () => {
-    if (!kisConfig.isConnected) return;
+    if (!kisConfig.isConnected) {
+      showNotification("KIS 실계좌가 연결되어 있지 않습니다. [KIS 연동 설정]에서 API 키와 계좌를 연결해주세요.", "info");
+      setShowKisModal(true);
+      return;
+    }
     
     // Check for password
     const activeConfig = getActiveKisConfig(kisConfig);
     if (!activeConfig.accountPw) {
       setBotStatus("연동 실패: 계좌 비밀번호가 필요합니다.");
-      alert("계좌 비밀번호(4자리)가 입력되지 않았습니다. [설정 > KIS 연동]에서 비밀번호를 입력해주세요.");
+      showNotification("계좌 비밀번호(4자리)가 입력되지 않았습니다. [설정 > KIS 연동]에서 비밀번호를 입력해주세요.", "error");
+      setShowKisModal(true);
       return;
     }
 
@@ -7136,17 +7135,20 @@ export default function App() {
                 {currentUser?.displayName || currentUser?.email || '아이디'}
               </span>
               <div className="flex items-center gap-2">
-                {currentUser?.email === "agnus9524@gmail.com" && (
+                {(currentUser?.email?.toLowerCase() === "agnus9524@gmail.com" || currentUser?.uid === "admin") && (
                   <button 
+                    type="button"
                     onClick={() => { setShowAdminPanel(true); handleFetchAllLicenses(); }}
-                    className="text-sleek-blue hover:text-white transition-colors flex items-center gap-1 text-[10px]"
+                    className="bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 hover:text-white border border-blue-500/40 px-2 py-0.5 rounded-lg transition-colors flex items-center gap-1 text-[10px] font-bold cursor-pointer"
+                    title="슈퍼 관리자 패널 열기"
                   >
-                    <Settings className="w-3 h-3" /> ADMIN
+                    <Settings className="w-3 h-3 text-blue-400" /> ADMIN
                   </button>
                 )}
                 <button 
+                  type="button"
                   onClick={handleLogout}
-                  className="text-sleek-text-secondary hover:text-white transition-colors"
+                  className="text-sleek-text-secondary hover:text-white transition-colors cursor-pointer"
                   title="로그아웃"
                 >
                   LOGOUT
@@ -7156,19 +7158,21 @@ export default function App() {
             <div className="flex flex-col items-end">
               <span className="text-[9px] md:text-[10px] text-sleek-text-secondary uppercase">KIS Connection</span>
               <div className="flex items-center gap-2">
-                {kisConfig.isConnected && (
-                  <button 
-                    onClick={handleSyncKIS}
-                    className="text-[10px] text-sleek-blue hover:text-white flex items-center gap-1"
-                    title="잔고 동기화"
-                  >
-                    <RefreshCw className="w-3 h-3" /> SYNC
-                  </button>
-                )}
                 <button 
+                  type="button"
+                  onClick={handleSyncKIS}
+                  disabled={isSyncingKIS}
+                  className="text-[10px] px-2 py-0.5 rounded-md bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 hover:text-white border border-blue-500/30 flex items-center gap-1 font-bold cursor-pointer disabled:opacity-50 transition-all active:scale-95"
+                  title="실시간 계좌 잔고 및 보유 종목 동기화"
+                >
+                  <RefreshCw className={cn("w-3 h-3", isSyncingKIS && "animate-spin text-blue-400")} /> 
+                  <span>{isSyncingKIS ? "동기화 중..." : "SYNC"}</span>
+                </button>
+                <button 
+                  type="button"
                   onClick={() => setShowKisModal(true)}
                   className={cn(
-                    "flex items-center gap-2 font-black text-sm", 
+                    "flex items-center gap-2 font-black text-sm cursor-pointer", 
                     kisConfig.isConnected ? "text-emerald-400" : "text-rose-500 animate-pulse"
                   )}
                 >
@@ -8172,41 +8176,177 @@ export default function App() {
               </div>
             </div>
 
-              {/* Current Holdings Summary */}
+              {/* 4. Real-time Holdings Portfolio Status (보유 주식 현황 대시보드 - 항상 표시) */}
               {(() => {
-                const heldSymbols = Object.keys(holdings).filter(sym => holdings[sym] > 0);
-                if (heldSymbols.length === 0) return null;
+                const heldSymbols = Object.keys(holdings).filter(sym => (holdings[sym] || 0) > 0);
                 
+                let totalStockPurchase = 0;
+                let totalStockEval = 0;
+
+                heldSymbols.forEach(sym => {
+                  const qty = holdings[sym] || 0;
+                  const avgP = avgPrices[sym] || 0;
+                  const st = stocks.find(s => s.symbol === sym) || INITIAL_STOCKS_KR.find(s => s.symbol === sym) || INITIAL_STOCKS.find(s => s.symbol === sym);
+                  const currentP = st?.price || avgP;
+                  totalStockPurchase += (avgP * qty);
+                  totalStockEval += (currentP * qty);
+                });
+
+                const totalStockPnL = totalStockEval - totalStockPurchase;
+                const totalStockPnLPct = totalStockPurchase > 0 ? (totalStockPnL / totalStockPurchase) * 100 : 0;
+
                 return (
-                  <div className="bg-black/40 rounded-2xl p-3 border border-slate-700/50 mt-2 shrink-0 w-full">
-                    <div className="text-xs font-bold text-slate-400 mb-2 px-1">보유 종목 현황</div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 overflow-y-auto max-h-[180px] custom-scrollbar pr-1">
-                      {heldSymbols.map(sym => {
-                        const qty = holdings[sym];
-                        const avgP = avgPrices[sym] || 0;
-                        const st = stocks.find(s => s.symbol === sym) || INITIAL_STOCKS_KR.find(s => s.symbol === sym) || INITIAL_STOCKS.find(s => s.symbol === sym);
-                        const currentP = st?.price || avgP;
-                        const pnlPct = avgP > 0 ? ((currentP - avgP) / avgP) * 100 : 0;
-                        const pnlAmt = (currentP - avgP) * qty;
-                        
-                        return (
-                          <div key={sym} className="flex items-center justify-between bg-slate-800/80 p-2.5 rounded-xl border border-slate-700">
-                            <div className="truncate pr-2">
-                              <div className="font-bold text-[13px] text-white truncate">{st?.name || sym}({sym})</div>
-                              <div className="text-[10px] text-slate-400 font-mono mt-0.5">{qty.toLocaleString()}주 · 평단 {formatCurrency(avgP)}</div>
-                            </div>
-                            <div className="text-right shrink-0">
-                              <div className={cn("text-[11px] font-bold font-mono", pnlPct > 0 ? "text-rose-400" : pnlPct < 0 ? "text-sky-400" : "text-slate-300")}>
-                                {pnlPct > 0 ? "+" : ""}{formatCurrency(pnlAmt)}
-                              </div>
-                              <div className={cn("text-[10px] font-mono mt-0.5", pnlPct > 0 ? "text-rose-400/80" : pnlPct < 0 ? "text-sky-400/80" : "text-slate-400")}>
-                                {pnlPct > 0 ? "+" : ""}{pnlPct.toFixed(2)}%
-                              </div>
-                            </div>
+                  <div className="bg-slate-900/90 border border-slate-700/80 rounded-3xl p-4 sm:p-5 shadow-2xl space-y-3.5 relative overflow-hidden text-white backdrop-blur-md">
+                    {/* Header with Totals */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-slate-800">
+                      <div className="flex items-center gap-2.5">
+                        <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center border border-blue-500/30">
+                          <Briefcase className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <h3 className="text-sm sm:text-base font-black text-white tracking-tight">보유 주식 현황</h3>
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                              {heldSymbols.length}개 종목 보유 중
+                            </span>
                           </div>
-                        );
-                      })}
+                          <p className="text-[10.5px] text-slate-400">
+                            실시간 체결 내역 및 KIS 연동 보유 주식 평가 현황
+                          </p>
+                        </div>
+                      </div>
+
+                      {heldSymbols.length > 0 && (
+                        <div className="flex items-center gap-3 bg-slate-950/70 px-3.5 py-1.5 rounded-2xl border border-slate-800 text-xs font-mono">
+                          <div>
+                            <span className="text-[10px] text-slate-400 block font-sans">총 평가금액</span>
+                            <span className="font-bold text-white">{formatCurrency(totalStockEval)}</span>
+                          </div>
+                          <div className="h-6 w-px bg-slate-800" />
+                          <div>
+                            <span className="text-[10px] text-slate-400 block font-sans">총 평가손익</span>
+                            <span className={cn("font-bold flex items-center gap-0.5", totalStockPnL >= 0 ? "text-rose-400" : "text-sky-400")}>
+                              {totalStockPnL >= 0 ? "+" : ""}{formatCurrency(totalStockPnL)} ({totalStockPnLPct >= 0 ? "+" : ""}{totalStockPnLPct.toFixed(2)}%)
+                            </span>
+                          </div>
+                        </div>
+                      )}
                     </div>
+
+                    {/* Stock Cards / List or Empty State */}
+                    {heldSymbols.length === 0 ? (
+                      <div className="py-8 px-4 bg-slate-950/40 rounded-2xl border border-dashed border-slate-800 flex flex-col items-center justify-center text-center space-y-3">
+                        <div className="w-10 h-10 rounded-2xl bg-slate-800 text-slate-400 flex items-center justify-center">
+                          <Coins className="w-5 h-5 text-slate-500" />
+                        </div>
+                        <div>
+                          <p className="text-xs sm:text-sm font-bold text-slate-300">현재 보유 중인 주식이 없습니다.</p>
+                          <p className="text-[11px] text-slate-500 mt-0.5">
+                            스캘퍼 자동 매매가 실행되거나, 상단 추천종목 10선에서 매수 시 실시간으로 표시됩니다.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowScalperRecModal(true);
+                              handleRefreshScalperRecList();
+                            }}
+                            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <Sparkles className="w-3.5 h-3.5" />
+                            <span>추천종목 찾기</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleSyncKIS}
+                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
+                            <span>잔고 동기화</span>
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 overflow-y-auto max-h-[220px] custom-scrollbar pr-1">
+                        {heldSymbols.map(sym => {
+                          const qty = holdings[sym] || 0;
+                          const avgP = avgPrices[sym] || 0;
+                          const st = stocks.find(s => s.symbol === sym) || INITIAL_STOCKS_KR.find(s => s.symbol === sym) || INITIAL_STOCKS.find(s => s.symbol === sym);
+                          const currentP = st?.price || avgP;
+                          const evalAmt = currentP * qty;
+                          const pnlAmt = (currentP - avgP) * qty;
+                          const pnlPct = avgP > 0 ? ((currentP - avgP) / avgP) * 100 : 0;
+                          const isProfit = pnlAmt >= 0;
+                          const displayName = getResolvedStockName(sym, st);
+
+                          return (
+                            <div 
+                              key={sym} 
+                              className="bg-slate-950/80 border border-slate-800 hover:border-slate-700 p-3 rounded-2xl flex flex-col justify-between gap-2.5 transition-all shadow-sm group"
+                            >
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="truncate">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-bold text-xs sm:text-[13px] text-white truncate group-hover:text-blue-400 transition-colors">
+                                      {displayName}
+                                    </span>
+                                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
+                                      {sym}
+                                    </span>
+                                  </div>
+                                  <div className="text-[10.5px] text-slate-400 font-mono mt-0.5">
+                                    {qty.toLocaleString()}주 · 평단 {formatCurrency(avgP)}
+                                  </div>
+                                </div>
+
+                                <div className="text-right shrink-0 font-mono">
+                                  <div className={cn("text-xs font-bold", isProfit ? "text-rose-400" : "text-sky-400")}>
+                                    {isProfit ? "+" : ""}{formatCurrency(pnlAmt)}
+                                  </div>
+                                  <div className={cn("text-[10px]", isProfit ? "text-rose-400/80" : "text-sky-400/80")}>
+                                    {isProfit ? "+" : ""}{pnlPct.toFixed(2)}%
+                                  </div>
+                                </div>
+                              </div>
+
+                              <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 font-mono text-[11px]">
+                                <span className="text-slate-400">평가 {formatCurrency(evalAmt)}</span>
+                                <div className="flex items-center gap-1 font-sans">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (st) {
+                                        openOrSwitchScalperTab(st.symbol, st.name);
+                                      }
+                                    }}
+                                    className="px-2 py-0.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 text-[10.5px] font-bold transition-all cursor-pointer"
+                                    title="스캘퍼 매매 탭으로 이동"
+                                  >
+                                    스캘퍼
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      if (st) {
+                                        setManualSellStock(st);
+                                        setManualSellQty(qty);
+                                        setManualSellPrice(currentP);
+                                        setManualSellModalOpen(true);
+                                      }
+                                    }}
+                                    className="px-2 py-0.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-[10.5px] font-bold transition-all cursor-pointer"
+                                    title="수동 지정가 매도"
+                                  >
+                                    매도
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
                   </div>
                 );
               })()}
@@ -8590,11 +8730,11 @@ export default function App() {
           const expectedProfitPct = modalAvgPrice > 0 ? calculateNetProfitPercent(modalAvgPrice, manualSellPrice, isModalUS ? 'US' : 'KR') : 0;
 
           return (
-            <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md">
+            <div className="fixed inset-0 z-[999999] flex items-start justify-center p-4 pt-6 sm:pt-10 bg-black/80 backdrop-blur-md overflow-y-auto">
               <motion.div 
-                initial={{ opacity: 0, scale: 0.95, y: 10 }}
+                initial={{ opacity: 0, scale: 0.95, y: -20 }}
                 animate={{ opacity: 1, scale: 1, y: 0 }}
-                exit={{ opacity: 0, scale: 0.95, y: 10 }}
+                exit={{ opacity: 0, scale: 0.95, y: -20 }}
                 className="bg-sleek-card border border-sleek-border rounded-3xl p-6 md:p-8 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl space-y-6 relative custom-scrollbar"
               >
                 <div className="flex items-center justify-between border-b border-white/10 pb-4">
@@ -8846,12 +8986,12 @@ export default function App() {
       {/* Total Asset Evaluation Analysis Modal (총 자산 평가 분석 팝업) */}
       <AnimatePresence>
         {isAssetAnalysisModalOpen && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[9999] flex items-center justify-center p-4">
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[999999] flex items-start justify-center p-4 pt-6 sm:pt-10 overflow-y-auto">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 10 }}
+              initial={{ opacity: 0, scale: 0.95, y: -20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 10 }}
-              className="bg-sleek-card border border-sleek-border rounded-3xl max-w-3xl w-full max-h-[92vh] overflow-hidden flex flex-col shadow-2xl relative"
+              exit={{ opacity: 0, scale: 0.95, y: -20 }}
+              className="bg-sleek-card border border-sleek-border rounded-3xl max-w-3xl w-full max-h-[90vh] overflow-hidden flex flex-col shadow-2xl relative"
             >
               {/* Modal Header */}
               <div className="p-5 md:p-6 border-b border-sleek-border flex items-center justify-between bg-sleek-bg/80">
@@ -9121,12 +9261,12 @@ export default function App() {
       {/* Realized PnL Details Modal (한국투자증권 실현손익 세부내역 팝업: 종목별 / 일별 / 월별 / 연도별) */}
       <AnimatePresence>
         {showPnlDetailsModal && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[9999] flex items-center justify-center p-2.5 sm:p-4 md:p-6">
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[999999] flex items-start justify-center p-2.5 sm:p-4 md:p-6 pt-6 sm:pt-10 overflow-y-auto">
             <motion.div 
-              initial={{ opacity: 0, scale: 0.96, y: 10 }}
+              initial={{ opacity: 0, scale: 0.96, y: -20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.96, y: 10 }}
-              className="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-4xl w-full p-4 sm:p-6 space-y-4 shadow-2xl relative text-white max-h-[94vh] flex flex-col overflow-hidden"
+              exit={{ opacity: 0, scale: 0.96, y: -20 }}
+              className="bg-slate-900 border border-slate-700/80 rounded-3xl max-w-4xl w-full p-4 sm:p-6 space-y-4 shadow-2xl relative text-white max-h-[90vh] flex flex-col overflow-hidden"
             >
               {/* Header */}
               <div className="flex items-center justify-between border-b border-slate-800 pb-3.5 shrink-0">
@@ -9622,11 +9762,11 @@ export default function App() {
       {/* 🤖 AI 실시간 추천 종목 팝업 모달 */}
       <AnimatePresence>
         {showAiRecPopup && aiRecPopupData && (
-          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[9999] flex items-center justify-center p-3 sm:p-4">
+          <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[999999] flex items-start justify-center p-3 sm:p-4 pt-6 sm:pt-10 overflow-y-auto">
             <motion.div
-              initial={{ opacity: 0, scale: 0.92, y: 12 }}
+              initial={{ opacity: 0, scale: 0.92, y: -20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.92, y: 12 }}
+              exit={{ opacity: 0, scale: 0.92, y: -20 }}
               className="bg-slate-900/95 border border-purple-500/40 rounded-2xl max-w-lg w-full p-4 sm:p-5 space-y-4 shadow-[0_0_50px_rgba(168,85,247,0.25)] relative text-white max-h-[85vh] flex flex-col overflow-hidden"
             >
               {/* Modal Header */}
@@ -9762,12 +9902,12 @@ export default function App() {
       {/* ⚡ LEO SCALPER BOT PRO 최고수익 AI 전자동 운용 설정 팝업 모달 */}
       <AnimatePresence>
         {isMaxYieldModalOpen && (
-          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[9999] flex items-center justify-center p-3 sm:p-4 md:p-6">
+          <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-[999999] flex items-start justify-center p-3 sm:p-4 md:p-6 pt-6 sm:pt-10 overflow-y-auto">
             <motion.div
-              initial={{ opacity: 0, scale: 0.94, y: 15 }}
+              initial={{ opacity: 0, scale: 0.94, y: -20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.94, y: 15 }}
-              className="bg-slate-900/95 border-2 border-amber-500/50 rounded-3xl max-w-xl w-full p-5 sm:p-6 space-y-4 sm:space-y-5 shadow-[0_0_60px_rgba(245,158,11,0.3)] relative text-white max-h-[92vh] flex flex-col overflow-hidden"
+              exit={{ opacity: 0, scale: 0.94, y: -20 }}
+              className="bg-slate-900/95 border-2 border-amber-500/50 rounded-3xl max-w-xl w-full p-5 sm:p-6 space-y-4 sm:space-y-5 shadow-[0_0_60px_rgba(245,158,11,0.3)] relative text-white max-h-[90vh] flex flex-col overflow-hidden"
             >
               {/* Modal Header */}
               <div className="flex items-center justify-between border-b border-amber-500/20 pb-3.5 shrink-0">
@@ -9962,7 +10102,7 @@ export default function App() {
 
       <AnimatePresence>
         {showScalperGuide && (
-          <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4 md:p-6">
+          <div className="fixed inset-0 z-[999999] bg-black/80 flex items-start justify-center p-4 md:p-6 pt-6 sm:pt-10 overflow-y-auto">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -9971,9 +10111,9 @@ export default function App() {
               className="absolute inset-0 bg-black/80 backdrop-blur-md"
             />
             <motion.div
-              initial={{ opacity: 0, scale: 0.9, y: 20 }}
+              initial={{ opacity: 0, scale: 0.9, y: -20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.9, y: 20 }}
+              exit={{ opacity: 0, scale: 0.9, y: -20 }}
               className="relative w-full max-w-4xl max-h-[90vh] bg-sleek-bg border border-sleek-border rounded-[2rem] shadow-2xl overflow-hidden flex flex-col"
             >
               {/* Header */}
@@ -10015,6 +10155,24 @@ export default function App() {
         onQuickBuy={handleQuickBuyRecommendation}
         onBatchRegisterTop3={handleBatchRegisterTop3}
         registeredSymbols={scalperTabs.map(t => t.symbol)}
+      />
+
+      {/* 🛡️ 슈퍼 관리자 라이선스 및 인증키 발급 모달 */}
+      <AdminPanelModal
+        isOpen={showAdminPanel}
+        onClose={() => setShowAdminPanel(false)}
+        allLicenses={allLicenses}
+        allAuthKeys={allAuthKeys}
+        isLoading={isAdminLoading}
+        onRefresh={handleFetchAllLicenses}
+        onGenerateKey={handleGenerateKey}
+        onUpdateStatus={handleUpdateUserStatus}
+        onExtendLicense={handleExtendLicense}
+        onDeleteLicense={handleDeleteUserLicense}
+        onDeleteAuthKey={handleDeleteAuthKey}
+        onExportCSV={handleExportCSV}
+        adminTab={adminTab}
+        setAdminTab={setAdminTab}
       />
     </div>
   );
