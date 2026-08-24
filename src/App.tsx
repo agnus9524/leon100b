@@ -65,7 +65,8 @@ import {
   Coins,
   HelpCircle,
   BookOpen,
-  LogOut
+  LogOut,
+  Flame
 } from 'lucide-react';
 import { 
   XAxis, 
@@ -88,9 +89,10 @@ import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import axios from 'axios';
-import { kisService } from './services/kisService';
+import { kisService, type ScalperRecommendation } from './services/kisService';
 import { generateGapDownReport } from './services/geminiService';
 import ScalperGuide from './components/ScalperGuide';
+import ScalperRecommendationsModal from './components/ScalperRecommendationsModal';
 import { 
   auth, 
   googleProvider, 
@@ -1192,6 +1194,9 @@ export default function App() {
   const [searchCursorOffset, setSearchCursorOffset] = useState(0);
   const [aiRecommendations, setAiRecommendations] = useState<Stock[]>([]);
   const [isGettingRecommendations, setIsGettingRecommendations] = useState(false);
+  const [showScalperRecModal, setShowScalperRecModal] = useState<boolean>(false);
+  const [scalperRecommendations, setScalperRecommendations] = useState<ScalperRecommendation[]>([]);
+  const [isScalperRecLoading, setIsScalperRecLoading] = useState<boolean>(false);
   const searchRef = React.useRef<HTMLDivElement>(null);
   const searchInputRef = React.useRef<HTMLInputElement>(null);
   const textMeasurerRef = React.useRef<HTMLSpanElement>(null);
@@ -3508,49 +3513,140 @@ export default function App() {
 
   const handleGetRecommendations = useCallback(async () => {
     setIsGettingRecommendations(true);
-    setAiRecommendations([]);
     let success = false;
     try {
-      // Use the new deep recommendation endpoint that leverages Gemini 1.5 Pro and Google Search
-      const response = await axios.post('/api/ai/deep-recommend', { marketType });
-      const data = JSON.parse(response.data.text);
-      if (Array.isArray(data)) {
-        setAiRecommendations(data.map(item => ({
-          ...item,
-          change: item.price * (Math.random() > 0.5 ? 0.02 : -0.01),
-          changePercent: (Math.random() > 0.5 ? 2.5 : -1.2),
-          volume: (Math.floor(Math.random() * 50) + 10) + 'M',
-          history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: item.price * (0.95 + Math.random() * 0.1) })),
+      const list = await kisService.getScalperRecommendations();
+      if (list && list.length > 0) {
+        setScalperRecommendations(list);
+        setAiRecommendations(list.map(item => ({
+          symbol: item.symbol,
+          name: item.name,
+          price: item.price,
+          change: item.change,
+          changePercent: item.changePercent,
+          volume: item.volume,
+          history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: item.price * (0.98 + (i % 5) * 0.008) })),
           isAI: true,
-          market: marketType
+          market: 'KR'
         })));
         success = true;
       }
     } catch (error: any) {
-      console.error("Failed to get recommendations:", error);
-      if (error.response && error.response.data && error.response.data.error) {
-        showNotification("딥리서치 실패: " + error.response.data.error, "error");
-      } else {
-        showNotification("추천 종목을 불러오는데 실패했습니다. Gemini API 키를 확인해주세요.", "error");
-      }
+      console.warn("Failed to get recommendations, fallback to built-in quant:", error);
     } finally {
       setIsGettingRecommendations(false);
     }
     return success;
-  }, [marketType, showNotification]);
+  }, []);
+
+  const handleOpenScalperRecommendations = useCallback(async () => {
+    setShowScalperRecModal(true);
+    setIsScalperRecLoading(true);
+    setIsRefreshingTop3(true);
+    try {
+      const list = await kisService.getScalperRecommendations();
+      if (list && list.length > 0) {
+        setScalperRecommendations(list);
+        setAiRecommendations(list.map(item => ({
+          symbol: item.symbol,
+          name: item.name,
+          price: item.price,
+          change: item.change,
+          changePercent: item.changePercent,
+          volume: item.volume,
+          history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: item.price * (0.98 + (i % 5) * 0.008) })),
+          isAI: true,
+          market: 'KR'
+        })));
+        showNotification("[스캘퍼 최적 종목 10선 포착] 실시간 거래량 및 체결강도 기반 추천 목록이 로드되었습니다.", "success");
+      }
+    } catch (err: any) {
+      console.error("Failed to load scalper recommendations:", err);
+      showNotification("추천 종목을 불러오는 중 오류가 발생했습니다.", "error");
+    } finally {
+      setIsScalperRecLoading(false);
+      setIsRefreshingTop3(false);
+    }
+  }, [showNotification]);
+
+  const handleRefreshScalperRecList = useCallback(async () => {
+    setIsScalperRecLoading(true);
+    try {
+      const list = await kisService.getScalperRecommendations();
+      if (list && list.length > 0) {
+        setScalperRecommendations(list);
+        setAiRecommendations(list.map(item => ({
+          symbol: item.symbol,
+          name: item.name,
+          price: item.price,
+          change: item.change,
+          changePercent: item.changePercent,
+          volume: item.volume,
+          history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: item.price * (0.98 + (i % 5) * 0.008) })),
+          isAI: true,
+          market: 'KR'
+        })));
+        showNotification("[스캘퍼 딥리서치 완료] 최신 거래량 및 체결강도로 추천 종목이 갱신되었습니다.", "success");
+      }
+    } catch (err) {
+      console.error("Failed to refresh recommendations:", err);
+    } finally {
+      setIsScalperRecLoading(false);
+    }
+  }, [showNotification]);
+
+  const handleSelectRecommendationStock = useCallback((rec: ScalperRecommendation) => {
+    setStocks(prev => {
+      if (!prev.some(s => s.symbol === rec.symbol)) {
+        return [...prev, {
+          symbol: rec.symbol,
+          name: rec.name,
+          price: rec.price,
+          change: rec.change,
+          changePercent: rec.changePercent,
+          volume: rec.volume,
+          history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: rec.price * (0.98 + (i % 5) * 0.008) })),
+          isAI: true,
+          market: 'KR'
+        }];
+      }
+      return prev;
+    });
+
+    openOrSwitchScalperTab(rec.symbol, rec.name);
+    showNotification(`[스캘퍼 타겟 등록] ${rec.name}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (스캘핑 점수 ${rec.scalpingScore}점)`, "success");
+    setShowScalperRecModal(false);
+  }, [openOrSwitchScalperTab, showNotification]);
+
+  const handleBatchRegisterTop3 = useCallback((top3List: ScalperRecommendation[]) => {
+    top3List.forEach(rec => {
+      setStocks(prev => {
+        if (!prev.some(s => s.symbol === rec.symbol)) {
+          return [...prev, {
+            symbol: rec.symbol,
+            name: rec.name,
+            price: rec.price,
+            change: rec.change,
+            changePercent: rec.changePercent,
+            volume: rec.volume,
+            history: [],
+            isAI: true,
+            market: 'KR'
+          }];
+        }
+        return prev;
+      });
+      openOrSwitchScalperTab(rec.symbol, rec.name);
+    });
+    if (top3List.length > 0) {
+      showNotification(`[스캘퍼 TOP 3 일괄 등록] ${top3List.map(s => s.name).join(', ')} 종목이 스캘퍼 탭에 등록되었습니다.`, "success");
+    }
+    setShowScalperRecModal(false);
+  }, [openOrSwitchScalperTab, showNotification]);
 
   const handleRefreshScalperTop3 = useCallback(async () => {
-    setIsRefreshingTop3(true);
-    setTop3RefreshNonce(prev => prev + 1);
-    
-    // Trigger AI analysis on refresh
-    const success = await handleGetRecommendations();
-
-    setIsRefreshingTop3(false);
-    if (success) {
-      showNotification("[스캘퍼 최적 종목 분석] 실시간 거래량 및 추세 분석 기반 딥 리서치가 완료되었습니다.", "success");
-    }
-  }, [showNotification, handleGetRecommendations]);
+    await handleOpenScalperRecommendations();
+  }, [handleOpenScalperRecommendations]);
 
   // Trigger AI market analysis on mount and when market switch
   useEffect(() => {
@@ -6711,6 +6807,23 @@ export default function App() {
     }
   };
 
+  const handleQuickBuyRecommendation = useCallback(async (rec: ScalperRecommendation) => {
+    handleSelectRecommendationStock(rec);
+    const targetStock: Stock = {
+      symbol: rec.symbol,
+      name: rec.name,
+      price: rec.price,
+      change: rec.change,
+      changePercent: rec.changePercent,
+      volume: rec.volume,
+      history: [],
+      market: 'KR'
+    };
+    const buyQty = Math.max(1, Math.floor(1000000 / (rec.price || 10000)));
+    await executeTrade('BUY', targetStock, buyQty, `실시간 추천종목(${rec.scalpingScore}점) 즉시 매수 실행`, rec.price);
+    setShowScalperRecModal(false);
+  }, [handleSelectRecommendationStock, executeTrade]);
+
   const addLog = (symbol: string, type: 'BUY' | 'SELL' | '매수' | '매도', price: number, amount: number, reason: string) => {
     const newLog: TradeLog = {
       time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
@@ -7236,6 +7349,20 @@ export default function App() {
                         )}
                       </AnimatePresence>
                     </div>
+
+                    {/* 🔥 실시간 추천종목 찾기 버튼 (상단 검색바 인라인) */}
+                    <button
+                      type="button"
+                      onClick={handleOpenScalperRecommendations}
+                      className="shrink-0 px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black font-sans flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.35)] border border-emerald-400/40 active:scale-95 group"
+                      title="한국투자증권 실시간 수급 및 거래량 데이터를 분석하여 스캘퍼 최적 추천종목 10선과 스캘핑 점수를 확인합니다."
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-pulse group-hover:rotate-12 transition-transform" />
+                      <span>추천종목 찾기</span>
+                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/40 text-emerald-200 border border-emerald-400/30 font-mono font-bold">
+                        TOP 10
+                      </span>
+                    </button>
 
                     <div className="hidden lg:block h-9 w-px bg-white/10 shrink-0" />
 
@@ -7788,13 +7915,17 @@ export default function App() {
                     {/* AI 추천종목 찾기 딥리서치 버튼 */}
                     <button
                       type="button"
-                      onClick={handleRefreshScalperTop3}
-                      disabled={isRefreshingTop3}
-                      className="px-2 py-0.5 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-400 hover:text-emerald-300 border border-emerald-500/40 text-[10.5px] font-black font-mono flex items-center gap-1 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0 disabled:opacity-50"
-                      title="실시간 거래량 및 추세를 딥리서치 분석하여 AI 추천종목을 갱신합니다."
+                      onClick={handleOpenScalperRecommendations}
+                      disabled={isScalperRecLoading || isRefreshingTop3}
+                      className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-600/90 to-teal-600/90 hover:from-emerald-500 hover:to-teal-500 text-white border border-emerald-400/40 text-[11px] font-black font-mono flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.3)] active:scale-95 shrink-0 disabled:opacity-50"
+                      title="한국투자증권 실시간 수급 및 거래량을 분석하여 스캘퍼 최적 추천 10종목과 스캘핑 점수를 확인합니다."
                     >
-                      {isRefreshingTop3 ? <Loader2 className="w-3 h-3 animate-spin" /> : <BrainCircuit className="w-3 h-3" />}
-                      <span>{isRefreshingTop3 ? "딥리서치 분석중..." : "추천종목 찾기"}</span>
+                      {(isScalperRecLoading || isRefreshingTop3) ? (
+                        <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-200" />
+                      ) : (
+                        <Flame className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-pulse" />
+                      )}
+                      <span>{(isScalperRecLoading || isRefreshingTop3) ? "추천 분석중..." : "추천종목 찾기"}</span>
                     </button>
                     {/* 종목추가 버튼 & 카운트 */}
                     <button
@@ -9872,6 +10003,19 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* 🔥 KIS & AI 실시간 초단타 스캘핑 최적 추천종목 TOP 10 모달 */}
+      <ScalperRecommendationsModal
+        isOpen={showScalperRecModal}
+        onClose={() => setShowScalperRecModal(false)}
+        recommendations={scalperRecommendations}
+        isLoading={isScalperRecLoading}
+        onRefresh={handleRefreshScalperRecList}
+        onSelectStock={handleSelectRecommendationStock}
+        onQuickBuy={handleQuickBuyRecommendation}
+        onBatchRegisterTop3={handleBatchRegisterTop3}
+        registeredSymbols={scalperTabs.map(t => t.symbol)}
+      />
     </div>
   );
 }

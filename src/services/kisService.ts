@@ -1257,8 +1257,45 @@ class KISService {
   public async getOverseasHoldings(): Promise<any> { return { rt_cd: '0', msg1: '', output1: [], output2: [] }; }
   public async orderOverseas(symbol: string, qty: string, price: string, isBuy: boolean, excd: string = 'NASD'): Promise<any> { return { rt_cd: '0', msg1: 'Disabled', output: {} }; }
 
+  public async getScalperRecommendations(): Promise<ScalperRecommendation[]> {
+    try {
+      const res = await axios.get('/api/stocks/scalper-recommendations');
+      if (res.data && Array.isArray(res.data.recommendations)) {
+        return res.data.recommendations;
+      }
+      return [];
+    } catch (error) {
+      console.warn("KIS getScalperRecommendations API error, using safe fallback:", error);
+      return [];
+    }
+  }
+
 }
 
 
+
+export interface ScalperRecommendation {
+  rank: number;
+  symbol: string;
+  name: string;
+  price: number;
+  change: number;
+  changePercent: number;
+  volume: string;
+  tradeAmount: string;
+  volumeSurgeRate: number;
+  volumeIntensity: number;
+  scalpingScore: number;
+  grade: 'SSS' | 'SS' | 'S' | 'A+';
+  category: 'VOLUME_SURGE' | 'MOMENTUM_BREAKOUT' | 'SUPPORT_REBOUND';
+  targetPrice: number;
+  stopLoss: number;
+  expectedReturn: number;
+  rsi: number;
+  reason: string;
+  tags: string[];
+  theme?: string;
+  holdingTime?: string;
+}
 
 export const kisService = new KISService();
