@@ -1520,50 +1520,16 @@ class KISService {
   public async orderOverseas(symbol: string, qty: string, price: string, isBuy: boolean, excd: string = 'NASD'): Promise<any> { return { rt_cd: '0', msg1: 'Disabled', output: {} }; }
 
   public async getScalperRecommendations(): Promise<ScalperRecommendation[]> {
-    let baseList: ScalperRecommendation[] = [];
     try {
-      const res = await axios.get('/api/stocks/scalper-recommendations', { timeout: 6000 });
+      const res = await axios.get('/api/stocks/scalper-recommendations', { timeout: 3500 });
       if (res.data && Array.isArray(res.data.recommendations) && res.data.recommendations.length > 0) {
-        baseList = res.data.recommendations;
+        return res.data.recommendations;
       }
     } catch (error) {
       console.warn("KIS getScalperRecommendations API error, using safe fallback:", error);
     }
 
-    if (baseList.length === 0) {
-      baseList = this.getDefaultScalperRecommendations();
-    }
-
-    // Synchronize all recommendation stocks with exact real-time prices
-    try {
-      const updatedList = await Promise.all(baseList.map(async (rec) => {
-        try {
-          const live = await this.getPrice(rec.symbol);
-          if (live && live.current > 0) {
-            const targetPrice = Math.round(live.current * (1 + Number((1.5 + (rec.scalpingScore % 5) * 0.3).toFixed(2)) / 100));
-            const stopLoss = Math.round(live.current * 0.985);
-            const expectedReturn = Number((((targetPrice - live.current) / live.current) * 100).toFixed(2));
-            return {
-              ...rec,
-              name: live.name || rec.name,
-              price: live.current,
-              change: live.change,
-              changePercent: live.changePercent,
-              volume: live.volume || rec.volume,
-              targetPrice,
-              stopLoss,
-              expectedReturn
-            };
-          }
-        } catch {
-          // ignore
-        }
-        return rec;
-      }));
-      return updatedList;
-    } catch {
-      return baseList;
-    }
+    return this.getDefaultScalperRecommendations();
   }
 
   public getDefaultScalperRecommendations(): ScalperRecommendation[] {
@@ -1587,8 +1553,8 @@ class KISService {
         stopLoss: 195000,
         expectedReturn: 3.03,
         rsi: 64.5,
-        reason: '[KOSPI] HBM 공급 확대 모멘텀 및 장중 외인·기관 대량 순매수 유입. 호가창 매수 받침이 탄탄하여 초단기 스캘핑 돌파 매매 최적 구간.',
-        tags: ['#KOSPI', '#거래량폭증+340%', '#HBM주도주', '#체결강도185%'],
+        reason: '[KOSPI] HBM 공급 확대 및 CVD 실시간 대량 순매수 유입. 호가창 매수 받침이 탄탄하여 초단기 스캘핑 돌파 매매 최적 구간.',
+        tags: ['#KOSPI', '#CVD수급집중', '#거래량폭증+340%', '#체결강도185%'],
         theme: 'AI 반도체 HBM 대장주',
         holdingTime: '3분 ~ 10분 (초단타)'
       },
@@ -1611,13 +1577,37 @@ class KISService {
         stopLoss: 333000,
         expectedReturn: 2.96,
         rsi: 66.8,
-        reason: '[KOSPI] 방산 해외 수주 잭팟 모멘텀으로 직전 고점 강한 양봉 돌파. 5분봉 골든크로스 발생 타점.',
-        tags: ['#KOSPI', '#K-방산', '#고점돌파', '#체결강도172%'],
+        reason: '[KOSPI] 방산 해외 수주 모멘텀으로 직전 고점 강한 양봉 돌파. 5분봉 골든크로스 발생 타점.',
+        tags: ['#KOSPI', '#모멘텀돌파', '#K-방산', '#체결강도172%'],
         theme: 'K-방산 우주항공 대장',
         holdingTime: '5분 ~ 15분 (초단타)'
       },
       {
         rank: 3,
+        symbol: '005930',
+        name: '삼성전자',
+        marketType: 'KOSPI',
+        price: 58500,
+        change: 1200,
+        changePercent: 2.09,
+        volume: '16.5M',
+        tradeAmount: '9,650억원',
+        volumeSurgeRate: 210,
+        volumeIntensity: 155,
+        scalpingScore: 96,
+        grade: 'SS' as const,
+        category: 'VWAP_SUPPORT' as const,
+        targetPrice: 60200,
+        stopLoss: 57600,
+        expectedReturn: 2.91,
+        rsi: 58.4,
+        reason: '[KOSPI] 당일 VWAP(기관·외인 거래량 가중평균가) 상단 안정적 지지 확인 후 우상향 추세 필터 통과.',
+        tags: ['#KOSPI', '#VWAP지지', '#코스피대장', '#기관평단위'],
+        theme: '종합 반도체 대장',
+        holdingTime: '5분 ~ 20분 (단기)'
+      },
+      {
+        rank: 4,
         symbol: '267260',
         name: 'HD현대일렉트릭',
         marketType: 'KOSPI',
@@ -1635,13 +1625,13 @@ class KISService {
         stopLoss: 343000,
         expectedReturn: 2.87,
         rsi: 62.1,
-        reason: '[KOSPI] 북미 초고압 변압기 수주 지속 및 전력 인프라 슈퍼사이클 진입. 매수세 집중 유입.',
-        tags: ['#KOSPI', '#전력인프라', '#거래량급증', '#기관순매수'],
+        reason: '[KOSPI] 북미 초고압 변압기 수주 지속 및 CVD 누적 순매수 자금 유입. 강력한 수급 확인.',
+        tags: ['#KOSPI', '#CVD수급집중', '#전력인프라', '#거래량급증'],
         theme: 'AI 전력망 변압기',
         holdingTime: '3분 ~ 12분 (초단타)'
       },
       {
-        rank: 4,
+        rank: 5,
         symbol: '064350',
         name: '현대로템',
         marketType: 'KOSPI',
@@ -1659,37 +1649,37 @@ class KISService {
         stopLoss: 56300,
         expectedReturn: 2.80,
         rsi: 63.4,
-        reason: '[KOSPI] 폴란드 K2 전차 2차 계약 임박 기대감으로 외국인 프로그램 순매수 폭증.',
-        tags: ['#KOSPI', '#K2전차수출', '#외인순매수', '#눌림목돌파'],
+        reason: '[KOSPI] K2 전차 수출 기대감으로 당일 전고점 돌파. 체결강도 160% 매수세 집중.',
+        tags: ['#KOSPI', '#모멘텀돌파', '#K2전차수출', '#외인순매수'],
         theme: 'K-방산 전차 수출',
         holdingTime: '5분 ~ 15분 (초단타)'
       },
       {
-        rank: 5,
-        symbol: '005930',
-        name: '삼성전자',
+        rank: 6,
+        symbol: '042700',
+        name: '한미반도체',
         marketType: 'KOSPI',
-        price: 78900,
-        change: 1400,
-        changePercent: 1.81,
-        volume: '18.5M',
-        tradeAmount: '1조 4,596억원',
-        volumeSurgeRate: 195,
-        volumeIntensity: 148,
+        price: 118500,
+        change: 4500,
+        changePercent: 3.95,
+        volume: '1.4M',
+        tradeAmount: '1,659억원',
+        volumeSurgeRate: 215,
+        volumeIntensity: 158,
         scalpingScore: 94,
         grade: 'SS' as const,
         category: 'SUPPORT_REBOUND' as const,
-        targetPrice: 80500,
-        stopLoss: 78000,
-        expectedReturn: 2.03,
-        rsi: 56.2,
-        reason: '[KOSPI] 코스피 대장주 외국인 1조원대 순매수 유입. 20일선 지지 후 강력한 기술적 반등 타점.',
-        tags: ['#KOSPI', '#코스피대장', '#거래대금1위', '#기관외인쌍끌이'],
-        theme: '종합 반도체 대장',
-        holdingTime: '5분 ~ 20분 (단기)'
+        targetPrice: 122000,
+        stopLoss: 116500,
+        expectedReturn: 2.95,
+        rsi: 59.2,
+        reason: '[KOSPI] 5분봉 20선 지지선 눌림목 반등 타점 포착. 저위험 고수익 손익비 우수 구간.',
+        tags: ['#KOSPI', '#눌림목반등', '#TC본더', '#손익비최상'],
+        theme: 'AI 반도체 장비',
+        holdingTime: '3분 ~ 15분 (초단타)'
       },
       {
-        rank: 6,
+        rank: 7,
         symbol: '034020',
         name: '두산에너빌리티',
         marketType: 'KOSPI',
@@ -1702,42 +1692,42 @@ class KISService {
         volumeIntensity: 155,
         scalpingScore: 93,
         grade: 'S' as const,
-        category: 'VOLUME_SURGE' as const,
+        category: 'VWAP_SUPPORT' as const,
         targetPrice: 22500,
         stopLoss: 21400,
         expectedReturn: 3.21,
         rsi: 61.0,
-        reason: '[KOSPI] 체코 원전 및 SMR(소형 모듈 원자로) 추가 수주 모멘텀으로 단기 수급 급증.',
-        tags: ['#KOSPI', '#체코원전', '#SMR원자로', '#거래량급증'],
+        reason: '[KOSPI] 체코 원전 및 SMR 수주 모멘텀. VWAP 지지선 상단에서 안정적 반등 진행.',
+        tags: ['#KOSPI', '#VWAP지지', '#체코원전', '#원전주도'],
         theme: '원전 & 가스터빈',
         holdingTime: '3분 ~ 15분 (초단타)'
       },
       {
-        rank: 7,
-        symbol: '007660',
-        name: '이수페타시스',
+        rank: 8,
+        symbol: '068270',
+        name: '셀트리온',
         marketType: 'KOSPI',
-        price: 47200,
-        change: 1900,
-        changePercent: 4.19,
-        volume: '2.8M',
-        tradeAmount: '1,321억원',
-        volumeSurgeRate: 210,
+        price: 198500,
+        change: 5500,
+        changePercent: 2.85,
+        volume: '950K',
+        tradeAmount: '1,885억원',
+        volumeSurgeRate: 190,
         volumeIntensity: 152,
         scalpingScore: 92,
         grade: 'S' as const,
-        category: 'VOLUME_SURGE' as const,
-        targetPrice: 48600,
-        stopLoss: 46400,
-        expectedReturn: 2.97,
-        rsi: 60.8,
-        reason: '[KOSPI] AI 가속기용 고다층 기판(MLB) 증설 효과 및 엔비디아향 공급 수혜.',
-        tags: ['#KOSPI', '#AI_MLB기판', '#고점트라이', '#수급양호'],
-        theme: 'AI 기판 인쇄회로',
-        holdingTime: '3분 ~ 10분 (초단타)'
+        category: 'SUPPORT_REBOUND' as const,
+        targetPrice: 204500,
+        stopLoss: 195500,
+        expectedReturn: 3.02,
+        rsi: 57.8,
+        reason: '[KOSPI] 코스피 바이오 대장주. 주요 매물대 지지 후 눌림목 양봉 반등 시그널 확인.',
+        tags: ['#KOSPI', '#눌림목반등', '#짐펜트라', '#바이오대장'],
+        theme: '바이오 시밀러 대장',
+        holdingTime: '5분 ~ 20분 (단기)'
       },
       {
-        rank: 8,
+        rank: 9,
         symbol: '003230',
         name: '삼양식품',
         marketType: 'KOSPI',
@@ -1755,58 +1745,34 @@ class KISService {
         stopLoss: 556000,
         expectedReturn: 2.65,
         rsi: 59.5,
-        reason: '[KOSPI] K-푸드 불닭볶음면 글로벌 수출 호조세 지속. 영업이익 서프라이즈 모멘텀.',
-        tags: ['#KOSPI', '#K-푸드수출', '#실적호조', '#신고가패턴'],
+        reason: '[KOSPI] K-푸드 불닭볶음면 글로벌 수출 호조세 지속. 전고점 모멘텀 돌파 타점.',
+        tags: ['#KOSPI', '#모멘텀돌파', '#K-푸드수출', '#신고가패턴'],
         theme: '음식료 수출 대장',
         holdingTime: '5분 ~ 15분 (초단타)'
       },
       {
-        rank: 9,
-        symbol: '010130',
-        name: '고려아연',
-        marketType: 'KOSPI',
-        price: 985000,
-        change: 32000,
-        changePercent: 3.36,
-        volume: '150K',
-        tradeAmount: '1,477억원',
-        volumeSurgeRate: 230,
-        volumeIntensity: 162,
-        scalpingScore: 90,
-        grade: 'S' as const,
-        category: 'MOMENTUM_BREAKOUT' as const,
-        targetPrice: 1015000,
-        stopLoss: 970000,
-        expectedReturn: 3.05,
-        rsi: 61.2,
-        reason: '[KOSPI] 경영권 지분 확보 경쟁에 따른 장중 유통 물량 부족 및 공격적 매수세 포착.',
-        tags: ['#KOSPI', '#지분경쟁', '#호가공백', '#변동성스캘핑'],
-        theme: '비철금속 & 지분경쟁',
-        holdingTime: '2분 ~ 8분 (초단타)'
-      },
-      {
         rank: 10,
-        symbol: '196170',
-        name: '알테오젠',
-        marketType: 'KOSDAQ',
-        price: 385000,
-        change: 14000,
-        changePercent: 3.77,
-        volume: '850K',
-        tradeAmount: '3,272억원',
-        volumeSurgeRate: 200,
-        volumeIntensity: 158,
+        symbol: '005380',
+        name: '현대차',
+        marketType: 'KOSPI',
+        price: 246000,
+        change: 6000,
+        changePercent: 2.50,
+        volume: '1.1M',
+        tradeAmount: '2,706억원',
+        volumeSurgeRate: 175,
+        volumeIntensity: 148,
         scalpingScore: 90,
         grade: 'S' as const,
-        category: 'MOMENTUM_BREAKOUT' as const,
-        targetPrice: 396000,
-        stopLoss: 379000,
-        expectedReturn: 2.86,
-        rsi: 62.0,
-        reason: '[KOSDAQ] 키트루다 SC 글로벌 독점 판권 로열티 기대감. 바이오 주도주 거래량 폭증.',
-        tags: ['#KOSDAQ', '#키트루다SC', '#바이오대장주', '#거래대금상위'],
-        theme: '바이오 플랫폼 대장',
-        holdingTime: '3분 ~ 12분 (초단타)'
+        category: 'VWAP_SUPPORT' as const,
+        targetPrice: 253000,
+        stopLoss: 242000,
+        expectedReturn: 2.85,
+        rsi: 56.5,
+        reason: '[KOSPI] 밸류업 프로그램 및 호실적 기반 기관 매수세. VWAP 지지선 상단 안착.',
+        tags: ['#KOSPI', '#VWAP지지', '#밸류업', '#자동차대장'],
+        theme: '자동차 & 미래 모빌리티',
+        holdingTime: '5분 ~ 20분 (단기)'
       }
     ];
     return rawList;
@@ -1828,7 +1794,7 @@ export interface ScalperRecommendation {
   volumeIntensity: number;
   scalpingScore: number;
   grade: 'SSS' | 'SS' | 'S' | 'A+';
-  category: 'VOLUME_SURGE' | 'MOMENTUM_BREAKOUT' | 'SUPPORT_REBOUND';
+  category: 'VOLUME_SURGE' | 'MOMENTUM_BREAKOUT' | 'SUPPORT_REBOUND' | 'VWAP_SUPPORT' | 'CVD_FLOW';
   targetPrice: number;
   stopLoss: number;
   expectedReturn: number;
