@@ -216,39 +216,85 @@ class KISService {
     const isKR = /^\d{6}$/.test(symbol);
     try {
       if (isKR) {
-        const data = await this.getDomesticPrice(symbol);
-        if (!data) return null;
-        
-        return {
-          current: Number(data.stck_prpr),
-          prevClose: Number(data.stck_sdpr),
-          change: Number(data.prdy_vrss),
-          changePercent: Number(data.prdy_ctrt),
-          volume: data.acml_vol || '0',
-          name: data.hts_kor_isnm || undefined
-        };
+        if (this.config) {
+          const data = await this.getDomesticPrice(symbol);
+          if (data && data.stck_prpr) {
+            const isFalling = data.prdy_vrss_sign === '4' || data.prdy_vrss_sign === '5';
+            const rawChange = Math.abs(Number(data.prdy_vrss || 0));
+            const change = isFalling ? -rawChange : rawChange;
+            const rawPercent = Math.abs(Number(data.prdy_ctrt || 0));
+            const changePercent = isFalling ? -rawPercent : rawPercent;
+            const current = Number(data.stck_prpr || 0);
+            const prevClose = Number(data.stck_sdpr || (current - change));
+
+            return {
+              current,
+              prevClose: prevClose > 0 ? prevClose : (current - change),
+              change,
+              changePercent,
+              volume: Number(data.acml_vol || 0).toLocaleString(),
+              name: data.hts_kor_isnm || undefined
+            };
+          }
+        }
+
+        // Live fallback via Universal Quote Resolver
+        try {
+          const resp = await axios.get(`/api/stocks/quote?symbol=${encodeURIComponent(symbol)}`, { timeout: 3500 });
+          if (resp.data && resp.data.price) {
+            return {
+              current: Number(resp.data.price),
+              prevClose: Number(resp.data.prevClose || (resp.data.price - (resp.data.change || 0))),
+              change: Number(resp.data.change || 0),
+              changePercent: Number(resp.data.changePercent || 0),
+              volume: String(resp.data.volume || '0'),
+              name: resp.data.name || undefined
+            };
+          }
+        } catch {
+          // ignore
+        }
       } else {
-        const data = await this.getOverseasPrice(symbol);
-        if (!data) return null;
-        
-        const current = Number(data.last);
-        const prevClose = Number(data.base);
-        const change = Number(data.diff || (current - prevClose));
-        const changePercent = Number(data.rate || (prevClose > 0 ? (change / prevClose) * 100 : 0));
-        
-        return {
-          current,
-          prevClose,
-          change,
-          changePercent,
-          volume: data.tvol || '0',
-          name: data.name || data.orgr_isnm || undefined
-        };
+        if (this.config) {
+          const data = await this.getOverseasPrice(symbol);
+          if (data && data.last) {
+            const current = Number(data.last);
+            const prevClose = Number(data.base);
+            const change = Number(data.diff || (current - prevClose));
+            const changePercent = Number(data.rate || (prevClose > 0 ? (change / prevClose) * 100 : 0));
+            
+            return {
+              current,
+              prevClose: prevClose > 0 ? prevClose : (current - change),
+              change,
+              changePercent,
+              volume: data.tvol || '0',
+              name: data.name || data.orgr_isnm || undefined
+            };
+          }
+        }
+
+        // Live fallback for US quotes
+        try {
+          const resp = await axios.get(`/api/stocks/quote?symbol=${encodeURIComponent(symbol)}`, { timeout: 3500 });
+          if (resp.data && resp.data.price) {
+            return {
+              current: Number(resp.data.price),
+              prevClose: Number(resp.data.prevClose || (resp.data.price - (resp.data.change || 0))),
+              change: Number(resp.data.change || 0),
+              changePercent: Number(resp.data.changePercent || 0),
+              volume: String(resp.data.volume || '0'),
+              name: resp.data.name || undefined
+            };
+          }
+        } catch {
+          // ignore
+        }
       }
     } catch (e) {
       console.warn(`[KIS Service] Failed to fetch price for ${symbol}:`, e);
-      return null;
     }
+    return null;
   }
 
   public async getHoldings() {
@@ -1107,6 +1153,83 @@ class KISService {
       console.warn("[KIS Service] Domestic Orderbook Exception safely caught:", error?.response?.data || error?.message);
       return { rt_cd: '0', output1: {}, output2: {} };
     }
+  }
+
+  public async fetchLiveOrderbook(symbol: string): Promise<any> {
+    const isKR = /^\d{6}$/.test(symbol);
+    if (!isKR) return null;
+
+    // 1. Try KIS API if configured
+    if (this.config) {
+      try {
+        const data = await this.getDomesticOrderbook(symbol);
+        const o1 = data?.output1;
+        if (o1 && o1.askp1 && o1.bidp1) {
+          const askLevels = [
+            Number(o1.askp4 || 0),
+            Number(o1.askp3 || 0),
+            Number(o1.askp2 || 0),
+            Number(o1.askp1 || 0)
+          ].filter(p => p > 0);
+
+          const askVolumes = [
+            Number(o1.askp_rsqn4 || 0),
+            Number(o1.askp_rsqn3 || 0),
+            Number(o1.askp_rsqn2 || 0),
+            Number(o1.askp_rsqn1 || 0)
+          ];
+
+          const bidLevels = [
+            Number(o1.bidp1 || 0),
+            Number(o1.bidp2 || 0),
+            Number(o1.bidp3 || 0),
+            Number(o1.bidp4 || 0)
+          ].filter(p => p > 0);
+
+          const bidVolumes = [
+            Number(o1.bidp_rsqn1 || 0),
+            Number(o1.bidp_rsqn2 || 0),
+            Number(o1.bidp_rsqn3 || 0),
+            Number(o1.bidp_rsqn4 || 0)
+          ];
+
+          if (askLevels.length > 0 && bidLevels.length > 0) {
+            const totalAsk = Number(o1.total_askp_rsqn || askVolumes.reduce((a, b) => a + b, 0));
+            const totalBid = Number(o1.total_bidp_rsqn || bidVolumes.reduce((a, b) => a + b, 0));
+            const sum = (totalAsk + totalBid) || 1;
+            const maxLevelVol = Math.max(...askVolumes, ...bidVolumes, 1);
+
+            return {
+              symbol,
+              isRealData: true,
+              askLevels,
+              askVolumes,
+              bidLevels,
+              bidVolumes,
+              totalAskVolume: totalAsk,
+              totalBidVolume: totalBid,
+              askPctVal: ((totalAsk / sum) * 100).toFixed(1),
+              bidPctVal: ((totalBid / sum) * 100).toFixed(1),
+              maxLevelVol
+            };
+          }
+        }
+      } catch (e) {
+        console.warn("[KIS Service] Fetch Orderbook via KIS failed, falling back:", e);
+      }
+    }
+
+    // 2. Fallback to /api/stocks/orderbook
+    try {
+      const resp = await axios.get(`/api/stocks/orderbook?symbol=${encodeURIComponent(symbol)}`, { timeout: 3500 });
+      if (resp.data && resp.data.isRealData) {
+        return resp.data;
+      }
+    } catch {
+      // ignore
+    }
+
+    return null;
   }
 
   public async getExchangeRate() {

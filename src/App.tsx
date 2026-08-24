@@ -1227,14 +1227,22 @@ export default function App() {
     };
   };
 
-  const formatCurrency = (val: number, _forceKRW: boolean = false, _customMarket?: 'KR' | 'US') => {
+  const formatCurrency = (val: number, forceKRW: boolean = false, customMarket?: 'KR' | 'US') => {
     if (val === undefined || val === null || isNaN(val)) return '-';
-    return ;
+    const isUS = customMarket ? customMarket === 'US' : (!forceKRW && marketType === 'US');
+    if (isUS) {
+      return `$${Number(val).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    }
+    return `${Math.round(val).toLocaleString()}원`;
   };
 
   const formatQuantity = (val: number) => {
-    return ;
+    if (val === undefined || val === null || isNaN(val)) return '0';
+    return Number(val).toLocaleString();
   };
+
+  const [liveOrderbook, setLiveOrderbook] = useState<any>(null);
+  const [isLiveOrderbookLoading, setIsLiveOrderbookLoading] = useState<boolean>(false);
   const [showKisModal, setShowKisModal] = useState(false);
   const [showKisPassword, setShowKisPassword] = useState(false);
   const [isAppInitialized, setIsAppInitialized] = useState(true);
@@ -2087,44 +2095,62 @@ export default function App() {
     const isUSStock = selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US';
     const currentPrice = selectedStock.price;
     const tickSize = getTickSize(currentPrice, isUSStock ? 'US' : 'KR');
+
+    // Use live real-time orderbook from KIS / Naver if available
+    if (
+      liveOrderbook && 
+      liveOrderbook.symbol === selectedStock.symbol && 
+      Array.isArray(liveOrderbook.askLevels) && 
+      liveOrderbook.askLevels.length > 0 &&
+      Array.isArray(liveOrderbook.bidLevels) &&
+      liveOrderbook.bidLevels.length > 0
+    ) {
+      const askVolumes = liveOrderbook.askVolumes || [0, 0, 0, 0];
+      const bidVolumes = liveOrderbook.bidVolumes || [0, 0, 0, 0];
+      const maxLevelVol = liveOrderbook.maxLevelVol || Math.max(...askVolumes, ...bidVolumes, 1);
+      const totalAskVolume = liveOrderbook.totalAskVolume || askVolumes.reduce((a: number, b: number) => a + b, 0);
+      const totalBidVolume = liveOrderbook.totalBidVolume || bidVolumes.reduce((a: number, b: number) => a + b, 0);
+      const totalDepth = (totalAskVolume + totalBidVolume) || 1;
+      const askPctVal = liveOrderbook.askPctVal || ((totalAskVolume / totalDepth) * 100).toFixed(1);
+      const bidPctVal = liveOrderbook.bidPctVal || ((totalBidVolume / totalDepth) * 100).toFixed(1);
+
+      return {
+        isUSStock,
+        currentPrice,
+        tickSize,
+        isRealData: true,
+        askLevels: liveOrderbook.askLevels,
+        bidLevels: liveOrderbook.bidLevels,
+        askVolumes,
+        bidVolumes,
+        maxLevelVol,
+        totalAskVolume,
+        totalBidVolume,
+        askPctVal,
+        bidPctVal
+      };
+    }
+
+    // Dynamic price level fallback when orderbook is initial loading
     const askLevels = Array.from({ length: 4 }, (_, i) => 
       isUSStock ? Number((currentPrice + (4 - i) * tickSize).toFixed(4)) : currentPrice + (4 - i) * tickSize
     );
     const bidLevels = Array.from({ length: 4 }, (_, i) => 
       isUSStock ? Number((currentPrice - (i + 1) * tickSize).toFixed(4)) : currentPrice - (i + 1) * tickSize
     );
-    const getLevelVolume = (priceLevel: number) => {
-      const intPrice = isUSStock ? Math.round(priceLevel * 100) : Math.round(priceLevel);
-      const symHash = (selectedStock?.symbol || '').split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-      
-      let scale = 1;
-      if (isUSStock) {
-        scale = currentPrice < 10 ? 50 : currentPrice < 100 ? 10 : currentPrice < 500 ? 3 : 1;
-      } else {
-        scale = currentPrice < 10000 ? 50 : currentPrice < 100000 ? 10 : 2;
-      }
-
-      const base = (Math.abs((intPrice * 37 + symHash * 13) % 800) + 120) * scale;
-      const timeStep = Math.floor(Date.now() / 2500);
-      const wiggle = Math.floor(Math.sin(timeStep + intPrice) * 35 * scale) + (35 * scale);
-      
-      return Math.max(10 * scale, Math.floor(base + wiggle));
-    };
-
-    const askVolumes = askLevels.map(p => getLevelVolume(p));
-    const bidVolumes = bidLevels.map(p => getLevelVolume(p));
-    const maxLevelVol = Math.max(...askVolumes, ...bidVolumes, 1);
-
-    const totalAskVolume = askVolumes.reduce((a, b) => a + b, 0);
-    const totalBidVolume = bidVolumes.reduce((a, b) => a + b, 0);
-    const totalDepthVolume = (totalAskVolume + totalBidVolume) || 1;
-    const askPctVal = ((totalAskVolume / totalDepthVolume) * 100).toFixed(1);
-    const bidPctVal = ((totalBidVolume / totalDepthVolume) * 100).toFixed(1);
+    const askVolumes = [0, 0, 0, 0];
+    const bidVolumes = [0, 0, 0, 0];
+    const maxLevelVol = 1;
+    const totalAskVolume = 0;
+    const totalBidVolume = 0;
+    const askPctVal = '50.0';
+    const bidPctVal = '50.0';
 
     return {
       isUSStock,
       currentPrice,
       tickSize,
+      isRealData: false,
       askLevels,
       bidLevels,
       askVolumes,
@@ -2135,7 +2161,7 @@ export default function App() {
       askPctVal,
       bidPctVal
     };
-  }, [selectedStock, marketType]);
+  }, [selectedStock, liveOrderbook, marketType]);
   const totalValue = useMemo(() => {
     // Total Asset Valuation = Cash Balance + Current Market Value of Stock Holdings + Pending Order Reserves
     let stockValue = 0;
@@ -4675,69 +4701,27 @@ export default function App() {
 
   // Unified Gap Trading logic is now placed in the main bot effect below.
 
-  // Real-time Stock Price Sync Interval (Optimized dual-interval for selected and other watchlist stocks)
+  // Real-time Stock Price & Orderbook Sync Interval
   useEffect(() => {
     if (!isAppInitialized) return;
     let slowInterval: NodeJS.Timeout;
     let fastInterval: NodeJS.Timeout;
+    let orderbookInterval: NodeJS.Timeout;
     let kisSyncInterval: NodeJS.Timeout;
 
-    if (kisConfig.isConnected) {
-      // 1. Slow sync for all watchlist stocks (every 15 seconds)
-      const syncAllPrices = async () => {
-        try {
-          const currentStocks = stocksRef.current;
-          if (currentStocks.length === 0) return;
+    // 1. Sync for all watchlist stocks (every 10 seconds)
+    const syncAllPrices = async () => {
+      try {
+        const currentStocks = stocksRef.current;
+        if (currentStocks.length === 0) return;
 
-          const updatedStocks = await Promise.all(currentStocks.map(async (s) => {
-            try {
-              const priceData = await kisService.getPrice(s.symbol);
-              if (priceData) {
-                const realPrice = priceData.current;
-                const safeHist = Array.isArray(s.history) ? s.history : [];
-                
-                return {
-                  ...s,
-                  price: realPrice,
-                  change: priceData.change,
-                  changePercent: priceData.changePercent,
-                  volume: priceData.volume,
-                  isRealTime: true,
-                  lastUpdated: new Date().toLocaleTimeString(),
-                  history: [...safeHist.slice(1), { 
-                    time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }), 
-                    price: realPrice 
-                  }]
-                };
-              }
-            } catch (innerErr: any) {
-              console.warn(`All-stock price fetch failed for ${s.symbol}:`, innerErr);
-            }
-            return { ...s };
-          }));
-          
-          setStocks(updatedStocks);
-        } catch (err: any) {
-          console.error("Real-time price sync failed:", err);
-        }
-      };
-
-      // 2. Fast sync for the currently selected stock to enable high frequency trading (every 2 seconds)
-      const syncSelectedPrice = async () => {
-        if (!selectedSymbol) return;
-        try {
-          const priceData = await kisService.getPrice(selectedSymbol);
-          if (priceData) {
-            const realPrice = priceData.current;
-            setStocks(prev => prev.map(s => {
-              if (s.symbol !== selectedSymbol) return s;
-              const newHistory = Array.isArray(s.history) ? [...s.history] : [];
-              if (newHistory.length > 0) {
-                newHistory[newHistory.length - 1] = {
-                  ...newHistory[newHistory.length - 1],
-                  price: realPrice
-                };
-              }
+        const updatedStocks = await Promise.all(currentStocks.map(async (s) => {
+          try {
+            const priceData = await kisService.getPrice(s.symbol);
+            if (priceData && priceData.current > 0) {
+              const realPrice = priceData.current;
+              const safeHist = Array.isArray(s.history) ? s.history : [];
+              
               return {
                 ...s,
                 price: realPrice,
@@ -4746,32 +4730,99 @@ export default function App() {
                 volume: priceData.volume,
                 isRealTime: true,
                 lastUpdated: new Date().toLocaleTimeString(),
-                history: newHistory
+                history: safeHist.length > 0 
+                  ? [...safeHist.slice(1), { 
+                      time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }), 
+                      price: realPrice 
+                    }]
+                  : [{ time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }), price: realPrice }]
               };
-            }));
+            }
+          } catch (innerErr: any) {
+            console.warn(`All-stock price fetch failed for ${s.symbol}:`, innerErr);
           }
-        } catch (innerErr: any) {
-          console.warn(`Fast price sync failed for ${selectedSymbol}:`, innerErr);
+          return { ...s };
+        }));
+        
+        setStocks(updatedStocks);
+      } catch (err: any) {
+        console.error("Real-time price sync failed:", err);
+      }
+    };
+
+    // 2. Fast sync for the currently selected stock (every 1.5 seconds)
+    const syncSelectedPrice = async () => {
+      if (!selectedSymbol) return;
+      try {
+        const priceData = await kisService.getPrice(selectedSymbol);
+        if (priceData && priceData.current > 0) {
+          const realPrice = priceData.current;
+          setStocks(prev => prev.map(s => {
+            if (s.symbol !== selectedSymbol) return s;
+            const newHistory = Array.isArray(s.history) ? [...s.history] : [];
+            if (newHistory.length > 0) {
+              newHistory[newHistory.length - 1] = {
+                ...newHistory[newHistory.length - 1],
+                price: realPrice
+              };
+            } else {
+              newHistory.push({
+                time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
+                price: realPrice
+              });
+            }
+            return {
+              ...s,
+              price: realPrice,
+              change: priceData.change,
+              changePercent: priceData.changePercent,
+              volume: priceData.volume,
+              isRealTime: true,
+              lastUpdated: new Date().toLocaleTimeString(),
+              history: newHistory
+            };
+          }));
         }
-      };
+      } catch (innerErr: any) {
+        console.warn(`Fast price sync failed for ${selectedSymbol}:`, innerErr);
+      }
+    };
 
-      syncAllPrices();
-      slowInterval = setInterval(syncAllPrices, 15000);
+    // 3. Live real-time orderbook sync for selected stock (every 1.5 seconds)
+    const syncLiveOrderbook = async () => {
+      if (!selectedSymbol) return;
+      try {
+        const ob = await kisService.fetchLiveOrderbook(selectedSymbol);
+        if (ob) {
+          setLiveOrderbook(ob);
+        }
+      } catch (e: any) {
+        console.warn(`Live orderbook fetch failed for ${selectedSymbol}:`, e);
+      }
+    };
 
-      syncSelectedPrice();
-      fastInterval = setInterval(syncSelectedPrice, 2000);
+    // Immediate initial sync
+    syncAllPrices();
+    syncSelectedPrice();
+    syncLiveOrderbook();
 
-      // Regular KIS Balance & Holdings sync (every 10 seconds while connected to keep portfolio 100% accurate)
+    slowInterval = setInterval(syncAllPrices, 10000);
+    fastInterval = setInterval(syncSelectedPrice, 1500);
+    orderbookInterval = setInterval(syncLiveOrderbook, 1500);
+
+    if (kisConfig.isConnected) {
       kisSyncInterval = setInterval(() => {
         handleSyncKIS();
       }, 10000);
     }
+
     return () => {
       if (slowInterval) clearInterval(slowInterval);
       if (fastInterval) clearInterval(fastInterval);
+      if (orderbookInterval) clearInterval(orderbookInterval);
       if (kisSyncInterval) clearInterval(kisSyncInterval);
     };
-  }, [kisConfig.isConnected, marketType, selectedSymbol, isGapBotActive, true]);
+  }, [kisConfig.isConnected, marketType, selectedSymbol, isGapBotActive]);
 
   // Auto KIS initial sync on connection
   const initialKisSyncTriggeredRef = React.useRef(false);
@@ -4786,43 +4837,13 @@ export default function App() {
     }
   }, [kisConfig.isConnected]);
 
-  // Simulation: Update prices randomly (ONLY if NOT connected)
+  // Real-time clock update (clean 1-second tick)
   useEffect(() => {
-    if (!isAppInitialized) return;
     const interval = setInterval(() => {
-      // COMPLETELY DISABLE simulation if KIS is connected - use real data only
-      if (kisConfig.isConnected) {
-        setTime(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
-        return;
-      }
-
-      // If not connected, we keep a very slow simulation just to keep UI alive
-      setStocks(prev => prev.map(stock => {
-        const isUS = stock.market === 'US' || /^[A-Z]/.test(stock.symbol);
-        const tickSize = getTickSize(stock.price, isUS ? 'US' : 'KR');
-        const moves = [-tickSize, 0, tickSize];
-        const move = moves[Math.floor(Math.random() * moves.length)];
-        if (move === 0) return stock;
-
-        const newPrice = Math.max(tickSize, isUS ? Number((stock.price + move).toFixed(2)) : stock.price + move);
-        const basePrice = stock.basePrice || (stock.price - stock.change) || newPrice;
-        const { change, changePercent } = calcStockChange(newPrice, basePrice, isUS ? 'US' : 'KR');
-
-        const safeHist = Array.isArray(stock.history) ? stock.history : [];
-        const newHistory = [...safeHist.slice(1), { time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }), price: newPrice }];
-        return {
-          ...stock,
-          price: newPrice,
-          basePrice,
-          change,
-          changePercent,
-          history: newHistory
-        };
-      }));
       setTime(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
-    }, 10000); // Slower updates
+    }, 1000);
     return () => clearInterval(interval);
-  }, [kisConfig.isConnected, marketType, true]);
+  }, []);
 
   // Fetch News using Gemini Search with Caching
   const fetchNews = async (symbol: string, isManual = false) => {
@@ -7825,6 +7846,11 @@ export default function App() {
                     <span className="text-[10.5px] font-black text-slate-300 uppercase tracking-wider flex items-center gap-1">
                       <Activity className="w-3 h-3 text-sleek-blue" />
                       실시간 잔량 호가창 (4호가)
+                      {orderBookData?.isRealData && (
+                        <span className="text-[8.5px] px-1 rounded bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 font-mono">
+                          LIVE
+                        </span>
+                      )}
                     </span>
                     {selectedStock && (
                       <span className="text-[9.5px] font-mono text-slate-400 truncate max-w-[80px]">

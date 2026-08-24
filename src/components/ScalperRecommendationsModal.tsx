@@ -286,7 +286,14 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
                               </div>
                               <div className="text-right font-mono">
                                 <div className="text-sm font-black text-white">{stock.price.toLocaleString()}원</div>
-                                <div className="text-xs font-bold text-rose-400">+{stock.changePercent.toFixed(2)}%</div>
+                                <div className={`text-xs font-bold ${stock.changePercent >= 0 ? 'text-rose-400' : 'text-sky-400'}`}>
+                                  {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                                  {stock.change !== undefined && (
+                                    <span className="text-[10px] ml-1 opacity-80">
+                                      ({stock.change >= 0 ? '+' : ''}{stock.change.toLocaleString()}원)
+                                    </span>
+                                  )}
+                                </div>
                               </div>
                             </div>
 
@@ -399,7 +406,14 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
                               <div className="text-right">
                                 <div className="text-xs text-slate-400 text-[10px]">현재가</div>
                                 <div className="text-sm font-black text-white">{stock.price.toLocaleString()}원</div>
-                                <div className="text-xs font-bold text-rose-400">+{stock.changePercent.toFixed(2)}%</div>
+                                <div className={`text-xs font-bold ${stock.changePercent >= 0 ? 'text-rose-400' : 'text-sky-400'}`}>
+                                  {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
+                                  {stock.change !== undefined && (
+                                    <span className="text-[10px] ml-1 opacity-80">
+                                      ({stock.change >= 0 ? '+' : ''}{stock.change.toLocaleString()}원)
+                                    </span>
+                                  )}
+                                </div>
                               </div>
 
                               <div className="text-right">
