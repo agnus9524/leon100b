@@ -1,12 +1,12 @@
 export interface StockSuggestion {
   symbol: string;
   name: string;
-  market: 'KR' | 'US';
+  market: 'KR';
   price?: number;
 }
 
 export const POPULAR_STOCKS: StockSuggestion[] = [
-  // KR Stocks (Domestic with both Korean and English Names/Codes)
+  // 국내 대표 우량 및 주도주 (코스피 / 코스닥)
   { symbol: '005930', name: '삼성전자 (Samsung Electronics)', market: 'KR' },
   { symbol: '000660', name: 'SK하이닉스 (SK hynix)', market: 'KR' },
   { symbol: '373220', name: 'LG에너지솔루션 (LG Energy Solution)', market: 'KR' },
@@ -55,50 +55,14 @@ export const POPULAR_STOCKS: StockSuggestion[] = [
   { symbol: '352820', name: '하이브 (HYBE)', market: 'KR' },
   { symbol: '069500', name: 'KODEX 200 (코덱스 200)', market: 'KR' },
   { symbol: '122630', name: 'KODEX 레버리지 (KODEX Leverage)', market: 'KR' },
-  { symbol: '133690', name: 'TIGER 미국나스닥100 (TIGER US Nasdaq 100)', market: 'KR' },
-  { symbol: '360750', name: 'TIGER 미국S&P500 (TIGER US S&P 500)', market: 'KR' },
-  
-  // US Stocks (Major US Stocks with English and Korean Names/Codes)
-  { symbol: 'NVDA', name: '엔비디아 (NVIDIA Corp)', market: 'US' },
-  { symbol: 'AAPL', name: '애플 (Apple Inc)', market: 'US' },
-  { symbol: 'TSLA', name: '테슬라 (Tesla Inc)', market: 'US' },
-  { symbol: 'MSFT', name: '마이크로소프트 (Microsoft Corp)', market: 'US' },
-  { symbol: 'GOOGL', name: '알파벳 A / 구글 (Alphabet Google A)', market: 'US' },
-  { symbol: 'GOOG', name: '알파벳 C / 구글 (Alphabet Google C)', market: 'US' },
-  { symbol: 'AMZN', name: '아마존 (Amazon.com Inc)', market: 'US' },
-  { symbol: 'META', name: '메타 / 페이스북 (Meta Platforms)', market: 'US' },
-  { symbol: 'AMD', name: 'AMD (어드밴스드 마이크로 디바이스)', market: 'US' },
-  { symbol: 'PLTR', name: '팔란티어 (Palantir Technologies)', market: 'US' },
-  { symbol: 'NFLX', name: '넷플릭스 (Netflix Inc)', market: 'US' },
-  { symbol: 'AVGO', name: '브로드컴 (Broadcom Inc)', market: 'US' },
-  { symbol: 'ARM', name: 'ARM 홀딩스 (Arm Holdings)', market: 'US' },
-  { symbol: 'SMCI', name: '슈퍼마이크로 (Super Micro Computer)', market: 'US' },
-  { symbol: 'COIN', name: '코인베이스 (Coinbase Global)', market: 'US' },
-  { symbol: 'MARA', name: '마라톤 디지털 (MARA Holdings)', market: 'US' },
-  { symbol: 'RIOT', name: '라이엇 플랫폼스 (Riot Platforms)', market: 'US' },
-  { symbol: 'SOUN', name: '사운드하운드 AI (SoundHound AI)', market: 'US' },
-  { symbol: 'SOFI', name: '소파이 (SoFi Technologies)', market: 'US' },
-  { symbol: 'BBAI', name: '빅베어 AI (BigBear.ai)', market: 'US' },
-  { symbol: 'IONQ', name: '아이온큐 (IonQ Inc)', market: 'US' },
-  { symbol: 'INTC', name: '인텔 (Intel Corp)', market: 'US' },
-  { symbol: 'QCOM', name: '퀄컴 (Qualcomm Inc)', market: 'US' },
-  { symbol: 'TSM', name: 'TSMC (Taiwan Semiconductor)', market: 'US' },
-  { symbol: 'LLY', name: '일라이 릴리 (Eli Lilly and Co)', market: 'US' },
-  { symbol: 'COST', name: '코스트코 (Costco Wholesale)', market: 'US' },
-  { symbol: 'WMT', name: '월마트 (Walmart Inc)', market: 'US' },
-  { symbol: 'DIS', name: '디즈니 (Walt Disney Co)', market: 'US' },
-  { symbol: 'NKE', name: '나이키 (Nike Inc)', market: 'US' },
-  { symbol: 'SBUX', name: '스타벅스 (Starbucks Corp)', market: 'US' },
-  { symbol: 'PYPL', name: '페이팔 (PayPal Holdings)', market: 'US' },
-  { symbol: 'CRM', name: '세일즈포스 (Salesforce Inc)', market: 'US' },
-  { symbol: 'ORCL', name: '오라클 (Oracle Corp)', market: 'US' },
-  { symbol: 'BRK.B', name: '버크셔 해서웨이 B (Berkshire Hathaway B)', market: 'US' },
-  { symbol: 'SPY', name: 'SPDR S&P 500 ETF (SPY)', market: 'US' },
-  { symbol: 'QQQ', name: 'Invesco QQQ Trust (나스닥 100 ETF)', market: 'US' },
-  { symbol: 'SOXL', name: 'Direxion 반도체 3X 불 (SOXL)', market: 'US' },
-  { symbol: 'SOXS', name: 'Direxion 반도체 3X 베어 (SOXS)', market: 'US' },
-  { symbol: 'TQQQ', name: 'ProShares 울트라프로 QQQ 3X (TQQQ)', market: 'US' },
-  { symbol: 'SQQQ', name: 'ProShares 울트라프로 숏 QQQ 3X (SQQQ)', market: 'US' },
-  { symbol: 'SMH', name: 'VanEck Semiconductor ETF (SMH)', market: 'US' }
+  { symbol: '114800', name: 'KODEX 인버스 (KODEX Inverse)', market: 'KR' },
+  { symbol: '252670', name: 'KODEX 200선물인버스2X', market: 'KR' },
+  { symbol: '233740', name: 'KODEX 코스닥150레버리지', market: 'KR' },
+  { symbol: '251340', name: 'KODEX 코스닥150선물인버스', market: 'KR' },
+  { symbol: '000810', name: '삼성화재 (Samsung Fire & Marine)', market: 'KR' },
+  { symbol: '015760', name: '한국전력 (KEPCO)', market: 'KR' },
+  { symbol: '033780', name: 'KT&G (케이티앤지)', market: 'KR' },
+  { symbol: '003670', name: '포스코퓨처엠 (POSCO Future M)', market: 'KR' },
+  { symbol: '011200', name: 'HMM (에이치엠엠)', market: 'KR' },
+  { symbol: '010130', name: '고려아연 (Korea Zinc)', market: 'KR' }
 ];
-

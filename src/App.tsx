@@ -956,6 +956,7 @@ export function calculateStockLimits(price: number, changePercent: number = 0, i
 
 export default function App() {
   const [marketType, setMarketType] = useState<'KR' | 'US'>('KR');
+// Forced to KR always
   const holdingsViewTab = 'KR';
 
   const [lastSelectedKR, setLastSelectedKR] = useState(() => {
@@ -977,7 +978,7 @@ export default function App() {
     changePercent: 0,
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1350 + Math.random() * 5 }))
   });
-  const [isRateLoading, setIsRateLoading] = useState(true);
+  
   const [exchangeRateTrend, setExchangeRateTrend] = useState<'UP' | 'DOWN'>('UP');
   const [selectionMode, setSelectionMode] = useState<'RECOMMENDED' | 'MANUAL'>('RECOMMENDED');
   const [stocks, setStocks] = useState<Stock[]>(() => {
@@ -1218,25 +1219,17 @@ export default function App() {
     };
   };
 
-  const formatCurrency = (val: number, forceKRW: boolean = false, customMarket?: 'KR' | 'US') => {
+  const formatCurrency = (val: number, _forceKRW: boolean = false, _customMarket?: 'KR' | 'US') => {
     if (val === undefined || val === null || isNaN(val)) return '-';
-    const effectiveMarket = customMarket || (selectedStock && (/^[A-Za-z]/.test(selectedStock.symbol) || selectedStock.market === 'US') ? 'US' : marketType);
-    const isUSD = effectiveMarket === 'US' && !forceKRW;
-    if (isUSD) {
-      return `${val < 0 ? '-' : ''}$${Math.abs(val).toLocaleString(undefined, { 
-        minimumFractionDigits: 2, 
-        maximumFractionDigits: 4 
-      })}`;
-    }
-    return `₩${Math.round(val).toLocaleString()}`;
+    return ;
   };
 
   const formatQuantity = (val: number) => {
-    return `${val.toLocaleString()} ${marketType === 'US' ? '주' : '주'}`; // '주' is standard for both in KR context usually, but can be customized
+    return ;
   };
   const [showKisModal, setShowKisModal] = useState(false);
   const [showKisPassword, setShowKisPassword] = useState(false);
-  const [isAppInitialized, setIsAppInitialized] = useState(false);
+  const [isAppInitialized, setIsAppInitialized] = useState(true);
   const [initSyncState, setInitSyncState] = useState<{
     status: 'idle' | 'syncing' | 'ready' | 'error';
     progress: number;
@@ -3294,92 +3287,11 @@ export default function App() {
     // Disabled exchange rate
   }, []);
   
-  const dummy_fetchRealExchangeRate = React.useCallback(async () => {
-    try {
-      let realRate = 0;
-      
-      // Priority 1: KIS API (If connected)
-      if (kisConfig.isConnected) {
-        try {
-          const kisRateInfo = await kisService.getExchangeRate();
-          if (kisRateInfo && kisRateInfo.length > 0) {
-            // Find the most recent rate (usually the first one)
-            // fx_rt is the exchange rate
-            realRate = Number(kisRateInfo[0].fx_rt);
-          }
-        } catch (e) {
-          console.warn("KIS Exchange Rate Fetch Failed, falling back to Public API", e);
-        }
-      }
-
-      // Priority 2: Public API (Backup) - Using a more reliable one if available
-      if (!realRate) {
-        try {
-          const response = await fetch('https://open.er-api.com/v6/latest/USD');
-          const data = await response.json();
-          if (data && data.rates && data.rates.KRW) {
-            // Adjusting mid-market rate to match Base Rate (매매기준율) usually seen on portals
-            // Usually mid-market is slightly lower than portal base rates
-            const midRate = data.rates.KRW;
-            realRate = midRate * 1.003; // Adding a 0.3% premium to match portal base rates (매매기준율)
-          }
-        } catch (e) {
-          console.error("Public API Fetch Failed", e);
-        }
-      }
-
-      if (realRate) {
-        setExchangeRate(prev => {
-          setExchangeRateTrend(realRate >= prev ? 'UP' : 'DOWN');
-          return realRate;
-        });
-        setExchangeData(prev => {
-          const newHistory = [...(prev?.history || []), { 
-            time: new Date().toLocaleTimeString('ko-KR', { hour12: false }), 
-            price: realRate 
-          }].slice(-50);
-          const change = realRate - (prev?.price || realRate);
-          return {
-            symbol: 'USD/KRW',
-            name: '원/달러 환율',
-            price: realRate,
-            change,
-            changePercent: prev?.price ? (change / prev.price) * 100 : 0,
-            history: newHistory
-          };
-        });
-        setIsRateLoading(false);
-      }
-    } catch (error: any) {
-      console.error("Failed to fetch real exchange rate:", error);
-      showNotification("환율 정보를 가져오는 데 실패했습니다.", "error");
-    } finally {
-      setIsRateLoading(false);
-    }
-  }, [kisConfig.isConnected]);
-
   const [isRefreshingRate, setIsRefreshingRate] = useState(false);
   const handleManualRateRefresh = async () => {
     setIsRefreshingRate(true);
-    await fetchRealExchangeRate();
-    setTimeout(() => setIsRefreshingRate(false), 1000);
+    setTimeout(() => setIsRefreshingRate(false), 500);
   };
-
-  useEffect(() => {
-    fetchRealExchangeRate();
-    const simulatorInterval = setInterval(() => {
-      setExchangeRate(prev => {
-        const change = (Math.random() - 0.5) * 0.1; // Tiny fluctuations
-        const newRate = Number((prev + change).toFixed(2));
-        setExchangeRateTrend(newRate >= prev ? 'UP' : 'DOWN');
-        return newRate;
-      });
-    }, 15000);
-
-    return () => {
-      clearInterval(simulatorInterval);
-    };
-  }, [fetchRealExchangeRate]);
 
   // Firebase Auth & License Check
   useEffect(() => {
@@ -3499,14 +3411,14 @@ export default function App() {
   // Auto-Sync KIS Account Status once initial stocks, charts, and prices load
   const hasAutoSyncedRef = React.useRef(false);
   useEffect(() => {
-    if (kisConfig.isConnected && !hasAutoSyncedRef.current && stocks.length > 0 && isAppInitialized) {
+    if (kisConfig.isConnected && !hasAutoSyncedRef.current && stocks.length > 0 && true) {
       hasAutoSyncedRef.current = true;
       const timer = setTimeout(() => {
         handleSyncKIS();
       }, 800);
       return () => clearTimeout(timer);
     }
-  }, [kisConfig.isConnected, stocks.length, isAppInitialized]);
+  }, [kisConfig.isConnected, stocks.length, true]);
 
   const isLoggingInRef = React.useRef(false);
   const handleLogin = async () => {
@@ -3541,155 +3453,9 @@ export default function App() {
   };
 
   const handleMarketSwitch = async (newMarket: 'KR' | 'US') => {
-    if (marketType === newMarket) return;
-
-    // 1. Save current stocks to cache & custom names
-    const currentMarket = marketType;
-    const currentStocks = stocksRef.current;
-
-    const newNamesFromCurrent: Record<string, string> = {};
-    currentStocks.forEach(s => {
-      if (s.symbol && s.name && s.name !== s.symbol) {
-        newNamesFromCurrent[s.symbol] = s.name;
-      }
-    });
-    if (Object.keys(newNamesFromCurrent).length > 0) {
-      setCustomStockNames(prev => ({ ...prev, ...newNamesFromCurrent }));
-    }
-
-    const nextCache = {
-      ...stocksCache,
-      [currentMarket]: currentStocks.filter(s => s.market === currentMarket)
-    };
-    setStocksCache(nextCache);
-
-    // 2. Set new market states
-    setMarketType(newMarket);
-    setDisplayCurrency(newMarket === 'KR' ? 'KRW' : 'USD');
-    
-    const cachedStocks = nextCache[newMarket] && nextCache[newMarket].length > 0
-      ? nextCache[newMarket]
-      : (newMarket === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS);
-    setStocks(cachedStocks);
-
-    // 3. Sync symbol
-    let sym = newMarket === 'US' ? lastSelectedUS : lastSelectedKR;
-    const isUS = /^[A-Z]/.test(sym);
     if (newMarket === 'US') {
-      if (!isUS || !cachedStocks.some(s => s.symbol === sym)) {
-        sym = cachedStocks.find(s => /^[A-Z]/.test(s.symbol))?.symbol || 'NVDA';
-      }
-    } else {
-      if (isUS || !cachedStocks.some(s => s.symbol === sym)) {
-        sym = cachedStocks.find(s => !/^[A-Z]/.test(s.symbol))?.symbol || '073240';
-      }
-    }
-    setSelectedSymbol(sym);
-
-    // 4. Sync Tabs
-    const stock = cachedStocks.find(s => s.symbol === sym) || cachedStocks[0];
-    if (stock) {
-      const isUSStock = newMarket === 'US' || /^[A-Za-z]/.test(stock.symbol);
-      const price = stock.price || (newMarket === 'KR' ? 1000 : 10);
-      const limits = calculateStockLimits(price, stock.changePercent || 0, isUSStock, stock.basePrice);
-      
-      const validTabs = scalperTabsRef.current.filter(t => {
-        const tIsUS = /^[A-Z]/.test(t.symbol);
-        return newMarket === 'US' ? tIsUS : !tIsUS;
-      });
-
-      if (validTabs.length > 0) {
-        const targetTab = validTabs.find(t => t.id === sym || t.symbol === sym) || validTabs[0];
-        handleSwitchTab(targetTab.id);
-      } else {
-        const createdTab: ScalperTab = {
-          id: stock.symbol,
-          symbol: stock.symbol,
-          name: stock.name || stock.symbol,
-          isBotActive: false,
-          gapBuyPrice: limits.lowerLimit,
-          gapSellPrice: limits.upperLimit,
-          tradeQuantity: 1,
-          maxSlots: 10,
-          gapInventory: [],
-          gapTradingProfit: 0,
-          gapTradeCount: 0,
-          lastTradeType: null,
-          scalperMessage: "대기 중...",
-          entryPriceMode: 'BID2',
-          autoCancelThreshold: 0.2,
-          tradeLogs: []
-        };
-        setScalperTabs(prev => [createdTab, ...prev]);
-        setActiveTabId(stock.symbol);
-        setSelectedSymbol(stock.symbol);
-        setGapBuyPrice(limits.lowerLimit);
-        setGapSellPrice(limits.upperLimit);
-      }
-    }
-
-    // 5. Fetch fresh live price data immediately on market switch
-    setIsFetchingMarketPrices(true);
-    try {
-      let livePriceData = await kisService.getPrice(sym);
-      
-      if (!livePriceData && newMarket === 'US') {
-        try {
-          const prompt = `미국 주식 ${sym}의 현재 실시간 주가와 전일 대비 변동률(changePercent)을 알려주세요. 반드시 JSON 형식으로만 응답: {"price": 숫자, "changePercent": 숫자}`;
-          const res = await axios.post('/api/ai/bot-decision', { prompt });
-          const parsed = JSON.parse(res.data.text);
-          if (parsed && parsed.price > 0) {
-            livePriceData = {
-              current: parsed.price,
-              prevClose: parsed.price / (1 + (parsed.changePercent || 0) / 100),
-              change: parsed.price - (parsed.price / (1 + (parsed.changePercent || 0) / 100)),
-              changePercent: parsed.changePercent || 0,
-              volume: '10M',
-              name: sym
-            };
-          }
-        } catch (e) {
-          console.warn("[Market Switch] Gemini price fallback failed:", e);
-        }
-      }
-
-      if (livePriceData && livePriceData.current > 0) {
-        const realPrice = livePriceData.current;
-        const changePercent = livePriceData.changePercent || 0;
-        const isUSStock = newMarket === 'US';
-        const limits = calculateStockLimits(realPrice, changePercent, isUSStock, livePriceData.prevClose);
-
-        setStocks(prev => prev.map(s => {
-          if (s.symbol !== sym) return s;
-          return {
-            ...s,
-            price: realPrice,
-            change: livePriceData.change,
-            changePercent: changePercent,
-            basePrice: livePriceData.prevClose || (realPrice / (1 + changePercent / 100)),
-            isRealTime: true,
-            lastUpdated: new Date().toLocaleTimeString()
-          };
-        }));
-
-        setGapSellPrice(limits.upperLimit);
-        setGapBuyPrice(limits.lowerLimit);
-
-        setScalperTabs(prev => prev.map(t => {
-          if (t.symbol === sym || t.id === sym) {
-            return {
-              ...t,
-              gapBuyPrice: limits.lowerLimit,
-              gapSellPrice: limits.upperLimit
-            };
-          }
-          return t;
-        }));
-      }
-    } catch (err) {
-      console.warn("Live market fetch on switch failed:", err);
-    } finally {
-      setIsFetchingMarketPrices(false);
+      showNotification('해외 주식은 현재 지원되지 않습니다.', 'error');
+      return;
     }
   };
 
@@ -4418,88 +4184,6 @@ export default function App() {
         domesticError = err.message;
       }
 
-      // Overseas Stock Sync (TTTS3012R)
-      try {
-        const overseasBalanceData = await kisService.getOverseasBalance();
-        let totalOverseasPurchaseCostUSD = 0;
-
-        if (overseasBalanceData?.rt_cd === '0') {
-          foundAnyData = true;
-          overseasSuccess = true;
-          if (overseasBalanceData.output1 && Array.isArray(overseasBalanceData.output1)) {
-            for (const item of overseasBalanceData.output1) {
-              if (item.pdno) {
-                const qty = Number(item.hldg_qty || 0);
-                const avgP = Number(item.pchs_avg_pric || 0);
-                const name = item.prdt_name || item.ovrs_item_name;
-                if (qty > 0 && !isNaN(qty)) {
-                  newHoldings[item.pdno] = qty;
-                  if (avgP > 0) newAvgPrices[item.pdno] = avgP;
-                  if (name) newStockNames[item.pdno] = name;
-                  totalOverseasPurchaseCostUSD += (qty * avgP);
-                }
-              }
-            }
-          }
-        }
-
-        if (overseasBalanceData?.rt_cd === '0' && (overseasBalanceData.output2 || overseasBalanceData.output3)) {
-          foundAnyData = true;
-          overseasSuccess = true;
-          const out2List = Array.isArray(overseasBalanceData.output2) 
-            ? overseasBalanceData.output2 
-            : (overseasBalanceData.output2 ? [overseasBalanceData.output2] : []);
-          const usdItem = out2List.find((item: any) => item.crcy_cd === 'USD') || out2List[0] || {};
-          const out3 = Array.isArray(overseasBalanceData.output3) 
-            ? (overseasBalanceData.output3[0] || {}) 
-            : (overseasBalanceData.output3 || {});
-
-          const frcr_dncl_amt = Number(
-            usdItem.frcr_dncl_amt || 
-            usdItem.frcr_drwg_psbl_amt || 
-            usdItem.ord_psbl_frcr_amt || 
-            usdItem.frcr_ord_psbl_amt1 || 
-            out3.frcr_ord_psbl_amt1 || 
-            out3.frcr_dncl_amt || 
-            0
-          );
-          let ordPsblUsd = Number(
-            usdItem.frcr_ord_psbl_amt1 || 
-            usdItem.ord_psbl_frcr_amt || 
-            usdItem.frcr_dncl_amt || 
-            out3.frcr_ord_psbl_amt1 || 
-            out3.ovrs_ord_psbl_amt || 
-            0
-          );
-          // If ordPsblUsd is in KRW (> 10000), convert to USD
-          if (ordPsblUsd > 10000 && exchangeRate > 0) {
-            ordPsblUsd = Number((ordPsblUsd / exchangeRate).toFixed(2));
-          }
-          const ovrs_tot_pchs_amt = Number(usdItem.ovrs_tot_pchs_amt || out3.frcr_pchs_amt || totalOverseasPurchaseCostUSD);
-          
-          let finalUsd = ordPsblUsd > 0 ? ordPsblUsd : frcr_dncl_amt;
-          if (finalUsd <= 0) {
-            // Secondary fallback check via orderable cash API
-            try {
-              const cashRes = await kisService.getOverseasOrderableCash();
-              if (cashRes && cashRes.rt_cd === '0' && cashRes.orderableUsd > 0) {
-                finalUsd = cashRes.orderableUsd;
-              }
-            } catch {}
-          }
-
-          if (finalUsd > 0) {
-            setOrderableUsd(finalUsd);
-          }
-          
-          if (marketType === 'US') {
-            totalConvertedBalance += finalUsd;
-            totalConvertedPrincipal += (finalUsd + ovrs_tot_pchs_amt);
-          }
-        }
-      } catch (err: any) {
-        console.warn("Overseas Sync Skip:", err);
-      }
 
       // Final Check: If absolutely no data was fetched, keep existing state and notify user
       if (!foundAnyData) {
@@ -4510,29 +4194,6 @@ export default function App() {
          return;
       }
 
-      // 3. Integrated Asset Status (CTRP6548R)
-      try {
-        const assetStatus = await kisService.getInvestmentAssetStatus();
-        if (assetStatus?.output2) {
-          const out2 = Array.isArray(assetStatus.output2) ? (assetStatus.output2[0] || {}) : assetStatus.output2;
-          const ord_psbl = Number(out2.ord_psbl_cash || out2.nrcy_ord_psbl_amt || out2.dncl_amt || out2.d2_dncl_amt || 0);
-          const tot_asst_amt = Number(out2.tot_asst_amt || 0);
-          
-          if (tot_asst_amt > 0) {
-            if (tot_asst_amt > totalConvertedPrincipal) {
-              totalConvertedPrincipal = Math.round(tot_asst_amt);
-            }
-            if (ord_psbl > 0 && totalConvertedBalance === 0) {
-              totalConvertedBalance = Math.round(ord_psbl);
-            }
-          }
-          if (ord_psbl > 0) {
-            setOrderableKrw(prev => (prev === 0 ? ord_psbl : prev));
-          }
-        }
-      } catch (err) {
-        console.warn("Asset Status Sync Skip:", err);
-      }
 
       // Final fallback: if total is still 0, check if we have any total eval amount in output2
       // common for some accounts to only populate tot_evlu_amt
@@ -4634,19 +4295,6 @@ export default function App() {
         }
         
         // If overseas synced successfully, clear old US holdings except those bought very recently (< 45s)
-        if (overseasSuccess) {
-          Object.keys(merged).forEach(sym => {
-            const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
-            if (isUS) {
-              const recentTrade = recentLocalTradesRef.current[sym];
-              const isRecentlyTraded = recentTrade && (now - recentTrade.timestamp < 45000) && recentTrade.quantity > 0;
-              if (!isRecentlyTraded) {
-                delete merged[sym];
-              }
-            }
-          });
-        }
-        
         // Add all newly fetched confirmed holdings
         Object.entries(newHoldings).forEach(([sym, qty]) => {
           const numQty = Number(qty);
@@ -4686,16 +4334,6 @@ export default function App() {
             const recentTrade = recentLocalTradesRef.current[sym];
             const isRecentlyTraded = recentTrade && (now - recentTrade.timestamp < 45000) && recentTrade.quantity > 0;
             if (!isUS && (!newHoldings[sym] || newHoldings[sym] <= 0) && !isRecentlyTraded) {
-              delete nextAvg[sym];
-            }
-          });
-        }
-        if (overseasSuccess) {
-          Object.keys(nextAvg).forEach(sym => {
-            const isUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
-            const recentTrade = recentLocalTradesRef.current[sym];
-            const isRecentlyTraded = recentTrade && (now - recentTrade.timestamp < 45000) && recentTrade.quantity > 0;
-            if (isUS && (!newHoldings[sym] || newHoldings[sym] <= 0) && !isRecentlyTraded) {
               delete nextAvg[sym];
             }
           });
@@ -4923,12 +4561,8 @@ export default function App() {
       }
     } catch (err: any) {
       console.error("Initial Sync Pipeline Error", err);
-      setInitSyncState(prev => ({
-        ...prev,
-        status: 'error',
-        currentStep: `동기화 오류: ${err.message || '데이터를 가져오지 못했습니다.'}`,
-        errorMsg: err.message
-      }));
+      // Just force start the app even if there are errors
+      if (autoEnterAfterSync) setIsAppInitialized(true);
     } finally {
       isInitialSyncRunningRef.current = false;
     }
@@ -4942,7 +4576,7 @@ export default function App() {
       }, 400);
       return () => clearTimeout(timer);
     }
-  }, [kisConfig.isConnected, isAppInitialized, initSyncState.status, executeFullKisInitialSync]);
+  }, [kisConfig.isConnected, true, initSyncState.status, executeFullKisInitialSync]);
 
   // Unified Gap Trading logic is now placed in the main bot effect below.
 
@@ -5042,7 +4676,7 @@ export default function App() {
       if (fastInterval) clearInterval(fastInterval);
       if (kisSyncInterval) clearInterval(kisSyncInterval);
     };
-  }, [kisConfig.isConnected, marketType, selectedSymbol, isGapBotActive, isAppInitialized]);
+  }, [kisConfig.isConnected, marketType, selectedSymbol, isGapBotActive, true]);
 
   // Auto KIS initial sync on connection
   const initialKisSyncTriggeredRef = React.useRef(false);
@@ -5093,7 +4727,7 @@ export default function App() {
       setTime(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
     }, 10000); // Slower updates
     return () => clearInterval(interval);
-  }, [kisConfig.isConnected, marketType, isAppInitialized]);
+  }, [kisConfig.isConnected, marketType, true]);
 
   // Fetch News using Gemini Search with Caching
   const fetchNews = async (symbol: string, isManual = false) => {
@@ -7281,7 +6915,7 @@ export default function App() {
     alert("API 키 및 개인정보가 성공적으로 초기화되었습니다.");
   };
 
-  if (isAuthLoading || isRateLoading) {
+  if (isAuthLoading) {
     return (
       <div className="min-h-screen bg-sleek-bg flex flex-col items-center justify-center gap-6">
         <div className="relative">
@@ -7314,822 +6948,17 @@ export default function App() {
           <div className="flex flex-col items-center justify-center text-center">
             <h1 className="text-lg sm:text-xl font-black text-white mb-2 uppercase italic tracking-tighter">LEO 100B AI BOT</h1>
             <p className="text-sleek-text-secondary text-xs sm:text-sm mb-8 leading-relaxed">
-              레오의 100억 주식매매 프로그램에 오신 것을 환영합니다.<br/>
+              레오의 100억 국내주식 자동매매 프로그램에 오신 것을 환영합니다.<br/>
               서비스 이용을 위해 로그인이 필요합니다.
             </p>
             
             <div className="space-y-4 w-full">
               <button 
                 onClick={handleLogin}
-                className="w-full py-4 rounded-xl bg-white text-black font-black flex items-center justify-center gap-3 hover:scale-[1.02] transition-all cursor-pointer shadow-lg"
+                className="w-full py-4 sm:py-5 rounded-2xl font-black text-base sm:text-lg transition-all flex items-center justify-center gap-3 group bg-sleek-blue text-white shadow-[0_10px_30px_-10px_rgba(30,144,255,0.5)] hover:scale-[1.02] active:scale-95 cursor-pointer"
               >
-                <User className="w-5 h-5" />
-                GOOGLE 계정으로 로그인하기
-              </button>
-            </div>
-
-            <div className="mt-8 bg-black/30 border border-white/5 rounded-2xl p-4 text-left space-y-1.5 w-full">
-              <h4 className="text-[10px] font-black text-amber-400 uppercase tracking-widest flex items-center gap-1.5">
-                <Info className="w-3.5 h-3.5" /> iFrame 로그인 차단 안내
-              </h4>
-              <p className="text-[10px] text-sleek-text-secondary leading-relaxed">
-                만약 구글 로그인 버튼이 작동하지 않거나 무반응이라면, 브라우저 보안 정책(3방 쿠키 차단) 때문입니다.
-                오른쪽 상단의 <strong>'새 창에서 열기' (Open in New Tab)</strong> 버튼을 클릭해 접속해 주세요.
-              </p>
-            </div>
-          </div>
-        </motion.div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="min-h-screen flex flex-col bg-sleek-bg text-sleek-text-primary selection:bg-sleek-blue/30 overflow-hidden relative">
-      <AnimatePresence mode="wait">
-        {showKisModal && (
-          <motion.div 
-            key="kis-modal"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[110] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
-              className="bg-sleek-card border border-sleek-blue/30 rounded-3xl p-8 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl custom-scrollbar"
-            >
-              <h2 className="text-xl font-black text-white mb-2 flex items-center gap-2">
-                <CircleDollarSign className="text-sleek-blue" />
-                한국투자증권 API 연결
-              </h2>
-              <p className="text-xs text-sleek-text-secondary mb-6 leading-relaxed">
-                발급받으신 KIS Developers App Key와 Secret을 입력하세요. 
-                이 정보는 브라우저 메모리에만 저장되며 전송되지 않습니다.
-              </p>
-              
-              <div className="space-y-4">
-                <div>
-                  <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">App Key</label>
-                  <input 
-                    type="password" 
-                    value={kisConfig.appKey}
-                    onChange={(e) => setKisConfig((prev: any) => ({ 
-                      ...prev, 
-                      appKey: e.target.value
-                    }))}
-                    className="w-full bg-black/40 border border-sleek-border rounded-lg p-3 text-xs focus:border-sleek-blue outline-none" 
-                    placeholder="한국투자증권 App Key 입력"
-                  />
-                </div>
-                <div>
-                  <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">App Secret</label>
-                  <input 
-                    type="password" 
-                    value={kisConfig.appSecret}
-                    onChange={(e) => setKisConfig((prev: any) => ({ 
-                      ...prev, 
-                      appSecret: e.target.value
-                    }))}
-                    className="w-full bg-black/40 border border-sleek-border rounded-lg p-3 text-xs focus:border-sleek-blue outline-none" 
-                    placeholder="한국투자증권 Secret Key 입력"
-                  />
-                </div>
-                <div className="flex gap-2">
-                  <div className="flex-[2]">
-                    <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">Account No</label>
-                    <input 
-                      type="text" 
-                      value={kisConfig.accountNo}
-                      onChange={(e) => {
-                        const val = e.target.value.replace(/-/g, '');
-                        setKisConfig(prev => {
-                          const updated = { ...prev, accountNo: val };
-                          if (val.length >= 10 && /^\d+$/.test(val.substring(0, 10))) {
-                             updated.accountNo = val.substring(0, 8);
-                             updated.accountCode = val.substring(8, 10);
-                          }
-                          return updated;
-                        });
-                      }}
-                      className="w-full bg-black/40 border border-sleek-border rounded-lg p-3 text-xs focus:border-sleek-blue outline-none" 
-                      placeholder="8자리 계좌번호"
-                    />
-                  </div>
-                  <div className="flex-1">
-                    <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">Code</label>
-                    <input 
-                      type="text" 
-                      maxLength={2}
-                      value={kisConfig.accountCode}
-                      onChange={(e) => setKisConfig(prev => ({ ...prev, accountCode: e.target.value }))}
-                      className="w-full bg-black/40 border border-sleek-border rounded-lg p-3 text-xs focus:border-sleek-blue outline-none text-center" 
-                      placeholder="01"
-                    />
-                  </div>
-                </div>
-                <div>
-                   <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">PW (4 digits)</label>
-                   <div className="relative">
-                     <input 
-                       type={showKisPassword ? "text" : "password"} 
-                       maxLength={4}
-                       value={kisConfig.accountPw}
-                       onChange={(e) => setKisConfig(prev => ({ ...prev, accountPw: e.target.value }))}
-                       className="w-full bg-black/40 border border-sleek-border rounded-lg p-3 pr-10 text-xs focus:border-sleek-blue outline-none" 
-                       placeholder="****"
-                     />
-                     <button
-                       type="button"
-                       onClick={() => setShowKisPassword(!showKisPassword)}
-                       className="absolute right-3 top-1/2 -translate-y-1/2 text-sleek-text-secondary hover:text-white transition-colors"
-                     >
-                       {showKisPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                     </button>
-                   </div>
-                </div>
-                <div>
-                   <label className="text-[10px] font-bold text-sleek-text-secondary uppercase mb-1 block">주문 구분 (Order Type)</label>
-                   <select
-                     value={kisConfig.domesticOrderType || '00'}
-                     onChange={(e) => setKisConfig(prev => ({ ...prev, domesticOrderType: e.target.value }))}
-                     className="w-full bg-black/40 border border-sleek-border rounded-lg p-3 text-xs focus:border-sleek-blue outline-none text-white appearance-none"
-                     style={{ colorScheme: 'dark' }}
-                   >
-                     <option value="00" className="bg-sleek-card text-white">지정가 (Limit) - 현재가 주문 [권장]</option>
-                     <option value="01" className="bg-sleek-card text-white">시장가 (Market) - 즉시 체결 주문</option>
-                   </select>
-                   <p className="text-[9px] text-sleek-text-secondary mt-1 leading-normal">
-                     * 시장가(Market)는 증권사 규정상 상한가 기준 보증금(최대 130%)을 예치하므로, 소액 계좌에서는 <strong>"주문가능금액 초과 (APBK0952)"</strong> 오류가 발생합니다. 안정적인 구동을 위해 <strong>지정가(Limit)</strong> 사용을 적극 권장합니다.
-                   </p>
-                </div>
-                 <div className="flex items-center justify-between p-3.5 rounded-xl bg-black/40 border border-sleek-border mt-4">
-                    <div className="max-w-[75%] text-left">
-                      <label className="text-xs font-bold text-white block">실제 주문 전송 (Live Ordering)</label>
-                      <p className="text-[9px] text-sleek-text-secondary leading-normal mt-1">
-                        활성화 시 KIS 계좌로 즉시 주문을 전송합니다. 비활성화 시 KIS 실시간 시세만 연동하고 가상 잔액(로컬)으로 거래하여 <strong>매수 가능량 0주 문제 및 자산 손실 위험을 방지</strong>합니다.
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setKisConfig(prev => ({ ...prev, isRealOrderEnabled: !prev.isRealOrderEnabled }))}
-                      className={cn(
-                        "relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none",
-                        kisConfig.isRealOrderEnabled ? "bg-sleek-blue" : "bg-white/10"
-                      )}
-                    >
-                      <span
-                        className={cn(
-                          "pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-md transition duration-200 ease-in-out",
-                          kisConfig.isRealOrderEnabled ? "translate-x-5" : "translate-x-0"
-                        )}
-                      />
-                    </button>
-                 </div>
-              </div>
-
-              <div className="flex gap-3 mt-8">
-                <button 
-                  onClick={() => setShowKisModal(false)}
-                  className="flex-1 py-3 rounded-xl text-xs font-bold text-sleek-text-secondary hover:bg-white/5 transition-all"
-                >
-                  취소
-                </button>
-                {kisConfig.isConnected && (
-                  <button 
-                    onClick={async () => {
-                      try {
-                        await kisService.refreshAccessToken();
-                        alert("Access Token이 성공적으로 갱신되었습니다. (LMS가 발송됩니다)");
-                      } catch (e: any) {
-                        alert("토큰 갱신 실패: " + e.message);
-                      }
-                    }}
-                    className="flex-1 py-3 rounded-xl text-xs font-bold border border-sleek-blue/30 text-sleek-blue hover:bg-sleek-blue/5 transition-all"
-                  >
-                    토큰 갱신
-                  </button>
-                )}
-                <button 
-                  onClick={handleConnectKIS}
-                  className="flex-[2] py-3 rounded-xl text-xs font-bold bg-sleek-blue text-white shadow-lg shadow-sleek-blue/20 hover:scale-[1.02] transition-all"
-                >
-                  {kisConfig.isConnected ? "정보 업데이트" : "연결하기"}
-                </button>
-              </div>
-              
-              {!kisConfig.isConnected && (
-                <div className="mt-2">
-                  <button 
-                    onClick={handleTestConnection}
-                    className="w-full py-2 rounded-lg text-[10px] font-bold border border-white/10 text-sleek-text-secondary hover:bg-white/5 transition-all"
-                  >
-                    🚀 입력 정보로 연결 확인하기
-                  </button>
-                </div>
-              )}
-
-              <div className="mt-4 p-3 bg-white/5 rounded-xl border border-white/10">
-                <p className="text-[9px] text-sleek-text-secondary leading-relaxed">
-                  <span className="text-sleek-blue font-bold">INFO:</span> OAuth 2.0 Client Credentials 방식(2-Legged)을 사용합니다. 
-                  접근 토큰은 24시간 유효하며, 보안을 위해 토큰 발급 시 한국투자증권에서 LMS 알림이 발송됩니다. 
-                  본 앱은 토큰을 저장하여 알림 발송 횟수를 최소화합니다.
-                </p>
-              </div>
-
-              {/* API 키 및 개인정보 초기화 버튼 (팝업창 맨 밑) */}
-              <div className="mt-5 pt-4 border-t border-rose-500/20">
-                <button
-                  type="button"
-                  onClick={handleResetKISConfig}
-                  className="w-full py-2.5 px-4 rounded-xl text-xs font-bold text-rose-400 bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/30 hover:border-rose-500/50 flex items-center justify-center gap-2 transition-all shadow-sm group"
-                >
-                  <Trash2 className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
-                  <span>API 키 삭제 및 개인정보 초기화</span>
-                </button>
-                <p className="text-[9px] text-rose-400/70 text-center mt-1.5">
-                  * 저장된 KIS App Key, Secret, 계좌번호, 비밀번호 등 모든 연동 정보를 즉시 삭제합니다.
-                </p>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-
-        {showActivationModal && (
-          <motion.div 
-            key="activation-modal"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[120] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
-              className="bg-sleek-card border border-sleek-blue/30 rounded-3xl p-8 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl custom-scrollbar"
-            >
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-10 h-10 bg-sleek-blue/20 rounded-xl flex items-center justify-center">
-                  <Key className="w-5 h-5 text-sleek-blue" />
-                </div>
-                <div>
-                  <h2 className="text-lg font-black text-white italic uppercase tracking-tighter">LICENCE ACTIVATION</h2>
-                  <p className="text-[10px] text-sleek-text-secondary uppercase tracking-widest">전달받은 인증키를 입력하세요</p>
-                </div>
-              </div>
-              
-              <div className="space-y-4">
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-sleek-text-secondary" />
-                  <input 
-                    type="text" 
-                    value={inputKey}
-                    onChange={(e) => setInputKey(e.target.value.toUpperCase())}
-                    className="w-full bg-black/40 border border-sleek-border rounded-xl py-4 pl-10 pr-4 text-sm font-mono tracking-widest focus:border-sleek-blue outline-none transition-colors" 
-                    placeholder="XXXX-XXXX-XXXX-XXXX"
-                  />
-                </div>
-                {activationError && (
-                  <p className="text-[11px] text-sleek-red font-bold animate-shake text-center border border-sleek-red/20 bg-sleek-red/5 py-2 rounded-lg">{activationError}</p>
-                )}
-              </div>
-
-              <div className="flex gap-3 mt-8">
-                <button 
-                  onClick={() => { setShowActivationModal(false); setActivationError(null); }}
-                  className="flex-1 py-3 rounded-xl text-xs font-bold text-sleek-text-secondary hover:bg-white/5 transition-all"
-                >
-                  취소
-                </button>
-                <button 
-                  onClick={handleActivateKey}
-                  disabled={isActivatingKey}
-                  className="flex-[2] py-3 rounded-xl text-xs font-bold bg-sleek-blue text-white shadow-lg shadow-sleek-blue/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50"
-                >
-                  {isActivatingKey ? <Loader2 className="w-4 h-4 animate-spin mx-auto" /> : "인증하기"}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-
-        {showPlanDetails && userLicenseData && (
-          <motion.div 
-            key="plan-modal"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[110] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
-              className="bg-sleek-card border border-sleek-blue/30 rounded-3xl p-8 w-full max-w-md max-h-[90vh] overflow-y-auto shadow-2xl relative custom-scrollbar"
-            >
-              <div className="absolute top-0 right-0 w-32 h-32 bg-sleek-blue/5 rounded-full -mr-16 -mt-16 blur-2xl"></div>
-              
-              <div className="flex items-center gap-4 mb-8">
-                <div className="w-12 h-12 bg-sleek-blue/20 rounded-2xl flex items-center justify-center">
-                  <CreditCard className="w-6 h-6 text-sleek-blue" />
-                </div>
-                <div>
-                  <h2 className="text-xl font-black text-white italic uppercase tracking-tighter">Subscription Details</h2>
-                  <p className="text-[10px] text-sleek-text-secondary uppercase tracking-widest">본인의 계정 활성화 정보입니다</p>
-                </div>
-              </div>
-
-              <div className="space-y-6">
-                <div className="bg-white/5 border border-white/5 rounded-2xl p-5">
-                  <div className="text-[10px] text-sleek-text-secondary uppercase mb-2 flex items-center gap-2">
-                    <User className="w-3 h-3" /> Account Email
-                  </div>
-                  <div className="text-sm font-bold text-white mb-4">{currentUser?.email || "간편로그인 (인증키)"}</div>
-                  
-                  <div className="grid grid-cols-2 gap-4">
-                    <div>
-                      <div className="text-[10px] text-sleek-text-secondary uppercase mb-1">Status</div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] bg-sleek-green/20 text-sleek-green px-2 py-0.5 rounded-full font-black uppercase">Active</span>
-                        <div className="w-1.5 h-1.5 rounded-full bg-sleek-green animate-ping"></div>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="text-[10px] text-sleek-text-secondary uppercase mb-1">Plan Type</div>
-                      <div className="text-xs font-bold text-white">PREMIUM AI BOT</div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div>
-                    <div className="text-[10px] text-sleek-text-secondary uppercase mb-1 flex items-center gap-2">
-                      <Calendar className="w-3 h-3" /> Activation Period
-                    </div>
-                    <div className="bg-black/40 border border-sleek-border rounded-xl p-3 flex justify-between items-center">
-                      <div className="text-center">
-                        <p className="text-[8px] text-sleek-text-secondary uppercase">Start</p>
-                        <p className="text-[10px] font-mono text-white">{new Date(userLicenseData.createdAt?.seconds * 1000 || Date.now() - 30 * 86400000).toLocaleDateString()}</p>
-                      </div>
-                      <div className="h-px w-8 bg-sleek-border"></div>
-                      <div className="text-center">
-                        <p className="text-[8px] text-sleek-text-secondary uppercase">Expire</p>
-                        <p className="text-[10px] font-mono text-sleek-blue font-bold">{new Date(userLicenseData.expiresAt).toLocaleDateString()}</p>
-                      </div>
-                    </div>
-                    <p className="text-[10px] text-sleek-blue mt-2 font-bold text-right">
-                      남은 기간: {Math.max(0, Math.ceil((new Date(userLicenseData.expiresAt).getTime() - Date.now()) / (1000 * 60 * 60 * 24)))}일
-                    </p>
-                  </div>
-
-                  <div>
-                    <div className="text-[10px] text-sleek-text-secondary uppercase mb-1 flex items-center gap-2">
-                      <Key className="w-3 h-3" /> Registered Key
-                    </div>
-                    <div className="bg-black/40 border border-sleek-border rounded-xl p-3 flex items-center justify-between">
-                      <code className="text-[11px] font-mono text-sleek-text-secondary">{userLicenseData.key || 'Direct Activation'}</code>
-                      <Copy className="w-3 h-3 text-sleek-text-secondary opacity-30" />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <button 
-                onClick={() => setShowPlanDetails(false)}
-                className="w-full mt-8 py-4 rounded-2xl bg-white text-black font-black text-sm shadow-xl hover:scale-[1.02] transition-all"
-              >
-                확인
-              </button>
-            </motion.div>
-          </motion.div>
-        )}
-
-        {confirmState.show && (
-          <motion.div 
-            key="confirm-modal"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-6"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }}
-              className="bg-sleek-card border border-white/10 rounded-3xl p-8 w-full max-w-sm max-h-[90vh] overflow-y-auto shadow-2xl text-center custom-scrollbar"
-            >
-              <div className="w-16 h-16 bg-sleek-red/20 rounded-full flex items-center justify-center mx-auto mb-6">
-                <ShieldCheck className="w-8 h-8 text-sleek-red" />
-              </div>
-              <h2 className="text-lg font-black text-white mb-2">{confirmState.title}</h2>
-              <p className="text-xs text-sleek-text-secondary whitespace-pre-line mb-8">{confirmState.message}</p>
-              
-              <div className="flex gap-3">
-                <button 
-                  onClick={() => setConfirmState(prev => ({ ...prev, show: false }))}
-                  disabled={confirmState.isLoading}
-                  className="flex-1 py-3 rounded-xl text-xs font-bold text-white bg-white/10 hover:bg-white/20 transition-all disabled:opacity-50"
-                >
-                  취소
-                </button>
-                <button 
-                  onClick={confirmState.onConfirm}
-                  disabled={confirmState.isLoading}
-                  className="flex-1 py-3 rounded-xl text-xs font-bold bg-sleek-red text-white shadow-lg shadow-sleek-red/20 hover:scale-[1.02] active:scale-95 transition-all disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {confirmState.isLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : "확인"}
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-
-        {showAdminPanel && currentUser?.email === "agnus9524@gmail.com" && (
-          <motion.div 
-            key="admin-panel"
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[110] bg-black/90 backdrop-blur-md flex items-center justify-center p-4 md:p-10"
-          >
-            <motion.div 
-              initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
-              className="bg-sleek-card border border-white/10 rounded-[40px] p-6 md:p-10 w-full max-w-5xl h-[80vh] flex flex-col shadow-2xl overflow-hidden"
-            >
-              <div className="flex items-center justify-between mb-8">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 bg-sleek-blue/20 rounded-2x flex items-center justify-center">
-                    <ShieldCheck className="w-6 h-6 text-sleek-blue" />
-                  </div>
-                  <div>
-                    <h2 className="text-2xl font-black text-white italic tracking-tighter uppercase">ADMIN CONTROL PANEL</h2>
-                    <div className="flex gap-4 mt-1 items-center">
-                      <button 
-                        onClick={() => setAdminTab('users')}
-                        className={cn("text-[10px] uppercase tracking-widest font-bold transition-colors", adminTab === 'users' ? "text-sleek-blue underline underline-offset-4" : "text-sleek-text-secondary")}
-                      >
-                        Subscriber Management
-                      </button>
-                      <button 
-                        onClick={() => setAdminTab('keys')}
-                        className={cn("text-[10px] uppercase tracking-widest font-bold transition-colors", adminTab === 'keys' ? "text-sleek-blue underline underline-offset-4" : "text-sleek-text-secondary")}
-                      >
-                        Auth Keys (인증키 발행)
-                      </button>
-                      <div className="h-4 w-px bg-white/10 mx-2"></div>
-                      <button 
-                        onClick={handleExportCSV}
-                        className="flex items-center gap-1.5 text-[9px] font-black bg-sleek-green/20 text-sleek-green hover:bg-sleek-green hover:text-black px-2.5 py-1 rounded-full transition-all uppercase tracking-tighter"
-                      >
-                        <FileSpreadsheet className="w-3 h-3" /> EXCEL 다운로드
-                      </button>
-                    </div>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setShowAdminPanel(false)}
-                  className="w-12 h-12 rounded-full border border-white/5 flex items-center justify-center text-sleek-text-secondary hover:bg-white/5 transition-all"
-                >
-                  <Square className="w-4 h-4 rotate-45" />
-                </button>
-              </div>
-
-              <div className="flex-1 overflow-y-auto pr-2 custom-scrollbar">
-                {adminTab === 'users' ? (
-                  <table className="w-full text-left border-separate border-spacing-y-3">
-                    <thead>
-                      <tr className="text-[10px] text-sleek-text-secondary uppercase tracking-widest font-bold">
-                        <th className="px-6 py-2">User UID / Email</th>
-                        <th className="px-6 py-2">Status</th>
-                        <th className="px-6 py-2">Expires At</th>
-                        <th className="px-6 py-2 text-right">Actions</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {allLicenses.length === 0 ? (
-                        <tr>
-                          <td colSpan={4} className="text-center py-20 text-sleek-text-secondary italic">등록된 사용자가 없습니다.</td>
-                        </tr>
-                      ) : (
-                        allLicenses.map((lic) => (
-                          <tr key={lic.id} className="bg-white/5 border border-white/5 rounded-2xl overflow-hidden shadow-lg hover:bg-white/10 transition-colors">
-                            <td className="px-6 py-4 rounded-l-2xl">
-                              <div className="flex items-center gap-2 mb-1">
-                                <span className={cn(
-                                  "text-xs font-bold",
-                                  lic.email ? "text-white" : "text-sleek-red/70 italic"
-                                )}>
-                                  {lic.email || "Email 미등록 사용자"}
-                                </span>
-                              </div>
-                              <div className="text-[10px] text-sleek-text-secondary font-mono flex items-center gap-1">
-                                <span className="opacity-50">UID:</span> {lic.userId || lic.id}
-                              </div>
-                              <div className="text-[9px] text-sleek-blue/70 font-mono mt-1">Key: {lic.key || 'N/A'}</div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <span className={cn(
-                                "text-[10px] font-black px-2 py-1 rounded-md uppercase",
-                                lic.status === 'active' ? "bg-sleek-green/20 text-sleek-green" : "bg-sleek-red/20 text-sleek-red"
-                              )}>
-                                {lic.status}
-                              </span>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="text-[10px] text-white flex items-center gap-2">
-                                <Calendar className="w-3 h-3 text-sleek-text-secondary" />
-                                {new Date(lic.expiresAt).toLocaleDateString()}
-                              </div>
-                            </td>
-                            <td className="px-6 py-4 rounded-r-2xl text-right">
-                              <div className="flex items-center justify-end gap-2">
-                                <button 
-                                  onClick={() => handleUpdateLicenseStatus(lic.id, lic, lic.status === 'active' ? 'expired' : 'active')}
-                                  className="px-3 py-1.5 rounded-lg bg-white/5 border border-white/10 text-[10px] font-bold hover:bg-white/10"
-                                >
-                                  {lic.status === 'active' ? '중지' : '활성'}
-                                </button>
-                                <button 
-                                  onClick={() => handleExtendLicense(lic.id, lic)}
-                                  className="px-3 py-1.5 rounded-lg bg-sleek-blue/20 border border-sleek-blue/30 text-sleek-blue text-[10px] font-bold hover:bg-sleek-blue hover:text-white"
-                                >
-                                  +1개월 연장
-                                </button>
-                                <button 
-                                  onClick={() => handleDeleteUserLicense(lic.id)}
-                                  className="px-3 py-1.5 rounded-lg bg-sleek-red/10 border border-sleek-red/20 text-sleek-red text-[10px] font-bold hover:bg-sleek-red hover:text-white transition-all"
-                                >
-                                  삭제
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                ) : (
-                  <div className="space-y-6">
-                    <div className="flex justify-between items-center bg-sleek-blue/5 border border-sleek-blue/20 p-6 rounded-3xl">
-                      <div>
-                        <h3 className="text-sm font-bold text-white mb-1">신규 인증키 생성</h3>
-                        <p className="text-[11px] text-sleek-text-secondary">기본 30일(1개월) 유효 기간의 랜덤 인증키를 생성합니다.</p>
-                        <p className="text-[9px] text-sleek-red/70 mt-2 font-bold italic">
-                          * 주의: 인증키 삭제는 '구독 활성화 전'의 키를 폐기하는 기능입니다.<br/>
-                          이미 활성화된 사용자의 권한을 뺏으려면 'Subscriber Management'에서 관리해 주세요.
-                        </p>
-                      </div>
-                      <button 
-                        onClick={handleGenerateKey}
-                        className="px-6 py-3 bg-sleek-blue text-white rounded-2xl font-black text-sm shadow-xl shadow-sleek-blue/30 hover:scale-105 active:scale-95 transition-all flex items-center gap-2"
-                      >
-                        <Plus className="w-4 h-4" /> 인증키 발행
-                      </button>
-                    </div>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                      {allAuthKeys.map(key => (
-                        <div key={key.id} className="bg-white/5 border border-white/10 p-5 rounded-2xl flex flex-col gap-4">
-                          <div className="flex justify-between items-start">
-                            <span className={cn(
-                              "text-[9px] font-black px-1.5 py-0.5 rounded uppercase",
-                              key.status === 'unused' ? "bg-sleek-green text-black" : "bg-sleek-text-secondary text-white"
-                            )}>
-                              {key.status}
-                            </span>
-                            <span className="text-[10px] font-mono text-sleek-text-secondary">30 DAYS</span>
-                          </div>
-                          <div className="flex items-center justify-between">
-                            <h4 className="text-sm font-mono font-bold tracking-tighter text-white">{key.id}</h4>
-                            <div className="flex items-center gap-1">
-                              <button 
-                                onClick={() => {
-                                  navigator.clipboard.writeText(key.id);
-                                  alert("클립보드에 복사되었습니다.");
-                                }}
-                                className="w-8 h-8 rounded-lg hover:bg-white/10 flex items-center justify-center text-sleek-text-secondary"
-                                title="복사"
-                              >
-                                <Copy className="w-4 h-4" />
-                              </button>
-                              <button 
-                                onClick={() => handleDeleteAuthKey(key.id)}
-                                className="w-8 h-8 rounded-lg hover:bg-sleek-red/20 flex items-center justify-center text-sleek-red/60 hover:text-sleek-red transition-colors"
-                                title="삭제"
-                              >
-                                <Square className="w-3 h-3 rotate-45 fill-current" />
-                              </button>
-                            </div>
-                          </div>
-                          {key.usedBy && (
-                            <div className="pt-3 border-t border-white/5">
-                              <p className="text-[8px] text-sleek-text-secondary uppercase mb-1">Used By</p>
-                              <p className="text-[9px] font-mono text-white truncate">{key.usedBy}</p>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-              
-              <div className="mt-8 pt-8 border-t border-white/5 flex justify-between items-center">
-                <div className="text-xs text-sleek-text-secondary">{adminTab === 'users' ? `총 ${allLicenses.length}명의 고객` : `총 ${allAuthKeys.length}개의 인증키`} 관리 중</div>
-                <button 
-                  onClick={handleFetchAllLicenses}
-                  disabled={isAdminLoading}
-                  className="px-6 py-3 rounded-2xl bg-white text-black font-black text-sm flex items-center gap-3 hover:scale-[1.05] transition-all disabled:opacity-50"
-                >
-                  {isAdminLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" /> }
-                  새로고침
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {!isSubscribed ? (
-        <div className="flex-1 flex items-center justify-center p-6 bg-sleek-bg relative">
-          <motion.div 
-            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
-            className="bg-sleek-card border border-sleek-red/30 rounded-3xl p-10 w-full max-w-md shadow-2xl text-center relative z-10"
-          >
-            <div className="w-16 h-16 bg-sleek-red/20 rounded-2xl flex items-center justify-center mx-auto mb-6">
-              <Zap className="w-10 h-10 text-sleek-red" />
-            </div>
-            <h1 className="text-2xl font-black text-white mb-2 uppercase italic tracking-tighter">구독 정보가 없습니다</h1>
-            <p className="text-sleek-text-secondary text-sm mb-4">
-              현재 <b>{currentUser.email || "간편로그인(인증키)"}</b> 계정은 구독 상태가 아닙니다.<br/>
-              프로그램 이용권을 구매하여 자동매매 엔진을 기동하세요.
-            </p>
-            <div className="bg-white/5 border border-white/10 rounded-xl p-4 mb-4 text-left">
-              <div className="text-xs font-bold text-sleek-text-secondary uppercase mb-2">사용자 UID (입금 시 전달용)</div>
-              <code className="text-xs sm:text-sm font-mono font-bold text-sleek-blue break-all select-all block bg-black/40 p-2.5 rounded-lg border border-white/10 tracking-wide">{currentUser.uid}</code>
-            </div>
-            <button 
-              onClick={() => setShowActivationModal(true)}
-              className="w-full py-4 bg-sleek-blue text-white rounded-xl font-black text-sm shadow-xl shadow-sleek-blue/20 hover:scale-[1.02] active:scale-95 transition-all flex items-center justify-center gap-3 mb-3"
-            >
-              <Key className="w-5 h-5" /> 인증키 등록하기
-            </button>
-            <button 
-              onClick={handleLogout}
-              className="w-full py-3.5 rounded-xl border border-white/10 text-xs font-bold text-slate-400 hover:text-white hover:bg-white/5 transition-all flex items-center justify-center gap-2"
-            >
-              <LogOut className="w-4 h-4 text-slate-400" /> 로그아웃 (다른 계정으로 로그인)
-            </button>
-          </motion.div>
-        </div>
-      ) : !isAppInitialized ? (
-        <div className="flex-1 flex items-center justify-center p-4 sm:p-6 bg-sleek-bg relative overflow-hidden">
-          <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-sleek-blue/10 blur-[120px] rounded-full animate-pulse"></div>
-          <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-sleek-green/10 blur-[120px] rounded-full animate-pulse delay-700"></div>
-
-          <motion.div 
-            initial={{ opacity: 0, scale: 0.95, y: 20 }} 
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            className="bg-sleek-card border border-sleek-blue/20 rounded-[2.5rem] p-6 sm:p-10 w-full max-w-2xl shadow-2xl text-center relative z-10"
-          >
-            <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-transparent via-sleek-blue to-transparent opacity-50"></div>
-            
-            <div className="w-16 h-16 sm:w-20 sm:h-20 bg-sleek-blue/10 rounded-3xl flex items-center justify-center mx-auto mb-4 sm:mb-6 relative">
-              <div className="absolute inset-0 bg-sleek-blue/5 rounded-3xl animate-ping opacity-20"></div>
-              <Bot className="w-8 h-8 sm:w-10 sm:h-10 text-sleek-blue drop-shadow-[0_0_10px_rgba(30,144,255,0.5)]" />
-            </div>
-            
-            <h1 className="text-lg xs:text-xl sm:text-2xl font-black text-white mb-2 tracking-tight leading-snug break-keep max-w-full">
-              <span className="text-sleek-blue">LEO 100B AI 트레이딩</span> 시스템
-            </h1>
-            
-            <p className="text-sleek-text-secondary text-xs sm:text-sm mb-6 leading-relaxed max-w-md mx-auto">
-              {kisConfig.isConnected 
-                ? "한국투자증권(KIS) 실시간 계좌 잔고, 보유 주식 및 최신 시세를 정밀 동기화하고 있습니다."
-                : "한국투자증권(KIS) API 키 등록 후 실제 계좌 데이터 기반 실시간 자동매매를 시작할 수 있습니다."}
-            </p>
-
-            {/* KIS Live Synchronization Progress Box */}
-            {kisConfig.isConnected && (
-              <div className="mb-6 p-4 sm:p-5 bg-black/40 border border-sleek-blue/30 rounded-2xl text-left space-y-3.5 shadow-inner">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="relative flex h-2.5 w-2.5">
-                      <span className={cn(
-                        "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75",
-                        initSyncState.status === 'ready' ? "bg-emerald-400" : initSyncState.status === 'error' ? "bg-rose-400" : "bg-sleek-blue"
-                      )}></span>
-                      <span className={cn(
-                        "relative inline-flex rounded-full h-2.5 w-2.5",
-                        initSyncState.status === 'ready' ? "bg-emerald-500" : initSyncState.status === 'error' ? "bg-rose-500" : "bg-sleek-blue"
-                      )}></span>
-                    </span>
-                    <span className="text-xs font-black text-white tracking-wide uppercase">
-                      한국투자증권 실시간 정밀 동기화
-                    </span>
-                  </div>
-                  <span className="text-xs font-black font-mono text-sleek-blue bg-sleek-blue/10 px-2.5 py-0.5 rounded-full border border-sleek-blue/20">
-                    {initSyncState.progress}%
-                  </span>
-                </div>
-
-                {/* Animated Progress Bar */}
-                <div className="w-full h-2 bg-white/5 rounded-full overflow-hidden p-0.5 border border-white/5">
-                  <motion.div 
-                    initial={{ width: 0 }}
-                    animate={{ width: `${initSyncState.progress}%` }}
-                    transition={{ duration: 0.4, ease: "easeOut" }}
-                    className={cn(
-                      "h-full rounded-full transition-all",
-                      initSyncState.status === 'ready'
-                        ? "bg-gradient-to-r from-emerald-500 to-teal-400 shadow-[0_0_12px_rgba(16,185,129,0.6)]"
-                        : initSyncState.status === 'error'
-                        ? "bg-rose-500"
-                        : "bg-gradient-to-r from-sleek-blue via-indigo-400 to-cyan-400 shadow-[0_0_12px_rgba(30,144,255,0.6)]"
-                    )}
-                  />
-                </div>
-
-                {/* 4-Step Checklist */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                  {[
-                    { id: 1, label: 'API 토큰 & 보안 연결 검증', minProg: 15 },
-                    { id: 2, label: '실시간 잔고 & 주문가능액 조회', minProg: 35 },
-                    { id: 3, label: '보유주식 & 매수평단가 동기화', minProg: 65 },
-                    { id: 4, label: '관심종목 실시간 호가/시세 수신', minProg: 90 },
-                  ].map((step) => {
-                    const isDone = initSyncState.progress > step.minProg || initSyncState.status === 'ready';
-                    const isActive = initSyncState.progress >= step.minProg && !isDone;
-                    return (
-                      <div 
-                        key={step.id} 
-                        className={cn(
-                          "flex items-center gap-2 p-2 rounded-xl text-[11px] font-mono transition-all",
-                          isDone 
-                            ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/20" 
-                            : isActive
-                            ? "bg-sleek-blue/10 text-sleek-blue border border-sleek-blue/30 font-bold"
-                            : "bg-white/[0.02] text-slate-500 border border-white/5"
-                        )}
-                      >
-                        {isDone ? (
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                        ) : isActive ? (
-                          <Loader2 className="w-3.5 h-3.5 text-sleek-blue animate-spin shrink-0" />
-                        ) : (
-                          <div className="w-3.5 h-3.5 rounded-full border border-slate-600 flex items-center justify-center shrink-0">
-                            <div className="w-1.5 h-1.5 rounded-full bg-slate-600"></div>
-                          </div>
-                        )}
-                        <span className="truncate">{step.label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Current step text */}
-                <div className="text-[11px] text-slate-400 flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg font-mono">
-                  <Activity className="w-3 h-3 text-sleek-blue shrink-0 animate-pulse" />
-                  <span className="truncate">{initSyncState.currentStep}</span>
-                </div>
-              </div>
-            )}
-
-            <div className="space-y-3">
-              <button 
-                onClick={() => {
-                  if (kisConfig.isConnected) {
-                    if (initSyncState.status === 'syncing') {
-                      showNotification("한국투자증권 실시간 데이터를 모두 가져온 후 즉시 시작됩니다.", "info");
-                    } else if (initSyncState.status === 'error') {
-                      executeFullKisInitialSync(true);
-                    } else {
-                      setIsAppInitialized(true);
-                    }
-                  } else {
-                    showNotification("한국투자증권(KIS) 연동 설정 및 연결 확인이 완료되어야 시스템을 가동할 수 있습니다. 아래 설정 버튼을 클릭해주세요.", "error");
-                    setShowKisModal(true);
-                  }
-                }}
-                disabled={kisConfig.isConnected && initSyncState.status === 'syncing'}
-                className={cn(
-                  "w-full py-4 sm:py-5 rounded-2xl font-black text-base sm:text-lg transition-all flex items-center justify-center gap-3 group",
-                  kisConfig.isConnected
-                    ? initSyncState.status === 'syncing'
-                      ? "bg-slate-800/80 text-slate-400 border border-white/10 cursor-wait shadow-inner"
-                      : initSyncState.status === 'error'
-                      ? "bg-amber-500/20 text-amber-300 border border-amber-500/40 hover:bg-amber-500/30 cursor-pointer shadow-lg"
-                      : "bg-sleek-blue text-white shadow-[0_10px_30px_-10px_rgba(30,144,255,0.5)] hover:scale-[1.02] active:scale-95 cursor-pointer"
-                    : "bg-white/10 text-slate-400 border border-amber-500/30 hover:bg-white/15 cursor-pointer"
-                )}
-              >
-                {kisConfig.isConnected ? (
-                  initSyncState.status === 'syncing' ? (
-                    <>
-                      <Loader2 className="w-5 h-5 animate-spin text-sleek-blue" />
-                      <span>한국투자증권 데이터 동기화 중... ({initSyncState.progress}%)</span>
-                    </>
-                  ) : initSyncState.status === 'error' ? (
-                    <>
-                      <RefreshCw className="w-5 h-5 text-amber-400" />
-                      <span>동기화 재시도 및 시스템 가동</span>
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="w-5 h-5 fill-white group-hover:animate-bounce" />
-                      <span>데이터 동기화 완료 - 시스템 가동 시작</span>
-                    </>
-                  )
-                ) : (
-                  <>
-                    <Zap className="w-5 h-5 text-amber-400" />
-                    <span>정보 업데이트 및 시스템 가동 (KIS 연동 필요)</span>
-                  </>
-                )}
+                <Zap className="w-5 h-5 fill-white group-hover:animate-bounce" />
+                <span>Google 계정으로 로그인</span>
               </button>
 
               <button 
@@ -8138,63 +6967,35 @@ export default function App() {
               >
                 <Settings className="w-4 h-4" /> {kisConfig.isConnected ? "KIS 연동 설정 변경" : "KIS 연동 설정하기"}
               </button>
-
-              <button 
-                onClick={handleLogout}
-                className="w-full py-3 bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-white/10 rounded-2xl font-bold text-xs transition-all flex items-center justify-center gap-2 cursor-pointer"
-              >
-                <LogOut className="w-4 h-4 text-slate-400" /> 로그아웃 (다른 계정으로 로그인)
-              </button>
             </div>
 
-            <div className="mt-8 pt-6 border-t border-white/5 grid grid-cols-3 gap-4">
+            <div className="mt-8 pt-6 border-t border-white/5 grid grid-cols-3 gap-4 w-full">
               <div className="text-center">
                 <div className="text-[10px] text-sleek-text-secondary uppercase tracking-widest mb-1">Status</div>
-                <div className={cn(
-                  "text-xs font-bold font-mono",
-                  initSyncState.status === 'ready' ? "text-emerald-400" : initSyncState.status === 'syncing' ? "text-sleek-blue" : "text-amber-400"
-                )}>
-                  {initSyncState.status === 'ready' ? "SYNCED" : initSyncState.status === 'syncing' ? "SYNCING" : "READY"}
-                </div>
+                <div className="text-xs font-bold text-emerald-400 font-mono">READY</div>
               </div>
               <div className="text-center border-x border-white/5">
-                <div className="text-[10px] text-sleek-text-secondary uppercase tracking-widest mb-1">Network</div>
-                <div className="text-xs font-bold text-emerald-400 font-mono">KIS OPEN API</div>
+                <div className="text-[10px] text-sleek-text-secondary uppercase tracking-widest mb-1">Market</div>
+                <div className="text-xs font-bold text-emerald-400 font-mono">KRX 국내주식</div>
               </div>
               <div className="text-center">
                 <div className="text-[10px] text-sleek-text-secondary uppercase tracking-widest mb-1">Engine</div>
                 <div className="text-xs font-bold text-white/70 font-mono">100B.PRO</div>
               </div>
             </div>
-          </motion.div>
-        </div>
-      ) : (
-        <>
+          </div>
+        </motion.div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-sleek-bg text-slate-200 flex flex-col font-sans select-none overflow-x-hidden">
       <header className="h-auto md:h-[60px] border-b border-sleek-border glass-header flex flex-col md:flex-row items-center justify-between px-6 py-4 md:py-0 sticky top-0 z-50 gap-4 md:gap-0">
         <div className="flex items-center gap-4">
-          <div className="flex bg-black/40 p-1 rounded-xl border border-white/10">
-            <button 
-              onClick={() => handleMarketSwitch('KR')}
-              className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all",
-                marketType === 'KR' 
-                  ? "bg-sleek-blue text-white shadow-lg shadow-sleek-blue/30" 
-                  : "text-sleek-text-secondary hover:text-white"
-              )}
-            >
-              <SouthKoreaFlag /> KR
-            </button>
-            <button 
-              onClick={() => handleMarketSwitch('US')}
-              className={cn(
-                "flex items-center gap-2 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all",
-                marketType === 'US' 
-                  ? "bg-sleek-blue text-white shadow-lg shadow-sleek-blue/30" 
-                  : "text-sleek-text-secondary hover:text-white"
-              )}
-            >
-              <USAFlag /> US
-            </button>
+          <div className="flex bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 items-center gap-2">
+            <SouthKoreaFlag />
+            <span className="text-[11px] font-black text-white">국내주식 (KRX)</span>
           </div>
           {isFetchingMarketPrices && (
             <div className="flex items-center gap-1.5 px-2.5 py-1 bg-sleek-blue/10 border border-sleek-blue/30 rounded-xl text-[10px] font-bold text-sleek-blue animate-pulse">
@@ -8290,35 +7091,29 @@ export default function App() {
         </div>
       </header>
       
-      {/* Exchange Rate Ribbon */}
+      {/* Domestic Market Ribbon */}
       <div className="h-8 bg-black/80 sticky top-[60px] md:top-[60px] z-40 border-b border-sleek-border/50 flex items-center justify-between px-6 backdrop-blur-md overflow-x-auto no-scrollbar">
         <div className="flex items-center gap-6 whitespace-nowrap">
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest flex items-center gap-1">
-              <Globe className="w-3 h-3" /> Market Context
+              <Globe className="w-3 h-3" /> KRX 국내시장 실시간
             </span>
             <div className="h-3 w-px bg-white/10 mx-1" />
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5">
-                <USAFlag />
-                <span className="text-[11px] font-mono font-bold text-white">USD/KRW</span>
-                <span className={cn(
-                  "text-[11px] font-mono font-black",
-                  exchangeRateTrend === 'UP' ? "text-sleek-red" : "text-sleek-green"
-                )}>
-                  {exchangeRate.toLocaleString()}
-                </span>
-                {exchangeRateTrend === 'UP' ? <TrendingUp className="w-3 h-3 text-sleek-red" /> : <TrendingDown className="w-3 h-3 text-sleek-green" />}
+                <SouthKoreaFlag />
+                <span className="text-[11px] font-mono font-bold text-white">KOSPI / KOSDAQ</span>
+                <span className="text-[11px] font-mono font-black text-emerald-400">실시간 연동</span>
               </div>
             </div>
           </div>
           
           <div className="hidden sm:flex items-center gap-4 text-[10px] font-bold text-sleek-text-secondary uppercase">
             <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> KOSPI <span className="text-white">+0.8%</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> 코스피 <span className="text-white">정규장</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> NASDAQ <span className="text-white">+1.2%</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> 코스닥 <span className="text-white">정규장</span>
             </div>
           </div>
         </div>
@@ -8405,7 +7200,6 @@ export default function App() {
 
                             <div className="max-h-[340px] overflow-y-auto custom-scrollbar divide-y divide-white/5">
                               {searchSuggestions.map((s, idx) => {
-                                const isStockUS = s.market === 'US' || /^[A-Za-z]/.test(s.symbol);
                                 return (
                                   <button 
                                     key={`${s.symbol}-${idx}`}
@@ -8417,11 +7211,6 @@ export default function App() {
                                         <div className="text-sm sm:text-base font-extrabold text-white group-hover:text-sleek-blue transition-colors">
                                           {s.name}
                                         </div>
-                                        {isStockUS && (
-                                          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border bg-amber-500/15 text-amber-300 border-amber-500/30">
-                                            미국
-                                          </span>
-                                        )}
                                       </div>
                                       <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
                                         <span className="text-slate-300 font-semibold">{s.symbol}</span>
@@ -8429,7 +7218,7 @@ export default function App() {
                                           <>
                                             <span>•</span>
                                             <span className="text-sleek-blue font-bold">
-                                              {formatCurrency(s.price, false, isStockUS ? 'US' : 'KR')}
+                                              {formatCurrency(s.price)}
                                             </span>
                                           </>
                                         )}
@@ -9712,18 +8501,18 @@ export default function App() {
                         <span className="text-base font-black text-white">{modalStockDisplayName}</span>
                         <span className="text-xs font-mono text-slate-400 font-bold">({modalSymbol})</span>
                         <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-sleek-blue/20 text-sleek-blue border border-sleek-blue/30 font-bold">
-                          {isModalUS ? 'US' : 'KR'}
+                          KRX
                         </span>
                       </div>
                       <span className="text-xs font-mono font-black text-sleek-blue">
-                        현재가 {formatCurrency(modalStockPrice, false, isModalUS ? 'US' : 'KR')}
+                        현재가 {formatCurrency(modalStockPrice)}
                       </span>
                     </div>
 
                     <div className="grid grid-cols-3 gap-2 text-xs text-sleek-text-secondary pt-2 border-t border-white/5 font-mono">
                       <div>
                         <span className="text-[10px] text-slate-400 block font-sans">매수평단</span>
-                        <span className="text-amber-300 font-bold">{formatCurrency(modalAvgPrice, false, isModalUS ? 'US' : 'KR')}</span>
+                        <span className="text-amber-300 font-bold">{formatCurrency(modalAvgPrice)}</span>
                       </div>
                       <div>
                         <span className="text-[10px] text-slate-400 block font-sans">보유수량</span>
@@ -9731,7 +8520,7 @@ export default function App() {
                       </div>
                       <div className="text-right">
                         <span className="text-[10px] text-slate-400 block font-sans">현재 평가액</span>
-                        <span className="text-white font-bold">{formatCurrency(modalHeldQty * modalStockPrice, false, isModalUS ? 'US' : 'KR')}</span>
+                        <span className="text-white font-bold">{formatCurrency(modalHeldQty * modalStockPrice)}</span>
                       </div>
                     </div>
                   </div>
@@ -9746,7 +8535,7 @@ export default function App() {
                   {/* Target Sell Price Input */}
                   <div className="space-y-2">
                     <div className="flex justify-between items-center text-xs font-bold text-sleek-text-secondary">
-                      <span>매도 희망 단가 ({isModalUS ? 'USD' : '원'})</span>
+                      <span>매도 희망 단가 (원)</span>
                       {targetModalStock && manualSellPrice > 0 && modalStockPrice > 0 && (
                         <span className={cn(
                           "font-mono text-[11px] font-bold px-2 py-0.5 rounded bg-black/40 border border-white/5",
@@ -9761,10 +8550,10 @@ export default function App() {
                         type="number"
                         value={manualSellPrice || ''}
                         onChange={(e) => setManualSellPrice(Number(e.target.value))}
-                        placeholder={`희망 매도가 입력 (${isModalUS ? '$' : '원'})`}
+                        placeholder="희망 매도가 입력 (원)"
                         className="w-full bg-sleek-bg border border-sleek-border rounded-2xl py-3 px-4 text-sm font-mono font-bold text-white focus:border-rose-500 outline-none transition-all"
                       />
-                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-sleek-text-secondary">{isModalUS ? 'USD' : 'KRW'}</span>
+                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs font-bold text-sleek-text-secondary">KRW</span>
                     </div>
 
                     {/* Quick Price Adjust Buttons */}
@@ -9775,7 +8564,7 @@ export default function App() {
                           onClick={() => setManualSellPrice(modalStockPrice)}
                           className="px-2.5 py-1 bg-white/5 hover:bg-white/10 rounded-xl text-[10px] font-bold text-sleek-text-secondary hover:text-white transition-all border border-white/5 cursor-pointer"
                         >
-                          현재가 ({formatCurrency(modalStockPrice, false, isModalUS ? 'US' : 'KR')})
+                          현재가 ({formatCurrency(modalStockPrice)})
                         </button>
                         <button
                           type="button"
@@ -9853,7 +8642,7 @@ export default function App() {
                       <div className="flex justify-between items-center">
                         <span className="text-xs text-rose-300 font-bold">총 매도 체결 금액</span>
                         <span className="text-base font-black font-mono text-rose-400">
-                          {formatCurrency(manualSellPrice * manualSellQty, false, isModalUS ? 'US' : 'KR')}
+                          {formatCurrency(manualSellPrice * manualSellQty)}
                         </span>
                       </div>
                       
@@ -9861,7 +8650,7 @@ export default function App() {
                         <div>
                           <span className="text-[10px] text-slate-400 block font-sans">예상 세금·수수료</span>
                           <span className="text-slate-300 font-bold">
-                            {formatCurrency(expectedTax + expectedFee, false, isModalUS ? 'US' : 'KR')}
+                            {formatCurrency(expectedTax + expectedFee)}
                           </span>
                         </div>
                         <div className="text-right">
@@ -9870,7 +8659,7 @@ export default function App() {
                             "font-black text-sm",
                             expectedNetProfit > 0 ? "text-rose-400" : expectedNetProfit < 0 ? "text-sky-400" : "text-slate-300"
                           )}>
-                            {expectedNetProfit > 0 ? `+${formatCurrency(expectedNetProfit, false, isModalUS ? 'US' : 'KR')}` : expectedNetProfit < 0 ? `-${formatCurrency(Math.abs(expectedNetProfit), false, isModalUS ? 'US' : 'KR')}` : formatCurrency(0, false, isModalUS ? 'US' : 'KR')}
+                            {expectedNetProfit > 0 ? `+${formatCurrency(expectedNetProfit)}` : expectedNetProfit < 0 ? `-${formatCurrency(Math.abs(expectedNetProfit))}` : formatCurrency(0)}
                             <span className="text-xs ml-1 font-bold">
                               ({expectedProfitPct >= 0 ? '+' : ''}{expectedProfitPct.toFixed(2)}%)
                             </span>
@@ -11040,8 +9829,6 @@ export default function App() {
         )}
       </AnimatePresence>
 
-        </>
-      )}
       <AnimatePresence>
         {showScalperGuide && (
           <div className="fixed inset-0 z-[9999] bg-black/80 flex items-center justify-center p-4 md:p-6">

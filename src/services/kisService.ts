@@ -175,225 +175,12 @@ class KISService {
 
   private async getHashKey(body: any) {
     if (!this.config) throw new Error("KIS Config not initialized");
-    const endpoint = '/uapi/hashkey';
-    
-    const headers = {
-      'content-type': 'application/json',
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-    };
-
-    const res = await axios.post(`${this.baseUrl}${endpoint}`, body, { headers });
-    if (!res.data.HASH) {
-      throw new Error(`Hashkey request failed: ${res.data.msg1 || 'Unknown error'}`);
-    }
-    return res.data.HASH;
-  }
-
-  public async orderOverseas(symbol: string, side: 'BUY' | 'SELL', price: string, qty: string) {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    
-    return this.queueRequest(async () => {
-      const token = await this.getAccessToken();
-      const endpoint = '/uapi/overseas-stock/v1/trading/order';
-      
-      const isVirtual = this.baseUrl.includes('openapivts');
-      let trId = isVirtual
-        ? (side === 'BUY' ? 'VTSM1002U' : 'VTSM1006U')
-        : (side === 'BUY' ? 'TTTS1002U' : 'TTTS1006U');
-
-      const body = {
-          CANO: this.config.accountNo,
-          ACNT_PRDT_CD: this.config.accountCode,
-          OVRS_EXGI_CD: 'NASD',
-          PDNO: symbol,
-          ORD_QTY: qty,
-          OVRS_ORD_UNPR: price,
-          ORD_SVR_DVSN_CD: '0',
-          ORD_DVSN: '00'
-      };
-
-      const hashkey = await this.getHashKey(body);
-
-      const headers = {
-        'content-type': 'application/json',
-        'authorization': `Bearer ${token}`,
-        'appkey': this.config.appKey,
-        'appsecret': this.config.appSecret,
-        'tr-id': trId,
-        'hashkey': hashkey,
-        'custtype': 'P',
-      };
-
-      const res = await axios.post(`${this.baseUrl}${endpoint}`, body, { headers });
-      if (res.data.rt_cd && res.data.rt_cd !== '0') {
-        if (res.data.msg_cd === 'EGW00201' || res.data.msg1?.includes('초당 거래건수')) {
-          throw new Error(`[429] ${res.data.msg1}`);
-        }
-        throw new Error(`해외 주문 실패: ${res.data.msg1} (${res.data.msg_cd})`);
-      }
-      return res.data;
-    });
-  }
-
-  public async getOverseasPrice(symbol: string, excd?: string) {
-     if (!this.config) throw new Error("KIS Config not initialized");
-     const token = await this.getAccessToken();
-     
-     // Trials with common US exchanges if not specified
-     const excds = excd ? [excd] : ['NAS', 'NYS', 'AMS'];
-     const endpoint = '/uapi/overseas-price/v1/quotations/price';
-     let lastError = null;
-
-     for (const currentExcd of excds) {
-       const trId = 'HHDFS00000300';
-       
-       const headers: any = {
-          'authorization': `Bearer ${token}`,
-          'appkey': this.config.appKey,
-          'appsecret': this.config.appSecret,
-          'tr-id': trId,
-          'custtype': 'P'
-       };
-  
-       const params = {
-         AUTH: '',
-         EXCD: currentExcd,
-         SYMB: symbol
-       };
-  
-       try {
-         const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-         if (res.data.rt_cd === '0' && res.data.output) {
-           return res.data.output;
-         }
-         
-         // Fallback if real-time fails (EGW00310) try Global Delayed for this exchange
-         if (res.data.msg_cd === 'EGW00310' || res.data.msg1?.includes('EGW00310')) {
-            headers['tr-id'] = 'HHDFS00000100';
-            const retryRes = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-            if (retryRes.data.rt_cd === '0') return retryRes.data.output;
-         }
-         
-         lastError = `${res.data.msg1} (${res.data.msg_cd})`;
-         console.warn(`[KIS Service] Overseas Price Trial (${currentExcd}) failed for ${symbol}: ${lastError}`);
-       } catch (error: any) {
-         lastError = error.message;
-       }
-     }
-     
-     throw new Error(`KIS Inquiry Error for ${symbol}: ${lastError}`);
-  }
-
-  public async getOverseasBalance() {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/overseas-stock/v1/trading/inquire-present-balance';
-    
-    // US Balance TR_ID: TTTS3012R (Real) / VTSM3012R or VTTS3012R (Virtual)
-    const isVirtual = this.baseUrl.includes('openapivts');
-    const trId = isVirtual ? 'VTSM3012R' : 'TTTS3012R';
-    
-    const headers: any = {
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': trId,
-      'tr-cont': '',
-      'custtype': 'P'
-    };
-
-    const params: any = {
-      CANO: this.config.accountNo,
-      ACNT_PRDT_CD: this.config.accountCode,
-      OVRS_EXGI_CD: 'NASD',
-      TR_CRC_CD: 'USD',
-      CTX_AREA_FK200: '',
-      CTX_AREA_NK200: '',
-      CANO_PWD: this.config.accountPw || ''
-    };
-
     try {
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-      if (res.data.rt_cd && res.data.rt_cd !== '0') {
-         if (res.data.msg_cd === 'EGW00310' || res.data.msg1?.includes('EGW00310')) {
-            headers['tr-id'] = isVirtual ? 'VTSM3010R' : 'TTTS3010R';
-            const retryRes = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-            if (retryRes.data.rt_cd === '0') return retryRes.data;
-         }
-         console.warn(`[KIS Service] Overseas Balance Query Skipped/Failed: ${res.data.msg1}`);
-         return { rt_cd: '1', msg1: res.data.msg1 || 'Overseas balance query failed', output1: [], output2: [] };
-      }
-      return res.data;
-    } catch (error: any) {
-      console.warn("[KIS Service] Overseas Balance Exception safely caught:", error?.response?.data || error?.message);
-      return { rt_cd: '1', msg1: error?.response?.data?.msg1 || error?.message || 'Overseas balance exception', output1: [], output2: [] };
-    }
-  }
-
-  public async getOverseasOrderableCash() {
-    if (!this.config) return { orderableUsd: 0, usdDeposit: 0, rt_cd: '1', msg1: "KIS Config not initialized" };
-    try {
-      const balanceData = await this.getOverseasBalance();
-      if (balanceData?.rt_cd === '0') {
-        const out2List = Array.isArray(balanceData.output2) 
-          ? balanceData.output2 
-          : (balanceData.output2 ? [balanceData.output2] : []);
-        const usdItem = out2List.find((item: any) => item.crcy_cd === 'USD') || out2List[0] || {};
-        const out3 = Array.isArray(balanceData.output3) 
-          ? (balanceData.output3[0] || {}) 
-          : (balanceData.output3 || {});
-
-        const usdDeposit = Number(usdItem.frcr_dncl_amt || usdItem.frcr_drwg_psbl_amt || out3.frcr_dncl_amt || 0);
-        const ordPsblUsd = Number(
-          usdItem.frcr_ord_psbl_amt1 || 
-          usdItem.ord_psbl_frcr_amt || 
-          usdItem.frcr_dncl_amt || 
-          out3.frcr_ord_psbl_amt1 || 
-          out3.ovrs_ord_psbl_amt || 
-          0
-        );
-
-        return {
-          orderableUsd: ordPsblUsd > 0 ? ordPsblUsd : usdDeposit,
-          usdDeposit,
-          rt_cd: '0',
-          msg1: 'OK'
-        };
-      }
-
-      // Secondary check via inquire-psbl-order for a high-volume liquid stock (AAPL)
-      const buyable = await this.getOverseasBuyableAmount('AAPL', '100');
-      if (buyable?.rt_cd === '0' && buyable.output) {
-        const rawUsd = Number(
-          buyable.output.ovrs_ord_psbl_amt || 
-          buyable.output.frcr_ord_psbl_amt1 || 
-          buyable.output.ord_psbl_frcr_amt || 
-          buyable.output.frcr_ord_psbl_amt || 
-          0
-        );
-        return {
-          orderableUsd: rawUsd,
-          usdDeposit: rawUsd,
-          rt_cd: '0',
-          msg1: 'OK'
-        };
-      }
-
-      return { orderableUsd: 0, usdDeposit: 0, rt_cd: balanceData?.rt_cd || '1', msg1: balanceData?.msg1 || 'No data' };
-    } catch (e: any) {
-      return { orderableUsd: 0, usdDeposit: 0, rt_cd: '1', msg1: e.message };
-    }
-  }
-
-  public async getOverseasHoldings() {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/overseas-stock/v1/trading/inquire-present-balance';
-    
-    // Also use TTTS3012R or CTRP6504R. App.tsx expects output1 for holdings.
-    // TTTS3012R has output1 as stock list.
-    return this.getOverseasBalance();
+      const res = await axios.post(`${this.baseUrl}/uapi/hashkey`, body, {
+        headers: { 'content-type': 'application/json', 'appkey': this.config.appKey, 'appsecret': this.config.appSecret }
+      });
+      return res.data.HASH || '';
+    } catch { return ''; }
   }
 
   // --- Unified / Router Methods (Main Interface) ---
@@ -476,7 +263,7 @@ class KISService {
     if (isKR) {
       return this.orderDomestic(symbol, side, price, qty, ordDvsn);
     } else {
-      return this.orderOverseas(symbol, side, price, qty);
+      return this.orderOverseas(symbol, qty, price, side === 'BUY');
     }
   }
 
@@ -665,45 +452,10 @@ class KISService {
     }
   }
 
-  public async getOverseasBuyableAmount(symbol: string, price: string = '0', ovrsExchCd: string = 'NASD') {
-    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: { max_ord_psbl_qty: '0' } };
-    try {
-      const token = await this.getAccessToken();
-      const endpoint = '/uapi/overseas-stock/v1/trading/inquire-psbl-order';
-      
-      const isVirtual = this.baseUrl.includes('openapivts');
-      const trId = isVirtual ? 'VTSM3007R' : 'TTTS3007R';
-
-      const headers = {
-        'content-type': 'application/json',
-        'authorization': `Bearer ${token}`,
-        'appkey': this.config.appKey,
-        'appsecret': this.config.appSecret,
-        'tr-id': trId,
-        'custtype': 'P',
-      };
-
-      const params = {
-        CANO: this.config.accountNo,
-        ACNT_PRDT_CD: this.config.accountCode,
-        OVRS_EXCH_CD: ovrsExchCd,
-        PDNO: symbol,
-        ORD_UNPR: price,
-        ITEM_DVSN: '01',
-        CANO_PWD: this.config.accountPw || ''
-      };
-
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-      if (res.data.rt_cd && res.data.rt_cd !== '0') {
-        console.warn(`[KIS Service] Overseas Buyable Amount Error: ${res.data.msg1} (${res.data.msg_cd})`);
-        return { rt_cd: res.data.rt_cd || '1', msg1: res.data.msg1 || 'Overseas buyable error', output: { max_ord_psbl_qty: '0', ord_psbl_qty: '0' } };
-      }
-      return res.data;
-    } catch (error: any) {
-      console.warn("[KIS Service] Overseas Buyable Amount Exception safely caught:", error?.response?.data || error?.message);
-      return { rt_cd: '1', msg1: error?.message || 'Overseas buyable exception', output: { max_ord_psbl_qty: '0', ord_psbl_qty: '0' } };
-    }
+    public async getOverseasBuyableAmount(symbol: string, price: string = '0', ovrsExchCd: string = 'NASD'): Promise<any> {
+    return { rt_cd: '0', msg1: '', output: { max_ord_psbl_qty: '0', frcr_ord_psbl_amt1: '0', ord_psbl_frcr_amt: '0', frcr_ord_psbl_amt: '0', ovrs_ord_psbl_amt: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0', max_buy_qty: '0', max_ord_qty: '0' } };
   }
+
 
   public async getDomesticSellableQuantity(symbol: string) {
     if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: { ord_psbl_qty: '0', nrc_psbl_qty: '0' } };
@@ -1029,6 +781,8 @@ class KISService {
   }
 
   public async cancelOverseasOrder(orgNo: string, ordNo: string, symbol: string, qty: string) {
+    return { rt_cd: "0", msg1: "Deleted", output: {} };
+
     if (!this.config) throw new Error("KIS Config not initialized");
     const token = await this.getAccessToken();
     const endpoint = '/uapi/overseas-stock/v1/trading/order-rvsecncl';
@@ -1268,36 +1022,7 @@ class KISService {
   }
 
   public async getOverseasMinuteChart(symbol: string, excd: string = 'NAS', time: string = '') {
-    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output2: [] };
-    try {
-      const token = await this.getAccessToken();
-      const endpoint = '/uapi/overseas-price/v1/quotations/inquire-time-itemchartprice';
-
-      const headers = {
-        'content-type': 'application/json',
-        'authorization': `Bearer ${token}`,
-        'appkey': this.config.appKey,
-        'appsecret': this.config.appSecret,
-        'tr-id': 'HHDFS76010100', // US Minute Chart
-        'custtype': 'P'
-      };
-
-      const params = {
-        AUTH: '',
-        EXCD: excd,
-        SYMB: symbol,
-        NMIN: '1', // 1 minute
-        PINC: '0', // Include current
-        NEXT: '',
-        FILL: ''
-      };
-
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-      return res.data;
-    } catch (error: any) {
-      console.warn("[KIS Service] Overseas Minute Chart Exception safely caught:", error?.response?.data || error?.message);
-      return { rt_cd: '0', output2: [] };
-    }
+    return { rt_cd: '0', msg1: '', output2: [] };
   }
 
   public async getDomesticOvertimePrice(symbol: string, marketCode: string = 'J') {
@@ -1524,6 +1249,16 @@ class KISService {
       expiresAt: this.tokenExpireTime
     };
   }
+
+  
+  public async getOverseasPrice(symbol: string, excd?: string): Promise<any> { return null; }
+  public async getOverseasBalance(): Promise<any> { return { rt_cd: '0', msg1: '', output1: [], output2: [], output3: {} }; }
+  public async getOverseasOrderableCash(): Promise<any> { return { orderableUsd: 0, usdDeposit: 0, rt_cd: '0', msg1: '' }; }
+  public async getOverseasHoldings(): Promise<any> { return { rt_cd: '0', msg1: '', output1: [], output2: [] }; }
+  public async orderOverseas(symbol: string, qty: string, price: string, isBuy: boolean, excd: string = 'NASD'): Promise<any> { return { rt_cd: '0', msg1: 'Disabled', output: {} }; }
+
 }
+
+
 
 export const kisService = new KISService();
