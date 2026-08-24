@@ -3519,34 +3519,82 @@ export default function App() {
     setIsAdminLoading(false);
   };
 
-  const handleUpdateUserStatus = async (userId: string, status: 'active' | 'suspended') => {
+  const handleUpdateUserStatus = async (userId: string, newStatus?: 'active' | 'suspended' | any, currentData?: any) => {
     setIsAdminLoading(true);
     try {
-      await updateLicense(userId, { status });
-      showNotification(`사용자 상태가 ${status === 'active' ? '활성' : '정지'}(으)로 변경되었습니다.`, "success");
+      let resolvedStatus: 'active' | 'suspended' = 'active';
+      if (typeof newStatus === 'string' && (newStatus === 'active' || newStatus === 'suspended')) {
+        resolvedStatus = newStatus;
+      } else if (typeof newStatus === 'object' && newStatus?.status) {
+        resolvedStatus = newStatus.status === 'active' ? 'suspended' : 'active';
+      } else if (currentData?.status) {
+        resolvedStatus = currentData.status === 'active' ? 'suspended' : 'active';
+      } else {
+        const found = allLicenses.find(l => (l.id === userId || l.userId === userId));
+        resolvedStatus = found?.status === 'active' ? 'suspended' : 'active';
+      }
+
+      await updateLicense(userId, { status: resolvedStatus });
+      
+      // Optimistic update
+      setAllLicenses(prev => prev.map(l => {
+        if (l.id === userId || l.userId === userId) {
+          return { ...l, status: resolvedStatus };
+        }
+        return l;
+      }));
+
+      showNotification(`사용자 상태가 [${resolvedStatus === 'active' ? '활성' : '중지'}](으)로 변경되었습니다.`, "success");
       await handleFetchAllLicenses();
     } catch (e: any) {
+      console.error("Status update error:", e);
       showNotification(`상태 변경 실패: ${e.message}`, "error");
     } finally {
       setIsAdminLoading(false);
     }
   };
 
-  const handleExtendLicense = async (userId: string, additionalDays: number) => {
+  const handleExtendLicense = async (userId: string, additionalDays: number | any = 30, currentData?: any) => {
     setIsAdminLoading(true);
     try {
-      const currentLic = allLicenses.find(l => l.id === userId || l.userId === userId);
-      const currentExpiry = currentLic?.expiresAt ? new Date(currentLic.expiresAt) : new Date();
-      const baseDate = currentExpiry > new Date() ? currentExpiry : new Date();
-      baseDate.setDate(baseDate.getDate() + additionalDays);
+      const days = (typeof additionalDays === 'number' && !isNaN(additionalDays) && additionalDays > 0) 
+        ? additionalDays 
+        : 30;
+
+      const licObj = (typeof additionalDays === 'object' && additionalDays !== null)
+        ? additionalDays
+        : ((typeof currentData === 'object' && currentData !== null)
+            ? currentData
+            : allLicenses.find(l => l.id === userId || l.userId === userId));
+
+      let baseTime = Date.now();
+      if (licObj?.expiresAt) {
+        const expTime = new Date(licObj.expiresAt).getTime();
+        if (!isNaN(expTime) && expTime > baseTime) {
+          baseTime = expTime;
+        }
+      }
+
+      const newExpiryDate = new Date(baseTime + days * 24 * 60 * 60 * 1000);
+      const newExpiryIso = newExpiryDate.toISOString();
 
       await updateLicense(userId, { 
-        expiresAt: baseDate.toISOString(),
+        expiresAt: newExpiryIso,
         status: 'active'
       });
-      showNotification(`라이선스 기간이 ${additionalDays}일 연장되었습니다.`, "success");
+
+      // Optimistic update
+      setAllLicenses(prev => prev.map(l => {
+        if (l.id === userId || l.userId === userId) {
+          return { ...l, expiresAt: newExpiryIso, status: 'active' };
+        }
+        return l;
+      }));
+
+      showNotification(`라이선스가 +${days}일 연장되었습니다. (만료일: ${newExpiryDate.toLocaleDateString()})`, "success");
       await handleFetchAllLicenses();
     } catch (e: any) {
+      console.error("License extension error:", e);
       showNotification(`연장 실패: ${e.message}`, "error");
     } finally {
       setIsAdminLoading(false);
@@ -7279,7 +7327,7 @@ export default function App() {
             selectedSymbol={selectedSymbol}
             onSelectStock={(sym, name) => {
               if (sym) {
-                handleSelectStock(sym);
+                openOrSwitchScalperTab(sym, name);
                 if (name) showNotification(`[속보 연동] ${name}(${sym}) 종목으로 차트 및 스캘퍼가 전환되었습니다.`, "info");
               }
             }}

@@ -24,8 +24,8 @@ interface AdminPanelModalProps {
   isLoading: boolean;
   onRefresh: () => void;
   onGenerateKey: () => void;
-  onUpdateStatus: (userId: string, currentData: any, newStatus: string) => void;
-  onExtendLicense: (userId: string, currentData: any) => void;
+  onUpdateStatus: (userId: string, newStatus: 'active' | 'suspended', currentData?: any) => void;
+  onExtendLicense: (userId: string, days?: number, currentData?: any) => void;
   onDeleteLicense: (userId: string) => void;
   onDeleteAuthKey: (keyId: string) => void;
   onExportCSV: () => void;
@@ -249,8 +249,9 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                               <div className="flex items-center justify-end gap-1.5 font-sans">
                                 <button
                                   type="button"
-                                  onClick={() => onUpdateStatus(uid, lic, lic.status === 'active' ? 'suspended' : 'active')}
-                                  className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all ${
+                                  disabled={isLoading}
+                                  onClick={() => onUpdateStatus(uid, lic.status === 'active' ? 'suspended' : 'active', lic)}
+                                  className={`px-2 py-1 rounded-lg text-[11px] font-bold transition-all cursor-pointer disabled:opacity-50 ${
                                     lic.status === 'active' 
                                       ? 'bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/30' 
                                       : 'bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border border-emerald-500/30'
@@ -260,16 +261,18 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                                 </button>
                                 <button
                                   type="button"
-                                  onClick={() => onExtendLicense(uid, lic)}
-                                  className="px-2 py-1 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 text-[11px] font-bold transition-all"
+                                  disabled={isLoading}
+                                  onClick={() => onExtendLicense(uid, 30, lic)}
+                                  className="px-2 py-1 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 border border-blue-500/30 text-[11px] font-bold transition-all cursor-pointer active:scale-95 disabled:opacity-50"
                                   title="30일 연장"
                                 >
                                   +30일 연장
                                 </button>
                                 <button
                                   type="button"
+                                  disabled={isLoading}
                                   onClick={() => onDeleteLicense(uid)}
-                                  className="p-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/30 text-rose-400 border border-rose-500/20 transition-all"
+                                  className="p-1 rounded-lg bg-rose-500/10 hover:bg-rose-500/30 text-rose-400 border border-rose-500/20 transition-all cursor-pointer disabled:opacity-50"
                                   title="라이선스 삭제"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" />
