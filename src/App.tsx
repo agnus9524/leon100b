@@ -7423,48 +7423,120 @@ export default function App() {
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        {/* KIS OAuth Token Validity Status Card */}
-        <div 
-          onClick={() => setShowKisModal(true)}
-          className={cn(
-            "flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl border transition-all cursor-pointer select-none",
-            tokenInfo.hasToken && !tokenInfo.isExpired
-              ? "bg-slate-900/90 border-emerald-500/30 text-emerald-300 hover:border-emerald-500/60 shadow-[0_0_15px_rgba(16,185,129,0.1)]"
-              : "bg-slate-900/90 border-amber-500/40 text-amber-300 hover:border-amber-500/70"
-          )}
-          title="클릭하여 한국투자증권 API 키 설정 열기 | 토큰 만료시 자동 재발급"
-        >
-          <div className="flex items-center gap-1.5">
-            <Key className={cn("w-3.5 h-3.5", tokenInfo.hasToken && !tokenInfo.isExpired ? "text-emerald-400" : "text-amber-400")} />
-            <span className="text-[11px] font-bold tracking-tight text-slate-300">
-              KIS 토큰 유효시간:
-            </span>
-          </div>
-          
-          <div className="flex items-center gap-2 font-mono font-black text-[12px]">
-            <span className={tokenInfo.hasToken && !tokenInfo.isExpired ? "text-emerald-400" : "text-amber-400"}>
-              {tokenInfo.formattedRemaining}
-            </span>
-            {tokenInfo.hasToken && !tokenInfo.isExpired && (
-              <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,1)]" />
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {/* KIS OAuth Token Validity Status Card */}
+          <div 
+            onClick={() => setShowKisModal(true)}
+            className={cn(
+              "flex items-center gap-2.5 px-3 py-1.5 rounded-xl border transition-all cursor-pointer select-none",
+              tokenInfo.hasToken && !tokenInfo.isExpired
+                ? "bg-slate-900/90 border-emerald-500/30 text-emerald-300 hover:border-emerald-500/60 shadow-[0_0_15px_rgba(16,185,129,0.1)]"
+                : "bg-slate-900/90 border-amber-500/40 text-amber-300 hover:border-amber-500/70"
             )}
+            title="클릭하여 한국투자증권 API 키 설정 열기 | 토큰 만료시 자동 재발급"
+          >
+            <div className="flex items-center gap-1.5">
+              <Key className={cn("w-3.5 h-3.5", tokenInfo.hasToken && !tokenInfo.isExpired ? "text-emerald-400" : "text-amber-400")} />
+              <span className="text-[11px] font-bold tracking-tight text-slate-300">
+                KIS 토큰:
+              </span>
+            </div>
+            
+            <div className="flex items-center gap-1.5 font-mono font-black text-[12px]">
+              <span className={tokenInfo.hasToken && !tokenInfo.isExpired ? "text-emerald-400" : "text-amber-400"}>
+                {tokenInfo.formattedRemaining}
+              </span>
+              {tokenInfo.hasToken && !tokenInfo.isExpired && (
+                <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,1)]" />
+              )}
+            </div>
+
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                handleRefreshToken();
+              }}
+              disabled={isForceRefreshingToken}
+              className="p-1 -mr-1 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-colors disabled:opacity-50 cursor-pointer"
+              title="토큰 즉시 재발급/동기화"
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5", isForceRefreshingToken && "animate-spin text-emerald-400")} />
+            </button>
           </div>
 
+          {/* KIS 연동 설정 버튼 */}
           <button
             type="button"
-            onClick={(e) => {
-              e.stopPropagation();
-              handleRefreshToken();
-            }}
-            disabled={isForceRefreshingToken}
-            className="p-1 -mr-1 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-colors disabled:opacity-50 cursor-pointer"
-            title="토큰 즉시 재발급/동기화"
+            onClick={() => setShowKisModal(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 hover:border-sleek-blue/50 text-xs font-bold transition-all cursor-pointer shadow-sm active:scale-95"
+            title="한국투자증권(KIS) Open API 계정 및 모의투자/실전투자 설정"
           >
-            <RefreshCw className={cn("w-3.5 h-3.5", isForceRefreshingToken && "animate-spin text-emerald-400")} />
+            <Settings className="w-3.5 h-3.5 text-sleek-blue" />
+            <span className="hidden sm:inline">KIS 연동 설정</span>
+            {kisConfig.isConnected && (
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
+            )}
           </button>
+
+          {/* Admin (슈퍼 관리자) 패널 버튼 */}
+          {(currentUser?.email === "agnus9524@gmail.com" || currentUser) && (
+            <button
+              type="button"
+              onClick={() => {
+                handleFetchAllLicenses();
+                setShowAdminPanel(true);
+              }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 hover:from-amber-500/30 hover:to-orange-500/30 text-amber-300 border border-amber-500/40 text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95"
+              title="관리자 라이선스 및 회원 관리 패널 열기"
+            >
+              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+              <span>Admin</span>
+            </button>
+          )}
+
+          {/* 사용자 닉네임 & 로그인/로그아웃 버튼 */}
+          {currentUser ? (
+            <div className="flex items-center gap-2 pl-2 border-l border-white/10">
+              <div className="flex items-center gap-1.5 bg-black/40 px-2.5 py-1.5 rounded-xl border border-white/10">
+                {currentUser.photoURL ? (
+                  <img 
+                    src={currentUser.photoURL} 
+                    alt="profile" 
+                    className="w-5 h-5 rounded-full object-cover border border-white/20"
+                    referrerPolicy="no-referrer"
+                  />
+                ) : (
+                  <div className="w-5 h-5 rounded-full bg-sleek-blue/30 text-sleek-blue flex items-center justify-center text-[10px] font-bold">
+                    <User className="w-3 h-3" />
+                  </div>
+                )}
+                <span className="text-xs font-bold text-slate-200 max-w-[120px] truncate" title={currentUser.displayName || currentUser.email || '사용자'}>
+                  {currentUser.displayName || currentUser.email?.split('@')[0] || '사용자'}
+                </span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleLogout}
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-rose-500/20 hover:text-rose-300 text-slate-400 border border-slate-700 hover:border-rose-500/40 text-xs font-bold transition-all cursor-pointer"
+                title="로그아웃"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">로그아웃</span>
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={handleLogin}
+              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-sleek-blue hover:bg-sleek-blue/80 text-white text-xs font-black transition-all cursor-pointer shadow-md active:scale-95"
+            >
+              <Zap className="w-3.5 h-3.5 fill-white" />
+              <span>로그인</span>
+            </button>
+          )}
         </div>
-      </div>
       </header>
       
       {/* Domestic Market Ribbon */}
