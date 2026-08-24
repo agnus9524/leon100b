@@ -459,7 +459,55 @@ async function fetchRealtimeQuote(symbol: string): Promise<{
 } | null> {
   const isKR = /^\d{6}$/.test(symbol);
   if (isKR) {
-    // 1. Primary: Naver Finance Mobile Basic Quote API
+    // 1. Primary: Naver Polling Realtime API (Fastest & most direct for KRX domestic stocks)
+    try {
+      const pollingResp = await axios.get(`https://polling.finance.naver.com/api/realtime/domestic/stock/${symbol}`, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'application/json, text/plain, */*'
+        },
+        timeout: 2500
+      });
+      const dataItem = pollingResp.data?.datas?.[0] || pollingResp.data?.result?.areas?.[0]?.datas?.[0];
+      if (dataItem && (dataItem.closePrice || dataItem.nv)) {
+        const closePStr = String(dataItem.closePrice || dataItem.nv || '0').replace(/,/g, '');
+        const closeP = Number(closePStr);
+        if (closeP > 0) {
+          const compStr = String(dataItem.compareToPreviousClosePrice || dataItem.cv || '0').replace(/,/g, '');
+          let compVal = Number(compStr);
+          const ratioStr = String(dataItem.fluctuationsRatio || dataItem.cr || '0').replace(/,/g, '');
+          let ratio = Number(ratioStr);
+
+          const signCode = dataItem.compareToPreviousPrice?.code || dataItem.rf;
+          if ((signCode === '4' || signCode === '5') && compVal > 0) {
+            compVal = -compVal;
+          }
+          if ((signCode === '4' || signCode === '5') && ratio > 0) {
+            ratio = -ratio;
+          }
+
+          const volStr = String(dataItem.accumulatedTradingVolume || dataItem.aq || '0');
+          const rawVol = Number(volStr.replace(/,/g, ''));
+          const prevClose = closeP - compVal;
+
+          return {
+            symbol,
+            name: dataItem.stockName || dataItem.nm || symbol,
+            price: closeP,
+            prevClose: prevClose > 0 ? prevClose : closeP,
+            change: compVal,
+            changePercent: ratio,
+            volume: Number(rawVol).toLocaleString(),
+            rawVolume: rawVol,
+            market: 'KR'
+          };
+        }
+      }
+    } catch {
+      // try fallback below
+    }
+
+    // 2. Secondary: Naver Finance Mobile Basic Quote API
     try {
       const resp = await axios.get(`https://m.stock.naver.com/api/stock/${symbol}/basic`, {
         headers: {
@@ -503,7 +551,7 @@ async function fetchRealtimeQuote(symbol: string): Promise<{
           };
         }
       }
-    } catch (e) {
+    } catch {
       // ignore and try fallback
     }
 

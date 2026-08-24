@@ -3727,11 +3727,17 @@ export default function App() {
           market: 'KR'
         }];
       }
-      return prev;
+      return prev.map(s => s.symbol === rec.symbol ? {
+        ...s,
+        price: rec.price,
+        change: rec.change,
+        changePercent: rec.changePercent,
+        volume: rec.volume || s.volume
+      } : s);
     });
 
     openOrSwitchScalperTab(rec.symbol, rec.name);
-    showNotification(`[스캘퍼 타겟 등록] ${rec.name}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (스캘핑 점수 ${rec.scalpingScore}점)`, "success");
+    showNotification(`[스캘퍼 타겟 등록] ${rec.name}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (현재가 ${rec.price.toLocaleString()}원, 스캘핑 점수 ${rec.scalpingScore}점)`, "success");
     setShowScalperRecModal(false);
   }, [openOrSwitchScalperTab, showNotification]);
 
@@ -3751,12 +3757,18 @@ export default function App() {
             market: 'KR'
           }];
         }
-        return prev;
+        return prev.map(s => s.symbol === rec.symbol ? {
+          ...s,
+          price: rec.price,
+          change: rec.change,
+          changePercent: rec.changePercent,
+          volume: rec.volume || s.volume
+        } : s);
       });
       openOrSwitchScalperTab(rec.symbol, rec.name);
     });
     if (top3List.length > 0) {
-      showNotification(`[스캘퍼 TOP 3 일괄 등록] ${top3List.map(s => s.name).join(', ')} 종목이 스캘퍼 탭에 등록되었습니다.`, "success");
+      showNotification(`[스캘퍼 TOP 3 일괄 등록] ${top3List.map(s => `${s.name}(${s.price.toLocaleString()}원)`).join(', ')} 종목이 스캘퍼 탭에 등록되었습니다.`, "success");
     }
     setShowScalperRecModal(false);
   }, [openOrSwitchScalperTab, showNotification]);

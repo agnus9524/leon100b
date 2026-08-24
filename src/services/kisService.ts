@@ -1381,15 +1381,50 @@ class KISService {
   public async orderOverseas(symbol: string, qty: string, price: string, isBuy: boolean, excd: string = 'NASD'): Promise<any> { return { rt_cd: '0', msg1: 'Disabled', output: {} }; }
 
   public async getScalperRecommendations(): Promise<ScalperRecommendation[]> {
+    let baseList: ScalperRecommendation[] = [];
     try {
       const res = await axios.get('/api/stocks/scalper-recommendations', { timeout: 6000 });
       if (res.data && Array.isArray(res.data.recommendations) && res.data.recommendations.length > 0) {
-        return res.data.recommendations;
+        baseList = res.data.recommendations;
       }
     } catch (error) {
       console.warn("KIS getScalperRecommendations API error, using safe fallback:", error);
     }
-    return this.getDefaultScalperRecommendations();
+
+    if (baseList.length === 0) {
+      baseList = this.getDefaultScalperRecommendations();
+    }
+
+    // Synchronize all recommendation stocks with exact real-time prices
+    try {
+      const updatedList = await Promise.all(baseList.map(async (rec) => {
+        try {
+          const live = await this.getPrice(rec.symbol);
+          if (live && live.current > 0) {
+            const targetPrice = Math.round(live.current * (1 + Number((1.5 + (rec.scalpingScore % 5) * 0.3).toFixed(2)) / 100));
+            const stopLoss = Math.round(live.current * 0.985);
+            const expectedReturn = Number((((targetPrice - live.current) / live.current) * 100).toFixed(2));
+            return {
+              ...rec,
+              name: live.name || rec.name,
+              price: live.current,
+              change: live.change,
+              changePercent: live.changePercent,
+              volume: live.volume || rec.volume,
+              targetPrice,
+              stopLoss,
+              expectedReturn
+            };
+          }
+        } catch {
+          // ignore
+        }
+        return rec;
+      }));
+      return updatedList;
+    } catch {
+      return baseList;
+    }
   }
 
   public getDefaultScalperRecommendations(): ScalperRecommendation[] {

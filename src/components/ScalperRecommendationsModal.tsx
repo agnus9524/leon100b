@@ -51,9 +51,16 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   React.useEffect(() => {
-    if (isOpen && recommendations.length === 0 && !isLoading) {
+    if (!isOpen) return;
+    if (recommendations.length === 0 && !isLoading) {
       onRefresh();
     }
+    // Auto-refresh recommendation prices periodically while modal is open
+    const refreshTimer = setInterval(() => {
+      onRefresh();
+    }, 5000);
+
+    return () => clearInterval(refreshTimer);
   }, [isOpen, recommendations.length, isLoading, onRefresh]);
 
   const handleManualRefresh = async () => {
