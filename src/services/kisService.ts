@@ -26,8 +26,9 @@ class KISService {
   private config: KISConfig | null = null;
   private accessToken: string | null = null;
   private tokenExpireTime: number = 0;
+  private tokenIssuedTime: number = 0;
   private pendingTokenPromise: Promise<string> | null = null;
-  private onTokenUpdate: ((token: string, expiresAt: number) => void) | null = null;
+  private onTokenUpdate: ((token: string, expiresAt: number, issuedAt: number) => void) | null = null;
 
   private get baseUrl() {
     return '/api/kis';
@@ -39,7 +40,7 @@ class KISService {
     };
   }
 
-  public init(config: KISConfig, savedToken?: string, savedExpiresAt?: number) {
+  public init(config: KISConfig, savedToken?: string, savedExpiresAt?: number, savedIssuedAt?: number) {
     // Sanitize config by trimming strings to eliminate accidental trailing whitespace
     this.config = {
       ...config,
@@ -62,28 +63,80 @@ class KISService {
       });
     }
 
-    // Reset internal token if environment changed or it's empty
-    if (savedToken && savedExpiresAt && Date.now() < savedExpiresAt) {
-      this.accessToken = savedToken;
-      this.tokenExpireTime = savedExpiresAt;
+    // Try localStorage if parameters not provided
+    const localToken = savedToken || localStorage.getItem('sleek_kis_token') || undefined;
+    const localExpires = savedExpiresAt || Number(localStorage.getItem('sleek_kis_token_expires') || 0);
+    const localIssued = savedIssuedAt || Number(localStorage.getItem('sleek_kis_token_issued') || 0);
+
+    // KIS Token is valid for 24 hours (86,400s). Re-use without fetching anew on every connection.
+    if (localToken && localExpires && Date.now() < localExpires) {
+      this.accessToken = localToken;
+      this.tokenExpireTime = localExpires;
+      this.tokenIssuedTime = localIssued || (localExpires - 24 * 3600 * 1000);
     } else {
       this.accessToken = null;
       this.tokenExpireTime = 0;
+      this.tokenIssuedTime = 0;
     }
   }
 
-  public setTokenUpdateHandler(handler: (token: string, expiresAt: number) => void) {
+  public setTokenUpdateHandler(handler: (token: string, expiresAt: number, issuedAt: number) => void) {
     this.onTokenUpdate = handler;
+  }
+
+  public getTokenInfo() {
+    const now = Date.now();
+    const isExpired = !this.accessToken || now >= this.tokenExpireTime;
+    const remainingMs = Math.max(0, this.tokenExpireTime - now);
+    const remainingMinutes = Math.floor(remainingMs / (60 * 1000));
+    const remainingHours = Number((remainingMs / (3600 * 1000)).toFixed(1));
+    const needsRenewal = isExpired || remainingMinutes <= 15;
+
+    return {
+      token: this.accessToken,
+      issuedAt: this.tokenIssuedTime,
+      expiresAt: this.tokenExpireTime,
+      isExpired,
+      remainingMinutes,
+      remainingHours,
+      needsRenewal
+    };
+  }
+
+  public async forceRefreshToken(): Promise<string> {
+    this.accessToken = null;
+    this.tokenExpireTime = 0;
+    this.tokenIssuedTime = 0;
+    localStorage.removeItem('sleek_kis_token');
+    localStorage.removeItem('sleek_kis_token_expires');
+    localStorage.removeItem('sleek_kis_token_issued');
+    return this.getAccessToken();
   }
 
   public clear() {
     this.config = null;
     this.accessToken = null;
     this.tokenExpireTime = 0;
+    this.tokenIssuedTime = 0;
+    localStorage.removeItem('sleek_kis_token');
+    localStorage.removeItem('sleek_kis_token_expires');
+    localStorage.removeItem('sleek_kis_token_issued');
   }
 
   private async getAccessToken() {
+    // 24-hour token validity check: Reuse existing token if still valid
     if (this.accessToken && Date.now() < this.tokenExpireTime) {
+      return this.accessToken;
+    }
+
+    // Check localStorage in case another tab or component saved it
+    const storedToken = localStorage.getItem('sleek_kis_token');
+    const storedExpires = Number(localStorage.getItem('sleek_kis_token_expires') || 0);
+    const storedIssued = Number(localStorage.getItem('sleek_kis_token_issued') || 0);
+    if (storedToken && storedExpires && Date.now() < storedExpires) {
+      this.accessToken = storedToken;
+      this.tokenExpireTime = storedExpires;
+      this.tokenIssuedTime = storedIssued || (storedExpires - 24 * 3600 * 1000);
       return this.accessToken;
     }
 
@@ -135,21 +188,33 @@ class KISService {
         }
 
         const newAccessToken = res.data.access_token;
-        const expiresInSec = Number(res.data.expires_in || 86400);
-        // Buffer for safety (1 hour before actual expiry or 23h since token lasts 24h)
-        const newExpireTime = Date.now() + (expiresInSec > 3600 ? expiresInSec - 3600 : expiresInSec - 60) * 1000;
+        const now = Date.now();
+        const expiresInSec = Number(res.data.expires_in || 86400); // 24 hours
+        // Set expiry buffer to 23.5 hours for full 24h cycle
+        const newExpireTime = now + (expiresInSec > 1800 ? expiresInSec - 1800 : expiresInSec) * 1000;
+        const issuedAt = now;
         
         this.accessToken = newAccessToken;
         this.tokenExpireTime = newExpireTime;
+        this.tokenIssuedTime = issuedAt;
+
+        // Persist for 24-hour cross-session reuse
+        localStorage.setItem('sleek_kis_token', newAccessToken);
+        localStorage.setItem('sleek_kis_token_expires', String(newExpireTime));
+        localStorage.setItem('sleek_kis_token_issued', String(issuedAt));
 
         if (this.onTokenUpdate) {
-          this.onTokenUpdate(newAccessToken, newExpireTime);
+          this.onTokenUpdate(newAccessToken, newExpireTime, issuedAt);
         }
         
         return this.accessToken;
       } catch (error: any) {
         this.accessToken = null;
         this.tokenExpireTime = 0;
+        this.tokenIssuedTime = 0;
+        localStorage.removeItem('sleek_kis_token');
+        localStorage.removeItem('sleek_kis_token_expires');
+        localStorage.removeItem('sleek_kis_token_issued');
 
         const dataErr = error.response?.data;
         const kisDetail = dataErr?.error_description 

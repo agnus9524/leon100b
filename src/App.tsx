@@ -97,6 +97,7 @@ import { KisConfigModal } from './components/KisConfigModal';
 import { LiveNewsAlerts } from './components/LiveNewsAlerts';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { KisStartupVerification, type StepItem } from './components/KisStartupVerification';
+import { IntegratedTradingHeader } from './components/IntegratedTradingHeader';
 import { 
   auth, 
   googleProvider, 
@@ -3610,19 +3611,36 @@ export default function App() {
 
       const newExpiryDate = new Date(baseTime + days * 24 * 60 * 60 * 1000);
       const newExpiryIso = newExpiryDate.toISOString();
+      const targetDocId = licObj?.id || userId || licObj?.userId;
 
-      await updateLicense(userId, { 
+      if (!targetDocId) {
+        throw new Error("대상 회원의 식별자(UID)를 찾을 수 없습니다.");
+      }
+
+      await updateLicense(targetDocId, { 
         expiresAt: newExpiryIso,
         status: 'active'
       });
 
-      // Optimistic update
+      if (licObj?.userId && licObj.userId !== targetDocId) {
+        await updateLicense(licObj.userId, { 
+          expiresAt: newExpiryIso,
+          status: 'active'
+        });
+      }
+
+      // Optimistic update in state
       setAllLicenses(prev => prev.map(l => {
-        if (l.id === userId || l.userId === userId) {
+        if (l.id === targetDocId || l.userId === targetDocId || l.id === userId || l.userId === userId) {
           return { ...l, expiresAt: newExpiryIso, status: 'active' };
         }
         return l;
       }));
+
+      // If current user is extended, update user license state
+      if (currentUser && (targetDocId === currentUser.uid || licObj?.userId === currentUser.uid || userId === currentUser.uid)) {
+        setIsSubscribed(true);
+      }
 
       showNotification(`라이선스가 +${days}일 연장되었습니다. (만료일: ${newExpiryDate.toLocaleDateString()})`, "success");
       await handleFetchAllLicenses();
@@ -7434,1125 +7452,94 @@ export default function App() {
             }}
           />
 
-          {/* 0. 종목 검색/추가 및 실시간 시세·스캘핑 종합 지표 일체형 통합 바 */}
+          {/* 0. 스캘퍼 종합 일체형 통합 헤더 바 (종목명, 현재체결가, VP/CVD, 실시간메시지, 5개 제어창, 보유현황) */}
           {(() => {
-            const isUS = selectedStock ? (selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US') : false;
-            const price = selectedStock?.price || 0;
-            const limitPct = 0.30;
-            const upperLimit = isUS ? Math.round(price * (1 + limitPct) * 100) / 100 : Math.floor(price * (1 + limitPct));
-            const lowerLimit = isUS ? Math.round(price * (1 - limitPct) * 100) / 100 : Math.ceil(price * (1 - limitPct));
-            const changeVal = selectedStock?.change || 0;
-            const changePct = selectedStock?.changePercent || 0;
-            const isUp = changeVal >= 0;
             const heldQty = selectedStock ? (holdings[selectedStock.symbol] || 0) : 0;
-            
-            // 호가 잔량 계산
-            const symHash = selectedStock ? selectedStock.symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0) : 100;
-            const bidTotal = Math.max(50, Math.floor(((symHash * 17) % 800 + 350) * (isUS ? 1 : 12)));
-            const askTotal = Math.max(50, Math.floor(((symHash * 29) % 750 + 300) * (isUS ? 1 : 12)));
-            const totalDepth = bidTotal + askTotal || 1;
-            const bidShare = Math.round((bidTotal / totalDepth) * 100);
-            const askShare = 100 - bidShare;
-
-            let signalScore = 88;
-            if (changePct > 5) signalScore = 94;
-            else if (changePct > 0) signalScore = 86;
-            else if (changePct > -3) signalScore = 78;
-            else signalScore = 65;
+            const isKR = selectedStock ? /^d{6}$/.test(selectedStock.symbol) : (marketType === 'KR');
+            const availableCash = isKR ? (orderableKrw > 0 ? orderableKrw : balance) : (orderableUsd > 0 ? orderableUsd * exchangeRate : balance);
+            const stockPrice = selectedStock?.price || 0;
+            const priceInBalanceCurrency = isKR ? stockPrice : stockPrice * exchangeRate;
+            const calcBuyable = (priceInBalanceCurrency > 0 && availableCash > 0)
+              ? Math.floor(availableCash / priceInBalanceCurrency)
+              : 0;
+            const displayBuyableQty = kisBuyableQty !== null ? kisBuyableQty : calcBuyable;
 
             return (
-              <div className="relative z-[110] bg-gradient-to-br from-slate-900/95 via-slate-900/98 to-slate-950/95 border border-slate-700/60 p-3 sm:p-3.5 rounded-3xl shadow-2xl backdrop-blur-xl">
-                <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3">
-                  {/* 좌측: 종목 검색 & 추가 + 선택된 종목명, 코드, 현재 체결가, 전일 대비, 보유/주문가능수량 */}
-                  <div className="flex items-center gap-2.5 flex-wrap grow py-0.5 overflow-visible">
-                    {/* 종목 검색 & 추가 인풋 - 컴팩트 사이즈로 단일 라인 유지 */}
-                    <div ref={searchRef} className="relative z-[100] w-full sm:w-44 md:w-48 shrink-0">
-                      <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
-                      <input 
-                        ref={searchInputRef}
-                        type="text" 
-                        value={searchSymbol}
-                        onChange={(e) => setSearchSymbol(e.target.value)}
-                        onFocus={() => {
-                          if (searchSuggestions.length > 0) setShowSuggestions(true);
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter') {
-                            handleAddStock();
-                          }
-                        }}
-                        className="w-full bg-black/50 border border-white/15 focus:border-sleek-blue rounded-xl py-1.5 pl-7 pr-12 text-xs font-semibold text-white placeholder:text-slate-500 outline-none transition-all shadow-inner" 
-                        placeholder="종목코드/명"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => handleAddStock()}
-                        className="absolute right-1 top-1/2 -translate-y-1/2 px-2 py-1 bg-sleek-blue hover:bg-blue-600 active:scale-95 text-white text-[11px] font-bold rounded-lg transition-all shadow-md cursor-pointer"
-                      >
-                        추가
-                      </button>
-                      
-                      {/* Search Suggestions Dropdown - '국내' 텍스트 제거 */}
-                      <AnimatePresence>
-                        {showSuggestions && searchSuggestions.length > 0 && (
-                          <motion.div 
-                            initial={{ opacity: 0, y: -4, scale: 0.98 }} 
-                            animate={{ opacity: 1, y: 0, scale: 1 }} 
-                            exit={{ opacity: 0, y: -4, scale: 0.98 }}
-                            transition={{ duration: 0.15 }}
-                            className="absolute top-full left-0 right-0 mt-2 z-[200] bg-slate-900/98 backdrop-blur-2xl border-2 border-sleek-blue/50 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.95)] ring-2 ring-sleek-blue/30 overflow-hidden"
-                          >
-                            {/* 상단 안내 바 */}
-                            <div className="px-4 py-2 bg-slate-950/90 border-b border-white/10 flex items-center justify-between text-xs text-slate-400 font-bold uppercase tracking-wider">
-                              <span className="flex items-center gap-1.5 text-sleek-blue">
-                                <Search className="w-3.5 h-3.5" /> 실시간 검색 종목 ({searchSuggestions.length}개)
-                              </span>
-                              <span className="text-[11px] text-emerald-400 font-medium">클릭 시 즉시 스캘핑 탭 추가</span>
-                            </div>
-
-                            <div className="max-h-[340px] overflow-y-auto custom-scrollbar divide-y divide-white/5">
-                              {searchSuggestions.map((s, idx) => {
-                                return (
-                                  <button 
-                                    key={`${s.symbol}-${idx}`}
-                                    onClick={() => handleAddStock(s.symbol, undefined, s.name)}
-                                    className="w-full flex items-center justify-between p-3.5 hover:bg-sleek-blue/20 active:bg-sleek-blue/30 transition-colors text-left cursor-pointer group"
-                                  >
-                                    <div className="flex flex-col gap-1">
-                                      <div className="flex items-center gap-2.5">
-                                        <div className="text-sm sm:text-base font-extrabold text-white group-hover:text-sleek-blue transition-colors">
-                                          {s.name}
-                                        </div>
-                                      </div>
-                                      <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-                                        <span className="text-slate-300 font-semibold">{s.symbol}</span>
-                                        {s.price !== undefined && s.price > 0 && (
-                                          <>
-                                            <span>•</span>
-                                            <span className="text-sleek-blue font-bold">
-                                              {formatCurrency(s.price)}
-                                            </span>
-                                          </>
-                                        )}
-                                      </div>
-                                    </div>
-                                    <div className="flex items-center gap-2 text-xs font-bold text-sleek-blue opacity-80 group-hover:opacity-100 group-hover:translate-x-1 transition-all">
-                                      <span>탭 추가</span>
-                                      <ChevronRight className="w-4 h-4" />
-                                    </div>
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </motion.div>
-                        )}
-                      </AnimatePresence>
-                    </div>
-
-                    {/* 🔥 실시간 추천종목 찾기 버튼 (상단 검색바 인라인) */}
-                    <button
-                      type="button"
-                      onClick={handleOpenScalperRecommendations}
-                      className="shrink-0 px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-black font-sans flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_0_15px_rgba(16,185,129,0.35)] border border-emerald-400/40 active:scale-95 group"
-                      title="한국투자증권 실시간 수급 및 거래량 데이터를 분석하여 스캘퍼 최적 추천종목 10선과 스캘핑 점수를 확인합니다."
-                    >
-                      <Sparkles className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-pulse group-hover:rotate-12 transition-transform" />
-                      <span>추천종목 찾기</span>
-                      <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-black/40 text-emerald-200 border border-emerald-400/30 font-mono font-bold">
-                        TOP 10
-                      </span>
-                    </button>
-
-                    <div className="hidden lg:block h-9 w-px bg-white/10 shrink-0" />
-
-                    {/* 선택된 종목 기본 정보 & 4대 핵심 지표 인라인 배치 */}
-                    {selectedStock && (
-                      <div className="flex items-center gap-3 flex-wrap grow min-w-0">
-
-                        
-                        {/* 종목명 & 종목코드 & (보유/주문가능수량) - 고정 폭 적용으로 종목명 길이에 따른 흔들림 완벽 방지 */}
-                        <div className="w-full sm:w-[220px] md:w-[240px] shrink-0 flex flex-col justify-center overflow-hidden">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            <h2 className="text-base sm:text-lg font-black text-white tracking-tight leading-none truncate" title={selectedStock.name}>
-                              {selectedStock.name}
-                            </h2>
-                            <span className="text-[10px] font-mono font-bold text-slate-400 bg-black/40 px-1.5 py-0.5 rounded border border-white/10 shrink-0">
-                              {selectedStock.symbol}
-                            </span>
-                          </div>
-                          <div className="text-[11px] text-slate-400 mt-1 flex flex-col gap-0.5 font-mono leading-tight">
-                            <div>보유: <strong className="text-white font-bold">{heldQty.toLocaleString()}주</strong></div>
-                            <div>주문가능: <strong className="text-sleek-blue font-bold">{displayBuyableQty.toLocaleString()}주</strong></div>
-                          </div>
-                        </div>
-
-                        {/* 현재 체결가 및 그 바로 밑 전일 대비 (눈에 띄는 색상 & 확장된 박스) */}
-                        <div className="w-full sm:w-auto sm:min-w-[225px] shrink-0 bg-black/70 px-3 py-2 rounded-2xl border border-white/20 shadow-xl flex flex-col justify-center gap-1.5 backdrop-blur-md">
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-xs sm:text-[13px] font-black text-amber-300 flex items-center gap-1 shrink-0">
-                              <Activity className="w-3.5 h-3.5 text-amber-400" />
-                              현재 체결가:
-                            </span>
-                            <span className="text-base sm:text-lg font-black text-white font-mono tracking-tight text-right drop-shadow-md">
-                              {formatCurrency(price, false, isUS ? 'US' : 'KR')}
-                            </span>
-                          </div>
-                          <div className="flex items-center justify-between gap-2 pt-1 border-t border-white/10">
-                            <span className="text-xs sm:text-[12px] font-black text-slate-300 shrink-0">
-                              전일 대비:
-                            </span>
-                            <span className={cn(
-                              "text-xs sm:text-sm font-black font-mono flex items-center gap-1 shrink-0 px-2 py-0.5 rounded-lg border",
-                              isUp 
-                                ? "text-rose-400 bg-rose-500/15 border-rose-500/30" 
-                                : "text-sky-400 bg-sky-500/15 border-sky-500/30"
-                            )}>
-                              {isUp ? <TrendingUp className="w-3.5 h-3.5 shrink-0" /> : <TrendingDown className="w-3.5 h-3.5 shrink-0" />}
-                              <span className="font-extrabold">{isUp ? '+' : ''}{formatCurrency(changeVal, false, isUS ? 'US' : 'KR')}</span>
-                              <span className="text-[11px] font-bold">({isUp ? '+' : ''}{changePct.toFixed(2)}%)</span>
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* 4대 핵심 지표 카드 (현재 체결가 바로 옆에 배치, shrink-0으로 고정) */}
-                        {/* 1. 당일 가격 제한폭 카드 */}
-                        <div className="w-full sm:w-auto shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[140px] text-xs">
-                          <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
-                            <Layers className="w-3 h-3 text-slate-400" /> 당일 가격 제한폭
-                          </span>
-                          <div className="flex items-center justify-between font-mono pt-1 text-[11px]">
-                            <span className="text-rose-400 font-bold flex items-center gap-0.5">
-                              <TrendingUp className="w-2.5 h-2.5" /> 상한 (+30%):
-                            </span>
-                            <strong className="text-rose-400 font-black">{formatCurrency(upperLimit, false, isUS ? 'US' : 'KR')}</strong>
-                          </div>
-                          <div className="flex items-center justify-between font-mono pt-0.5 border-t border-white/5 text-[11px]">
-                            <span className="text-sky-400 font-bold flex items-center gap-0.5">
-                              <TrendingDown className="w-2.5 h-2.5" /> 하한 (-30%):
-                            </span>
-                            <strong className="text-sky-400 font-black">{formatCurrency(lowerLimit, false, isUS ? 'US' : 'KR')}</strong>
-                          </div>
-                        </div>
-
-                        {/* 2. 호가창 총 잔량 비율 */}
-                        <div className="w-full sm:w-auto shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[160px] text-xs">
-                          <div className="flex items-center justify-between text-[11px]">
-                            <span className="font-bold text-slate-400 flex items-center gap-1">
-                              <Activity className="w-3 h-3 text-sleek-blue" /> 호가 총 잔량 비율
-                            </span>
-                            <span className="font-mono font-bold text-slate-300">
-                              {bidShare}% / {askShare}%
-                            </span>
-                          </div>
-                          <div className="w-full bg-slate-800 h-1.5 rounded-full overflow-hidden flex my-1">
-                            <div style={{ width: `${bidShare}%` }} className="bg-rose-500 h-full transition-all" title={`매수잔량: ${bidTotal.toLocaleString()}주`} />
-                            <div style={{ width: `${askShare}%` }} className="bg-sky-500 h-full transition-all" title={`매도잔량: ${askTotal.toLocaleString()}주`} />
-                          </div>
-                          <div className="flex items-center justify-between text-[10px] font-mono pt-0.5 border-t border-white/5">
-                            <span className="text-rose-300">매수: <strong>{bidTotal.toLocaleString()}주</strong></span>
-                            <span className="text-sky-300">매도: <strong>{askTotal.toLocaleString()}주</strong></span>
-                          </div>
-                        </div>
-
-                        {/* 3. 실시간 누적 거래량 */}
-                        <div className="w-full sm:w-auto shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[135px] text-xs">
-                          <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
-                            <Zap className="w-3 h-3 text-amber-400" /> 실시간 누적 거래량
-                          </span>
-                          <div className="text-xs sm:text-sm font-black text-white font-mono my-0.5">
-                            {typeof selectedStock.volume === 'number' ? selectedStock.volume.toLocaleString() : selectedStock.volume}
-                          </div>
-                          <div className="flex items-center justify-between text-[10px] text-slate-400 font-mono pt-0.5 border-t border-white/5">
-                            <span>체결 강도:</span>
-                            <strong className={cn("font-bold", bidShare >= 50 ? "text-rose-400" : "text-sky-400")}>
-                              {Math.round((bidTotal / (askTotal || 1)) * 100)}%
-                            </strong>
-                          </div>
-                        </div>
-
-                        {/* 4. AI 스캘핑 종합 점수 */}
-                        <div className="w-full sm:w-auto shrink-0 bg-black/40 px-2.5 py-1.5 rounded-2xl border border-white/10 flex flex-col justify-between min-w-[130px] text-xs">
-                          <span className="text-[11px] font-bold text-slate-400 flex items-center gap-1">
-                            <Sparkles className="w-3 h-3 text-purple-400" /> AI 스캘핑 점수
-                          </span>
-                          <div className="flex items-center justify-between my-0.5">
-                            <span className="text-sm sm:text-base font-black font-mono text-emerald-400">
-                              {signalScore}점
-                            </span>
-                            <span className="text-[10px] font-bold text-purple-300 bg-purple-500/20 px-1.5 py-0.5 rounded border border-purple-500/30">
-                              초단타 최적
-                            </span>
-                          </div>
-                          <div className="text-[10px] text-slate-400 pt-0.5 border-t border-white/5 flex items-center justify-between font-mono">
-                            <span>권장 손익:</span>
-                            <strong className="text-emerald-400">+0.2% / -0.5%</strong>
-                          </div>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+              <IntegratedTradingHeader
+                selectedStock={selectedStock}
+                searchRef={searchRef}
+                searchInputRef={searchInputRef}
+                searchSymbol={searchSymbol}
+                setSearchSymbol={setSearchSymbol}
+                searchSuggestions={searchSuggestions}
+                showSuggestions={showSuggestions}
+                setShowSuggestions={setShowSuggestions}
+                handleAddStock={handleAddStock}
+                handleOpenScalperRecommendations={handleOpenScalperRecommendations}
+                heldQty={heldQty}
+                displayBuyableQty={displayBuyableQty}
+                formatCurrency={formatCurrency}
+                formatQuantity={formatQuantity}
+                scalperStrategyMode={scalperStrategyMode}
+                setScalperStrategyMode={setScalperStrategyMode}
+                activeStrategyDetection={activeStrategyDetection}
+                setIsMaxYieldModalOpen={setIsMaxYieldModalOpen}
+                displayScalperMessage={displayScalperMessage}
+                tradeQuantity={tradeQuantity}
+                setTradeQuantity={setTradeQuantity}
+                maxSlots={maxSlots}
+                setMaxSlots={setMaxSlots}
+                scalpingTargetProfit={scalpingTargetProfit}
+                setScalpingTargetProfit={setScalpingTargetProfit}
+                scalpingStopLoss={scalpingStopLoss}
+                setScalpingStopLoss={setScalpingStopLoss}
+                isSmartScalperMode={isSmartScalperMode}
+                setIsSmartScalperMode={setIsSmartScalperMode}
+                minGapBetweenSlots={minGapBetweenSlots}
+                setMinGapBetweenSlots={setMinGapBetweenSlots}
+                entryPriceMode={entryPriceMode}
+                setEntryPriceMode={setEntryPriceMode}
+                scalpingSpeed={scalpingSpeed}
+                setScalpingSpeed={setScalpingSpeed}
+                orderBookData={orderBookData}
+                gapBuyPrice={gapBuyPrice}
+                gapSellPrice={gapSellPrice}
+                isScalperRecLoading={isScalperRecLoading}
+                isRefreshingTop3={isRefreshingTop3}
+                scalperTabs={scalperTabs}
+                activeTabId={activeTabId}
+                marketType={marketType}
+                handleSwitchTab={handleSwitchTab}
+                closeScalperTab={closeScalperTab}
+                openOrSwitchScalperTab={openOrSwitchScalperTab}
+                stocks={stocks}
+                setStocks={setStocks}
+                stocksCache={stocksCache}
+                setStocksCache={setStocksCache}
+                aiRecommendations={aiRecommendations}
+                getResolvedStockName={getResolvedStockName}
+                showNotification={showNotification}
+                isGapBotActive={isGapBotActive}
+                setIsGapBotActive={setIsGapBotActive}
+                setLastTradeType={setLastTradeType}
+                isAutoRotateTabs={isAutoRotateTabs}
+                setIsAutoRotateTabs={setIsAutoRotateTabs}
+                tabRotationInterval={tabRotationInterval}
+                setTabRotationInterval={setTabRotationInterval}
+                holdings={holdings}
+                avgPrices={avgPrices}
+                setShowScalperRecModal={setShowScalperRecModal}
+                handleRefreshScalperRecList={handleRefreshScalperRecList}
+                handleSyncKIS={handleSyncKIS}
+                setManualSellStock={setManualSellStock}
+                setManualSellQty={setManualSellQty}
+                setManualSellPrice={setManualSellPrice}
+                setManualSellModalOpen={setManualSellModalOpen}
+                INITIAL_STOCKS_KR={INITIAL_STOCKS_KR}
+                INITIAL_STOCKS={INITIAL_STOCKS}
+              />
             );
           })()}
-
-          {/* 1. AI SCALPING CONFIG - 일체형 컴팩트 섹터 */}
-          <div id="ai-scalping-config-panel" className="bg-sleek-card border border-sleek-border p-3.5 sm:p-4 rounded-3xl shadow-xl space-y-3">
-            {/* 상단 라인: 스캘퍼 AI 실시간 전략 감지 센서 & 6대 전략 선택 모드 */}
-            <div className="bg-black/40 p-2.5 sm:p-3 rounded-2xl border border-white/10 flex flex-col lg:flex-row items-center justify-between gap-2.5">
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-xs sm:text-sm font-black text-slate-200 flex items-center gap-1.5">
-                  <Sparkles className="w-4 h-4 text-amber-400 animate-spin" /> 스캘퍼 AI 실시간 전략 감지 센서:
-                </span>
-              </div>
-              <div className="grid grid-cols-2 lg:flex lg:flex-row lg:items-center gap-1.5 lg:gap-1.5 w-full lg:w-auto">
-                {/* ⚡ 최고수익 AI★ 버튼 (독립적 간격 분리 배치) */}
-                <div className="col-span-1 lg:pr-2 lg:sm:pr-3 lg:mr-1 lg:sm:mr-2 lg:border-r lg:border-white/15 w-full flex">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsMaxYieldModalOpen(true);
-                    }}
-                    className={cn(
-                      "w-full px-3 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shadow-md",
-                      scalperStrategyMode === 'AI_MAX_YIELD'
-                        ? "bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white border-amber-300 shadow-[0_0_16px_rgba(245,158,11,0.6)] animate-pulse"
-                        : "bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 border-amber-500/40"
-                    )}
-                    title="⚡ 최고수익 AI 전자동 모드: 금액 한도 설정 후 모든 옵션 구속 없이 최적 종목 자동 선정 & 최고수익 자동매매 가동"
-                  >
-                    <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-bounce" />
-                    <span>⚡ 최고수익 AI★</span>
-                  </button>
-                </div>
-
-                {/* 🎯 4/4 올-그린 및 전략 모드 버튼 그룹 */}
-                <button
-                  type="button"
-                  onClick={() => setScalperStrategyMode('ALL_SENSORS_4')}
-                  className={cn(
-                    "col-span-1 w-full relative px-2.5 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
-                    activeStrategyDetection.activeCount === 4
-                      ? "bg-gradient-to-r from-emerald-500/40 via-cyan-500/40 to-blue-500/40 text-emerald-200 border-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.5)] animate-pulse"
-                      : scalperStrategyMode === 'ALL_SENSORS_4'
-                      ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/50 shadow-md"
-                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-80"
-                  )}
-                  title="4개 실시간 전략 감지 센서가 모두 켜질 때만(4/4) 슬롯 전체를 가득 매수 진입하는 최고 신뢰도 전용 모드"
-                >
-                  <span className={cn(
-                    "w-2 h-2 rounded-full transition-all shrink-0",
-                    activeStrategyDetection.activeCount === 4
-                      ? "bg-emerald-400 shadow-[0_0_8px_#10b981] animate-ping"
-                      : "bg-slate-600/60 border border-slate-700"
-                  )} />
-                  <span>🎯 4/4 올-그린</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setScalperStrategyMode('PULLBACK')}
-                  className={cn(
-                    "col-span-1 w-full relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
-                    activeStrategyDetection.isPullback
-                      ? "bg-cyan-500/30 text-cyan-200 border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.4)]"
-                      : scalperStrategyMode === 'PULLBACK'
-                      ? "bg-cyan-500/20 text-cyan-300 border-cyan-500/50 shadow-md"
-                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
-                  )}
-                  title="상승 추세(SMA5>=SMA20) 눌림목 후 반등 진입 (원칙 1,3)"
-                >
-                  <span className={cn(
-                    "w-2 h-2 rounded-full transition-all shrink-0",
-                    activeStrategyDetection.isPullback
-                      ? "bg-cyan-400 shadow-[0_0_8px_#06b6d4] animate-pulse"
-                      : "bg-slate-600/60 border border-slate-700"
-                  )} />
-                  <span>① 눌림목</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setScalperStrategyMode('BREAKOUT')}
-                  className={cn(
-                    "col-span-1 w-full relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
-                    activeStrategyDetection.isBreakout
-                      ? "bg-amber-500/30 text-amber-200 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.4)]"
-                      : scalperStrategyMode === 'BREAKOUT'
-                      ? "bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-md"
-                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
-                  )}
-                  title="거래량 급증 및 전고점 돌파 진입 (원칙 2)"
-                >
-                  <span className={cn(
-                    "w-2 h-2 rounded-full transition-all shrink-0",
-                    activeStrategyDetection.isBreakout
-                      ? "bg-amber-400 shadow-[0_0_8px_#f59e0b] animate-pulse"
-                      : "bg-slate-600/60 border border-slate-700"
-                  )} />
-                  <span>② 돌파</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setScalperStrategyMode('VWAP_SUPPORT')}
-                  className={cn(
-                    "col-span-1 w-full relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
-                    activeStrategyDetection.isVwapSupport
-                      ? "bg-indigo-500/30 text-indigo-200 border-indigo-400 shadow-[0_0_12px_rgba(99,102,241,0.4)]"
-                      : scalperStrategyMode === 'VWAP_SUPPORT'
-                      ? "bg-indigo-500/20 text-indigo-300 border-indigo-500/50 shadow-md"
-                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
-                  )}
-                  title="VWAP 평균가격 지지 및 지지선 반등 진입"
-                >
-                  <span className={cn(
-                    "w-2 h-2 rounded-full transition-all shrink-0",
-                    activeStrategyDetection.isVwapSupport
-                      ? "bg-indigo-400 shadow-[0_0_8px_#6366f1] animate-pulse"
-                      : "bg-slate-600/60 border border-slate-700"
-                  )} />
-                  <span>③ VWAP</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setScalperStrategyMode('VOLUME_PROFILE_CVD')}
-                  className={cn(
-                    "col-span-1 w-full relative px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1",
-                    activeStrategyDetection.isVolumeProfile
-                      ? "bg-purple-500/30 text-purple-200 border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.4)]"
-                      : scalperStrategyMode === 'VOLUME_PROFILE_CVD'
-                      ? "bg-purple-500/20 text-purple-300 border-purple-500/50 shadow-md"
-                      : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/5 opacity-70"
-                  )}
-                  title="볼륨 프로파일(POC) 최대 수평거래선 지지 & CVD 누적 거래량 다이버전스/유동성 흡수 진입 (하비어 발렌틴 전략)"
-                >
-                  <span className={cn(
-                    "w-2 h-2 rounded-full transition-all shrink-0",
-                    activeStrategyDetection.isVolumeProfile
-                      ? "bg-purple-400 shadow-[0_0_8px_#a855f7] animate-pulse"
-                      : "bg-slate-600/60 border border-slate-700"
-                  )} />
-                  <span>④ VP/CVD</span>
-                </button>
-              </div>
-            </div>
-
-            {/* 🔴 스캘퍼 AI 실시간 전략 감지 센서 바로 아래로 이동 배치된 실시간 상태 메시지 */}
-            <div className="text-xs sm:text-sm font-mono flex items-center bg-black/40 px-3.5 py-2.5 rounded-2xl border border-sleek-blue/30 shadow-inner">
-              <div className="flex items-center gap-2.5 w-full overflow-hidden">
-                <span className="text-xs sm:text-sm font-black text-slate-300 uppercase shrink-0 flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-                  실시간 상태 메시지:
-                </span>
-                <span className="font-bold text-sleek-blue text-xs sm:text-sm leading-snug truncate">
-                  {displayScalperMessage}
-                </span>
-              </div>
-            </div>
-
-            {/* 핵심 스캘퍼 5열 컴팩트 대시보드 */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-stretch text-xs">
-              {/* 1. 1회 거래수량, 최대 분할 슬롯, 목표순익 & 손절 (가로폭 축소: col-span-2) */}
-              <div className="lg:col-span-2 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0">
-                <div>
-                  <div className="flex items-center justify-between mb-0.5">
-                    <label className="text-[11px] font-black text-slate-300 uppercase flex items-center gap-1">
-                      <Layers className="w-3 h-3 text-sleek-blue" /> 1회 거래수량
-                    </label>
-                    <span className="text-xs font-bold text-white font-mono">{tradeQuantity}주</span>
-                  </div>
-                  <select 
-                    value={tradeQuantity}
-                    onChange={(e) => setTradeQuantity(Number(e.target.value))}
-                    className="w-full bg-black/50 border border-sleek-border rounded-xl p-1 text-center text-xs font-bold outline-none text-white font-mono appearance-none cursor-pointer"
-                  >
-                    {Array.from({ length: 100 }, (_, i) => i + 1).map(val => (
-                      <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="pt-1 border-t border-white/10">
-                  <div className="flex items-center justify-between mb-0.5">
-                    <label className="text-[11px] font-black text-slate-300 uppercase flex items-center gap-1">
-                      <Layers className="w-3 h-3 text-emerald-400" /> 최대 분할 슬롯
-                    </label>
-                    <span className="text-[11px] font-bold text-emerald-400 font-mono">10개★</span>
-                  </div>
-                  <select 
-                    value={maxSlots}
-                    onChange={(e) => setMaxSlots(Number(e.target.value))}
-                    className="w-full bg-black/50 border border-emerald-500/30 rounded-xl p-1 text-center text-xs font-bold outline-none text-emerald-300 font-mono appearance-none cursor-pointer"
-                    title="최대 분할 매수 개수 (기본: 10개)"
-                  >
-                    {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20].map(val => (
-                      <option key={val} value={val} className="bg-sleek-bg text-white">
-                        {val === 10 ? '10개★' : `${val}개`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div className="pt-1 border-t border-white/10">
-                  <div className="text-[10.5px] font-black uppercase leading-tight space-y-0.5 mb-1">
-                    <div className="text-emerald-400 flex items-center justify-between">
-                      <span>목표 순익 +{scalpingTargetProfit}%</span>
-                      <span className="text-[8.5px] font-normal text-emerald-400/80 font-sans">세후</span>
-                    </div>
-                    <div className="text-rose-400">손절 {scalpingStopLoss}%</div>
-                  </div>
-                  <div className="grid grid-cols-2 gap-1">
-                    <select 
-                      value={scalpingTargetProfit}
-                      onChange={(e) => setScalpingTargetProfit(Number(e.target.value))}
-                      className="bg-black/50 border border-emerald-500/40 rounded-xl p-1 text-xs font-mono outline-none text-emerald-400 text-center font-bold appearance-none cursor-pointer"
-                      title="목표 순수익률 (기본 +0.2%)"
-                    >
-                      {[0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1.0].map(val => (
-                        <option key={val} value={val} className="bg-sleek-bg text-emerald-400">
-                          +{val}%{val === 0.2 ? '★' : ''}
-                        </option>
-                      ))}
-                    </select>
-                    <select 
-                      value={scalpingStopLoss}
-                      onChange={(e) => setScalpingStopLoss(Number(e.target.value))}
-                      className="bg-black/50 border border-rose-500/40 rounded-xl p-1 text-xs font-mono outline-none text-rose-400 text-center font-bold appearance-none cursor-pointer"
-                      title="손절 기준률 (기본 -0.5%)"
-                    >
-                      {[-0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9, -1.0].map(val => (
-                        <option key={val} value={val} className="bg-sleek-bg text-rose-400">
-                          {val}%{val === -0.5 ? '★' : ''}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-
-              {/* 2. SMART SCALPER & 세부 설정 (가로폭 축소: col-span-2) */}
-              <div className="lg:col-span-2 bg-sleek-blue/5 border border-sleek-blue/20 p-2.5 rounded-2xl flex flex-col justify-between space-y-1.5 min-w-0">
-                <div className="flex items-center justify-between">
-                  <span className="text-[11px] font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1 group relative">
-                    <Zap className="w-3 h-3" /> SMART SCALPER
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setIsSmartScalperMode(!isSmartScalperMode)}
-                    className={cn(
-                      "p-0.5 rounded-lg transition-all border cursor-pointer shrink-0",
-                      isSmartScalperMode
-                        ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue"
-                        : "bg-white/5 border-white/10 text-slate-400 opacity-60"
-                    )}
-                    title={`스마트 스캘퍼 모드 ${isSmartScalperMode ? '활성화(ON)' : '비활성화(OFF)'}`}
-                  >
-                    <div className={cn(
-                      "w-6 h-3 rounded-full transition-colors relative p-0.5",
-                      isSmartScalperMode ? "bg-sleek-blue" : "bg-slate-700"
-                    )}>
-                      <div className={cn(
-                        "w-2 h-2 rounded-full bg-white transition-transform shadow",
-                        isSmartScalperMode ? "translate-x-3" : "translate-x-0"
-                      )} />
-                    </div>
-                  </button>
-                </div>
-
-                <div>
-                  <div className="flex items-center justify-between mb-0.5">
-                    <label className="text-[10px] font-black text-slate-300 uppercase">추가 매수 간격 (Gap %)</label>
-                  </div>
-                  <select 
-                    value={minGapBetweenSlots}
-                    onChange={(e) => setMinGapBetweenSlots(Number(e.target.value))}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl px-1.5 py-1 text-xs font-mono font-bold text-white outline-none cursor-pointer appearance-none"
-                  >
-                    {[0.1, 0.2, 0.3, 0.4, 0.5, 0.8, 1.0, 1.5, 2.0, 3.0, 5.0].map(gap => (
-                      <option key={gap} value={gap} className="bg-sleek-bg text-white">{gap}%</option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* 진입 호가 방식 드롭다운 */}
-                <div className="pt-1 border-t border-white/10">
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[10px] font-bold text-white flex items-center gap-1">
-                      <TrendingDown className="w-3 h-3 text-amber-400" /> 진입 호가 방식
-                    </span>
-                  </div>
-                  <select
-                    value={entryPriceMode}
-                    onChange={(e) => setEntryPriceMode(e.target.value as any)}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl px-1.5 py-1 text-xs font-bold text-white outline-none cursor-pointer appearance-none"
-                    title="진입 호가 방식 선택"
-                  >
-                    <option value="BID1" className="bg-sleek-bg text-white">매수1호가</option>
-                    <option value="BID2" className="bg-sleek-bg text-emerald-400 font-bold">매수2호가★</option>
-                    <option value="BID4" className="bg-sleek-bg text-white">매수4호가</option>
-                    <option value="CURRENT" className="bg-sleek-bg text-white">현재가</option>
-                  </select>
-                </div>
-
-                {/* 실행 속도 드롭다운 */}
-                <div className="pt-1 border-t border-white/10">
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[10px] font-bold text-slate-300 uppercase flex items-center gap-1">
-                      <Activity className="w-3 h-3 text-amber-400" /> 실행 속도
-                    </span>
-                  </div>
-                  <select
-                    value={scalpingSpeed}
-                    onChange={(e) => setScalpingSpeed(Number(e.target.value))}
-                    className="w-full bg-black/50 border border-white/10 rounded-xl px-1.5 py-1 text-xs font-mono font-bold text-amber-300 outline-none cursor-pointer appearance-none"
-                    title="스캘핑 실행 주기 (체결 속도)"
-                  >
-                    <option value={100} className="bg-sleek-bg text-white">0.1s</option>
-                    <option value={200} className="bg-sleek-bg text-white">0.2s</option>
-                    <option value={300} className="bg-sleek-bg text-amber-300 font-bold">0.3s★</option>
-                    <option value={500} className="bg-sleek-bg text-white">0.5s</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* 3. 실시간 잔량 호가창 (4호가) (smart scalper 우측 배치: col-span-3) */}
-              <div className="lg:col-span-3 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
-                <div>
-                  <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
-                    <span className="text-[10.5px] font-black text-slate-300 uppercase tracking-wider flex items-center gap-1">
-                      <Activity className="w-3 h-3 text-sleek-blue" />
-                      실시간 잔량 호가창 (4호가)
-                      {orderBookData?.isRealData && (
-                        <span className="text-[8.5px] px-1 rounded bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 font-mono">
-                          LIVE
-                        </span>
-                      )}
-                    </span>
-                    {selectedStock && (
-                      <span className="text-[9.5px] font-mono text-slate-400 truncate max-w-[80px]">
-                        {selectedStock.symbol}
-                      </span>
-                    )}
-                  </div>
-
-                  {orderBookData && selectedStock ? (
-                    <>
-                      {/* Ask Levels (매도 4~1호가) */}
-                      <div className="space-y-0.5">
-                        {orderBookData.askLevels.map((lvlPrice, idx) => {
-                          const vol = orderBookData.askVolumes[idx];
-                          const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
-                          const barPct = Math.min(100, Math.round((vol / orderBookData.maxLevelVol) * 100));
-                          return (
-                            <div key={`top-ask-${idx}`} className="flex items-center justify-between h-3.5 px-1 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
-                              <div className="absolute right-0 top-0 bottom-0 bg-sky-500/30 border-l border-sky-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
-                              <span className="w-11 shrink-0 text-[8.5px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}</span>
-                              <span className={cn(
-                                "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[9.5px] whitespace-nowrap px-0.5",
-                                isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-200"
-                              )}>
-                                {formatCurrency(lvlPrice)}
-                              </span>
-                              <span className="w-12 shrink-0 text-right text-sky-100 font-bold font-mono tabular-nums text-[8.5px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      {/* Spread Line (현재 체결가) */}
-                      <div className="my-0.5 h-4 px-1 bg-white/5 border-y border-white/10 flex items-center justify-between rounded font-mono tabular-nums">
-                        <span className="text-[8.5px] font-black text-slate-400 uppercase shrink-0">체결가</span>
-                        <span className={cn("font-black text-[10.5px] font-mono tabular-nums animate-pulse", (selectedStock.change || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
-                          {formatCurrency(selectedStock.price)}
-                        </span>
-                        <span className={cn("text-[8.5px] font-mono tabular-nums font-bold shrink-0", (selectedStock.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
-                          {(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%
-                        </span>
-                      </div>
-
-                      {/* Bid Levels (매수 1~4호가) */}
-                      <div className="space-y-0.5">
-                        {orderBookData.bidLevels.map((lvlPrice, idx) => {
-                          const vol = orderBookData.bidVolumes[idx];
-                          const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
-                          const barPct = Math.min(100, Math.round((vol / orderBookData.maxLevelVol) * 100));
-                          return (
-                            <div key={`top-bid-${idx}`} className="flex items-center justify-between h-3.5 px-1 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
-                              <div className="absolute right-0 top-0 bottom-0 bg-rose-500/30 border-l border-rose-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
-                              <span className="w-11 shrink-0 text-[8.5px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}</span>
-                              <span className={cn(
-                                "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[9.5px] whitespace-nowrap px-0.5",
-                                isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-200"
-                              )}>
-                                {formatCurrency(lvlPrice)}
-                              </span>
-                              <span className="w-12 shrink-0 text-right text-rose-100 font-bold font-mono tabular-nums text-[8.5px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="py-8 text-center text-slate-500 text-xs font-mono">
-                      종목 선택 대기 중
-                    </div>
-                  )}
-                </div>
-
-                {/* Order Book Pressure Gauge */}
-                {orderBookData && selectedStock && (
-                  <div className="pt-0.5 border-t border-white/5 space-y-0.5">
-                    <div className="flex justify-between text-[8px] text-slate-400 font-bold font-sans">
-                      <span className="text-sky-400">매도 {formatQuantity(orderBookData.totalAskVolume)} ({orderBookData.askPctVal}%)</span>
-                      <span className="text-rose-400">매수 {formatQuantity(orderBookData.totalBidVolume)} ({orderBookData.bidPctVal}%)</span>
-                    </div>
-                    <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex">
-                      <div className="h-full bg-sky-400 transition-all duration-300" style={{ width: `${orderBookData.askPctVal}%` }} />
-                      <div className="h-full bg-rose-400 transition-all duration-300" style={{ width: `${orderBookData.bidPctVal}%` }} />
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* 4. 스캘퍼 등록 종목 (호가창 우측 배치 + 붉은 글씨 현재가 + 닫기 x 표시: col-span-3) */}
-              <div className="lg:col-span-3 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0 shadow-inner">
-                <div className="flex items-center justify-between border-b border-white/10 pb-1.5 gap-1.5 flex-wrap">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    {/* AI 추천종목 찾기 딥리서치 버튼 */}
-                    <button
-                      type="button"
-                      onClick={handleOpenScalperRecommendations}
-                      disabled={isScalperRecLoading || isRefreshingTop3}
-                      className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-600/90 to-teal-600/90 hover:from-emerald-500 hover:to-teal-500 text-white border border-emerald-400/40 text-[11px] font-black font-mono flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.3)] active:scale-95 shrink-0 disabled:opacity-50"
-                      title="한국투자증권 실시간 수급 및 거래량을 분석하여 스캘퍼 최적 추천 10종목과 스캘핑 점수를 확인합니다."
-                    >
-                      {(isScalperRecLoading || isRefreshingTop3) ? (
-                        <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-200" />
-                      ) : (
-                        <Flame className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-pulse" />
-                      )}
-                      <span>{(isScalperRecLoading || isRefreshingTop3) ? "추천 분석중..." : "추천종목 찾기"}</span>
-                    </button>
-                    {/* 종목추가 버튼 & 카운트 */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const currentMarketTabs = scalperTabs.filter(t => 
-                          marketType === 'US' ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol)
-                        );
-                        if (currentMarketTabs.length >= 8) {
-                          showNotification("최대 8개 종목까지 스캘퍼 탭을 등록할 수 있습니다.", "info");
-                          return;
-                        }
-
-                        // 1. Prioritize AI recommended stocks first if not already in tabs
-                        const aiAvailable = aiRecommendations.find(s => 
-                          s.market === marketType && 
-                          !scalperTabs.some(t => t.symbol === s.symbol)
-                        );
-                        
-                        if (aiAvailable) {
-                          if (!stocks.some(s => s.symbol === aiAvailable.symbol)) {
-                            setStocks(prev => [...prev, aiAvailable]);
-                          }
-                          openOrSwitchScalperTab(aiAvailable.symbol, aiAvailable.name);
-                          showNotification(`[AI 분석 추천] ${aiAvailable.name}(${aiAvailable.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
-                          return;
-                        }
-
-                        // 2. Fallback to initial stock pool for current market
-                        const pool = marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS;
-                        const poolAvailable = pool.find(s => !scalperTabs.some(t => t.symbol === s.symbol));
-                        
-                        if (poolAvailable) {
-                          if (!stocks.some(s => s.symbol === poolAvailable.symbol)) {
-                            setStocks(prev => [...prev, poolAvailable]);
-                          }
-                          openOrSwitchScalperTab(poolAvailable.symbol, poolAvailable.name);
-                          showNotification(`[AI 종목 추천] ${poolAvailable.name}(${poolAvailable.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
-                          return;
-                        }
-
-                        // 3. Dynamic AI stock generator if all preset/AI stocks are used up to 8
-                        const tabIdx = currentMarketTabs.length + 1;
-                        const newSymbol = marketType === 'US' ? `AIUS${tabIdx}` : `099${String(tabIdx).padStart(3, '0')}`;
-                        const newName = marketType === 'US' ? `AI 추천 종목 ${tabIdx}` : `AI 최적추천주 ${tabIdx}`;
-                        const basePrice = marketType === 'US' ? 10 + Math.floor(Math.random() * 90) : 5000 + Math.floor(Math.random() * 45000);
-                        const dynamicStock: Stock = {
-                          symbol: newSymbol,
-                          name: newName,
-                          price: basePrice,
-                          change: Math.round(basePrice * 0.035),
-                          changePercent: 3.5,
-                          volume: '15.5M',
-                          history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: basePrice * (0.95 + (i/40)*0.1) })),
-                          market: marketType,
-                          isAI: true
-                        };
-
-                        setStocks(prev => [...prev, dynamicStock]);
-                        openOrSwitchScalperTab(dynamicStock.symbol, dynamicStock.name);
-                        showNotification(`[AI 분석 추천] ${dynamicStock.name}(${dynamicStock.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
-                      }}
-                      className="px-2 py-0.5 rounded-lg bg-sleek-blue/20 hover:bg-sleek-blue/30 text-sleek-blue hover:text-white border border-sleek-blue/40 text-[10.5px] font-black font-mono flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
-                      title="종목 추가 (최대 8개)"
-                    >
-                      <Sparkles className="w-3 h-3 text-sleek-blue" />
-                      <span>종목추가</span>
-                      <span className="text-[10px] font-mono font-bold text-sleek-blue bg-sleek-blue/20 px-1 py-0.2 rounded border border-sleek-blue/30">
-                        {scalperTabs.filter(tab => {
-                          const isUS = /^[A-Z]/.test(tab.symbol);
-                          return marketType === 'US' ? isUS : !isUS;
-                        }).length}/8
-                      </span>
-                    </button>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-[10px] font-mono font-bold text-sleek-blue bg-sleek-blue/10 px-1.5 py-0.5 rounded border border-sleek-blue/20">
-                      {scalperTabs.filter(tab => {
-                        const isUS = /^[A-Z]/.test(tab.symbol);
-                        return marketType === 'US' ? isUS : !isUS;
-                      }).length}/8
-                    </span>
-                  </div>
-                </div>
-
-                <div className="space-y-1 max-h-[175px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
-                  {scalperTabs.filter(tab => {
-                    const isUS = /^[A-Z]/.test(tab.symbol);
-                    return marketType === 'US' ? isUS : !isUS;
-                  }).map(tab => {
-                    const isSelected = tab.id === activeTabId;
-                    const tabStock = stocks.find(s => s.symbol === tab.symbol) || 
-                                     stocksCache.KR?.find(s => s.symbol === tab.symbol) ||
-                                     stocksCache.US?.find(s => s.symbol === tab.symbol) ||
-                                     (marketType === 'KR' 
-                                       ? INITIAL_STOCKS_KR.find(s => s.symbol === tab.symbol) 
-                                       : INITIAL_STOCKS.find(s => s.symbol === tab.symbol));
-                    const tabName = (tab.name && tab.name !== tab.symbol) ? tab.name : getResolvedStockName(tab.symbol, tabStock);
-                    const tabPrice = tabStock?.price || 0;
-
-                    return (
-                      <div
-                        key={tab.id}
-                        onClick={() => handleSwitchTab(tab.id)}
-                        className={cn(
-                          "px-2 py-1.5 rounded-xl border flex items-center justify-between gap-1.5 cursor-pointer transition-all w-full text-left min-w-0 font-mono select-none group",
-                          isSelected
-                            ? "bg-sleek-blue/25 border-sleek-blue text-white shadow-md font-black ring-1 ring-sleek-blue/60"
-                            : "bg-black/50 border-white/10 hover:bg-white/10 text-slate-300 hover:text-white"
-                        )}
-                        title={`${tabName} (${tab.symbol}) 탭으로 전환`}
-                      >
-                        {/* Left: Indicator & Stock Name */}
-                        <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
-                          <span className={cn(
-                            "w-1.5 h-1.5 rounded-full shrink-0",
-                            tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" : "bg-slate-500"
-                          )} />
-                          <span className="font-bold text-xs truncate text-white">{tabName}</span>
-                        </div>
-
-                        {/* Right: Current price in RED + ON badge + X close button */}
-                        <div className="flex items-center gap-1.5 shrink-0">
-                          {/* 붉은 글씨 현재가 */}
-                          <span className="text-xs font-black font-mono text-rose-500 tabular-nums">
-                            {formatCurrency(tabPrice)}
-                          </span>
-
-                          {tab.isBotActive && (
-                            <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/30 shrink-0">
-                              ON
-                            </span>
-                          )}
-
-                          {/* 닫기 X 버튼 */}
-                          <button
-                            type="button"
-                            onClick={(e) => closeScalperTab(tab.id, e)}
-                            className="p-1 rounded-md text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 transition-all opacity-70 group-hover:opacity-100 cursor-pointer"
-                            title={`${tabName} 탭 닫기`}
-                          >
-                            <X className="w-3 h-3" />
-                          </button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-
-              {/* 5. START AI SCALPER 큰 실행 버튼 & 하단 탭 순환 컨트롤 (col-span-2) */}
-              <div className="lg:col-span-2 flex flex-col justify-between gap-2">
-                <button 
-                  type="button"
-                  onClick={() => {
-                    if (!isGapBotActive) {
-                      if (gapBuyPrice <= 0 || gapSellPrice <= 0) {
-                        alert("금액 구간(하한선과 상한선)을 정확하게 설정해주세요.");
-                        return;
-                      }
-                      if (gapBuyPrice >= gapSellPrice) {
-                        alert("상한가는 하한가보다 높은 금액이어야 합니다.");
-                        return;
-                      }
-                      setLastTradeType(null);
-                    }
-                    setIsGapBotActive(!isGapBotActive);
-                  }}
-                  title="현재 선택된 종목의 개별 스캘퍼 시작/정지"
-                  className={cn(
-                    "w-full grow min-h-[80px] py-2.5 px-3 rounded-2xl font-black text-base sm:text-lg italic tracking-tight uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-1 border cursor-pointer",
-                    isGapBotActive 
-                      ? "bg-gradient-to-br from-rose-600 to-red-800 text-white border-rose-500/50 shadow-rose-900/40 hover:scale-[1.02] active:scale-95" 
-                      : "bg-gradient-to-br from-sleek-blue to-indigo-700 text-white border-sleek-blue/50 shadow-sleek-blue/40 hover:scale-[1.02] active:scale-95"
-                  )}
-                >
-                  {isGapBotActive ? (
-                    <>
-                      <Square className="w-5 h-5 fill-current animate-pulse text-white" />
-                      <span>SCALPER STOP</span>
-                    </>
-                  ) : (
-                    <>
-                      <Play className="w-5 h-5 fill-current text-white" />
-                      <span className="text-center leading-tight text-sm sm:text-base">START AI SCALPER</span>
-                    </>
-                  )}
-                </button>
-
-                {/* 🔄 START AI SCALPER 버튼 바로 아래 배치된 탭 순환 ON/OFF 및 순환 주기 선택 */}
-                <div className={cn(
-                  "flex items-center justify-between rounded-xl border p-1 transition-all shadow-inner",
-                  isAutoRotateTabs 
-                    ? "bg-purple-500/15 border-purple-500/40 shadow-[0_0_12px_rgba(168,85,247,0.2)]" 
-                    : "bg-black/40 border-white/10"
-                )}>
-                  <button
-                    type="button"
-                    onClick={() => setIsAutoRotateTabs(prev => !prev)}
-                    className={cn(
-                      "flex items-center gap-1 px-2 py-1 text-xs font-mono font-bold transition-all cursor-pointer grow",
-                      isAutoRotateTabs 
-                        ? "text-purple-300 hover:text-purple-200" 
-                        : "text-gray-400 hover:text-white"
-                    )}
-                    title={`스캘핑 종목 탭 ${tabRotationInterval}초 간격 자동 순환 ON/OFF`}
-                  >
-                    <RefreshCw className={cn("w-3.5 h-3.5 text-purple-400", isAutoRotateTabs && "animate-spin-slow")} />
-                    <span>탭 순환 {isAutoRotateTabs ? "ON" : "OFF"}</span>
-                  </button>
-
-                  <div className="h-4 w-px bg-white/15 mx-1" />
-
-                  <div className="relative flex items-center pr-1">
-                    <select
-                      id="scalper-config-tab-rotation-interval-select"
-                      aria-label="종목 탭 자동 순환 주기 선택"
-                      value={tabRotationInterval}
-                      onChange={(e) => {
-                        const val = Number(e.target.value);
-                        setTabRotationInterval(val);
-                        try {
-                          localStorage.setItem('sleek_tab_rotation_interval', String(val));
-                        } catch (err) {
-                          console.error(err);
-                        }
-                      }}
-                      className={cn(
-                        "bg-transparent text-xs font-mono font-bold focus:outline-none cursor-pointer py-0.5 px-1 rounded transition-all",
-                        isAutoRotateTabs ? "text-purple-300 hover:text-purple-100" : "text-gray-400 hover:text-gray-200",
-                        "[&>option]:bg-slate-900 [&>option]:text-white"
-                      )}
-                      title="종목 탭 자동 순환 주기 선택 (1초~10초)"
-                    >
-                      {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(sec => (
-                        <option key={sec} value={sec}>
-                          {sec}초
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-              {/* 4. Real-time Holdings Portfolio Status (보유 주식 현황 대시보드 - 항상 표시) */}
-              {(() => {
-                const heldSymbols = Object.keys(holdings).filter(sym => (holdings[sym] || 0) > 0);
-                
-                let totalStockPurchase = 0;
-                let totalStockEval = 0;
-
-                heldSymbols.forEach(sym => {
-                  const qty = holdings[sym] || 0;
-                  const avgP = avgPrices[sym] || 0;
-                  const st = stocks.find(s => s.symbol === sym) || INITIAL_STOCKS_KR.find(s => s.symbol === sym) || INITIAL_STOCKS.find(s => s.symbol === sym);
-                  const currentP = st?.price || avgP;
-                  totalStockPurchase += (avgP * qty);
-                  totalStockEval += (currentP * qty);
-                });
-
-                const totalStockPnL = totalStockEval - totalStockPurchase;
-                const totalStockPnLPct = totalStockPurchase > 0 ? (totalStockPnL / totalStockPurchase) * 100 : 0;
-
-                return (
-                  <div className="bg-slate-900/90 border border-slate-700/80 rounded-3xl p-4 sm:p-5 shadow-2xl space-y-3.5 relative overflow-hidden text-white backdrop-blur-md">
-                    {/* Header with Totals */}
-                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 pb-3 border-b border-slate-800">
-                      <div className="flex items-center gap-2.5">
-                        <div className="w-8 h-8 rounded-xl bg-blue-500/20 text-blue-400 flex items-center justify-center border border-blue-500/30">
-                          <Briefcase className="w-4 h-4" />
-                        </div>
-                        <div>
-                          <div className="flex items-center gap-2">
-                            <h3 className="text-sm sm:text-base font-black text-white tracking-tight">보유 주식 현황</h3>
-                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                              {heldSymbols.length}개 종목 보유 중
-                            </span>
-                          </div>
-                          <p className="text-[10.5px] text-slate-400">
-                            실시간 체결 내역 및 KIS 연동 보유 주식 평가 현황
-                          </p>
-                        </div>
-                      </div>
-
-                      {heldSymbols.length > 0 && (
-                        <div className="flex items-center gap-3 bg-slate-950/70 px-3.5 py-1.5 rounded-2xl border border-slate-800 text-xs font-mono">
-                          <div>
-                            <span className="text-[10px] text-slate-400 block font-sans">총 평가금액</span>
-                            <span className="font-bold text-white">{formatCurrency(totalStockEval)}</span>
-                          </div>
-                          <div className="h-6 w-px bg-slate-800" />
-                          <div>
-                            <span className="text-[10px] text-slate-400 block font-sans">총 평가손익</span>
-                            <span className={cn("font-bold flex items-center gap-0.5", totalStockPnL >= 0 ? "text-rose-400" : "text-sky-400")}>
-                              {totalStockPnL >= 0 ? "+" : ""}{formatCurrency(totalStockPnL)} ({totalStockPnLPct >= 0 ? "+" : ""}{totalStockPnLPct.toFixed(2)}%)
-                            </span>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Stock Cards / List or Empty State */}
-                    {heldSymbols.length === 0 ? (
-                      <div className="py-8 px-4 bg-slate-950/40 rounded-2xl border border-dashed border-slate-800 flex flex-col items-center justify-center text-center space-y-3">
-                        <div className="w-10 h-10 rounded-2xl bg-slate-800 text-slate-400 flex items-center justify-center">
-                          <Coins className="w-5 h-5 text-slate-500" />
-                        </div>
-                        <div>
-                          <p className="text-xs sm:text-sm font-bold text-slate-300">현재 보유 중인 주식이 없습니다.</p>
-                          <p className="text-[11px] text-slate-500 mt-0.5">
-                            스캘퍼 자동 매매가 실행되거나, 상단 추천종목 10선에서 매수 시 실시간으로 표시됩니다.
-                          </p>
-                        </div>
-                        <div className="flex items-center gap-2 pt-1">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowScalperRecModal(true);
-                              handleRefreshScalperRecList();
-                            }}
-                            className="px-3 py-1.5 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold shadow-md flex items-center gap-1.5 transition-all cursor-pointer"
-                          >
-                            <Sparkles className="w-3.5 h-3.5" />
-                            <span>추천종목 찾기</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleSyncKIS}
-                            className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold border border-slate-700 flex items-center gap-1.5 transition-all cursor-pointer"
-                          >
-                            <RefreshCw className="w-3.5 h-3.5 text-blue-400" />
-                            <span>잔고 동기화</span>
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 overflow-y-auto max-h-[220px] custom-scrollbar pr-1">
-                        {heldSymbols.map(sym => {
-                          const qty = holdings[sym] || 0;
-                          const avgP = avgPrices[sym] || 0;
-                          const st = stocks.find(s => s.symbol === sym) || INITIAL_STOCKS_KR.find(s => s.symbol === sym) || INITIAL_STOCKS.find(s => s.symbol === sym);
-                          const currentP = st?.price || avgP;
-                          const evalAmt = currentP * qty;
-                          const pnlAmt = (currentP - avgP) * qty;
-                          const pnlPct = avgP > 0 ? ((currentP - avgP) / avgP) * 100 : 0;
-                          const isProfit = pnlAmt >= 0;
-                          const displayName = getResolvedStockName(sym, st);
-
-                          return (
-                            <div 
-                              key={sym} 
-                              className="bg-slate-950/80 border border-slate-800 hover:border-slate-700 p-3 rounded-2xl flex flex-col justify-between gap-2.5 transition-all shadow-sm group"
-                            >
-                              <div className="flex items-start justify-between gap-2">
-                                <div className="truncate">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="font-bold text-xs sm:text-[13px] text-white truncate group-hover:text-blue-400 transition-colors">
-                                      {displayName}
-                                    </span>
-                                    <span className="text-[9px] px-1.5 py-0.2 rounded bg-slate-800 text-slate-400 font-mono">
-                                      {sym}
-                                    </span>
-                                  </div>
-                                  <div className="text-[10.5px] text-slate-400 font-mono mt-0.5">
-                                    {qty.toLocaleString()}주 · 평단 {formatCurrency(avgP)}
-                                  </div>
-                                </div>
-
-                                <div className="text-right shrink-0 font-mono">
-                                  <div className={cn("text-xs font-bold", isProfit ? "text-rose-400" : "text-sky-400")}>
-                                    {isProfit ? "+" : ""}{formatCurrency(pnlAmt)}
-                                  </div>
-                                  <div className={cn("text-[10px]", isProfit ? "text-rose-400/80" : "text-sky-400/80")}>
-                                    {isProfit ? "+" : ""}{pnlPct.toFixed(2)}%
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 font-mono text-[11px]">
-                                <span className="text-slate-400">평가 {formatCurrency(evalAmt)}</span>
-                                <div className="flex items-center gap-1 font-sans">
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (st) {
-                                        openOrSwitchScalperTab(st.symbol, st.name);
-                                      }
-                                    }}
-                                    className="px-2 py-0.5 rounded-lg bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 text-[10.5px] font-bold transition-all cursor-pointer"
-                                    title="스캘퍼 매매 탭으로 이동"
-                                  >
-                                    스캘퍼
-                                  </button>
-                                  <button
-                                    type="button"
-                                    onClick={() => {
-                                      if (st) {
-                                        setManualSellStock(st);
-                                        setManualSellQty(qty);
-                                        setManualSellPrice(currentP);
-                                        setManualSellModalOpen(true);
-                                      }
-                                    }}
-                                    className="px-2 py-0.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 text-[10.5px] font-bold transition-all cursor-pointer"
-                                    title="수동 지정가 매도"
-                                  >
-                                    매도
-                                  </button>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
-
-
-          </div>
 
           {/* 4. Real-time Account Status Card (Single Row Dark Theme Layout) */}
           <div className="bg-slate-900/90 border border-white/10 rounded-3xl p-5 shadow-2xl space-y-4 relative overflow-visible text-white backdrop-blur-md">
