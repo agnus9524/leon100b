@@ -93,6 +93,8 @@ import { kisService, type ScalperRecommendation } from './services/kisService';
 import { generateGapDownReport } from './services/geminiService';
 import ScalperGuide from './components/ScalperGuide';
 import ScalperRecommendationsModal from './components/ScalperRecommendationsModal';
+import { KisConfigModal } from './components/KisConfigModal';
+import { LiveNewsAlerts } from './components/LiveNewsAlerts';
 import { AdminPanelModal } from './components/AdminPanelModal';
 import { 
   auth, 
@@ -7272,6 +7274,17 @@ export default function App() {
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_360px] gap-px bg-sleek-border overflow-y-auto lg:overflow-hidden">
         {/* Main Terminal (Full Width Center & Left) */}
         <section className="bg-sleek-bg overflow-y-auto custom-scrollbar p-3 sm:p-4 md:p-5 space-y-4">
+          {/* 🔥 실시간 긴급 시장 뉴스 & 급등 테마 속보 알림 바 */}
+          <LiveNewsAlerts 
+            selectedSymbol={selectedSymbol}
+            onSelectStock={(sym, name) => {
+              if (sym) {
+                handleSelectStock(sym);
+                if (name) showNotification(`[속보 연동] ${name}(${sym}) 종목으로 차트 및 스캘퍼가 전환되었습니다.`, "info");
+              }
+            }}
+          />
+
           {/* 0. 종목 검색/추가 및 실시간 시세·스캘핑 종합 지표 일체형 통합 바 */}
           {(() => {
             const isUS = selectedStock ? (selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US') : false;
@@ -10211,6 +10224,18 @@ export default function App() {
         onExportCSV={handleExportCSV}
         adminTab={adminTab}
         setAdminTab={setAdminTab}
+      />
+
+      {/* 🔑 KIS 증권사 연동 및 API 키 설정 모달 */}
+      <KisConfigModal
+        isOpen={showKisModal}
+        onClose={() => setShowKisModal(false)}
+        kisConfig={kisConfig}
+        setKisConfig={setKisConfig}
+        onTestConnection={handleTestConnection}
+        onConnect={handleConnectKIS}
+        onReset={handleResetKISConfig}
+        botStatus={botStatus}
       />
     </div>
   );
