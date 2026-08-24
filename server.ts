@@ -1000,6 +1000,21 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
   app.all('/api/kis/*', async (req, res) => {
     const targetUrl = req.path.replace('/api/kis', '');
     
+    // Check if client specifies real or virtual server
+    const isRealServer = req.headers['x-is-real-server'] !== 'false';
+
+    // Server-side OAuth token caching (KIS tokens are 24-hour valid; prevents continuous LMS/SMS alerts)
+    const isTokenRequest = (targetUrl === '/oauth2/tokenP' || targetUrl.includes('/oauth2/token')) && req.method === 'POST';
+    const appKeyForToken = req.body?.appkey || req.headers['appkey'] || '';
+    const tokenCacheKey = isTokenRequest && appKeyForToken ? `kis_auth_token_${appKeyForToken}_${isRealServer}` : null;
+    
+    if (tokenCacheKey) {
+      const cachedToken = getCachedData(tokenCacheKey);
+      if (cachedToken && cachedToken.access_token) {
+        return res.json(cachedToken);
+      }
+    }
+
     // For GET quote queries, check 2-second in-memory cache to deduplicate concurrent component bursts
     const isGetQuote = req.method === 'GET' && (targetUrl.includes('inquire-price') || targetUrl.includes('inquire-daily-price') || targetUrl.includes('inquire-time-itemchartprice'));
     const cacheKey = `kis_get_${targetUrl}_${JSON.stringify(req.query)}`;
@@ -1012,8 +1027,6 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
       }
     }
 
-    // Check if client specifies real or virtual server
-    const isRealServer = req.headers['x-is-real-server'] !== 'false';
     const baseUrl = isRealServer 
       ? 'https://openapi.koreainvestment.com:9443' 
       : 'https://openapivts.koreainvestment.com:29443';
@@ -1096,6 +1109,12 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
     }
     
     if (response) {
+      if (isTokenRequest && response.status === 200 && response.data?.access_token && tokenCacheKey) {
+        // Cache token for 23.5 hours (84,600s) to reuse cross-session without spamming KIS
+        const expiresInSec = Number(response.data.expires_in || 86400);
+        const cacheTtlMs = Math.max(60000, (expiresInSec > 1800 ? expiresInSec - 1800 : expiresInSec) * 1000);
+        setCachedData(tokenCacheKey, response.data, cacheTtlMs);
+      }
       if (isGetQuote && response.status === 200) {
         setCachedData(cacheKey, response.data, 2000); // 2 seconds cache
         res.setHeader('Cache-Control', 'public, max-age=2, s-maxage=2');

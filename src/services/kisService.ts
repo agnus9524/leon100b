@@ -63,20 +63,53 @@ class KISService {
       });
     }
 
-    // Try localStorage if parameters not provided
-    const localToken = savedToken || localStorage.getItem('sleek_kis_token') || undefined;
-    const localExpires = savedExpiresAt || Number(localStorage.getItem('sleek_kis_token_expires') || 0);
-    const localIssued = savedIssuedAt || Number(localStorage.getItem('sleek_kis_token_issued') || 0);
+    const now = Date.now();
+    const localToken = localStorage.getItem('sleek_kis_token') || undefined;
+    const localExpires = Number(localStorage.getItem('sleek_kis_token_expires') || 0);
+    const localIssued = Number(localStorage.getItem('sleek_kis_token_issued') || 0);
 
-    // KIS Token is valid for 24 hours (86,400s). Re-use without fetching anew on every connection.
-    if (localToken && localExpires && Date.now() < localExpires) {
-      this.accessToken = localToken;
-      this.tokenExpireTime = localExpires;
-      this.tokenIssuedTime = localIssued || (localExpires - 24 * 3600 * 1000);
+    const firestoreToken = savedToken;
+    const firestoreExpires = Number(savedExpiresAt || 0);
+    const firestoreIssued = Number(savedIssuedAt || 0);
+
+    // Pick whichever valid token is newest and unexpired
+    let chosenToken: string | null = null;
+    let chosenExpires = 0;
+    let chosenIssued = 0;
+
+    if (firestoreToken && firestoreExpires > now) {
+      chosenToken = firestoreToken;
+      chosenExpires = firestoreExpires;
+      chosenIssued = firestoreIssued || (firestoreExpires - 24 * 3600 * 1000);
+    }
+
+    if (localToken && localExpires > now && localExpires >= chosenExpires) {
+      chosenToken = localToken;
+      chosenExpires = localExpires;
+      chosenIssued = localIssued || (localExpires - 24 * 3600 * 1000);
+    }
+
+    if (this.accessToken && this.tokenExpireTime > now && this.tokenExpireTime >= chosenExpires) {
+      chosenToken = this.accessToken;
+      chosenExpires = this.tokenExpireTime;
+      chosenIssued = this.tokenIssuedTime;
+    }
+
+    if (chosenToken && chosenExpires > now) {
+      this.accessToken = chosenToken;
+      this.tokenExpireTime = chosenExpires;
+      this.tokenIssuedTime = chosenIssued || (chosenExpires - 24 * 3600 * 1000);
+      try {
+        localStorage.setItem('sleek_kis_token', chosenToken);
+        localStorage.setItem('sleek_kis_token_expires', String(chosenExpires));
+        localStorage.setItem('sleek_kis_token_issued', String(this.tokenIssuedTime));
+      } catch {}
     } else {
-      this.accessToken = null;
-      this.tokenExpireTime = 0;
-      this.tokenIssuedTime = 0;
+      if (!this.accessToken || this.tokenExpireTime <= now) {
+        this.accessToken = null;
+        this.tokenExpireTime = 0;
+        this.tokenIssuedTime = 0;
+      }
     }
   }
 
@@ -86,21 +119,62 @@ class KISService {
 
   public getTokenInfo() {
     const now = Date.now();
+    
+    // Check localStorage if memory is empty
+    if (!this.accessToken) {
+      const storedToken = localStorage.getItem('sleek_kis_token');
+      const storedExpires = Number(localStorage.getItem('sleek_kis_token_expires') || 0);
+      const storedIssued = Number(localStorage.getItem('sleek_kis_token_issued') || 0);
+      if (storedToken && storedExpires > now) {
+        this.accessToken = storedToken;
+        this.tokenExpireTime = storedExpires;
+        this.tokenIssuedTime = storedIssued || (storedExpires - 24 * 3600 * 1000);
+      }
+    }
+
+    const hasToken = !!this.accessToken;
     const isExpired = !this.accessToken || now >= this.tokenExpireTime;
     const remainingMs = Math.max(0, this.tokenExpireTime - now);
-    const remainingMinutes = Math.floor(remainingMs / (60 * 1000));
-    const remainingHours = Number((remainingMs / (3600 * 1000)).toFixed(1));
-    const needsRenewal = isExpired || remainingMinutes <= 15;
+    const totalRemainingSeconds = Math.floor(remainingMs / 1000);
+    const totalRemainingMinutes = Math.floor(remainingMs / (60 * 1000));
+    const remainingHours = Math.floor(remainingMs / (3600 * 1000));
+    const remainingMinutes = Math.floor((remainingMs % (3600 * 1000)) / (60 * 1000));
+    const remainingSeconds = Math.floor((remainingMs % (60 * 1000)) / 1000);
+    const needsRenewal = isExpired || totalRemainingMinutes <= 15;
+
+    // Formatting
+    let formattedRemaining = "미발급";
+    if (hasToken) {
+      if (isExpired) {
+        formattedRemaining = "만료됨 (재발급 필요)";
+      } else if (remainingHours > 0) {
+        formattedRemaining = `${remainingHours}시간 ${String(remainingMinutes).padStart(2, '0')}분`;
+      } else if (remainingMinutes > 0) {
+        formattedRemaining = `${remainingMinutes}분 ${String(remainingSeconds).padStart(2, '0')}초`;
+      } else {
+        formattedRemaining = `${remainingSeconds}초`;
+      }
+    }
 
     return {
       token: this.accessToken,
+      hasToken,
       issuedAt: this.tokenIssuedTime,
       expiresAt: this.tokenExpireTime,
       isExpired,
-      remainingMinutes,
+      remainingMs,
       remainingHours,
-      needsRenewal
+      remainingMinutes,
+      remainingSeconds,
+      totalRemainingMinutes,
+      totalRemainingSeconds,
+      needsRenewal,
+      formattedRemaining
     };
+  }
+
+  public async getAccessTokenPublic(): Promise<string> {
+    return this.getAccessToken();
   }
 
   public async forceRefreshToken(): Promise<string> {

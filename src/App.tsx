@@ -1250,6 +1250,36 @@ export default function App() {
   const [showKisModal, setShowKisModal] = useState(false);
   const [showKisPassword, setShowKisPassword] = useState(false);
   const [isAppInitialized, setIsAppInitialized] = useState(false);
+
+  // KIS Token Validity & Real-time Countdown State
+  const [tokenInfo, setTokenInfo] = useState(() => kisService.getTokenInfo());
+  const [isForceRefreshingToken, setIsForceRefreshingToken] = useState(false);
+
+  useEffect(() => {
+    // Initial fetch
+    setTokenInfo(kisService.getTokenInfo());
+
+    const timer = setInterval(() => {
+      setTokenInfo(kisService.getTokenInfo());
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const handleRefreshToken = async () => {
+    if (isForceRefreshingToken) return;
+    setIsForceRefreshingToken(true);
+    try {
+      await kisService.forceRefreshToken();
+      const updated = kisService.getTokenInfo();
+      setTokenInfo(updated);
+      showNotification(`KIS 보안 토큰이 성공적으로 갱신되었습니다. (유효: ${updated.formattedRemaining})`, "success");
+    } catch (err: any) {
+      console.error("Token refresh error:", err);
+      showNotification(`토큰 갱신 실패: ${err.message || 'API 키 설정을 확인해주세요.'}`, "error");
+    } finally {
+      setIsForceRefreshingToken(false);
+    }
+  };
   const [startupSteps, setStartupSteps] = useState<StepItem[]>([
     {
       id: 'auth-check',
@@ -1757,6 +1787,30 @@ export default function App() {
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
   const [scalperStrategyMode, setScalperStrategyMode] = useState<'AUTO' | 'AI_MAX_YIELD' | 'ALL_SENSORS_4' | 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD'>('ALL_SENSORS_4');
+  
+  // 4대 스캘핑 핵심 전략 다중선택 상태 (눌림목, 돌파, VWAP, CVD)
+  const [selectedScalperStrategies, setSelectedScalperStrategies] = useState<('PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD')[]>(() => {
+    try {
+      const saved = localStorage.getItem('sleek_scalper_selected_strategies');
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return ['PULLBACK', 'BREAKOUT', 'VWAP_SUPPORT', 'VOLUME_PROFILE_CVD'];
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('sleek_scalper_selected_strategies', JSON.stringify(selectedScalperStrategies));
+    } catch {}
+  }, [selectedScalperStrategies]);
+
+  const selectedScalperStrategiesRef = React.useRef(selectedScalperStrategies);
+  useEffect(() => {
+    selectedScalperStrategiesRef.current = selectedScalperStrategies;
+  }, [selectedScalperStrategies]);
+
   const [isMaxYieldModalOpen, setIsMaxYieldModalOpen] = useState<boolean>(false);
   const [maxYieldBudget, setMaxYieldBudget] = useState<number>(1000000); // 최고수익 AI 한도 금액 (기본 100만원)
   const [maxYieldInputStr, setMaxYieldInputStr] = useState<string>("1,000,000");
@@ -1921,7 +1975,7 @@ export default function App() {
         if (strat.isBreakout) return `⚡ [거래량 돌파] ${currentName} 거래량 급증 돌파 탐색 중`;
         if (strat.isPullback) return `⚡ [눌림목 지지] ${currentName} 상승 추세 눌림목 지지선 감시 중`;
         if (strat.isVwapSupport) return `⚡ [VWAP 반등] ${currentName} 당일 VWAP 지지 반등 감시`;
-        if (strat.isVolumeProfile) return `⚡ [VP/CVD 유동성] ${currentName} 매수 우위 유동성 감시 중`;
+        if (strat.isVolumeProfile) return `⚡ [CVD 수급] ${currentName} 매수 우위 자금유입 감시 중`;
         if (held > 0) return `${currentName} 보유 포지션 감시 중 (보유: ${held}주, RSI: ${Math.round(strat.rsi)})`;
         return `${currentName} 실시간 수급/지지선 감시 중 (RSI: ${Math.round(strat.rsi)})`;
       }
@@ -1951,7 +2005,7 @@ export default function App() {
         if (strat.isBreakout) return `⚡ [거래량 돌파] ${currentName} 거래량 급증 돌파 탐색 중`;
         if (strat.isPullback) return `⚡ [눌림목 지지] ${currentName} 상승 추세 눌림목 지지선 감시 중`;
         if (strat.isVwapSupport) return `⚡ [VWAP 반등] ${currentName} 당일 VWAP 지지 반등 감시`;
-        if (strat.isVolumeProfile) return `⚡ [VP/CVD 유동성] ${currentName} 매수 우위 유동성 감시 중`;
+        if (strat.isVolumeProfile) return `⚡ [CVD 수급] ${currentName} 매수 우위 자금유입 감시 중`;
         if (held > 0) return `${currentName} 보유 포지션 감시 중 (보유: ${held}주, RSI: ${Math.round(strat.rsi)})`;
         return `${currentName} 실시간 수급/지지선 감시 중 (RSI: ${Math.round(strat.rsi)})`;
       }
@@ -2071,6 +2125,35 @@ export default function App() {
       setNotifications(prev => prev.filter(n => n.id !== id));
     }, 5000);
   }, []);
+
+  const handleToggleStrategy = useCallback((strat: 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD') => {
+    setSelectedScalperStrategies(prev => {
+      let next: ('PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD')[];
+      if (prev.includes(strat)) {
+        if (prev.length === 1) {
+          next = prev; // 최소 1개 유지
+          showNotification("최소 1개 이상의 전략이 활성화되어 있어야 합니다.", "info");
+        } else {
+          next = prev.filter(s => s !== strat);
+        }
+      } else {
+        next = [...prev, strat];
+      }
+
+      if (next.length === 4) {
+        setScalperStrategyMode('ALL_SENSORS_4');
+      } else {
+        setScalperStrategyMode('AUTO');
+      }
+      return next;
+    });
+  }, [showNotification]);
+
+  const handleSelectAllGreen = useCallback(() => {
+    setSelectedScalperStrategies(['PULLBACK', 'BREAKOUT', 'VWAP_SUPPORT', 'VOLUME_PROFILE_CVD']);
+    setScalperStrategyMode('ALL_SENSORS_4');
+    showNotification("🎯 [4/4 올-그린] 4개 핵심 전략(눌림목·돌파·VWAP·CVD)이 전체 활성화되었습니다.", "success");
+  }, [showNotification]);
 
   const cancelAllOrders = useCallback(() => {
     setIsGapBotActive(false);
@@ -6192,25 +6275,24 @@ export default function App() {
 
           const isAll4SensorsOn = strat.activeCount === 4 || (isPullbackCond && isBreakoutCond && isVwapSupportCond && isVolumeProfileCond);
 
+          const currentSelectedStrats = (selectedScalperStrategiesRef.current && selectedScalperStrategiesRef.current.length > 0)
+            ? selectedScalperStrategiesRef.current
+            : (['PULLBACK', 'BREAKOUT', 'VWAP_SUPPORT', 'VOLUME_PROFILE_CVD'] as ('PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD')[]);
+
+          const conditionsMap: Record<'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD', boolean> = {
+            PULLBACK: isPullbackCond,
+            BREAKOUT: isBreakoutCond,
+            VWAP_SUPPORT: isVwapSupportCond,
+            VOLUME_PROFILE_CVD: isVolumeProfileCond
+          };
+
+          // 다중선택된 모든 전략이 동시 충족되었는지 검사 (선택된 전략들의 AND 조합)
+          const areAllSelectedMet = currentSelectedStrats.length > 0 && currentSelectedStrats.every(k => conditionsMap[k]);
+
           let meetsBuyCriteria = false;
           let strategyLabel = "AI 스캘퍼";
 
-          if (scalperStrategyMode === 'ALL_SENSORS_4') {
-            meetsBuyCriteria = isAll4SensorsOn;
-            strategyLabel = "🎯 [4/4 올-그린] 4개 전략 동시포착";
-          } else if (scalperStrategyMode === 'PULLBACK') {
-            meetsBuyCriteria = isPullbackCond;
-            strategyLabel = "① 상승추세 눌림목";
-          } else if (scalperStrategyMode === 'BREAKOUT') {
-            meetsBuyCriteria = isBreakoutCond;
-            strategyLabel = "② 거래량 돌파";
-          } else if (scalperStrategyMode === 'VWAP_SUPPORT') {
-            meetsBuyCriteria = isVwapSupportCond;
-            strategyLabel = "③ VWAP 지지반등";
-          } else if (scalperStrategyMode === 'VOLUME_PROFILE_CVD') {
-            meetsBuyCriteria = isVolumeProfileCond;
-            strategyLabel = "④ VP/CVD 유동성포착";
-          } else if (scalperStrategyMode === 'AI_MAX_YIELD') {
+          if (scalperStrategyMode === 'AI_MAX_YIELD') {
             if (isAll4SensorsOn) {
               meetsBuyCriteria = true;
               strategyLabel = "⚡ [최고수익 AI] 4/4 올-그린 정밀수급 풀진입";
@@ -6225,34 +6307,45 @@ export default function App() {
               strategyLabel = "⚡ [최고수익 AI] ③VWAP 반등 받쳐두기";
             } else if (isVolumeProfileCond) {
               meetsBuyCriteria = true;
-              strategyLabel = "⚡ [최고수익 AI] ④VP/CVD POC 유동성 흡수";
+              strategyLabel = "⚡ [최고수익 AI] ④CVD 수급 유동성 흡수";
             } else if (isSmartScalperMode && momentumPositive && (rsi < 40 || isNearLowerBand)) {
               meetsBuyCriteria = true;
               strategyLabel = "⚡ [최고수익 AI] 과매도 수급 반등 탐색";
             }
           } else {
-            // 'AUTO' 모드
-            if (isAll4SensorsOn) {
-              meetsBuyCriteria = true;
-              strategyLabel = "🎯 [4/4 올-그린] 4개 전략 동시포착";
-            } else if (isPullbackCond) {
-              meetsBuyCriteria = true;
-              strategyLabel = "AI포착: ①상승추세 눌림목";
-            } else if (isBreakoutCond) {
-              meetsBuyCriteria = true;
-              strategyLabel = "AI포착: ②거래량 돌파";
-            } else if (isVwapSupportCond) {
-              meetsBuyCriteria = true;
-              strategyLabel = "AI포착: ③VWAP 지지반등";
-            } else if (isVolumeProfileCond) {
-              meetsBuyCriteria = true;
-              strategyLabel = "AI포착: ④VP/CVD 유동성포착";
-            } else if (isSmartScalperMode) {
-              meetsBuyCriteria = momentumPositive && (rsi < 35 || isNearLowerBand) && currentPrice >= sma5;
-              if (meetsBuyCriteria) strategyLabel = "AI포착: 스마트 반등";
+            // 다중선택 모드 (눌림목, 돌파, VWAP, CVD 단일/조합 일체)
+            meetsBuyCriteria = areAllSelectedMet;
+
+            if (currentSelectedStrats.length === 4) {
+              strategyLabel = "🎯 [4/4 올-그린] 4개 핵심전략 풀체결";
+            } else if (
+              currentSelectedStrats.length === 3 &&
+              currentSelectedStrats.includes('VWAP_SUPPORT') &&
+              currentSelectedStrats.includes('VOLUME_PROFILE_CVD') &&
+              currentSelectedStrats.includes('PULLBACK')
+            ) {
+              strategyLabel = "🏆 [A급 안정진입] VWAP+CVD+눌림목 지지";
+            } else if (
+              currentSelectedStrats.length === 3 &&
+              currentSelectedStrats.includes('VWAP_SUPPORT') &&
+              currentSelectedStrats.includes('VOLUME_PROFILE_CVD') &&
+              currentSelectedStrats.includes('BREAKOUT')
+            ) {
+              strategyLabel = "⚡ [S급 추세돌파] VWAP+CVD+돌파 모멘텀";
+            } else if (currentSelectedStrats.length === 1) {
+              if (currentSelectedStrats[0] === 'PULLBACK') strategyLabel = "① 상승추세 눌림목";
+              else if (currentSelectedStrats[0] === 'BREAKOUT') strategyLabel = "② 거래량 돌파";
+              else if (currentSelectedStrats[0] === 'VWAP_SUPPORT') strategyLabel = "③ VWAP 지지반등";
+              else if (currentSelectedStrats[0] === 'VOLUME_PROFILE_CVD') strategyLabel = "④ CVD 수급포착";
             } else {
-              meetsBuyCriteria = (isOverSold || isNearLowerBand) && (currentPrice >= sma5);
-              if (meetsBuyCriteria) strategyLabel = "AI포착: 과매도 반등";
+              const names = currentSelectedStrats.map(k => {
+                if (k === 'PULLBACK') return '눌림목';
+                if (k === 'BREAKOUT') return '돌파';
+                if (k === 'VWAP_SUPPORT') return 'VWAP';
+                if (k === 'VOLUME_PROFILE_CVD') return 'CVD';
+                return k;
+              });
+              strategyLabel = `🎯 [${names.join('+')}] 다중전략 진입`;
             }
           }
 
@@ -6260,12 +6353,12 @@ export default function App() {
           const tickSize = getTickSize(currentPrice, isUSStock ? 'US' : 'KR');
 
           let rawTargetBuyPrice = currentPrice;
-          const isBreakoutStrategyActive = (scalperStrategyMode === 'BREAKOUT') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('돌파')) || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('돌파'));
-          const isPullbackStrategyActive = (scalperStrategyMode === 'PULLBACK') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('눌림목')) || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('눌림목'));
-          const isVwapStrategyActive = (scalperStrategyMode === 'VWAP_SUPPORT') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('VWAP')) || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('VWAP'));
-          const isVpCvdStrategyActive = (scalperStrategyMode === 'VOLUME_PROFILE_CVD') || (scalperStrategyMode === 'AUTO' && strategyLabel.includes('VP/CVD')) || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('VP/CVD'));
+          const isBreakoutStrategyActive = currentSelectedStrats.includes('BREAKOUT') || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('돌파'));
+          const isPullbackStrategyActive = currentSelectedStrats.includes('PULLBACK') || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('눌림목'));
+          const isVwapStrategyActive = currentSelectedStrats.includes('VWAP_SUPPORT') || (scalperStrategyMode === 'AI_MAX_YIELD' && strategyLabel.includes('VWAP'));
+          const isVpCvdStrategyActive = currentSelectedStrats.includes('VOLUME_PROFILE_CVD') || (scalperStrategyMode === 'AI_MAX_YIELD' && (strategyLabel.includes('CVD') || strategyLabel.includes('VP/CVD')));
 
-          if (isBreakoutStrategyActive) {
+          if (isBreakoutStrategyActive && !isPullbackStrategyActive) {
             rawTargetBuyPrice = currentPrice;
           } else if (isPullbackStrategyActive || isVwapStrategyActive || isVpCvdStrategyActive) {
             const offset = itemEntryMode === 'BID4' ? 4 : itemEntryMode === 'BID2' ? 2 : 1;
@@ -7330,84 +7423,48 @@ export default function App() {
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center justify-center gap-4 md:gap-6">
-          <div className="flex items-center gap-4 text-[11px] md:text-[13px] font-mono border-r border-sleek-border pr-4 md:pr-6">
-            <div className="flex flex-col items-end">
-              <span className="text-[10px] md:text-[11px] font-bold text-amber-300 truncate max-w-[160px] tracking-tight" title={currentUser?.email || undefined}>
-                {currentUser?.displayName || currentUser?.email || '아이디'}
-              </span>
-              <div className="flex items-center gap-2">
-                {(currentUser?.email?.toLowerCase() === "agnus9524@gmail.com" || currentUser?.uid === "admin") && (
-                  <button 
-                    type="button"
-                    onClick={() => { setShowAdminPanel(true); handleFetchAllLicenses(); }}
-                    className="bg-blue-500/20 hover:bg-blue-500/30 text-blue-300 hover:text-white border border-blue-500/40 px-2 py-0.5 rounded-lg transition-colors flex items-center gap-1 text-[10px] font-bold cursor-pointer"
-                    title="슈퍼 관리자 패널 열기"
-                  >
-                    <Settings className="w-3 h-3 text-blue-400" /> ADMIN
-                  </button>
-                )}
-                <button 
-                  type="button"
-                  onClick={handleLogout}
-                  className="text-sleek-text-secondary hover:text-white transition-colors cursor-pointer"
-                  title="로그아웃"
-                >
-                  LOGOUT
-                </button>
-              </div>
-            </div>
-            <div className="flex flex-col items-end">
-              <span className="text-[9px] md:text-[10px] text-sleek-text-secondary uppercase">KIS Connection</span>
-              <div className="flex items-center gap-2">
-                <button 
-                  type="button"
-                  onClick={handleSyncKIS}
-                  disabled={isSyncingKIS}
-                  className="text-[10px] px-2 py-0.5 rounded-md bg-blue-500/15 hover:bg-blue-500/25 text-blue-300 hover:text-white border border-blue-500/30 flex items-center gap-1 font-bold cursor-pointer disabled:opacity-50 transition-all active:scale-95"
-                  title="실시간 계좌 잔고 및 보유 종목 동기화"
-                >
-                  <RefreshCw className={cn("w-3 h-3", isSyncingKIS && "animate-spin text-blue-400")} /> 
-                  <span>{isSyncingKIS ? "동기화 중..." : "SYNC"}</span>
-                </button>
-                <button 
-                  type="button"
-                  onClick={() => setShowKisModal(true)}
-                  className={cn(
-                    "flex items-center gap-2 font-black text-sm cursor-pointer", 
-                    kisConfig.isConnected ? "text-emerald-400" : "text-rose-500 animate-pulse"
-                  )}
-                >
-                  <div className={cn("w-2 h-2 rounded-full", kisConfig.isConnected ? "bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,1)]" : "bg-rose-500")} />
-                  {kisConfig.isConnected 
-                    ? "연동 중" 
-                    : "계좌 연결 필요"}
-                </button>
-              </div>
-            </div>
+      <div className="flex items-center gap-3">
+        {/* KIS OAuth Token Validity Status Card */}
+        <div 
+          onClick={() => setShowKisModal(true)}
+          className={cn(
+            "flex items-center gap-2.5 px-3.5 py-1.5 rounded-xl border transition-all cursor-pointer select-none",
+            tokenInfo.hasToken && !tokenInfo.isExpired
+              ? "bg-slate-900/90 border-emerald-500/30 text-emerald-300 hover:border-emerald-500/60 shadow-[0_0_15px_rgba(16,185,129,0.1)]"
+              : "bg-slate-900/90 border-amber-500/40 text-amber-300 hover:border-amber-500/70"
+          )}
+          title="클릭하여 한국투자증권 API 키 설정 열기 | 토큰 만료시 자동 재발급"
+        >
+          <div className="flex items-center gap-1.5">
+            <Key className={cn("w-3.5 h-3.5", tokenInfo.hasToken && !tokenInfo.isExpired ? "text-emerald-400" : "text-amber-400")} />
+            <span className="text-[11px] font-bold tracking-tight text-slate-300">
+              KIS 토큰 유효시간:
+            </span>
           </div>
-          <div className="flex items-center gap-2">
-            <button 
-              onClick={handleToggleAllScalping}
-              className={cn(
-                "flex items-center gap-2 px-3 md:px-4 py-1.5 md:py-2 rounded-lg font-bold text-[10px] md:text-xs transition-all shadow-sm",
-                (scalperTabs.some(t => t.isBotActive) || isGapBotActive)
-                  ? "bg-rose-500/20 text-rose-400 border border-rose-500/40 hover:bg-rose-500 hover:text-white" 
-                  : "bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 hover:bg-emerald-500 hover:text-white"
-              )}
-              title="현재 추가된 모든 종목의 스캘퍼를 일괄 시작/정지합니다"
-            >
-              {(scalperTabs.some(t => t.isBotActive) || isGapBotActive) ? (
-                <Square className="w-2.5 h-2.5 fill-current" />
-              ) : (
-                <Play className="w-2.5 h-2.5 fill-current" />
-              )}
-              <span>
-                {(scalperTabs.some(t => t.isBotActive) || isGapBotActive) ? "전체 스캘퍼 정지" : "전체 스캘퍼 시작"}
-              </span>
-            </button>
+          
+          <div className="flex items-center gap-2 font-mono font-black text-[12px]">
+            <span className={tokenInfo.hasToken && !tokenInfo.isExpired ? "text-emerald-400" : "text-amber-400"}>
+              {tokenInfo.formattedRemaining}
+            </span>
+            {tokenInfo.hasToken && !tokenInfo.isExpired && (
+              <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,1)]" />
+            )}
           </div>
+
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              handleRefreshToken();
+            }}
+            disabled={isForceRefreshingToken}
+            className="p-1 -mr-1 rounded-md hover:bg-white/10 text-slate-400 hover:text-white transition-colors disabled:opacity-50 cursor-pointer"
+            title="토큰 즉시 재발급/동기화"
+          >
+            <RefreshCw className={cn("w-3.5 h-3.5", isForceRefreshingToken && "animate-spin text-emerald-400")} />
+          </button>
         </div>
+      </div>
       </header>
       
       {/* Domestic Market Ribbon */}
@@ -7482,6 +7539,10 @@ export default function App() {
                 formatQuantity={formatQuantity}
                 scalperStrategyMode={scalperStrategyMode}
                 setScalperStrategyMode={setScalperStrategyMode}
+                selectedScalperStrategies={selectedScalperStrategies}
+                setSelectedScalperStrategies={setSelectedScalperStrategies}
+                handleToggleStrategy={handleToggleStrategy}
+                handleSelectAllGreen={handleSelectAllGreen}
                 activeStrategyDetection={activeStrategyDetection}
                 setIsMaxYieldModalOpen={setIsMaxYieldModalOpen}
                 displayScalperMessage={displayScalperMessage}
