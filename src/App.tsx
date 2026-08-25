@@ -1167,11 +1167,19 @@ export default function App() {
           const foundInCacheUS = stocksCache?.US?.find(s => s.symbol === symbol);
           if (foundInCacheUS?.name && foundInCacheUS.name !== symbol) resolved = foundInCacheUS.name;
           else {
-            const foundInInitKR = INITIAL_STOCKS_KR.find(s => s.symbol === symbol);
-            if (foundInInitKR?.name && foundInInitKR.name !== symbol) resolved = foundInInitKR.name;
+            const foundInTabs = scalperTabsRef.current?.find(t => t.symbol === symbol);
+            if (foundInTabs?.name && foundInTabs.name !== symbol) resolved = foundInTabs.name;
             else {
-              const foundInInitUS = INITIAL_STOCKS.find(s => s.symbol === symbol);
-              if (foundInInitUS?.name && foundInInitUS.name !== symbol) resolved = foundInInitUS.name;
+              const pop = POPULAR_STOCKS.find(s => s.symbol === symbol);
+              if (pop?.name) resolved = pop.name;
+              else {
+                const foundInInitKR = INITIAL_STOCKS_KR.find(s => s.symbol === symbol);
+                if (foundInInitKR?.name && foundInInitKR.name !== symbol) resolved = foundInInitKR.name;
+                else {
+                  const foundInInitUS = INITIAL_STOCKS.find(s => s.symbol === symbol);
+                  if (foundInInitUS?.name && foundInInitUS.name !== symbol) resolved = foundInInitUS.name;
+                }
+              }
             }
           }
         }
@@ -1598,6 +1606,27 @@ export default function App() {
     setTradeQuantity(targetTab.tradeQuantity);
     setMaxSlots(targetTab.maxSlots || 3);
 
+    // Ensure the stock exists in stocks and stocksCache so it never reverts to default stock
+    const isTargetUS = /^[A-Za-z]/.test(targetTab.symbol);
+    const resolvedName = (targetTab.name && targetTab.name !== targetTab.symbol) ? targetTab.name : getResolvedStockName(targetTab.symbol);
+    setStocks(prev => {
+      if (prev.some(s => s.symbol === targetTab.symbol)) {
+        return prev.map(s => s.symbol === targetTab.symbol && (!s.name || s.name === s.symbol) ? { ...s, name: resolvedName } : s);
+      }
+      const tabStockObj: Stock = {
+        symbol: targetTab.symbol,
+        name: resolvedName,
+        price: targetTab.gapBuyPrice || (isTargetUS ? 10 : 1000),
+        change: 0,
+        changePercent: 0,
+        volume: '0',
+        history: [{ time: '09:00', price: targetTab.gapBuyPrice || (isTargetUS ? 10 : 1000) }],
+        market: isTargetUS ? 'US' : 'KR',
+        isAI: false
+      };
+      return [tabStockObj, ...prev];
+    });
+
     const nextInv = (targetTab.gapInventory || [])
       .filter(s => !s.symbol || s.symbol === targetTab.symbol)
       .map(s => (typeof s === 'object' ? { ...s, symbol: targetTab.symbol } : { id: `SLOT-${Date.now()}`, price: s, quantity: 1, symbol: targetTab.symbol }));
@@ -1649,9 +1678,40 @@ export default function App() {
                   INITIAL_STOCKS.find(s => s.symbol === symbol);
     const isUS = stock?.market === 'US' || /^[A-Za-z]/.test(symbol) || marketType === 'US';
 
-    const name = customName || stock?.name || symbol;
+    const name = customName || stock?.name || getResolvedStockName(symbol) || symbol;
     const price = stock?.price || (isUS ? 10 : 1000);
     const limits = calculateStockLimits(price, stock?.changePercent || 0, isUS, stock?.basePrice);
+
+    if (customName && customName !== symbol) {
+      setCustomStockNames(prev => ({ ...prev, [symbol]: customName }));
+    }
+
+    const newStockObj: Stock = {
+      symbol,
+      name,
+      price,
+      change: stock?.change || 0,
+      changePercent: stock?.changePercent || 0,
+      volume: stock?.volume || '0',
+      history: stock?.history && stock.history.length > 0 ? stock.history : Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price })),
+      market: isUS ? 'US' : 'KR',
+      isAI: !!stock?.isAI
+    };
+
+    setStocks(prev => {
+      if (prev.some(s => s.symbol === symbol)) {
+        return prev.map(s => s.symbol === symbol ? { ...s, name } : s);
+      }
+      return [newStockObj, ...prev];
+    });
+
+    setStocksCache(prev => ({
+      ...prev,
+      [isUS ? 'US' : 'KR']: [
+        newStockObj,
+        ...(prev[isUS ? 'US' : 'KR'] || []).filter(s => s.symbol !== symbol)
+      ]
+    }));
 
     const newTab: ScalperTab = {
       id: symbol,
@@ -1956,6 +2016,45 @@ export default function App() {
               INITIAL_STOCKS.find(s => s.symbol === selectedSymbol);
     }
 
+    // Check scalper tabs
+    if (!found && selectedSymbol) {
+      const tab = scalperTabs.find(t => t.symbol === selectedSymbol || t.id === selectedSymbol);
+      if (tab) {
+        const isUS = isCurrentUS || /^[A-Za-z]/.test(tab.symbol);
+        const resolvedTabName = (tab.name && tab.name !== tab.symbol) ? tab.name : getResolvedStockName(tab.symbol);
+        found = {
+          symbol: tab.symbol,
+          name: resolvedTabName,
+          price: tab.gapBuyPrice || (isUS ? 10 : 1000),
+          change: 0,
+          changePercent: 0,
+          volume: '0',
+          history: [{ time: '09:00', price: tab.gapBuyPrice || (isUS ? 10 : 1000) }],
+          market: isUS ? 'US' : 'KR',
+          isAI: false
+        };
+      }
+    }
+
+    // Check popular stocks
+    if (!found && selectedSymbol) {
+      const pop = POPULAR_STOCKS.find(s => s.symbol === selectedSymbol);
+      if (pop) {
+        const isUS = isCurrentUS || /^[A-Za-z]/.test(pop.symbol);
+        found = {
+          symbol: pop.symbol,
+          name: getResolvedStockName(pop.symbol, { name: pop.name }),
+          price: pop.price || (isUS ? 10 : 1000),
+          change: 0,
+          changePercent: 0,
+          volume: '0',
+          history: [{ time: '09:00', price: pop.price || (isUS ? 10 : 1000) }],
+          market: isUS ? 'US' : 'KR',
+          isAI: false
+        };
+      }
+    }
+
     if (found) {
       return {
         ...found,
@@ -1963,9 +2062,26 @@ export default function App() {
       };
     }
 
+    // If selectedSymbol is explicitly defined, generate a clean valid Stock object
+    if (selectedSymbol) {
+      const isUS = isCurrentUS || /^[A-Za-z]/.test(selectedSymbol);
+      const resName = getResolvedStockName(selectedSymbol);
+      return {
+        symbol: selectedSymbol,
+        name: resName || selectedSymbol,
+        price: isUS ? 10 : 1000,
+        change: 0,
+        changePercent: 0,
+        volume: '0',
+        history: [{ time: '09:00', price: isUS ? 10 : 1000 }],
+        market: isUS ? 'US' : 'KR',
+        isAI: false
+      };
+    }
+
     const fallback = stocks.find(matchesMarket) || (isCurrentUS ? INITIAL_STOCKS[0] : INITIAL_STOCKS_KR[0]);
     return fallback ? { ...fallback, name: getResolvedStockName(fallback.symbol, fallback) } : null;
-  }, [stocks, stocksCache, selectedSymbol, marketType, getResolvedStockName]);
+  }, [stocks, stocksCache, selectedSymbol, marketType, scalperTabs, getResolvedStockName]);
 
   const displayScalperMessage = useMemo(() => {
     const currentName = selectedStock?.name || selectedSymbol;

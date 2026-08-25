@@ -634,31 +634,15 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           </div>
         </div>
 
-        {/* 2. SMART SCALPER & 세부 설정 (col-span-2) */}
+        {/* 2. SMART SCALPER 세부 설정 (col-span-2) */}
         <div className="lg:col-span-2 bg-sleek-blue/5 border border-sleek-blue/20 p-2.5 rounded-2xl flex flex-col justify-between space-y-1.5 min-w-0">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1">
-              <Zap className="w-3 h-3" /> SMART SCALPER
+              <Zap className="w-3 h-3 text-amber-400" /> SMART SCALPER
             </span>
-            <button
-              type="button"
-              onClick={() => setIsSmartScalperMode(!isSmartScalperMode)}
-              className={cn(
-                "p-0.5 rounded-lg transition-all border cursor-pointer shrink-0",
-                isSmartScalperMode ? "bg-sleek-blue/20 border-sleek-blue/40 text-sleek-blue" : "bg-white/5 border-white/10 text-slate-400 opacity-60"
-              )}
-              title={`스마트 스캘퍼 모드 ${isSmartScalperMode ? '활성화(ON)' : '비활성화(OFF)'}`}
-            >
-              <div className={cn(
-                "w-6 h-3 rounded-full transition-colors relative p-0.5",
-                isSmartScalperMode ? "bg-sleek-blue" : "bg-slate-700"
-              )}>
-                <div className={cn(
-                  "w-2 h-2 rounded-full bg-white transition-transform shadow",
-                  isSmartScalperMode ? "translate-x-3" : "translate-x-0"
-                )} />
-              </div>
-            </button>
+            <span className="text-[9px] font-mono font-bold text-sleek-blue bg-sleek-blue/20 px-1.5 py-0.5 rounded border border-sleek-blue/30">
+              AI ACTIVE
+            </span>
           </div>
 
           <div>
