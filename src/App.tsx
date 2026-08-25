@@ -1649,15 +1649,6 @@ export default function App() {
                   INITIAL_STOCKS.find(s => s.symbol === symbol);
     const isUS = stock?.market === 'US' || /^[A-Za-z]/.test(symbol) || marketType === 'US';
 
-    // 8-tab limit check
-    const currentMarketTabs = scalperTabsRef.current.filter(t => 
-      (/^[A-Za-z]/.test(t.symbol)) === isUS
-    );
-    if (currentMarketTabs.length >= 8) {
-      showNotification("최대 8개 종목까지 스캘퍼 등록이 가능합니다.", "info");
-      return;
-    }
-
     const name = customName || stock?.name || symbol;
     const price = stock?.price || (isUS ? 10 : 1000);
     const limits = calculateStockLimits(price, stock?.changePercent || 0, isUS, stock?.basePrice);
@@ -1684,7 +1675,25 @@ export default function App() {
     setScalperTabs(prev => {
       const sameMarket = prev.filter(t => isUS ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol));
       const diffMarket = prev.filter(t => isUS ? !/^[A-Z]/.test(t.symbol) : /^[A-Z]/.test(t.symbol));
-      return isUS ? [...diffMarket, newTab, ...sameMarket] : [newTab, ...sameMarket, ...diffMarket];
+      
+      // If 8 or more tabs in current market, remove an inactive tab or oldest tab to keep limit manageable
+      let updatedSame = [...sameMarket];
+      if (updatedSame.length >= 8) {
+        let inactiveIdx = -1;
+        for (let i = updatedSame.length - 1; i >= 0; i--) {
+          if (!updatedSame[i].isBotActive && updatedSame[i].id !== prevTabId) {
+            inactiveIdx = i;
+            break;
+          }
+        }
+        if (inactiveIdx >= 0) {
+          updatedSame.splice(inactiveIdx, 1);
+        } else {
+          updatedSame.pop();
+        }
+      }
+
+      return isUS ? [...diffMarket, newTab, ...updatedSame] : [newTab, ...updatedSame, ...diffMarket];
     });
 
     activeTabIdRef.current = symbol;
@@ -1962,24 +1971,58 @@ export default function App() {
     const currentName = selectedStock?.name || selectedSymbol;
     const held = holdings[selectedSymbol] || 0;
 
+    const currentSelectedStrats = (selectedScalperStrategies && selectedScalperStrategies.length > 0)
+      ? selectedScalperStrategies
+      : (['PULLBACK', 'BREAKOUT', 'VWAP_SUPPORT', 'VOLUME_PROFILE_CVD'] as ('PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD')[]);
+
+    const stratNames = currentSelectedStrats.map(k => {
+      if (k === 'PULLBACK') return '①눌림목';
+      if (k === 'BREAKOUT') return '②돌파';
+      if (k === 'VWAP_SUPPORT') return '③VWAP';
+      if (k === 'VOLUME_PROFILE_CVD') return '④CVD';
+      return k;
+    });
+    const stratTag = currentSelectedStrats.length === 4 ? '4/4 올-그린' : stratNames.join('+');
+
     if (!isGapBotActive) {
       return held > 0 
         ? `[대기] ${currentName} (${held}주 보유) - 스캘퍼 정지 상태`
-        : `[대기] ${currentName} 스캘퍼 대기 중 (시작 버튼을 누르면 자동매매 시작)`;
+        : `[대기] ${currentName} [${stratTag}] 대기 중 (시작 버튼을 누르면 실시간 자동매매 실행)`;
     }
 
-    if (!scalperMessage || scalperMessage === "대기 중..." || scalperMessage.includes("자금 순환 취소") || scalperMessage.includes("미체결 매수 취소") || scalperMessage.includes("주문 취소")) {
+    if (!scalperMessage || scalperMessage === "대기 중..." || scalperMessage.includes("감시 중") || scalperMessage.includes("진입 모니터링") || scalperMessage.includes("자금 순환 취소") || scalperMessage.includes("미체결 매수 취소") || scalperMessage.includes("주문 취소")) {
       if (selectedStock) {
         const strat = detectStockStrategies(selectedStock);
-        if (strat.activeCount === 4) return `🎯 [4/4 올-그린] ${currentName} 4개 전략 동시포착 - 진입 대기`;
-        if (strat.isBreakout) return `⚡ [거래량 돌파] ${currentName} 거래량 급증 돌파 탐색 중`;
-        if (strat.isPullback) return `⚡ [눌림목 지지] ${currentName} 상승 추세 눌림목 지지선 감시 중`;
-        if (strat.isVwapSupport) return `⚡ [VWAP 반등] ${currentName} 당일 VWAP 지지 반등 감시`;
-        if (strat.isVolumeProfile) return `⚡ [CVD 수급] ${currentName} 매수 우위 자금유입 감시 중`;
-        if (held > 0) return `${currentName} 보유 포지션 감시 중 (보유: ${held}주, RSI: ${Math.round(strat.rsi)})`;
-        return `${currentName} 실시간 수급/지지선 감시 중 (RSI: ${Math.round(strat.rsi)})`;
+        const conditionsMap: Record<'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD', boolean> = {
+          PULLBACK: strat.isPullback,
+          BREAKOUT: strat.isBreakout,
+          VWAP_SUPPORT: strat.isVwapSupport,
+          VOLUME_PROFILE_CVD: strat.isVolumeProfile
+        };
+        const allSelectedMet = currentSelectedStrats.every(k => conditionsMap[k]);
+
+        if (allSelectedMet) {
+          return `🎯 [${stratTag} 포착] ${currentName} 모든 진입 조건 충족! 호가 주문 실행 중...`;
+        }
+
+        const metStrats = currentSelectedStrats.filter(k => conditionsMap[k]).map(k => {
+          if (k === 'PULLBACK') return '눌림목';
+          if (k === 'BREAKOUT') return '돌파';
+          if (k === 'VWAP_SUPPORT') return 'VWAP';
+          if (k === 'VOLUME_PROFILE_CVD') return 'CVD';
+          return k;
+        });
+
+        if (metStrats.length > 0) {
+          return `⚡ [${stratTag}] ${currentName} (${metStrats.join('+')} 충족) 잔여 조건 실시간 탐색 중 (RSI: ${Math.round(strat.rsi)})`;
+        }
+
+        if (held > 0) {
+          return `🔍 [${stratTag} 감시] ${currentName} 보유 ${held}주 익절/추가진입 타점 감시 중 (RSI: ${Math.round(strat.rsi)})`;
+        }
+        return `🔍 [${stratTag} 감시] ${currentName} 실시간 수급·호가 타점 감시 중 (RSI: ${Math.round(strat.rsi)})`;
       }
-      return `${currentName} 진입 모니터링 중...`;
+      return `🔍 [${stratTag} 감시] ${currentName} 진입 타점 실시간 탐색 중...`;
     }
 
     let cleaned = scalperMessage
@@ -1997,23 +2040,18 @@ export default function App() {
       if (!isGapBotActive) {
         return held > 0 
           ? `[대기] ${currentName} (${held}주 보유) - 스캘퍼 정지 상태`
-          : `[대기] ${currentName} 스캘퍼 대기 중 (시작 버튼을 누르면 자동매매 시작)`;
+          : `[대기] ${currentName} [${stratTag}] 대기 중 (시작 버튼을 누르면 실시간 자동매매 실행)`;
       }
       if (selectedStock) {
         const strat = detectStockStrategies(selectedStock);
-        if (strat.activeCount === 4) return `🎯 [4/4 올-그린] ${currentName} 4개 전략 동시포착 - 진입 대기`;
-        if (strat.isBreakout) return `⚡ [거래량 돌파] ${currentName} 거래량 급증 돌파 탐색 중`;
-        if (strat.isPullback) return `⚡ [눌림목 지지] ${currentName} 상승 추세 눌림목 지지선 감시 중`;
-        if (strat.isVwapSupport) return `⚡ [VWAP 반등] ${currentName} 당일 VWAP 지지 반등 감시`;
-        if (strat.isVolumeProfile) return `⚡ [CVD 수급] ${currentName} 매수 우위 자금유입 감시 중`;
-        if (held > 0) return `${currentName} 보유 포지션 감시 중 (보유: ${held}주, RSI: ${Math.round(strat.rsi)})`;
-        return `${currentName} 실시간 수급/지지선 감시 중 (RSI: ${Math.round(strat.rsi)})`;
+        if (held > 0) return `🔍 [${stratTag} 감시] ${currentName} 보유 ${held}주 익절/추가진입 타점 감시 중 (RSI: ${Math.round(strat.rsi)})`;
+        return `🔍 [${stratTag} 감시] ${currentName} 실시간 수급·호가 타점 감시 중 (RSI: ${Math.round(strat.rsi)})`;
       }
-      return `${currentName} 진입 모니터링 중...`;
+      return `🔍 [${stratTag} 감시] ${currentName} 진입 타점 실시간 탐색 중...`;
     }
 
-    return cleaned || `${currentName} 진입 모니터링 중...`;
-  }, [scalperMessage, selectedStock, selectedSymbol, isGapBotActive, holdings, detectStockStrategies]);
+    return cleaned || `🔍 [${stratTag} 감시] ${currentName} 진입 타점 실시간 탐색 중...`;
+  }, [scalperMessage, selectedStock, selectedSymbol, isGapBotActive, holdings, detectStockStrategies, selectedScalperStrategies]);
 
   const isGapBotActiveRef = React.useRef(isGapBotActive);
   const gapBuyPriceRef = React.useRef(gapBuyPrice);
@@ -3847,8 +3885,24 @@ export default function App() {
     try {
       const list = await kisService.getScalperRecommendations();
       if (list && list.length > 0) {
-        setScalperRecommendations(list);
-        setAiRecommendations(list.map(item => ({
+        // Sync any recommendation item with real-time execution price (현재 체결가) from the current stock list
+        const syncedList = list.map(rec => {
+          const live = stocks.find(s => s.symbol === rec.symbol);
+          if (live && live.price > 0) {
+            const livePrice = live.price;
+            const change = live.change !== undefined ? live.change : rec.change;
+            const changePercent = live.changePercent !== undefined ? live.changePercent : rec.changePercent;
+            const volume = live.volume || rec.volume;
+            const targetPrice = Math.round(livePrice * (1 + Number((1.5 + (rec.scalpingScore % 5) * 0.3).toFixed(2)) / 100));
+            const stopLoss = Math.round(livePrice * 0.985);
+            const expectedReturn = Number((((targetPrice - livePrice) / livePrice) * 100).toFixed(2));
+            return { ...rec, name: live.name || rec.name, price: livePrice, change, changePercent, volume, targetPrice, stopLoss, expectedReturn };
+          }
+          return rec;
+        });
+
+        setScalperRecommendations(syncedList);
+        setAiRecommendations(syncedList.map(item => ({
           symbol: item.symbol,
           name: item.name,
           price: item.price,
@@ -3868,15 +3922,31 @@ export default function App() {
       setIsScalperRecLoading(false);
       setIsRefreshingTop3(false);
     }
-  }, [showNotification]);
+  }, [stocks, showNotification]);
 
   const handleRefreshScalperRecList = useCallback(async () => {
     setIsScalperRecLoading(true);
     try {
       const list = await kisService.getScalperRecommendations();
       if (list && list.length > 0) {
-        setScalperRecommendations(list);
-        setAiRecommendations(list.map(item => ({
+        // Sync any recommendation item with real-time execution price (현재 체결가) from the current stock list
+        const syncedList = list.map(rec => {
+          const live = stocks.find(s => s.symbol === rec.symbol);
+          if (live && live.price > 0) {
+            const livePrice = live.price;
+            const change = live.change !== undefined ? live.change : rec.change;
+            const changePercent = live.changePercent !== undefined ? live.changePercent : rec.changePercent;
+            const volume = live.volume || rec.volume;
+            const targetPrice = Math.round(livePrice * (1 + Number((1.5 + (rec.scalpingScore % 5) * 0.3).toFixed(2)) / 100));
+            const stopLoss = Math.round(livePrice * 0.985);
+            const expectedReturn = Number((((targetPrice - livePrice) / livePrice) * 100).toFixed(2));
+            return { ...rec, name: live.name || rec.name, price: livePrice, change, changePercent, volume, targetPrice, stopLoss, expectedReturn };
+          }
+          return rec;
+        });
+
+        setScalperRecommendations(syncedList);
+        setAiRecommendations(syncedList.map(item => ({
           symbol: item.symbol,
           name: item.name,
           price: item.price,
@@ -3894,47 +3964,59 @@ export default function App() {
     } finally {
       setIsScalperRecLoading(false);
     }
-  }, [showNotification]);
+  }, [stocks, showNotification]);
 
   const handleSelectRecommendationStock = useCallback((rec: ScalperRecommendation) => {
+    // If the stock is already in stocks state, use its real-time execution price (현재 체결가)
+    const existingStock = stocks.find(s => s.symbol === rec.symbol);
+    const resolvedPrice = (existingStock && existingStock.price > 0) ? existingStock.price : rec.price;
+    const resolvedChange = (existingStock && existingStock.change !== undefined) ? existingStock.change : rec.change;
+    const resolvedChangePercent = (existingStock && existingStock.changePercent !== undefined) ? existingStock.changePercent : rec.changePercent;
+    const resolvedVolume = (existingStock && existingStock.volume) ? existingStock.volume : rec.volume;
+
     setStocks(prev => {
       if (!prev.some(s => s.symbol === rec.symbol)) {
         return [...prev, {
           symbol: rec.symbol,
           name: rec.name,
-          price: rec.price,
-          change: rec.change,
-          changePercent: rec.changePercent,
-          volume: rec.volume,
-          history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: rec.price * (0.98 + (i % 5) * 0.008) })),
+          price: resolvedPrice,
+          change: resolvedChange,
+          changePercent: resolvedChangePercent,
+          volume: resolvedVolume,
+          history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: resolvedPrice * (0.98 + (i % 5) * 0.008) })),
           isAI: true,
           market: 'KR'
         }];
       }
       return prev.map(s => s.symbol === rec.symbol ? {
         ...s,
-        price: rec.price,
-        change: rec.change,
-        changePercent: rec.changePercent,
-        volume: rec.volume || s.volume
+        price: resolvedPrice,
+        change: resolvedChange,
+        changePercent: resolvedChangePercent,
+        volume: resolvedVolume || s.volume
       } : s);
     });
 
     openOrSwitchScalperTab(rec.symbol, rec.name);
-    showNotification(`[스캘퍼 타겟 등록] ${rec.name}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (현재가 ${rec.price.toLocaleString()}원, 스캘핑 점수 ${rec.scalpingScore}점)`, "success");
+    showNotification(`[스캘퍼 타겟 등록] ${rec.name}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (현재 체결가 ${resolvedPrice.toLocaleString()}원, 스캘핑 점수 ${rec.scalpingScore}점)`, "success");
     setShowScalperRecModal(false);
-  }, [openOrSwitchScalperTab, showNotification]);
+  }, [stocks, openOrSwitchScalperTab, showNotification]);
 
   const handleBatchRegisterTop3 = useCallback((top3List: ScalperRecommendation[]) => {
     top3List.forEach(rec => {
+      const existingStock = stocks.find(s => s.symbol === rec.symbol);
+      const livePrice = (existingStock && existingStock.price > 0) ? existingStock.price : rec.price;
+      const liveChange = (existingStock && existingStock.change !== undefined) ? existingStock.change : rec.change;
+      const liveChangePercent = (existingStock && existingStock.changePercent !== undefined) ? existingStock.changePercent : rec.changePercent;
+
       setStocks(prev => {
         if (!prev.some(s => s.symbol === rec.symbol)) {
           return [...prev, {
             symbol: rec.symbol,
             name: rec.name,
-            price: rec.price,
-            change: rec.change,
-            changePercent: rec.changePercent,
+            price: livePrice,
+            change: liveChange,
+            changePercent: liveChangePercent,
             volume: rec.volume,
             history: [],
             isAI: true,
@@ -3943,19 +4025,23 @@ export default function App() {
         }
         return prev.map(s => s.symbol === rec.symbol ? {
           ...s,
-          price: rec.price,
-          change: rec.change,
-          changePercent: rec.changePercent,
+          price: livePrice,
+          change: liveChange,
+          changePercent: liveChangePercent,
           volume: rec.volume || s.volume
         } : s);
       });
       openOrSwitchScalperTab(rec.symbol, rec.name);
     });
     if (top3List.length > 0) {
-      showNotification(`[스캘퍼 TOP 3 일괄 등록] ${top3List.map(s => `${s.name}(${s.price.toLocaleString()}원)`).join(', ')} 종목이 스캘퍼 탭에 등록되었습니다.`, "success");
+      showNotification(`[스캘퍼 TOP 3 일괄 등록] ${top3List.map(s => {
+        const live = stocks.find(x => x.symbol === s.symbol);
+        const p = live && live.price > 0 ? live.price : s.price;
+        return `${s.name}(${p.toLocaleString()}원)`;
+      }).join(', ')} 종목이 스캘퍼 탭에 등록되었습니다.`, "success");
     }
     setShowScalperRecModal(false);
-  }, [openOrSwitchScalperTab, showNotification]);
+  }, [stocks, openOrSwitchScalperTab, showNotification]);
 
   const handleRefreshScalperTop3 = useCallback(async () => {
     await handleOpenScalperRecommendations();
@@ -4021,24 +4107,44 @@ export default function App() {
     setSearchSuggestions([]);
     
     if (recommendedStock) {
-      if (stocks.some(s => s.symbol.toUpperCase() === recommendedStock.symbol.toUpperCase())) {
-        openOrSwitchScalperTab(recommendedStock.symbol, recommendedStock.name);
-        return;
-      }
-      const newStock: Stock = { ...recommendedStock, isAI: true, market: marketType };
-      setStocks(prev => [newStock, ...prev]);
+      const livePrice = (recommendedStock.price && recommendedStock.price > 0) ? recommendedStock.price : (marketType === 'KR' ? 50000 : 100);
+      const liveName = recommendedStock.name || resolvedName || symbolToUse;
+      const newStock: Stock = {
+        ...recommendedStock,
+        symbol: recommendedStock.symbol || symbolToUse,
+        name: liveName,
+        price: livePrice,
+        change: recommendedStock.change || 0,
+        changePercent: recommendedStock.changePercent || 0,
+        volume: String(recommendedStock.volume || '100K'),
+        history: recommendedStock.history && recommendedStock.history.length > 0 ? recommendedStock.history : Array.from({ length: 40 }, (_, i) => ({ 
+          time: `${i}:00`, 
+          price: livePrice * (0.98 + (i % 5) * 0.008) 
+        })),
+        market: marketType,
+        isAI: !!recommendedStock.isAI
+      };
+
+      setStocks(prev => {
+        if (prev.some(s => s.symbol.toUpperCase() === newStock.symbol.toUpperCase())) {
+          return prev.map(s => s.symbol.toUpperCase() === newStock.symbol.toUpperCase() ? { ...s, ...newStock } : s);
+        }
+        return [newStock, ...prev];
+      });
       setStocksCache(prev => ({
         ...prev,
-        [marketType]: [newStock, ...prev[marketType]]
+        [marketType]: [newStock, ...(prev[marketType] || []).filter(s => s.symbol.toUpperCase() !== newStock.symbol.toUpperCase())]
       }));
-      openOrSwitchScalperTab(recommendedStock.symbol, recommendedStock.name);
-      setAiRecommendations(prev => prev.filter(r => r.symbol !== recommendedStock.symbol));
-      addLog('SYSTEM', '매수', 0, 0, `[AI 추천 추가] ${recommendedStock.name}(${recommendedStock.symbol}) 종목이 분석 리스트에 추가되었습니다.`);
+      openOrSwitchScalperTab(newStock.symbol, liveName);
+      setSelectedSymbol(newStock.symbol);
+      setAiRecommendations(prev => prev.filter(r => r.symbol !== newStock.symbol));
+      showNotification(`[스캘퍼 탭 등록] ${liveName}(${newStock.symbol}) 종목이 스캘퍼 탭으로 추가되었습니다.`, "success");
       return;
     }
 
     if (stocks.some(s => s.symbol.toUpperCase() === symbolToUse.toUpperCase())) {
       openOrSwitchScalperTab(symbolToUse, resolvedName);
+      setSelectedSymbol(symbolToUse);
       return;
     }
 
@@ -6465,16 +6571,31 @@ export default function App() {
               }
             }
           } else if (isSelected) {
-            if (scalperStrategyMode === 'AUTO') {
-              if (isPullbackCond || isBreakoutCond || isVwapSupportCond) {
-                setScalperMessage(`${stockItem.name} 진입 모니터링 중...`);
-              } else if (!momentumPositive) {
-                setScalperMessage(`[AI관망] ${stockItem.name} 하락 추세 (SMA5<SMA20). 추세 전환 대기 중...`);
-              } else {
-                setScalperMessage(`${stockItem.name} 수급/지지선 감시 중 (RSI: ${Math.round(rsi)}, 보유: ${stockHoldingsQty}주)`);
-              }
+            const stratNames = currentSelectedStrats.map(k => {
+              if (k === 'PULLBACK') return '①눌림목';
+              if (k === 'BREAKOUT') return '②돌파';
+              if (k === 'VWAP_SUPPORT') return '③VWAP';
+              if (k === 'VOLUME_PROFILE_CVD') return '④CVD';
+              return k;
+            });
+            const stratTag = currentSelectedStrats.length === 4 ? '4/4 올-그린' : stratNames.join('+');
+
+            const metStrats = currentSelectedStrats.filter(k => conditionsMap[k]).map(k => {
+              if (k === 'PULLBACK') return '눌림목';
+              if (k === 'BREAKOUT') return '돌파';
+              if (k === 'VWAP_SUPPORT') return 'VWAP';
+              if (k === 'VOLUME_PROFILE_CVD') return 'CVD';
+              return k;
+            });
+
+            if (stockHoldingsQty > 0) {
+              setScalperMessage(`🔍 [${stratTag} 감시] ${stockItem.name} 보유 ${stockHoldingsQty}주 익절/추가진입 감시 (RSI: ${Math.round(rsi)})`);
+            } else if (metStrats.length > 0) {
+              setScalperMessage(`⚡ [${stratTag}] ${stockItem.name} (${metStrats.join('+')} 충족) 잔여 조건 실시간 탐색 중 (RSI: ${Math.round(rsi)})`);
+            } else if (!momentumPositive && currentSelectedStrats.includes('PULLBACK')) {
+              setScalperMessage(`🔍 [${stratTag} 감시] ${stockItem.name} 추세 정렬 및 지지선 대기 중 (RSI: ${Math.round(rsi)})`);
             } else {
-              setScalperMessage(`${stockItem.name} 감시 중 (RSI: ${Math.round(rsi)}, 보유: ${stockHoldingsQty}주)`);
+              setScalperMessage(`🔍 [${stratTag} 감시] ${stockItem.name} 실시간 수급·호가 타점 감시 중 (RSI: ${Math.round(rsi)})`);
             }
           }
         }
@@ -7473,31 +7594,29 @@ export default function App() {
             title="한국투자증권(KIS) Open API 계정 및 모의투자/실전투자 설정"
           >
             <Settings className="w-3.5 h-3.5 text-sleek-blue" />
-            <span className="hidden sm:inline">KIS 연동 설정</span>
+            <span>KIS 연동 설정</span>
             {kisConfig.isConnected && (
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" />
             )}
           </button>
 
-          {/* Admin (슈퍼 관리자) 패널 버튼 */}
-          {(currentUser?.email === "agnus9524@gmail.com" || currentUser) && (
-            <button
-              type="button"
-              onClick={() => {
-                handleFetchAllLicenses();
-                setShowAdminPanel(true);
-              }}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 hover:from-amber-500/30 hover:to-orange-500/30 text-amber-300 border border-amber-500/40 text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95"
-              title="관리자 라이선스 및 회원 관리 패널 열기"
-            >
-              <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
-              <span>Admin</span>
-            </button>
-          )}
+          {/* Admin (슈퍼 관리자) 패널 버튼 - 항상 접근 가능 */}
+          <button
+            type="button"
+            onClick={() => {
+              handleFetchAllLicenses();
+              setShowAdminPanel(true);
+            }}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-amber-500/20 to-orange-500/20 hover:from-amber-500/30 hover:to-orange-500/30 text-amber-300 border border-amber-500/40 text-xs font-black transition-all cursor-pointer shadow-sm active:scale-95"
+            title="관리자 라이선스 및 회원 관리 패널 열기"
+          >
+            <ShieldAlert className="w-3.5 h-3.5 text-amber-400" />
+            <span>Admin</span>
+          </button>
 
           {/* 사용자 닉네임 & 로그인/로그아웃 버튼 */}
           {currentUser ? (
-            <div className="flex items-center gap-2 pl-2 border-l border-white/10">
+            <div className="flex items-center gap-2 pl-1 sm:pl-2 border-l border-white/10">
               <div className="flex items-center gap-1.5 bg-black/40 px-2.5 py-1.5 rounded-xl border border-white/10">
                 {currentUser.photoURL ? (
                   <img 
@@ -7519,7 +7638,7 @@ export default function App() {
               <button
                 type="button"
                 onClick={handleLogout}
-                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-rose-500/20 hover:text-rose-300 text-slate-400 border border-slate-700 hover:border-rose-500/40 text-xs font-bold transition-all cursor-pointer"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-rose-500/20 hover:text-rose-300 text-slate-400 hover:border-rose-500/40 text-xs font-bold transition-all cursor-pointer border border-slate-700"
                 title="로그아웃"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -7527,41 +7646,44 @@ export default function App() {
               </button>
             </div>
           ) : (
-            <button
-              type="button"
-              onClick={handleLogin}
-              className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-sleek-blue hover:bg-sleek-blue/80 text-white text-xs font-black transition-all cursor-pointer shadow-md active:scale-95"
-            >
-              <Zap className="w-3.5 h-3.5 fill-white" />
-              <span>로그인</span>
-            </button>
+            <div className="flex items-center gap-2 pl-1 sm:pl-2 border-l border-white/10">
+              <div className="flex items-center gap-1.5 bg-black/30 px-2 py-1.5 rounded-xl border border-white/5 text-slate-400 text-xs">
+                <User className="w-3.5 h-3.5 text-slate-500" />
+                <span className="text-slate-400">게스트</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleLogin}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sleek-blue hover:bg-sleek-blue/80 text-white text-xs font-black transition-all cursor-pointer shadow-md active:scale-95"
+              >
+                <Zap className="w-3.5 h-3.5 fill-white" />
+                <span>로그인</span>
+              </button>
+            </div>
           )}
         </div>
       </header>
       
-      {/* Domestic Market Ribbon */}
+      {/* Domestic Market Ribbon (KOSPI Only) */}
       <div className="h-8 bg-black/80 sticky top-[60px] md:top-[60px] z-40 border-b border-sleek-border/50 flex items-center justify-between px-6 backdrop-blur-md overflow-x-auto no-scrollbar">
         <div className="flex items-center gap-6 whitespace-nowrap">
           <div className="flex items-center gap-2">
             <span className="text-[10px] font-black text-sleek-text-secondary uppercase tracking-widest flex items-center gap-1">
-              <Globe className="w-3 h-3" /> KRX 국내시장 실시간
+              <Globe className="w-3 h-3" /> 코스피(KOSPI) 실시간
             </span>
             <div className="h-3 w-px bg-white/10 mx-1" />
             <div className="flex items-center gap-3">
               <div className="flex items-center gap-1.5">
                 <SouthKoreaFlag />
-                <span className="text-[11px] font-mono font-bold text-white">KOSPI / KOSDAQ</span>
-                <span className="text-[11px] font-mono font-black text-emerald-400">실시간 연동</span>
+                <span className="text-[11px] font-mono font-bold text-white">KOSPI 대형 유동성 주도주</span>
+                <span className="text-[11px] font-mono font-black text-emerald-400">실시간 감시 중</span>
               </div>
             </div>
           </div>
           
           <div className="hidden sm:flex items-center gap-4 text-[10px] font-bold text-sleek-text-secondary uppercase">
             <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> 코스피 <span className="text-white">정규장</span>
-            </div>
-            <div className="flex items-center gap-1.5">
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> 코스닥 <span className="text-white">정규장</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400" /> 코스피 <span className="text-white">정규장 실시간 체결</span>
             </div>
           </div>
         </div>

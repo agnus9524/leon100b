@@ -261,7 +261,17 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                     {searchSuggestions.map((s, idx) => (
                       <button 
                         key={`${s.symbol}-${idx}`}
-                        onClick={() => handleAddStock(s.symbol, undefined, s.name)}
+                        type="button"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleAddStock(s.symbol, s as any, s.name);
+                        }}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          handleAddStock(s.symbol, s as any, s.name);
+                        }}
                         className="w-full flex items-center justify-between p-3.5 hover:bg-sleek-blue/20 active:bg-sleek-blue/30 transition-colors text-left cursor-pointer group"
                       >
                         <div className="flex flex-col gap-1">

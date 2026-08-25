@@ -14,9 +14,12 @@ import {
   Info,
   X,
   TrendingUp,
-  BarChart2
+  BarChart2,
+  Coins,
+  Search
 } from 'lucide-react';
 import { ScalperRecommendation } from '../services/kisService';
+import { Stock } from '../types';
 
 interface ScalperRecommendationsModalProps {
   isOpen: boolean;
@@ -28,9 +31,21 @@ interface ScalperRecommendationsModalProps {
   onQuickBuy: (rec: ScalperRecommendation) => void;
   onBatchRegisterTop3: (top3: ScalperRecommendation[]) => void;
   registeredSymbols: string[];
+  currentStocks?: Stock[];
 }
 
 type StrategyCategoryType = 'ALL' | 'SUPPORT_REBOUND' | 'MOMENTUM_BREAKOUT' | 'VWAP_SUPPORT' | 'CVD_FLOW';
+export type PriceFilterType = 'ALL' | 'UNDER_10K' | 'UNDER_50K' | 'UNDER_100K' | 'UNDER_200K' | 'UNDER_500K' | 'UNDER_1M' | 'CUSTOM';
+
+const PRICE_FILTER_OPTIONS: { id: PriceFilterType; label: string; shortLabel: string; maxPrice: number | null }[] = [
+  { id: 'ALL', label: '전체 금액', shortLabel: '전체 금액', maxPrice: null },
+  { id: 'UNDER_10K', label: '1만원 이하', shortLabel: '1만원 아래', maxPrice: 10000 },
+  { id: 'UNDER_50K', label: '5만원 이하', shortLabel: '5만원 아래', maxPrice: 50000 },
+  { id: 'UNDER_100K', label: '10만원 이하', shortLabel: '10만원 아래', maxPrice: 100000 },
+  { id: 'UNDER_200K', label: '20만원 이하', shortLabel: '20만원 아래', maxPrice: 200000 },
+  { id: 'UNDER_500K', label: '50만원 이하', shortLabel: '50만원 아래', maxPrice: 500000 },
+  { id: 'UNDER_1M', label: '100만원 이하', shortLabel: '100만원 아래', maxPrice: 1000000 },
+];
 
 export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalProps> = ({
   isOpen,
@@ -41,9 +56,12 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
   onSelectStock,
   onQuickBuy,
   onBatchRegisterTop3,
-  registeredSymbols
+  registeredSymbols,
+  currentStocks = []
 }) => {
   const [activeCategory, setActiveCategory] = useState<StrategyCategoryType>('ALL');
+  const [priceFilter, setPriceFilter] = useState<PriceFilterType>('ALL');
+  const [customPriceInput, setCustomPriceInput] = useState<string>('');
   const [selectedItem, setSelectedItem] = useState<ScalperRecommendation | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -65,8 +83,39 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
     }
   };
 
+  // Synchronize recommendation prices with real-time execution price (현재 체결가) from the app's stock list
+  const syncedRecommendations = useMemo(() => {
+    return recommendations.map(rec => {
+      const liveStock = currentStocks.find(s => s.symbol === rec.symbol);
+      if (liveStock && liveStock.price > 0) {
+        const livePrice = liveStock.price;
+        const change = liveStock.change !== undefined ? liveStock.change : rec.change;
+        const changePercent = liveStock.changePercent !== undefined ? liveStock.changePercent : rec.changePercent;
+        const volume = liveStock.volume || rec.volume;
+        const targetPrice = Math.round(livePrice * (1 + Number((1.5 + (rec.scalpingScore % 5) * 0.3).toFixed(2)) / 100));
+        const stopLoss = Math.round(livePrice * 0.985);
+        const expectedReturn = Number((((targetPrice - livePrice) / livePrice) * 100).toFixed(2));
+        
+        return {
+          ...rec,
+          name: liveStock.name || rec.name,
+          price: livePrice,
+          change,
+          changePercent,
+          volume,
+          targetPrice,
+          stopLoss,
+          expectedReturn
+        };
+      }
+      return rec;
+    });
+  }, [recommendations, currentStocks]);
+
   const filteredList = useMemo(() => {
-    let list = recommendations;
+    let list = syncedRecommendations;
+
+    // 1. Strategy category filter
     if (activeCategory !== 'ALL') {
       if (activeCategory === 'CVD_FLOW') {
         list = list.filter(r => r.category === 'VOLUME_SURGE' || (r as any).category === 'CVD_FLOW' || r.tags.some(t => t.includes('CVD')));
@@ -74,23 +123,50 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
         list = list.filter(r => r.category === activeCategory);
       }
     }
+
+    // 2. Price filter
+    if (priceFilter === 'CUSTOM') {
+      const customNum = Number(customPriceInput.replace(/,/g, '').trim());
+      if (!isNaN(customNum) && customNum > 0) {
+        list = list.filter(r => r.price <= customNum);
+      }
+    } else if (priceFilter !== 'ALL') {
+      const option = PRICE_FILTER_OPTIONS.find(o => o.id === priceFilter);
+      if (option && option.maxPrice) {
+        list = list.filter(r => r.price <= option.maxPrice);
+      }
+    }
+
     return [...list].sort((a, b) => b.scalpingScore - a.scalpingScore);
-  }, [recommendations, activeCategory]);
+  }, [syncedRecommendations, activeCategory, priceFilter, customPriceInput]);
 
   const top3 = useMemo(() => {
     return filteredList.slice(0, 3);
   }, [filteredList]);
 
   // Counts for category badges
-  const counts = useMemo(() => {
+  const strategyCounts = useMemo(() => {
     return {
-      ALL: recommendations.length,
-      SUPPORT_REBOUND: recommendations.filter(r => r.category === 'SUPPORT_REBOUND').length,
-      MOMENTUM_BREAKOUT: recommendations.filter(r => r.category === 'MOMENTUM_BREAKOUT').length,
-      VWAP_SUPPORT: recommendations.filter(r => r.category === 'VWAP_SUPPORT').length,
-      CVD_FLOW: recommendations.filter(r => r.category === 'VOLUME_SURGE' || (r as any).category === 'CVD_FLOW' || r.tags.some(t => t.includes('CVD'))).length
+      ALL: syncedRecommendations.length,
+      SUPPORT_REBOUND: syncedRecommendations.filter(r => r.category === 'SUPPORT_REBOUND').length,
+      MOMENTUM_BREAKOUT: syncedRecommendations.filter(r => r.category === 'MOMENTUM_BREAKOUT').length,
+      VWAP_SUPPORT: syncedRecommendations.filter(r => r.category === 'VWAP_SUPPORT').length,
+      CVD_FLOW: syncedRecommendations.filter(r => r.category === 'VOLUME_SURGE' || (r as any).category === 'CVD_FLOW' || r.tags.some(t => t.includes('CVD'))).length
     };
-  }, [recommendations]);
+  }, [syncedRecommendations]);
+
+  // Counts for price filter badges
+  const priceCounts = useMemo(() => {
+    return {
+      ALL: syncedRecommendations.length,
+      UNDER_10K: syncedRecommendations.filter(r => r.price <= 10000).length,
+      UNDER_50K: syncedRecommendations.filter(r => r.price <= 50000).length,
+      UNDER_100K: syncedRecommendations.filter(r => r.price <= 100000).length,
+      UNDER_200K: syncedRecommendations.filter(r => r.price <= 200000).length,
+      UNDER_500K: syncedRecommendations.filter(r => r.price <= 500000).length,
+      UNDER_1M: syncedRecommendations.filter(r => r.price <= 1000000).length,
+    };
+  }, [syncedRecommendations]);
 
   if (!isOpen) return null;
 
@@ -149,56 +225,126 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
             </div>
           </div>
 
-          {/* Filter Bar (Only KOSPI & 4 Core Strategies) */}
-          <div className="px-4 sm:px-5 py-2.5 bg-slate-900/40 border-b border-slate-800/60 flex flex-col md:flex-row md:items-center justify-between gap-2.5 shrink-0">
-            {/* Left: Market Scope Badge */}
-            <div className="flex items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-black">
-                <span>👑 코스피(KOSPI) 대형 유동성 전용</span>
-              </span>
-            </div>
-
-            {/* Right: Scalping 4-Strategy Filters & Batch Registration */}
-            <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-              {[
-                { id: 'ALL' as const, label: '전체 코스피', icon: Trophy, count: counts.ALL },
-                { id: 'SUPPORT_REBOUND' as const, label: '① 눌림목 반등', icon: Target, count: counts.SUPPORT_REBOUND },
-                { id: 'MOMENTUM_BREAKOUT' as const, label: '② 모멘텀 돌파', icon: Zap, count: counts.MOMENTUM_BREAKOUT },
-                { id: 'VWAP_SUPPORT' as const, label: '③ VWAP 지지', icon: BarChart2, count: counts.VWAP_SUPPORT },
-                { id: 'CVD_FLOW' as const, label: '④ CVD 수급', icon: Flame, count: counts.CVD_FLOW }
-              ].map(tab => {
-                const Icon = tab.icon;
-                const active = activeCategory === tab.id;
-                return (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setActiveCategory(tab.id)}
-                    className={`px-2.5 py-1 rounded-xl text-[11px] font-bold font-sans flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
-                      active 
-                        ? 'bg-gradient-to-r from-emerald-500/30 to-teal-500/30 text-emerald-200 border border-emerald-500/60 shadow-[0_0_12px_rgba(16,185,129,0.3)]' 
-                        : 'bg-slate-800/70 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
-                    }`}
-                  >
-                    <Icon className={`w-3 h-3 ${active ? 'text-emerald-400' : 'text-slate-500'}`} />
-                    <span>{tab.label}</span>
-                    <span className={`text-[9.5px] px-1 rounded-full font-mono font-black ${active ? 'bg-emerald-500/40 text-emerald-100' : 'bg-slate-700/50 text-slate-400'}`}>
-                      {tab.count}
-                    </span>
-                  </button>
-                );
-              })}
+          {/* Filter Bar (Strategy & Price Filters) */}
+          <div className="px-4 sm:px-5 py-3 bg-slate-900/60 border-b border-slate-800/80 space-y-2.5 shrink-0">
+            {/* Top Row: Strategies & Top 3 Batch */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-black shrink-0">
+                  <span>👑 코스피(KOSPI) 전용</span>
+                </span>
+                
+                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+                  {[
+                    { id: 'ALL' as const, label: '전체 전략', icon: Trophy, count: strategyCounts.ALL },
+                    { id: 'SUPPORT_REBOUND' as const, label: '① 눌림목 반등', icon: Target, count: strategyCounts.SUPPORT_REBOUND },
+                    { id: 'MOMENTUM_BREAKOUT' as const, label: '② 모멘텀 돌파', icon: Zap, count: strategyCounts.MOMENTUM_BREAKOUT },
+                    { id: 'VWAP_SUPPORT' as const, label: '③ VWAP 지지', icon: BarChart2, count: strategyCounts.VWAP_SUPPORT },
+                    { id: 'CVD_FLOW' as const, label: '④ CVD 수급', icon: Flame, count: strategyCounts.CVD_FLOW }
+                  ].map(tab => {
+                    const Icon = tab.icon;
+                    const active = activeCategory === tab.id;
+                    return (
+                      <button
+                        key={tab.id}
+                        type="button"
+                        onClick={() => setActiveCategory(tab.id)}
+                        className={`px-2.5 py-1 rounded-xl text-[11px] font-bold font-sans flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
+                          active 
+                            ? 'bg-gradient-to-r from-emerald-500/30 to-teal-500/30 text-emerald-200 border border-emerald-500/60 shadow-[0_0_12px_rgba(16,185,129,0.3)]' 
+                            : 'bg-slate-800/70 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
+                        }`}
+                      >
+                        <Icon className={`w-3 h-3 ${active ? 'text-emerald-400' : 'text-slate-500'}`} />
+                        <span>{tab.label}</span>
+                        <span className={`text-[9.5px] px-1 rounded-full font-mono font-black ${active ? 'bg-emerald-500/40 text-emerald-100' : 'bg-slate-700/50 text-slate-400'}`}>
+                          {tab.count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
               {top3.length > 0 && (
                 <button
                   type="button"
                   onClick={() => onBatchRegisterTop3(top3)}
-                  className="px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-[11px] font-black transition-all cursor-pointer flex items-center gap-1 shadow-[0_0_12px_rgba(16,185,129,0.3)] active:scale-95 ml-auto whitespace-nowrap"
+                  className="px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-[11px] font-black transition-all cursor-pointer flex items-center gap-1 shadow-[0_0_12px_rgba(16,185,129,0.3)] active:scale-95 whitespace-nowrap self-start lg:self-auto"
                 >
                   <Sparkles className="w-3 h-3" />
                   <span>TOP 3 일괄 등록</span>
                 </button>
               )}
+            </div>
+
+            {/* Bottom Row: Price Filtering (< 10000, < 50000, < 100000, 200000, 500000, 1000000, Custom Search) */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-800/60">
+              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
+                <div className="flex items-center gap-1 text-[11px] font-bold text-amber-400 mr-1 shrink-0">
+                  <Coins className="w-3.5 h-3.5" />
+                  <span>금액 검색:</span>
+                </div>
+                {PRICE_FILTER_OPTIONS.map(opt => {
+                  const active = priceFilter === opt.id;
+                  const count = opt.id === 'ALL' ? priceCounts.ALL : priceCounts[opt.id as keyof typeof priceCounts] ?? 0;
+                  return (
+                    <button
+                      key={opt.id}
+                      type="button"
+                      onClick={() => {
+                        setPriceFilter(opt.id);
+                        if (opt.id !== 'CUSTOM') setCustomPriceInput('');
+                      }}
+                      className={`px-2.5 py-1 rounded-xl text-[11px] font-bold font-sans flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
+                        active
+                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/60 shadow-[0_0_10px_rgba(245,158,11,0.2)]'
+                          : 'bg-slate-800/50 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
+                      }`}
+                    >
+                      <span>{opt.shortLabel}</span>
+                      <span className={`text-[9px] px-1 rounded-full font-mono font-black ${active ? 'bg-amber-500/40 text-amber-100' : 'bg-slate-700/50 text-slate-400'}`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Direct Price Input Search */}
+              <div className="flex items-center gap-1.5 shrink-0 self-start sm:self-auto">
+                <div className="relative">
+                  <input
+                    type="text"
+                    value={customPriceInput}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setCustomPriceInput(val);
+                      if (val.trim()) {
+                        setPriceFilter('CUSTOM');
+                      } else {
+                        setPriceFilter('ALL');
+                      }
+                    }}
+                    placeholder="직접 금액 이하 (원)"
+                    className="w-36 sm:w-40 bg-black/40 border border-slate-700 focus:border-amber-500 rounded-xl py-1 pl-6 pr-2 text-xs font-mono text-white placeholder:text-slate-500 outline-none transition-all"
+                  />
+                  <Search className="w-3 h-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
+                </div>
+                {customPriceInput && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCustomPriceInput('');
+                      setPriceFilter('ALL');
+                    }}
+                    className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-xs cursor-pointer"
+                    title="금액 필터 초기화"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                )}
+              </div>
             </div>
           </div>
 
@@ -215,16 +361,33 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
                 </div>
               </div>
             ) : filteredList.length === 0 ? (
-              <div className="py-16 text-center text-slate-400 space-y-2">
-                <Info className="w-8 h-8 text-slate-600 mx-auto" />
-                <p className="text-sm font-bold">해당 카테고리의 추천 종목이 없습니다.</p>
-                <button
-                  type="button"
-                  onClick={handleManualRefresh}
-                  className="px-3 py-1.5 rounded-xl bg-slate-800 text-slate-200 text-xs font-bold border border-slate-700 cursor-pointer"
-                >
-                  전체 코스피 다시 분석
-                </button>
+              <div className="py-16 text-center text-slate-400 space-y-3">
+                <Info className="w-9 h-9 text-slate-600 mx-auto" />
+                <div className="space-y-1">
+                  <p className="text-sm font-bold text-white">해당 조건(전략/금액)에 맞는 추천 종목이 없습니다.</p>
+                  <p className="text-xs text-slate-500">금액대 필터 또는 전략 선택을 변경해보세요.</p>
+                </div>
+                <div className="flex items-center justify-center gap-2 pt-1">
+                  {priceFilter !== 'ALL' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPriceFilter('ALL');
+                        setCustomPriceInput('');
+                      }}
+                      className="px-3.5 py-1.5 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-bold cursor-pointer"
+                    >
+                      전체 금액 보기
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleManualRefresh}
+                    className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 cursor-pointer"
+                  >
+                    전체 재분석
+                  </button>
+                </div>
               </div>
             ) : (
               <>
