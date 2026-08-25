@@ -8,15 +8,23 @@
   --color-sleek-green: #22c55e;
   --color-sleek-red: #ef4444;
   --color-sleek-blue: #3b82f6;
-  --color-sleek-border: rgba(148, 163, 184, 0.1);
+  --color-sleek-border: #334155;
   --color-up: #ef4444;
   --color-down: #3b82f6;
   --font-mono: "Courier New", Courier, monospace;
 }
 
 @layer base {
+  html, body, #root {
+    min-height: 100%;
+    background-color: #0f172a;
+    color: #f8fafc;
+  }
   body {
-    @apply bg-sleek-bg text-sleek-text-primary font-sans antialiased;
+    font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+    padding: 0;
   }
 }
 
