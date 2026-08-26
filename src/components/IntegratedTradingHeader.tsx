@@ -384,8 +384,13 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
             className={cn(
               "px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shrink-0",
               selectedScalperStrategies.length === 4
-                ? "bg-gradient-to-r from-emerald-500/30 via-cyan-500/30 to-blue-500/30 text-emerald-200 border-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.45)] ring-1 ring-emerald-400/50"
-                : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/10 hover:border-emerald-500/40 opacity-75"
+                ? cn(
+                    "bg-emerald-500/20 text-emerald-200",
+                    activeStrategyDetection.activeCount === 4
+                      ? "border-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.7)] ring-2 ring-emerald-400/80 animate-pulse"
+                      : "border-white/10"
+                  )
+                : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/10 opacity-60 hover:opacity-100"
             )}
             title="[최상급 4/4 올-그린] 눌림목 + 돌파 + VWAP + CVD 4개 전략 전체 선택"
           >
@@ -417,7 +422,12 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
             className={cn(
               "px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shrink-0",
               selectedScalperStrategies.includes('PULLBACK')
-                ? "bg-cyan-500/25 text-cyan-200 border-cyan-400 shadow-[0_0_12px_rgba(6,182,212,0.35)] ring-1 ring-cyan-400/40 font-black"
+                ? cn(
+                    "bg-cyan-500/20 text-cyan-200",
+                    activeStrategyDetection.isPullback
+                      ? "border-cyan-400 shadow-[0_0_14px_rgba(6,182,212,0.7)] ring-2 ring-cyan-400/80 animate-pulse"
+                      : "border-white/10"
+                  )
                 : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/10 opacity-60 hover:opacity-100"
             )}
             title="[진입 타이밍 ★★★★] 상승 추세 지지선 눌림목 후 반등 진입 (수익률 최적 진입)"
@@ -450,7 +460,12 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
             className={cn(
               "px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shrink-0",
               selectedScalperStrategies.includes('BREAKOUT')
-                ? "bg-amber-500/25 text-amber-200 border-amber-400 shadow-[0_0_12px_rgba(245,158,11,0.35)] ring-1 ring-amber-400/40 font-black"
+                ? cn(
+                    "bg-amber-500/20 text-amber-200",
+                    activeStrategyDetection.isBreakout
+                      ? "border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.7)] ring-2 ring-amber-400/80 animate-pulse"
+                      : "border-white/10"
+                  )
                 : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/10 opacity-60 hover:opacity-100"
             )}
             title="[진입 신호 ★★★★] 당일/전고점/박스 상단 돌파 (가짜 돌파 주의, CVD 연계 권장)"
@@ -483,7 +498,12 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
             className={cn(
               "px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shrink-0",
               selectedScalperStrategies.includes('VWAP_SUPPORT')
-                ? "bg-indigo-500/25 text-indigo-200 border-indigo-400 shadow-[0_0_12px_rgba(99,102,241,0.35)] ring-1 ring-indigo-400/40 font-black"
+                ? cn(
+                    "bg-indigo-500/20 text-indigo-200",
+                    activeStrategyDetection.isVwapSupport
+                      ? "border-indigo-400 shadow-[0_0_14px_rgba(99,102,241,0.7)] ring-2 ring-indigo-400/80 animate-pulse"
+                      : "border-white/10"
+                  )
                 : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/10 opacity-60 hover:opacity-100"
             )}
             title="[방향 필터 ★★★★★] 기관 평균단가 (VWAP 위=매수 우위 필터, 지지선 반등 진입)"
@@ -516,7 +536,12 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
             className={cn(
               "px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shrink-0",
               selectedScalperStrategies.includes('VOLUME_PROFILE_CVD')
-                ? "bg-purple-500/25 text-purple-200 border-purple-400 shadow-[0_0_12px_rgba(168,85,247,0.35)] ring-1 ring-purple-400/40 font-black"
+                ? cn(
+                    "bg-purple-500/20 text-purple-200",
+                    activeStrategyDetection.isVolumeProfile
+                      ? "border-purple-400 shadow-[0_0_14px_rgba(168,85,247,0.7)] ring-2 ring-purple-400/80 animate-pulse"
+                      : "border-white/10"
+                  )
                 : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/10 opacity-60 hover:opacity-100"
             )}
             title="[수급 확인 ★★★★★] CVD 누적 거래량 체결 델타 & 실제 자금 유입·세력 매집 확인"

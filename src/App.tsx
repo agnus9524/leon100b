@@ -1297,8 +1297,8 @@ export default function App() {
     },
     {
       id: 'market-feed',
-      title: '2. KRX 정규 시장 시세 및 지수 피드 수신',
-      desc: 'KOSPI / KOSDAQ 실시간 지수 및 상·하한가 가격 제한폭 데이터를 동기화합니다.',
+      title: '2. KRX 정규 시장 시세 및 코스피 지수 피드 수신',
+      desc: 'KOSPI 정규 시장 실시간 지수 및 상·하한가 가격 제한폭 데이터를 동기화합니다.',
       status: 'pending'
     },
     {
@@ -2087,58 +2087,21 @@ export default function App() {
     const currentName = selectedStock?.name || selectedSymbol;
     const held = holdings[selectedSymbol] || 0;
 
-    const currentSelectedStrats = (selectedScalperStrategies && selectedScalperStrategies.length > 0)
-      ? selectedScalperStrategies
-      : (['PULLBACK', 'BREAKOUT', 'VWAP_SUPPORT', 'VOLUME_PROFILE_CVD'] as ('PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD')[]);
-
-    const stratNames = currentSelectedStrats.map(k => {
-      if (k === 'PULLBACK') return '①눌림목';
-      if (k === 'BREAKOUT') return '②돌파';
-      if (k === 'VWAP_SUPPORT') return '③VWAP';
-      if (k === 'VOLUME_PROFILE_CVD') return '④CVD';
-      return k;
-    });
-    const stratTag = currentSelectedStrats.length === 4 ? '4/4 올-그린' : stratNames.join('+');
-
     if (!isGapBotActive) {
       return held > 0 
-        ? `[대기] ${currentName} (${held}주 보유) - 스캘퍼 정지 상태`
-        : `[대기] ${currentName} [${stratTag}] 대기 중 (시작 버튼을 누르면 실시간 자동매매 실행)`;
+        ? `[대기] ${currentName} (${held}주 보유 중) - 스캘퍼 정지 (시작 버튼을 누르면 실시간 자동매매 실행)`
+        : `[대기] ${currentName} 진입 대기 (시작 버튼을 누르면 실시간 자동매매 실행)`;
     }
 
     if (!scalperMessage || scalperMessage === "대기 중..." || scalperMessage.includes("감시 중") || scalperMessage.includes("진입 모니터링") || scalperMessage.includes("자금 순환 취소") || scalperMessage.includes("미체결 매수 취소") || scalperMessage.includes("주문 취소")) {
       if (selectedStock) {
         const strat = detectStockStrategies(selectedStock);
-        const conditionsMap: Record<'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD', boolean> = {
-          PULLBACK: strat.isPullback,
-          BREAKOUT: strat.isBreakout,
-          VWAP_SUPPORT: strat.isVwapSupport,
-          VOLUME_PROFILE_CVD: strat.isVolumeProfile
-        };
-        const allSelectedMet = currentSelectedStrats.every(k => conditionsMap[k]);
-
-        if (allSelectedMet) {
-          return `🎯 [${stratTag} 포착] ${currentName} 모든 진입 조건 충족! 호가 주문 실행 중...`;
-        }
-
-        const metStrats = currentSelectedStrats.filter(k => conditionsMap[k]).map(k => {
-          if (k === 'PULLBACK') return '눌림목';
-          if (k === 'BREAKOUT') return '돌파';
-          if (k === 'VWAP_SUPPORT') return 'VWAP';
-          if (k === 'VOLUME_PROFILE_CVD') return 'CVD';
-          return k;
-        });
-
-        if (metStrats.length > 0) {
-          return `⚡ [${stratTag}] ${currentName} (${metStrats.join('+')} 충족) 잔여 조건 실시간 탐색 중 (RSI: ${Math.round(strat.rsi)})`;
-        }
-
         if (held > 0) {
-          return `🔍 [${stratTag} 감시] ${currentName} 보유 ${held}주 익절/추가진입 타점 감시 중 (RSI: ${Math.round(strat.rsi)})`;
+          return `[보유 감시] ${currentName} ${held}주 보유 중 · 실시간 목표가 도달 및 분할 매매 추적 중 (RSI: ${Math.round(strat.rsi)})`;
         }
-        return `🔍 [${stratTag} 감시] ${currentName} 실시간 수급·호가 타점 감시 중 (RSI: ${Math.round(strat.rsi)})`;
+        return `[수급 감시] ${currentName} 실시간 호가 잔량 및 최적 진입 타점 정밀 분석 중 (RSI: ${Math.round(strat.rsi)})`;
       }
-      return `🔍 [${stratTag} 감시] ${currentName} 진입 타점 실시간 탐색 중...`;
+      return `[수급 감시] ${currentName} 실시간 호가 잔량 및 진입 타점 정밀 분석 중...`;
     }
 
     let cleaned = scalperMessage
@@ -2148,6 +2111,16 @@ export default function App() {
       .replace(/\[AI모니터링\]\s*/g, '')
       .replace(/^\[AI관망\]\s*/g, '')
       .replace(/\[AI관망\]\s*/g, '')
+      .replace(/\[.*?올-그린.*?\]/g, '')
+      .replace(/\[.*?눌림목.*?\]/g, '')
+      .replace(/\[.*?돌파.*?\]/g, '')
+      .replace(/\[.*?VWAP.*?\]/g, '')
+      .replace(/\[.*?CVD.*?\]/g, '')
+      .replace(/\(.*?(눌림목|돌파|VWAP|CVD|올-그린).*?\)/g, '')
+      .replace(/\[.*?(눌림목|돌파|VWAP|CVD|올-그린).*?\]/g, '')
+      .replace(/\([①②③④].*?\)/g, '')
+      .replace(/\[[①②③④].*?\]/g, '')
+      .replace(/\s+/g, ' ')
       .trim();
 
     // If message explicitly references a different stock name, synthesize accurate status for selected stock
@@ -2155,19 +2128,19 @@ export default function App() {
     if (isOtherStockMessage) {
       if (!isGapBotActive) {
         return held > 0 
-          ? `[대기] ${currentName} (${held}주 보유) - 스캘퍼 정지 상태`
-          : `[대기] ${currentName} [${stratTag}] 대기 중 (시작 버튼을 누르면 실시간 자동매매 실행)`;
+          ? `[대기] ${currentName} (${held}주 보유 중) - 스캘퍼 정지 (시작 버튼을 누르면 실시간 자동매매 실행)`
+          : `[대기] ${currentName} 진입 대기 (시작 버튼을 누르면 실시간 자동매매 실행)`;
       }
       if (selectedStock) {
         const strat = detectStockStrategies(selectedStock);
-        if (held > 0) return `🔍 [${stratTag} 감시] ${currentName} 보유 ${held}주 익절/추가진입 타점 감시 중 (RSI: ${Math.round(strat.rsi)})`;
-        return `🔍 [${stratTag} 감시] ${currentName} 실시간 수급·호가 타점 감시 중 (RSI: ${Math.round(strat.rsi)})`;
+        if (held > 0) return `[보유 감시] ${currentName} ${held}주 보유 중 · 실시간 목표가 도달 및 분할 매매 추적 중 (RSI: ${Math.round(strat.rsi)})`;
+        return `[수급 감시] ${currentName} 실시간 호가 잔량 및 최적 진입 타점 정밀 분석 중 (RSI: ${Math.round(strat.rsi)})`;
       }
-      return `🔍 [${stratTag} 감시] ${currentName} 진입 타점 실시간 탐색 중...`;
+      return `[수급 감시] ${currentName} 실시간 호가 잔량 및 진입 타점 정밀 분석 중...`;
     }
 
-    return cleaned || `🔍 [${stratTag} 감시] ${currentName} 진입 타점 실시간 탐색 중...`;
-  }, [scalperMessage, selectedStock, selectedSymbol, isGapBotActive, holdings, detectStockStrategies, selectedScalperStrategies]);
+    return cleaned || `[수급 감시] ${currentName} 실시간 호가 잔량 및 진입 타점 정밀 분석 중...`;
+  }, [scalperMessage, selectedStock, selectedSymbol, isGapBotActive, holdings, detectStockStrategies]);
 
   const isGapBotActiveRef = React.useRef(isGapBotActive);
   const gapBuyPriceRef = React.useRef(gapBuyPrice);

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { BrainCircuit, Zap, Target, ShieldAlert, TrendingUp, TrendingDown, Activity, Globe } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { aiTradingService, MarketSignal } from '../services/aiTradingService';
@@ -15,7 +15,9 @@ interface XTXPredictorProps {
 export const XTXPredictor: React.FC<XTXPredictorProps> = ({ symbol, name, history, marketType, onExecuteTrade, onSignalChange }) => {
   const [signal, setSignalState] = useState<MarketSignal | null>(null);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [lastAnalysis, setLastAnalysis] = useState<number>(0);
+  const analyzingRef = useRef(false);
 
   const setSignal = (s: MarketSignal | null) => {
     setSignalState(s);
@@ -23,25 +25,122 @@ export const XTXPredictor: React.FC<XTXPredictorProps> = ({ symbol, name, histor
   };
 
   const performAnalysis = async () => {
-    if (isAnalyzing) return;
-    setIsAnalyzing(true);
-    try {
-      const safeHistory = Array.isArray(history) ? history : [];
-      const result = await aiTradingService.analyzeStock(symbol, safeHistory, name);
-      setSignal(result);
-      setLastAnalysis(Date.now());
-    } catch (error) {
-      console.error("BullGPT Analysis failed", error);
-    } finally {
-      setIsAnalyzing(false);
-    }
-  };
 
-  useEffect(() => {
+  if (analyzingRef.current) {
+    return;
+  }
+
+  if (!history || history.length < 10) {
+
+  setSignal(null);
+
+  console.warn(
+    `[BullGPT] ${symbol} 분석 스킵 - 데이터 부족`
+  );
+
+  return;
+}
+
+
+  analyzingRef.current = true;
+  setIsAnalyzing(true);
+
+setAnalysisError(null);
+
+  try {
+
+    const safeHistory =
+      Array.isArray(history)
+        ? history
+        : [];
+
+    const result =
+      await aiTradingService.analyzeStock(
+        symbol,
+        safeHistory,
+        name
+      );
+
+    setSignal(result);
+    setLastAnalysis(Date.now());
+
+  } catch (error: any) {
+
+  console.error(
+    "BullGPT Analysis failed",
+    error
+  );
+
+  setAnalysisError(
+    error?.message ||
+    "AI 분석 실패"
+  );
+} finally {
+
+    analyzingRef.current = false;
+    setIsAnalyzing(false);
+
+  }
+};
+
+
+
+const currentPrice = React.useMemo(() => {
+  return history?.length > 0
+    ? history[history.length - 1]?.price
+    : 0;
+}, [history]);
+
+
+const lastPriceRef =
+  useRef<number>(0);
+
+useEffect(() => {
+
+  performAnalysis();
+
+  const interval = setInterval(
+    performAnalysis,
+    300000
+  );
+
+  return () => clearInterval(interval);
+
+}, [symbol]);
+
+
+useEffect(() => {
+
+  if (!currentPrice)
+    return;
+
+  const previous =
+    lastPriceRef.current;
+
+  lastPriceRef.current =
+    currentPrice;
+
+  if (!previous)
+    return;
+
+  const changePct =
+    Math.abs(
+      (
+        currentPrice -
+        previous
+      ) / previous
+    ) * 100;
+
+  if (changePct >= 0.5) {
+
+    console.log(
+      `[BullGPT] ${symbol} 가격 급변 감지 (${changePct.toFixed(2)}%)`
+    );
+
     performAnalysis();
-    const interval = setInterval(performAnalysis, 300000);
-    return () => clearInterval(interval);
-  }, [symbol, (Array.isArray(history) ? history.length : 0)]);
+  }
+
+}, [currentPrice]);
 
   return (
     <div className="bg-[#0a0a0a] border-2 border-white/10 rounded-[32px] p-8 overflow-hidden relative shadow-2xl">
@@ -74,6 +173,14 @@ export const XTXPredictor: React.FC<XTXPredictorProps> = ({ symbol, name, histor
           <Zap className={`w-5 h-5 transition-transform group-hover:scale-110 ${isAnalyzing ? 'text-yellow-400 animate-pulse' : 'text-gray-400'}`} />
         </button>
       </div>
+	  
+	  {
+  analysisError && (
+    <div className="mb-4 p-4 rounded-xl border border-red-500/20 bg-red-500/5 text-red-300 text-sm">
+      {analysisError}
+    </div>
+  )
+}
 
       <AnimatePresence mode="wait">
         {isAnalyzing && !signal ? (
@@ -117,7 +224,19 @@ export const XTXPredictor: React.FC<XTXPredictorProps> = ({ symbol, name, histor
                       {signal.action === 'BUY' ? '신규 매수' : signal.action === 'SELL' ? '신규 매도' : '관망 유지'}
                     </span>
                     <div className="bg-white/10 px-3 py-1.5 rounded-lg border border-white/5">
-                      <span className="text-sm font-bold text-white/80">{signal.confidence}% 신뢰도</span>
+                      <span className="text-sm font-bold text-white/80">
+  {
+    Math.max(
+      0,
+      Math.min(
+        Number(signal.confidence || 0),
+        100
+      )
+    )
+  }%
+  신뢰도
+</span>
+
                     </div>
                   </div>
                   <p className="text-lg text-gray-400 font-medium mt-2">{signal.pattern}</p>
@@ -126,9 +245,19 @@ export const XTXPredictor: React.FC<XTXPredictorProps> = ({ symbol, name, histor
               
               <div className="text-right flex flex-col justify-center">
                 <p className="text-xs text-gray-500 uppercase font-bold tracking-widest mb-1">분석 주기: {signal.timeframe}</p>
-                <div className={`flex items-center gap-2 text-2xl font-black font-mono ${signal.action === 'BUY' ? 'text-emerald-400' : 'text-rose-400'}`}>
+                <div className={`flex items-center gap-2 text-2xl font-black font-mono ${
+  signal.action === 'BUY'
+    ? 'text-emerald-400'
+    : signal.action === 'SELL'
+    ? 'text-rose-400'
+    : 'text-gray-400'
+}`}>
                   {signal.action === 'BUY' ? <TrendingUp className="w-6 h-6" /> : <TrendingDown className="w-6 h-6" />}
-                  RR: {signal.riskRewardRatio}
+                  RR: {
+  Number(
+    signal.riskRewardRatio || 1
+  ).toFixed(2)
+}
                 </div>
               </div>
             </div>
@@ -144,11 +273,14 @@ export const XTXPredictor: React.FC<XTXPredictorProps> = ({ symbol, name, histor
               </p>
               
               <div className="mt-6 flex flex-wrap gap-2">
-                {signal.invariants.map((inv, idx) => (
-                  <span key={idx} className="text-xs bg-white/5 text-gray-400 border border-white/10 px-3 py-1.5 rounded-full font-medium">
-                    {inv}
-                  </span>
-                ))}
+              {(signal.invariants || []).map((inv, idx) => (
+  <span
+    key={idx}
+    className="text-xs bg-white/5 text-gray-400 border border-white/10 px-3 py-1.5 rounded-full font-medium"
+  >
+    {inv}
+  </span>
+))}
               </div>
             </div>
 
@@ -186,15 +318,29 @@ export const XTXPredictor: React.FC<XTXPredictorProps> = ({ symbol, name, histor
             })()}
 
             <button
-              onClick={() => onExecuteTrade?.(signal)}
-              className={`w-full py-5 rounded-[24px] text-lg font-black transition-all shadow-xl active:scale-[0.98] ${
-                signal.action === 'BUY' ? 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/20' :
-                signal.action === 'SELL' ? 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/20' :
-                'bg-white/10 hover:bg-white/20 text-white'
-              }`}
-            >
-              시그널 즉시 실행
-            </button>
+  disabled={signal.action === 'HOLD'}
+  onClick={() => {
+    if (
+      signal &&
+      signal.action !== 'HOLD'
+    ) {
+      onExecuteTrade?.(signal);
+    }
+  }}
+  className={`w-full py-5 rounded-[24px] text-lg font-black transition-all shadow-xl active:scale-[0.98] ${
+    signal.action === 'BUY'
+      ? 'bg-emerald-500 hover:bg-emerald-400 text-black shadow-emerald-500/20'
+      : signal.action === 'SELL'
+      ? 'bg-rose-500 hover:bg-rose-400 text-white shadow-rose-500/20'
+      : 'bg-white/10 text-white opacity-50 cursor-not-allowed'
+  }`}
+>
+  {
+    signal.action === 'HOLD'
+      ? '관망 신호'
+      : '시그널 즉시 실행'
+  }
+</button>
             
             <div className="flex items-center justify-between px-2">
               <p className="text-[10px] text-gray-600 font-bold uppercase tracking-tighter">
