@@ -1944,14 +1944,16 @@ export default function App() {
     const bb = calculateBollingerBands(historyPrices, 20, 2);
     const sma5 = calculateSMA(historyPrices, 5);
     const sma20 = calculateSMA(historyPrices, 20);
-    const vwap = historyPrices.length > 0 ? (historyPrices.reduce((a, b) => a + b, 0) / historyPrices.length) : currentPrice;
+    const totalPV = history.reduce((sum, item) => sum + item.price * item.volume, 0);
+    const totalVolume = history.reduce((sum, item) => sum + item.volume, 0);
+    const vwap = totalVolume > 0 ? totalPV / totalVolume: currentPrice;
 
     const isUSStock = targetStock.market === 'US' || /^[A-Za-z]/.test(targetStock.symbol) || marketType === 'US';
 
     const priceBuckets: Record<string, number> = {};
     historyPrices.forEach(p => {
       const bucket = isUSStock ? p.toFixed(4) : p.toFixed(0);
-      priceBuckets[bucket] = (priceBuckets[bucket] || 0) + 1;
+      priceBuckets[bucket] = (priceBuckets[bucket] || 0) + tick.volume;
     });
     let maxVolBucket = 0;
     let poc = currentPrice;
@@ -1962,14 +1964,14 @@ export default function App() {
       }
     });
 
-    let cvd = 0;
-    let prevP = historyPrices[0] || currentPrice;
-    const cvdSeries: number[] = [];
-    historyPrices.forEach(p => {
-      let cvd = 0;
+   let cvd = 0;
+   const cvdSeries: number[] = [];
 
-ticks.forEach((tick, idx) => {
-  if (idx === 0) return;
+   ticks.forEach((tick, idx) => {
+     if (idx === 0) {
+      cvdSeries.push(0);
+    return;
+  }
 
   const delta =
     tick.price > ticks[idx - 1].price
@@ -1979,32 +1981,43 @@ ticks.forEach((tick, idx) => {
       : 0;
 
   cvd += delta;
+
+  cvdSeries.push(cvd);
 });
-      cvdSeries.push(cvd);
-      prevP = p;
-    });
 
     const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
     const recentLow = historyPrices.length >= 5 ? Math.min(...historyPrices.slice(-10, -1)) : currentPrice;
     const recentMaxCvd = cvdSeries.length >= 5 ? Math.max(...cvdSeries.slice(-10, -1)) : cvd;
     const recentMinCvd = cvdSeries.length >= 5 ? Math.min(...cvdSeries.slice(-10, -1)) : cvd;
 
-    const isBullishAbsorption = (currentPrice <= recentLow * 1.01) && (cvd > recentMinCvd);
-    const isBearishAbsorption = (currentPrice >= recentPeak * 0.995) && (cvd < recentMaxCvd);
+    const cvdRecovery = (cvd - recentMinCvd) / Math.max(Math.abs(recentMinCvd), 1);
+    const isBullishAbsorption = currentPrice <= recentLow * 1.01 && cvdRecovery > 0.15;
+    const cvdDrop = (recentMaxCvd - cvd) / Math.max(Math.abs(recentMaxCvd), 1);
+    const isBearishAbsorption = currentPrice >= recentPeak * 0.995 && cvdDrop > 0.15;
 
     const momentumPositive = sma5 >= sma20;
     const isNearLowerBand = currentPrice <= bb.lower * 1.005;
     const isNearUpperBand = currentPrice >= bb.upper * 0.995;
     const lastPrice = historyPrices.length >= 2 ? historyPrices[historyPrices.length - 2] : currentPrice;
-    const hasVolumeMomentum = currentPrice >= lastPrice || rsi >= 25;
+    const recentVolumes = history.map(h => h.volume);
+    const lastVolume = recentVolumes[recentVolumes.length - 1] || 0;
 
-    const isPullback = momentumPositive && (rsi < 40 || isNearLowerBand) && currentPrice >= sma5 && hasVolumeMomentum;
-    const isBreakout = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
-    const isVwapSupport = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
-    const isPocSupport = Math.abs(currentPrice - poc) / (poc || 1) < 0.008;
-    const isVolumeProfile = isPocSupport || isBullishAbsorption;
+    const avgVolume = recentVolumes.length > 0 ? recentVolumes.reduce((a, b) => a + b, 0 ) / recentVolumes.length : lastVolume;
+    const hasVolumeMomentum = lastVolume > avgVolume * 1.5;
+
+    const isPullback =
+  momentumPositive &&
+  currentPrice > sma20 &&
+  (rsi < 40 || isNearLowerBand) &&
+  currentPrice >= sma5 &&
+  hasVolumeMomentum;
+    const isBreakout = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50 && momentumPositive && hasVolumeMomentum;
+   const isVwapSupport = currentPrice >= vwap * 0.998 && currentPrice <= vwap * 1.01 && currentPrice >= sma5 && hasVolumeMomentum;
+    const isPocSupport = Math.abs(currentPrice - poc) < atr * 0.5;
+    const isVolumeProfile = cvd > 0 && (isPocSupport || isBullishAbsorption);
 
     const activeCount = (isPullback ? 1 : 0) + (isBreakout ? 1 : 0) + (isVwapSupport ? 1 : 0) + (isVolumeProfile ? 1 : 0);
+    const isAllGreen = activeCount === 4;
 
     return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd, isBullishAbsorption, isBearishAbsorption, bb, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice, hasVolumeMomentum };
   }, [marketType]);
@@ -2108,6 +2121,9 @@ ticks.forEach((tick, idx) => {
     if (!scalperMessage || scalperMessage === "대기 중..." || scalperMessage.includes("감시 중") || scalperMessage.includes("진입 모니터링") || scalperMessage.includes("자금 순환 취소") || scalperMessage.includes("미체결 매수 취소") || scalperMessage.includes("주문 취소")) {
       if (selectedStock) {
         const strat = detectStockStrategies(selectedStock);
+        if (strat.isAllGreen) {
+  return `🎯 [4/4 올그린] ${currentName} 최상급 스캘핑 후보 (RSI: ${Math.round(strat.rsi)})`;
+}
         if (held > 0) {
           return `[보유 감시] ${currentName} ${held}주 보유 중 · 실시간 목표가 도달 및 분할 매매 추적 중 (RSI: ${Math.round(strat.rsi)})`;
         }
