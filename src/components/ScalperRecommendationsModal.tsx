@@ -118,7 +118,7 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
     // 1. Strategy category filter
     if (activeCategory !== 'ALL') {
       if (activeCategory === 'CVD_FLOW') {
-        list = list.filter(r => r.category === 'VOLUME_SURGE' || (r as any).category === 'CVD_FLOW' || r.tags.some(t => t.includes('CVD')));
+        list = list.filter(r => r.category === 'VOLUME_SURGE' || r.category === 'CVD_FLOW' || r.tags.some(t => t.includes('CVD')));
       } else {
         list = list.filter(r => r.category === activeCategory);
       }
@@ -506,7 +506,7 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
                       const isSelected = selectedItem?.symbol === stock.symbol;
 
                       const categoryBadge = (() => {
-                        if (stock.category === 'VOLUME_SURGE' || (stock as any).category === 'CVD_FLOW') {
+                        if (stock.category === 'VOLUME_SURGE' || stock.category === 'CVD_FLOW') {
                           return { text: '🔥 CVD 수급', cls: 'bg-amber-500/10 text-amber-300 border-amber-500/30' };
                         }
                         if (stock.category === 'MOMENTUM_BREAKOUT') {

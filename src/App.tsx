@@ -2039,7 +2039,7 @@ export default function App() {
     const activeCount = (isPullback ? 1 : 0) + (isBreakout ? 1 : 0) + (isVwapSupport ? 1 : 0) + (isVolumeProfile ? 1 : 0);
     const isAllGreen = activeCount === 4;
 
-    return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd, isBullishAbsorption, isBearishAbsorption, bb, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice, hasVolumeMomentum };
+    return { isPullback, isAllGreen, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd, isBullishAbsorption, isBearishAbsorption, bb, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice, hasVolumeMomentum };
   }, [marketType]);
 
   const selectedStock = useMemo(() => {
@@ -4468,10 +4468,28 @@ export default function App() {
     const lowerTerm = term.toLowerCase();
 
     // 1. Instantly show local filtered popular stocks first for speed (case-insensitive for both symbol and name)
-    const localFiltered = POPULAR_STOCKS.filter(s => 
-      (s.market === marketType) && 
-      (s.name.toLowerCase().includes(lowerTerm) || s.symbol.toLowerCase().includes(lowerTerm))
-    );
+    const localFiltered = POPULAR_STOCKS
+  .filter(
+    s =>
+      s.market === marketType &&
+      (
+        s.symbol.toLowerCase().includes(lowerTerm) ||
+        s.name.toLowerCase().includes(lowerTerm)
+      )
+  )
+  .sort((a, b) => {
+    const aExact = a.symbol.startsWith(term);
+    const bExact = b.symbol.startsWith(term);
+
+    if (aExact && !bExact) return -1;
+    if (!aExact && bExact) return 1;
+
+    return 0;
+  });
+``
+console.log("검색어:", term);
+console.log("로컬 검색 결과:", localFiltered);
+
     setSearchSuggestions(localFiltered.slice(0, 10));
     setShowSuggestions(localFiltered.length > 0);
 
@@ -6452,7 +6470,7 @@ export default function App() {
   }, [holdings, avgPrices, scalpingTargetProfit, kisConfig.isConnected, kisConfig.isRealOrderEnabled, stocks, isGapBotActive, selectedSymbol, calculateTargetSellPrice]);
 
   const activeStrategyDetection = useMemo(() => {
-    if (!selectedStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
+    if (!selectedStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, isAllGreen: false, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
     return detectStockStrategies(selectedStock);
   }, [selectedStock, detectStockStrategies]);
 

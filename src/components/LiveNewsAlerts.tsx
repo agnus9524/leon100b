@@ -80,16 +80,22 @@ export const LiveNewsAlerts: React.FC<LiveNewsAlertsProps> = ({
   const [isDismissed, setIsDismissed] = useState(false);
 
   // Auto rotate active breaking news alert every 12 seconds
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setNewsFeed(prev => {
-        const nextIndex = (prev.findIndex(n => n.id === activeAlert?.id) + 1) % prev.length;
-        setActiveAlert(prev[nextIndex]);
-        return prev;
-      });
-    }, 12000);
-    return () => clearInterval(timer);
-  }, [activeAlert]);
+ useEffect(() => {
+  const timer = setInterval(() => {
+    const idx = newsFeed.findIndex(
+      n => n.id === activeAlert?.id
+    );
+
+    const nextIndex =
+      (idx + 1) % newsFeed.length;
+
+    setActiveAlert(
+      newsFeed[nextIndex]
+    );
+  }, 12000);
+
+  return () => clearInterval(timer);
+}, [activeAlert, newsFeed]);
 
   if (isDismissed || !activeAlert) return null;
 

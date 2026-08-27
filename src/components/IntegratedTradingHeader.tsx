@@ -34,6 +34,7 @@ export interface IntegratedTradingHeaderProps {
     isVwapSupport: boolean;
     isVolumeProfile: boolean;
     activeCount: number;
+    isAllGreen: boolean;
   };
   setIsMaxYieldModalOpen: (open: boolean) => void;
   displayScalperMessage: string;
@@ -225,10 +226,36 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                 if (searchSuggestions.length > 0) setShowSuggestions(true);
               }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  handleAddStock();
-                }
-              }}
+  if (e.key !== 'Enter') return;
+
+  const exactMatch = searchSuggestions.find(
+    s =>
+      s.symbol.toLowerCase() ===
+      searchSymbol.trim().toLowerCase()
+  );
+
+  if (exactMatch) {
+    handleAddStock(
+      exactMatch.symbol,
+      exactMatch,
+      exactMatch.name
+    );
+    return;
+  }
+
+  if (searchSuggestions.length > 0) {
+    const first = searchSuggestions[0];
+
+    handleAddStock(
+      first.symbol,
+      first,
+      first.name
+    );
+    return;
+  }
+
+  handleAddStock();
+}}
               className="w-full bg-black/50 border border-white/15 focus:border-sleek-blue rounded-xl py-1.5 pl-7 pr-12 text-xs font-semibold text-white placeholder:text-slate-500 outline-none transition-all shadow-inner" 
               placeholder="종목코드/명"
             />
