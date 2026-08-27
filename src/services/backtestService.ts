@@ -12,12 +12,29 @@ export interface BacktestResult {
 
 export interface Strategy {
   name: string;
+
   indicators: string[];
+
   conditions: {
     buy: string;
     sell: string;
   };
+
+  explanation?: string;
 }
+
+
+interface ParsedStrategy {
+  buyRSI: number;
+  sellRSI: number;
+  volumeMultiplier: number;
+  stopLoss: number;
+  takeProfit: number;
+  useMACD: boolean;
+  useVolume: boolean;
+  useSMA: boolean;
+}
+
 
 interface Candle {
   date: string;
@@ -217,6 +234,106 @@ function calculateSMA(
   return result;
 }
 
+function parseStrategy(
+  strategy: Strategy
+) {
+
+ const buy =
+  (strategy.conditions?.buy || '')
+    .toUpperCase();
+
+const sell =
+  (strategy.conditions?.sell || '')
+    .toUpperCase();
+
+ 
+const buySellText =
+  strategy.conditions?.buy + " " + strategy.conditions?.sell;
+   
+
+   
+   const config: ParsedStrategy = {
+
+  buyRSI: 40,
+  sellRSI: 70,
+
+  volumeMultiplier: 1.2,
+
+  stopLoss: 5,
+  takeProfit: 15,
+
+  useMACD:
+  (strategy.indicators || [])
+    .includes("MACD"),
+
+  useVolume: true,
+  useSMA: buySellText.includes("SMA20")
+
+};
+
+  const buyRSIMatch =
+    buy.match(
+  /RSI.*?(\d+)/
+);
+
+  if (buyRSIMatch) {
+    config.buyRSI =
+      Number(
+        buyRSIMatch[1]
+      );
+  }
+
+  const sellRSIMatch =
+    sell.match(
+  /RSI.*?(\d+)/
+);
+
+  if (sellRSIMatch) {
+    config.sellRSI =
+      Number(
+        sellRSIMatch[1]
+      );
+  }
+
+ const stopLossMatch =
+  (buy + " " + sell)
+    .match(/손절\s*(\d+)/);
+
+const takeProfitMatch =
+  (buy + " " + sell)
+    .match(/익절\s*(\d+)/);
+	  
+	  
+const volumeMatch =
+  (buy + " " + sell)
+    .match(/거래량\s*(\d+)/);
+
+if (volumeMatch) {
+  config.volumeMultiplier =
+    Number(volumeMatch[1]) / 100;
+}
+
+  if (stopLossMatch) {
+    config.stopLoss =
+      Number(
+        stopLossMatch[1]
+      );
+  }
+
+  
+
+  if (takeProfitMatch) {
+    config.takeProfit =
+      Number(
+        takeProfitMatch[1]
+      );
+  }
+
+  return config;
+
+}
+
+
 export const runBacktest = async (
   strategy: Strategy,
   symbol: string = '005930'
@@ -227,6 +344,8 @@ export const runBacktest = async (
       symbol,
       'D'
     );
+	
+const config = parseStrategy(strategy);
 
   if (
     !response ||
@@ -354,6 +473,24 @@ const taxRate =
 
 const currentSignal =
   signal[i] ?? 0;
+	
+const prevMACD =
+  macd[i - 1] ?? 0;
+
+const prevSignal =
+  signal[i - 1] ?? 0;
+	
+const macdGoldenCross =
+
+  prevMACD <= prevSignal &&
+
+  currentMACD > currentSignal;
+	
+const macdDeadCross =
+
+  prevMACD >= prevSignal &&
+
+  currentMACD < currentSignal;
 
 
 const currentVolume =
@@ -365,24 +502,36 @@ const avgVolume =
   ] ?? currentVolume;
 
 
-	
 const buySignal =
 
-  currentRSI < 40 &&
+  currentRSI <
+  config.buyRSI &&
 
-  currentMACD >
-  currentSignal &&
+ (
+  !config.useMACD ||
+  macdGoldenCross
+) &&
 
-  currentVolume >
-  avgVolume * 1.2;
+  (
+    !config.useVolume ||
+    currentVolume >
+    avgVolume *
+    config.volumeMultiplier
+  ) &&
 
-   const stopLoss =
+  (
+    !config.useSMA ||
+    price > currentSMA
+  );
+	
+  const stopLoss =
   buyPrice > 0 &&
   (
     (price - buyPrice)
     /
     buyPrice
-  ) <= -0.05;
+  ) <=
+  -(config.stopLoss / 100);
 
 const takeProfit =
   buyPrice > 0 &&
@@ -390,16 +539,27 @@ const takeProfit =
     (price - buyPrice)
     /
     buyPrice
-  ) >= 0.15;
+  ) >=
+  config.takeProfit / 100;
 
+const macdSellCondition =
+  !config.useMACD ||
+  macdDeadCross;
+	
 const sellSignal =
 
-  currentRSI > 70 ||
+  currentRSI >
+  config.sellRSI ||
 
-  currentMACD <
-  currentSignal ||
+  (
+    config.useMACD &&
+    macdDeadCross
+  ) ||
 
-  price < currentSMA ||
+  (
+    config.useSMA &&
+    price < currentSMA
+  ) ||
 
   stopLoss ||
 

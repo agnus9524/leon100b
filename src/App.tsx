@@ -1966,8 +1966,20 @@ export default function App() {
     let prevP = historyPrices[0] || currentPrice;
     const cvdSeries: number[] = [];
     historyPrices.forEach(p => {
-      const delta = p > prevP ? 1 : p < prevP ? -1 : 0;
-      cvd += delta;
+      let cvd = 0;
+
+ticks.forEach((tick, idx) => {
+  if (idx === 0) return;
+
+  const delta =
+    tick.price > ticks[idx - 1].price
+      ? tick.volume
+      : tick.price < ticks[idx - 1].price
+      ? -tick.volume
+      : 0;
+
+  cvd += delta;
+});
       cvdSeries.push(cvd);
       prevP = p;
     });
