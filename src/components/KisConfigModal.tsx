@@ -48,8 +48,8 @@ export const KisConfigModal: React.FC<KisConfigModalProps> = ({
   onReset,
   botStatus,
 }) => {
-  const [showSecret, setShowSecret] = useState(false);
-  const [showPassword, setShowPassword] = useState(false);
+  const [showSecret, setShowSecret] = useState<boolean>(false);
+  const [showPassword, setShowPassword] = useState<boolean>(false);
   const [isTesting, setIsTesting] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [activeTab, setActiveTab] = useState<'config' | 'guide'>('config');
