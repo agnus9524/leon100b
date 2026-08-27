@@ -25,7 +25,7 @@ export interface Stock {
   change: number;
   changePercent: number;
   volume: string;
-  history: { time: string; price: number }[];
+  history: { time: string; price: number; volume?: number }[];
   market: 'KR' | 'US';
   isAI?: boolean;
   momentum?: number;

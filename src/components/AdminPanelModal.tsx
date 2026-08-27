@@ -54,11 +54,15 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
 
   if (!isOpen) return null;
 
-  const handleCopy = (text: string) => {
-    navigator.clipboard.writeText(text);
+  const handleCopy = async (text: string) => {
+  try {
+    await navigator.clipboard.writeText(text);
     setCopiedKey(text);
     setTimeout(() => setCopiedKey(null), 2000);
-  };
+  } catch (e) {
+    console.error(e);
+  }
+};
 
   const filteredLicenses = allLicenses.filter(lic => {
     const term = searchTerm.toLowerCase();
@@ -217,7 +221,7 @@ export const AdminPanelModal: React.FC<AdminPanelModalProps> = ({
                     </thead>
                     <tbody className="divide-y divide-slate-800/60 font-mono">
                       {filteredLicenses.map((lic) => {
-                        const uid = lic.userId || lic.id;
+                        const uid = lic.userId || lic.id || '';
                         const isExpired = lic.expiresAt ? new Date(lic.expiresAt).getTime() < Date.now() : false;
                         const isActive = lic.status === 'active' && !isExpired;
 

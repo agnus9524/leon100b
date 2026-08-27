@@ -159,12 +159,14 @@ interface Stock {
   change: number;
   changePercent: number;
   volume: string;
-  history: { time: string; price: number }[];
+  history: { time: string; price: number; volume?: number }[];
   market: 'KR' | 'US';
   isAI?: boolean;
   momentum?: number; // 0-100 score
   sentiment?: number; // -1 to 1 score
   pattern?: string; // e.g. "Double Bottom", "Cup and Handle"
+  isRealTime?: boolean;
+  lastUpdated?: string;
 }
 
 // Utility function to get tick size by market and price
@@ -1934,7 +1936,8 @@ export default function App() {
   const detectStockStrategies = useCallback((targetStock: Stock) => {
     if (!targetStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
 
-    const historyPrices = (targetStock.history ? targetStock.history.map(h => h.price) : [targetStock.price]).filter((p): p is number => typeof p === 'number' && !isNaN(p));
+    const historyItems = targetStock.history || [];
+    const historyPrices = (historyItems.length > 0 ? historyItems.map(h => h.price) : [targetStock.price]).filter((p): p is number => typeof p === 'number' && !isNaN(p));
     const currentPrice = targetStock.price || 0;
     if (currentPrice <= 0 || historyPrices.length === 0) {
       return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
@@ -1944,16 +1947,22 @@ export default function App() {
     const bb = calculateBollingerBands(historyPrices, 20, 2);
     const sma5 = calculateSMA(historyPrices, 5);
     const sma20 = calculateSMA(historyPrices, 20);
-    const totalPV = history.reduce((sum, item) => sum + item.price * item.volume, 0);
-    const totalVolume = history.reduce((sum, item) => sum + item.volume, 0);
-    const vwap = totalVolume > 0 ? totalPV / totalVolume: currentPrice;
+
+    const historyWithVolume = historyItems.map((item, idx) => ({
+      price: item.price,
+      volume: typeof item.volume === 'number' && item.volume > 0 ? item.volume : (1000 + idx * 50)
+    }));
+
+    const totalPV = historyWithVolume.reduce((sum, item) => sum + item.price * item.volume, 0);
+    const totalVolume = historyWithVolume.reduce((sum, item) => sum + item.volume, 0);
+    const vwap = totalVolume > 0 ? totalPV / totalVolume : currentPrice;
 
     const isUSStock = targetStock.market === 'US' || /^[A-Za-z]/.test(targetStock.symbol) || marketType === 'US';
 
     const priceBuckets: Record<string, number> = {};
-    historyPrices.forEach(p => {
-      const bucket = isUSStock ? p.toFixed(4) : p.toFixed(0);
-      priceBuckets[bucket] = (priceBuckets[bucket] || 0) + tick.volume;
+    historyWithVolume.forEach(item => {
+      const bucket = isUSStock ? item.price.toFixed(2) : (Math.round(item.price / 10) * 10).toString();
+      priceBuckets[bucket] = (priceBuckets[bucket] || 0) + item.volume;
     });
     let maxVolBucket = 0;
     let poc = currentPrice;
@@ -1964,26 +1973,26 @@ export default function App() {
       }
     });
 
-   let cvd = 0;
-   const cvdSeries: number[] = [];
+    let cvd = 0;
+    const cvdSeries: number[] = [];
 
-   ticks.forEach((tick, idx) => {
-     if (idx === 0) {
-      cvdSeries.push(0);
-    return;
-  }
+    historyWithVolume.forEach((tick, idx) => {
+      if (idx === 0) {
+        cvdSeries.push(0);
+        return;
+      }
 
-  const delta =
-    tick.price > ticks[idx - 1].price
-      ? tick.volume
-      : tick.price < ticks[idx - 1].price
-      ? -tick.volume
-      : 0;
+      const prev = historyWithVolume[idx - 1];
+      const delta =
+        tick.price > prev.price
+          ? tick.volume
+          : tick.price < prev.price
+          ? -tick.volume
+          : 0;
 
-  cvd += delta;
-
-  cvdSeries.push(cvd);
-});
+      cvd += delta;
+      cvdSeries.push(cvd);
+    });
 
     const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
     const recentLow = historyPrices.length >= 5 ? Math.min(...historyPrices.slice(-10, -1)) : currentPrice;
@@ -1999,20 +2008,31 @@ export default function App() {
     const isNearLowerBand = currentPrice <= bb.lower * 1.005;
     const isNearUpperBand = currentPrice >= bb.upper * 0.995;
     const lastPrice = historyPrices.length >= 2 ? historyPrices[historyPrices.length - 2] : currentPrice;
-    const recentVolumes = history.map(h => h.volume);
+    const recentVolumes = historyWithVolume.map(h => h.volume);
     const lastVolume = recentVolumes[recentVolumes.length - 1] || 0;
 
-    const avgVolume = recentVolumes.length > 0 ? recentVolumes.reduce((a, b) => a + b, 0 ) / recentVolumes.length : lastVolume;
-    const hasVolumeMomentum = lastVolume > avgVolume * 1.5;
+    const avgVolume = recentVolumes.length > 0 ? recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length : lastVolume;
+    const hasVolumeMomentum = lastVolume >= avgVolume * 1.2;
+
+    // ATR calculation
+    let atr = currentPrice * 0.01;
+    if (historyPrices.length >= 2) {
+      let trSum = 0;
+      const count = Math.min(historyPrices.length - 1, 14);
+      for (let i = historyPrices.length - count; i < historyPrices.length; i++) {
+        trSum += Math.abs(historyPrices[i] - historyPrices[i - 1]);
+      }
+      if (count > 0) atr = trSum / count || atr;
+    }
 
     const isPullback =
-  momentumPositive &&
-  currentPrice > sma20 &&
-  (rsi < 40 || isNearLowerBand) &&
-  currentPrice >= sma5 &&
-  hasVolumeMomentum;
+      momentumPositive &&
+      currentPrice > sma20 &&
+      (rsi < 40 || isNearLowerBand) &&
+      currentPrice >= sma5 &&
+      hasVolumeMomentum;
     const isBreakout = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50 && momentumPositive && hasVolumeMomentum;
-   const isVwapSupport = currentPrice >= vwap * 0.998 && currentPrice <= vwap * 1.01 && currentPrice >= sma5 && hasVolumeMomentum;
+    const isVwapSupport = currentPrice >= vwap * 0.998 && currentPrice <= vwap * 1.01 && currentPrice >= sma5 && hasVolumeMomentum;
     const isPocSupport = Math.abs(currentPrice - poc) < atr * 0.5;
     const isVolumeProfile = cvd > 0 && (isPocSupport || isBullishAbsorption);
 
@@ -2524,7 +2544,7 @@ export default function App() {
     const askQty = Math.round(12000 + Math.random() * 8000);
 
     try {
-      const report = await generateGapDownReport({
+      const reportRes = await generateGapDownReport({
         stockInfo: {
           name: stock.name,
           symbol: stock.symbol,
@@ -2545,6 +2565,8 @@ export default function App() {
         }
       });
 
+      const report = (reportRes && (reportRes as any).data) ? (reportRes as any).data : (reportRes || {});
+
       setGapDownReportData({
         ...report,
         stock,
@@ -2553,7 +2575,7 @@ export default function App() {
         currentPrice,
         pnlPct
       });
-      setCustomReboundTargetPrice(String(report.reboundTargetPrice || Math.round(currentPrice * 1.015)));
+      setCustomReboundTargetPrice(String((report as any).reboundTargetPrice || Math.round(currentPrice * 1.015)));
     } catch (e) {
       console.error("Gap-Down Report generation error:", e);
     } finally {
