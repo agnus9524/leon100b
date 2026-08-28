@@ -1807,7 +1807,7 @@ export default function App() {
         // If all tabs in current market were closed, open default stock tab for current market
         const pool = marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS;
         const defaultStock = pool[0];
-        openOrSwitchScalperTab(defaultStock.symbol, defaultStock.name);
+        openOrSwitchScalperTab(defaultStock.symbol, defaultStock.name, defaultStock.price);
       }
     }
   };
@@ -1817,7 +1817,7 @@ export default function App() {
       showNotification("한국투자증권 데이터 동기화가 진행 중입니다. 잠시 후 다시 시도해주세요.", "info");
       return;
     }
-    const isAnyActive = scalperTabs.some(t => t.isBotActive) || isGapBotActive;
+    const isAnyActive = scalperT1abs.some(t => t.isBotActive) || isGapBotActive;
     const nextState = !isAnyActive;
     setIsGapBotActive(nextState);
     setScalperTabs(prev => prev.map(tab => ({ ...tab, isBotActive: nextState })));
@@ -7908,7 +7908,17 @@ export default function App() {
             selectedSymbol={selectedSymbol}
             onSelectStock={(sym, name) => {
               if (sym) {
-                openOrSwitchScalperTab(sym, name);
+                const stock = stocksRef.current.find(s => s.symbol === sym) ||
+                 INITIAL_STOCKS_KR.find(s => s.symbol === sym) ||
+                 INITIAL_STOCKS.find(s => s.symbol === sym);
+
+openOrSwitchScalperTab(
+  sym,
+  name,
+  stock?.price
+);
+``
+
                 if (name) showNotification(`[속보 연동] ${name}(${sym}) 종목으로 차트 및 스캘퍼가 전환되었습니다.`, "info");
               }
             }}
