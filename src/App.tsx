@@ -1680,7 +1680,7 @@ export default function App() {
 
     const name = customName || stock?.name || getResolvedStockName(symbol) || symbol;
     const price = customPrice || stock?.price || (isUS ? 10 : 1000);
-    console.log('[TAB OPEN]', {symbol, stockPrice: stock?.price, customPrice, finalPrice: price});
+    console.log( '[TAB OPEN]', {symbol, stockName: stock?.name, stockPrice: stock?.price, customPrice, finalPrice: price, stack: new Error().stack});
     const limits = calculateStockLimits(price, stock?.changePercent || 0, isUS, stock?.basePrice);
 
     if (customName && customName !== symbol) {
@@ -4087,7 +4087,7 @@ export default function App() {
       } : s);
     });
 
-    openOrSwitchScalperTab(rec.symbol, rec.name);
+    openOrSwitchScalperTab(rec.symbol, rec.name, resolvedPrice);
     showNotification(`[스캘퍼 타겟 등록] ${rec.name}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (현재 체결가 ${resolvedPrice.toLocaleString()}원, 스캘핑 점수 ${rec.scalpingScore}점)`, "success");
     setShowScalperRecModal(false);
   }, [stocks, openOrSwitchScalperTab, showNotification]);
@@ -4121,7 +4121,7 @@ export default function App() {
           volume: rec.volume || s.volume
         } : s);
       });
-      openOrSwitchScalperTab(rec.symbol, rec.name);
+      openOrSwitchScalperTab(rec.symbol, rec.name, livePrice);
     });
     if (top3List.length > 0) {
       showNotification(`[스캘퍼 TOP 3 일괄 등록] ${top3List.map(s => {
@@ -4460,12 +4460,7 @@ export default function App() {
       }, 0);
       return;
     }
-const targetMarket =
-  /^\d{6}$/.test(
-    newStock.symbol
-  )
-    ? 'KR'
-    : 'US';
+
     setIsSearchingStock(true);
     setSearchError(null);
 
