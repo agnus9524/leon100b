@@ -40,6 +40,127 @@ class KISService {
     };
   }
 
+public generateRealtimeRecommendations(
+  stocks: Stock[],
+  detectStockStrategies: (stock: Stock) => any
+): ScalperRecommendation[] {
+
+  return stocks
+    .map(stock => {
+
+      const strat =
+        detectStockStrategies(stock);
+
+      let score = 0;
+
+      if (strat.isPullback) score += 25;
+      if (strat.isBreakout) score += 25;
+      if (strat.isVwapSupport) score += 25;
+      if (strat.isVolumeProfile) score += 25;
+
+      if (strat.hasVolumeMomentum)
+        score += 10;
+
+      if (strat.activeCount === 4)
+        score += 30;
+
+      score = Math.min(score, 100);
+
+      const grade =
+        score >= 95 ? 'SSS' :
+        score >= 85 ? 'SS' :
+        score >= 70 ? 'S' :
+        'A+';
+
+      return {
+        rank: 0,
+
+        symbol: stock.symbol,
+        name: stock.name,
+
+        marketType:
+          stock.market === 'US'
+            ? 'KOSDAQ'
+            : 'KOSPI',
+
+        price: stock.price,
+
+        change: stock.change || 0,
+
+        changePercent:
+          stock.changePercent || 0,
+
+        volume:
+          stock.volume || '0',
+
+        tradeAmount: '-',
+
+        volumeSurgeRate:
+          strat.hasVolumeMomentum
+            ? 200
+            : 100,
+
+        volumeIntensity:
+          100 + strat.activeCount * 20,
+
+        scalpingScore: score,
+
+        grade,
+
+        category:
+          strat.isVolumeProfile
+            ? 'CVD_FLOW'
+            : strat.isVwapSupport
+            ? 'VWAP_SUPPORT'
+            : strat.isBreakout
+            ? 'MOMENTUM_BREAKOUT'
+            : 'SUPPORT_REBOUND',
+
+        targetPrice:
+          Math.round(
+            stock.price * 1.02
+          ),
+
+        stopLoss:
+          Math.round(
+            stock.price * 0.985
+          ),
+
+        expectedReturn:
+          Number(
+            (score / 30).toFixed(2)
+          ),
+
+        rsi:
+          Number(strat.rsi || 50),
+
+        reason:
+          `${strat.activeCount}/4 전략 충족`,
+
+        tags: [
+          strat.isPullback && '#눌림목',
+          strat.isBreakout && '#돌파',
+          strat.isVwapSupport && '#VWAP',
+          strat.isVolumeProfile && '#CVD'
+        ].filter(Boolean),
+
+        holdingTime:
+          '3분 ~ 15분'
+      };
+    })
+    .sort(
+      (a, b) =>
+        b.scalpingScore -
+        a.scalpingScore
+    )
+    .map((item, idx) => ({
+      ...item,
+      rank: idx + 1
+    }))
+    .slice(0, 10);
+}
+
+
   public init(config: KISConfig, savedToken?: string, savedExpiresAt?: number, savedIssuedAt?: number) {
     // Sanitize config by trimming strings to eliminate accidental trailing whitespace
     this.config = {
