@@ -1679,7 +1679,8 @@ export default function App() {
     const isUS = stock?.market === 'US' || /^[A-Za-z]/.test(symbol) || marketType === 'US';
 
     const name = customName || stock?.name || getResolvedStockName(symbol) || symbol;
-    const price = stock?.price || (isUS ? 10 : 1000);
+    const price = customPrice || stock?.price || (isUS ? 10 : 1000);
+    console.log('[TAB OPEN]', {symbol, stockPrice: stock?.price, customPrice, finalPrice: price});
     const limits = calculateStockLimits(price, stock?.changePercent || 0, isUS, stock?.basePrice);
 
     if (customName && customName !== symbol) {
@@ -4267,8 +4268,7 @@ export default function App() {
   );
 
   const newStock: Stock = {
-    ...recommendedStock,
-
+  
     symbol:
       recommendedStock.symbol ||
       symbolToUse,
@@ -4315,6 +4315,17 @@ export default function App() {
       !!recommendedStock.isAI
   };
 
+  console.log(
+  '[ADD STOCK]',
+  {
+    symbol: newStock.symbol,
+    name: newStock.name,
+    price: newStock.price,
+    change: newStock.change,
+    changePercent: newStock.changePercent
+  }
+);
+
       setStocks(prev => {
         if (prev.some(s => s.symbol.toUpperCase() === newStock.symbol.toUpperCase())) {
           return prev.map(s => s.symbol.toUpperCase() === newStock.symbol.toUpperCase() ? { ...s, ...newStock } : s);
@@ -4325,7 +4336,7 @@ export default function App() {
         ...prev,
         [marketType]: [newStock, ...(prev[marketType] || []).filter(s => s.symbol.toUpperCase() !== newStock.symbol.toUpperCase())]
       }));
-      openOrSwitchScalperTab(newStock.symbol, liveName);
+      openOrSwitchScalperTab(newStock.symbol, liveName, livePrice);
       setSelectedSymbol(newStock.symbol);
       setAiRecommendations(prev => prev.filter(r => r.symbol !== newStock.symbol));
       showNotification(`[스캘퍼 탭 등록] ${liveName}(${newStock.symbol}) 종목이 스캘퍼 탭으로 추가되었습니다.`, "success");
