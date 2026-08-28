@@ -4196,23 +4196,124 @@ export default function App() {
     setSearchSuggestions([]);
     
     if (recommendedStock) {
-      const livePrice = (recommendedStock.price && recommendedStock.price > 0) ? recommendedStock.price : (marketType === 'KR' ? 50000 : 100);
-      const liveName = recommendedStock.name || resolvedName || symbolToUse;
-      const newStock: Stock = {
-        ...recommendedStock,
-        symbol: recommendedStock.symbol || symbolToUse,
-        name: liveName,
-        price: livePrice,
-        change: recommendedStock.change || 0,
-        changePercent: recommendedStock.changePercent || 0,
-        volume: String(recommendedStock.volume || '100K'),
-        history: recommendedStock.history && recommendedStock.history.length > 0 ? recommendedStock.history : Array.from({ length: 40 }, (_, i) => ({ 
-          time: `${i}:00`, 
-          price: livePrice * (0.98 + (i % 5) * 0.008) 
-        })),
-        market: marketType,
-        isAI: !!recommendedStock.isAI
-      };
+
+  let livePrice =
+    recommendedStock.price || 0;
+
+  let liveChange =
+    recommendedStock.change || 0;
+
+  let liveChangePercent =
+    recommendedStock.changePercent || 0;
+
+  let liveName =
+    recommendedStock.name ||
+    resolvedName ||
+    symbolToUse;
+
+  try {
+
+    const liveData =
+      await kisService.getPrice(
+        recommendedStock.symbol
+      );
+
+    if (liveData) {
+
+      if (liveData.current > 0) {
+        livePrice =
+          liveData.current;
+      }
+
+      liveChange =
+        liveData.change || 0;
+
+      liveChangePercent =
+        liveData.changePercent || 0;
+
+      if (liveData.name) {
+        liveName =
+          liveData.name;
+      }
+    }
+
+  } catch (err) {
+
+    console.warn(
+      '[추천종목 실시간 시세 조회 실패]',
+      err
+    );
+
+  }
+
+  console.log(
+    '[추천종목 등록]',
+    {
+      symbol:
+        recommendedStock.symbol,
+
+      name:
+        liveName,
+
+      price:
+        livePrice,
+
+      change:
+        liveChange,
+
+      changePercent:
+        liveChangePercent
+    }
+  );
+
+  const newStock: Stock = {
+    ...recommendedStock,
+
+    symbol:
+      recommendedStock.symbol ||
+      symbolToUse,
+
+    name:
+      liveName,
+
+    price:
+      livePrice,
+
+    change:
+      liveChange,
+
+    changePercent:
+      liveChangePercent,
+
+    volume:
+      String(
+        recommendedStock.volume ||
+        '100K'
+      ),
+
+    history: Array.from(
+      { length: 40 },
+      (_, i) => ({
+        time: `${i}:00`,
+        price:
+          livePrice *
+          (
+            0.98 +
+            (i % 5) * 0.008
+          )
+      })
+    ),
+
+    market:
+      recommendedStock.symbol.match(
+        /^\d{6}$/
+      )
+        ? 'KR'
+        : 'US',
+
+    isAI:
+      !!recommendedStock.isAI
+  };
 
       setStocks(prev => {
         if (prev.some(s => s.symbol.toUpperCase() === newStock.symbol.toUpperCase())) {
@@ -4348,7 +4449,12 @@ export default function App() {
       }, 0);
       return;
     }
-
+const targetMarket =
+  /^\d{6}$/.test(
+    newStock.symbol
+  )
+    ? 'KR'
+    : 'US';
     setIsSearchingStock(true);
     setSearchError(null);
 
