@@ -1642,7 +1642,7 @@ export default function App() {
     setTradeLogs((targetTab.tradeLogs || []).filter(l => !l.symbol || l.symbol === targetTab.symbol || l.symbol === 'SYSTEM'));
   };
 
-  const openOrSwitchScalperTab = (symbol: string, customName?: string) => {
+  const openOrSwitchScalperTab = (symbol: string, customName?: string, customPrice?: number) => {
     const existing = scalperTabsRef.current.find(t => t.symbol === symbol || t.id === symbol);
     if (existing) {
       handleSwitchTab(existing.id);
@@ -4163,7 +4163,7 @@ export default function App() {
     });
   };
 
-  const handleAddStock = async (customSymbol?: string, recommendedStock?: Stock, customName?: string) => {
+  const handleAddStock = async (customSymbol?: string, recommendedStock?: Stock | ScalperRecommendation, customName?: string) => {
     let symbolToUse = customSymbol || searchSymbol.trim().toUpperCase();
     let resolvedName = customName;
 
@@ -4346,18 +4346,18 @@ export default function App() {
         if (livePriceData) {
           const liveName = livePriceData.name || customName || symbolToUse;
           const newStock: Stock = {
-            symbol: symbolToUse,
+            symbol: recommendedStock.symbol || symbolToUse,
             name: liveName,
-            price: livePriceData.current,
-            change: livePriceData.change,
-            changePercent: livePriceData.changePercent,
-            volume: livePriceData.volume,
+            price: livePrice,
+            change: liveChange,
+            changePercent: liveChangePercent,
+            volume: String(recommendedStock.volume || '100K'),
             history: Array.from({ length: 40 }, (_, i) => ({ 
               time: `${i}:00`, 
-              price: livePriceData.current * (0.98 + Math.random() * 0.04) 
+              price: livePrice * (0.98 + (i % 5) * 0.008) 
             })),
-            market: marketType,
-            isAI: false
+            market: /^\d{6}$/.test(recommendedStock.symbol) ? 'KR' : 'US',
+            isAI: !!(recommendedStock as any).isAI
           };
           setStocks(prev => {
             if (prev.some(s => s.symbol === symbolToUse)) {
