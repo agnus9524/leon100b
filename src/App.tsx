@@ -1680,7 +1680,17 @@ export default function App() {
 
     const name = customName || stock?.name || getResolvedStockName(symbol) || symbol;
     const price = customPrice || stock?.price || (isUS ? 10 : 1000);
-    console.log( '[TAB OPEN]', {symbol, stockName: stock?.name, stockPrice: stock?.price, customPrice, finalPrice: price, stack: new Error().stack});
+    console.log(
+  '[TAB OPEN]',
+  {
+    symbol,
+    stockName: stock?.name,
+    stockPrice: stock?.price,
+    customPrice,
+    finalPrice: price
+  },
+  new Error().stack
+);
     const limits = calculateStockLimits(price, stock?.changePercent || 0, isUS, stock?.basePrice);
 
     if (customName && customName !== symbol) {
