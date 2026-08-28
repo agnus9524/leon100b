@@ -4022,7 +4022,7 @@ export default function App() {
     setIsScalperRecLoading(true);
     setIsRefreshingTop3(true);
     try {
-      const list = await kisService.getScalperRecommendations();
+      const list = generateRealtimeRecommendations();
       if (list && list.length > 0) {
         // Sync any recommendation item with real-time execution price (현재 체결가) from the current stock list
         const syncedList = list.map(rec => {
@@ -4066,7 +4066,7 @@ export default function App() {
   const handleRefreshScalperRecList = useCallback(async () => {
     setIsScalperRecLoading(true);
     try {
-      const list = await kisService.getScalperRecommendations();
+      const list = generateRealtimeRecommendations();
       if (list && list.length > 0) {
         // Sync any recommendation item with real-time execution price (현재 체결가) from the current stock list
         const syncedList = list.map(rec => {
