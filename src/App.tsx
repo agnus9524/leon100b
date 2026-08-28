@@ -159,14 +159,12 @@ interface Stock {
   change: number;
   changePercent: number;
   volume: string;
-  history: { time: string; price: number; volume?: number }[];
+  history: { time: string; price: number }[];
   market: 'KR' | 'US';
   isAI?: boolean;
   momentum?: number; // 0-100 score
   sentiment?: number; // -1 to 1 score
   pattern?: string; // e.g. "Double Bottom", "Cup and Handle"
-  isRealTime?: boolean;
-  lastUpdated?: string;
 }
 
 // Utility function to get tick size by market and price
@@ -1936,8 +1934,7 @@ export default function App() {
   const detectStockStrategies = useCallback((targetStock: Stock) => {
     if (!targetStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
 
-    const historyItems = targetStock.history || [];
-    const historyPrices = (historyItems.length > 0 ? historyItems.map(h => h.price) : [targetStock.price]).filter((p): p is number => typeof p === 'number' && !isNaN(p));
+    const historyPrices = (targetStock.history ? targetStock.history.map(h => h.price) : [targetStock.price]).filter((p): p is number => typeof p === 'number' && !isNaN(p));
     const currentPrice = targetStock.price || 0;
     if (currentPrice <= 0 || historyPrices.length === 0) {
       return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
@@ -1947,22 +1944,14 @@ export default function App() {
     const bb = calculateBollingerBands(historyPrices, 20, 2);
     const sma5 = calculateSMA(historyPrices, 5);
     const sma20 = calculateSMA(historyPrices, 20);
-
-    const historyWithVolume = historyItems.map((item, idx) => ({
-      price: item.price,
-      volume: typeof item.volume === 'number' && item.volume > 0 ? item.volume : (1000 + idx * 50)
-    }));
-
-    const totalPV = historyWithVolume.reduce((sum, item) => sum + item.price * item.volume, 0);
-    const totalVolume = historyWithVolume.reduce((sum, item) => sum + item.volume, 0);
-    const vwap = totalVolume > 0 ? totalPV / totalVolume : currentPrice;
+    const vwap = historyPrices.length > 0 ? (historyPrices.reduce((a, b) => a + b, 0) / historyPrices.length) : currentPrice;
 
     const isUSStock = targetStock.market === 'US' || /^[A-Za-z]/.test(targetStock.symbol) || marketType === 'US';
 
     const priceBuckets: Record<string, number> = {};
-    historyWithVolume.forEach(item => {
-      const bucket = isUSStock ? item.price.toFixed(2) : (Math.round(item.price / 10) * 10).toString();
-      priceBuckets[bucket] = (priceBuckets[bucket] || 0) + item.volume;
+    historyPrices.forEach(p => {
+      const bucket = isUSStock ? p.toFixed(4) : p.toFixed(0);
+      priceBuckets[bucket] = (priceBuckets[bucket] || 0) + 1;
     });
     let maxVolBucket = 0;
     let poc = currentPrice;
@@ -1974,24 +1963,13 @@ export default function App() {
     });
 
     let cvd = 0;
+    let prevP = historyPrices[0] || currentPrice;
     const cvdSeries: number[] = [];
-
-    historyWithVolume.forEach((tick, idx) => {
-      if (idx === 0) {
-        cvdSeries.push(0);
-        return;
-      }
-
-      const prev = historyWithVolume[idx - 1];
-      const delta =
-        tick.price > prev.price
-          ? tick.volume
-          : tick.price < prev.price
-          ? -tick.volume
-          : 0;
-
+    historyPrices.forEach(p => {
+      const delta = p > prevP ? 1 : p < prevP ? -1 : 0;
       cvd += delta;
       cvdSeries.push(cvd);
+      prevP = p;
     });
 
     const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
@@ -1999,45 +1977,22 @@ export default function App() {
     const recentMaxCvd = cvdSeries.length >= 5 ? Math.max(...cvdSeries.slice(-10, -1)) : cvd;
     const recentMinCvd = cvdSeries.length >= 5 ? Math.min(...cvdSeries.slice(-10, -1)) : cvd;
 
-    const cvdRecovery = (cvd - recentMinCvd) / Math.max(Math.abs(recentMinCvd), 1);
-    const isBullishAbsorption = currentPrice <= recentLow * 1.01 && cvdRecovery > 0.15;
-    const cvdDrop = (recentMaxCvd - cvd) / Math.max(Math.abs(recentMaxCvd), 1);
-    const isBearishAbsorption = currentPrice >= recentPeak * 0.995 && cvdDrop > 0.15;
+    const isBullishAbsorption = (currentPrice <= recentLow * 1.01) && (cvd > recentMinCvd);
+    const isBearishAbsorption = (currentPrice >= recentPeak * 0.995) && (cvd < recentMaxCvd);
 
     const momentumPositive = sma5 >= sma20;
     const isNearLowerBand = currentPrice <= bb.lower * 1.005;
     const isNearUpperBand = currentPrice >= bb.upper * 0.995;
     const lastPrice = historyPrices.length >= 2 ? historyPrices[historyPrices.length - 2] : currentPrice;
-    const recentVolumes = historyWithVolume.map(h => h.volume);
-    const lastVolume = recentVolumes[recentVolumes.length - 1] || 0;
+    const hasVolumeMomentum = currentPrice >= lastPrice || rsi >= 25;
 
-    const avgVolume = recentVolumes.length > 0 ? recentVolumes.reduce((a, b) => a + b, 0) / recentVolumes.length : lastVolume;
-    const hasVolumeMomentum = lastVolume >= avgVolume * 1.2;
-
-    // ATR calculation
-    let atr = currentPrice * 0.01;
-    if (historyPrices.length >= 2) {
-      let trSum = 0;
-      const count = Math.min(historyPrices.length - 1, 14);
-      for (let i = historyPrices.length - count; i < historyPrices.length; i++) {
-        trSum += Math.abs(historyPrices[i] - historyPrices[i - 1]);
-      }
-      if (count > 0) atr = trSum / count || atr;
-    }
-
-    const isPullback =
-      momentumPositive &&
-      currentPrice > sma20 &&
-      (rsi < 40 || isNearLowerBand) &&
-      currentPrice >= sma5 &&
-      hasVolumeMomentum;
-    const isBreakout = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50 && momentumPositive && hasVolumeMomentum;
-    const isVwapSupport = currentPrice >= vwap * 0.998 && currentPrice <= vwap * 1.01 && currentPrice >= sma5 && hasVolumeMomentum;
-    const isPocSupport = Math.abs(currentPrice - poc) < atr * 0.5;
-    const isVolumeProfile = cvd > 0 && (isPocSupport || isBullishAbsorption);
+    const isPullback = momentumPositive && (rsi < 40 || isNearLowerBand) && currentPrice >= sma5 && hasVolumeMomentum;
+    const isBreakout = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
+    const isVwapSupport = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
+    const isPocSupport = Math.abs(currentPrice - poc) / (poc || 1) < 0.008;
+    const isVolumeProfile = isPocSupport || isBullishAbsorption;
 
     const activeCount = (isPullback ? 1 : 0) + (isBreakout ? 1 : 0) + (isVwapSupport ? 1 : 0) + (isVolumeProfile ? 1 : 0);
-    const isAllGreen = activeCount === 4;
 
     return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd, isBullishAbsorption, isBearishAbsorption, bb, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice, hasVolumeMomentum };
   }, [marketType]);
@@ -2141,9 +2096,6 @@ export default function App() {
     if (!scalperMessage || scalperMessage === "대기 중..." || scalperMessage.includes("감시 중") || scalperMessage.includes("진입 모니터링") || scalperMessage.includes("자금 순환 취소") || scalperMessage.includes("미체결 매수 취소") || scalperMessage.includes("주문 취소")) {
       if (selectedStock) {
         const strat = detectStockStrategies(selectedStock);
-        if (strat.isAllGreen) {
-  return `🎯 [4/4 올그린] ${currentName} 최상급 스캘핑 후보 (RSI: ${Math.round(strat.rsi)})`;
-}
         if (held > 0) {
           return `[보유 감시] ${currentName} ${held}주 보유 중 · 실시간 목표가 도달 및 분할 매매 추적 중 (RSI: ${Math.round(strat.rsi)})`;
         }
@@ -2544,7 +2496,7 @@ export default function App() {
     const askQty = Math.round(12000 + Math.random() * 8000);
 
     try {
-      const reportRes = await generateGapDownReport({
+      const report = await generateGapDownReport({
         stockInfo: {
           name: stock.name,
           symbol: stock.symbol,
@@ -2565,8 +2517,6 @@ export default function App() {
         }
       });
 
-      const report = (reportRes && (reportRes as any).data) ? (reportRes as any).data : (reportRes || {});
-
       setGapDownReportData({
         ...report,
         stock,
@@ -2575,7 +2525,7 @@ export default function App() {
         currentPrice,
         pnlPct
       });
-      setCustomReboundTargetPrice(String((report as any).reboundTargetPrice || Math.round(currentPrice * 1.015)));
+      setCustomReboundTargetPrice(String(report.reboundTargetPrice || Math.round(currentPrice * 1.015)));
     } catch (e) {
       console.error("Gap-Down Report generation error:", e);
     } finally {
@@ -3993,7 +3943,7 @@ export default function App() {
     setIsGettingRecommendations(true);
     let success = false;
     try {
-      const list = generateRealtimeRecommendations();
+      const list = await kisService.getScalperRecommendations();
       if (list && list.length > 0) {
         setScalperRecommendations(list);
         setAiRecommendations(list.map(item => ({
@@ -4022,7 +3972,7 @@ export default function App() {
     setIsScalperRecLoading(true);
     setIsRefreshingTop3(true);
     try {
-      const list = generateRealtimeRecommendations();
+      const list = await kisService.getScalperRecommendations();
       if (list && list.length > 0) {
         // Sync any recommendation item with real-time execution price (현재 체결가) from the current stock list
         const syncedList = list.map(rec => {
@@ -4066,7 +4016,7 @@ export default function App() {
   const handleRefreshScalperRecList = useCallback(async () => {
     setIsScalperRecLoading(true);
     try {
-      const list = generateRealtimeRecommendations();
+      const list = await kisService.getScalperRecommendations();
       if (list && list.length > 0) {
         // Sync any recommendation item with real-time execution price (현재 체결가) from the current stock list
         const syncedList = list.map(rec => {
