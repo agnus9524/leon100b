@@ -4354,10 +4354,19 @@ export default function App() {
     }
 
     if (stocks.some(s => s.symbol.toUpperCase() === symbolToUse.toUpperCase())) {
-      openOrSwitchScalperTab(symbolToUse, resolvedName);
-      setSelectedSymbol(symbolToUse);
-      return;
-    }
+  const existingStock = stocks.find(
+    s => s.symbol.toUpperCase() === symbolToUpperCase()
+  );
+
+  openOrSwitchScalperTab(
+    symbolToUse,
+    resolvedName,
+    existingStock?.price
+  );
+
+  setSelectedSymbol(symbolToUse);
+  return;
+}
 
     if (kisConfig.isConnected) {
       setIsSearchingStock(true);
@@ -4399,7 +4408,7 @@ export default function App() {
               [marketType]: [newStock, ...currentCache]
             };
           });
-          openOrSwitchScalperTab(symbolToUse, liveName);
+          openOrSwitchScalperTab(symbolToUse, liveName, newStock.price);
           setSearchSymbol("");
           addLog('SYSTEM', '매수', 0, 0, `[KIS 종목 추가] ${liveName}(${symbolToUse}) 종목이 실시간 연동 등록되었습니다 (현재가: ${formatCurrency(livePriceData.current)}).`);
           setIsSearchingStock(false);
@@ -4438,7 +4447,7 @@ export default function App() {
         ...prev,
         [marketType]: [newStock, ...prev[marketType].filter(s => s.symbol !== symbolToUse)]
       }));
-      openOrSwitchScalperTab(symbolToUse, customName);
+      openOrSwitchScalperTab(symbolToUse, customName, newStock.price);
       setSelectedSymbol(symbolToUse);
       
       // Load real name and price asynchronously from Gemini without blocking UI transition
