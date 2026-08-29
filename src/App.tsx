@@ -1677,7 +1677,18 @@ export default function App() {
     const isUS = stock?.market === 'US' || /^[A-Za-z]/.test(symbol) || marketType === 'US';
 
     const name = customName || stock?.name || getResolvedStockName(symbol) || symbol;
-    const price = customPrice || stock?.price || (isUS ? 10 : 1000);
+    const price = customPrice ?? stock?.price ?? 0;
+    if (price <= 0) {
+  console.warn(
+    '[TAB OPEN BLOCKED]',
+    {
+      symbol,
+      customPrice,
+      stockPrice: stock?.price
+    }
+  );
+  return;
+}
     console.log(
   '[TAB OPEN]',
   {
@@ -1685,7 +1696,8 @@ export default function App() {
     stockName: stock?.name,
     stockPrice: stock?.price,
     customPrice,
-    finalPrice: price
+    finalPrice: price,
+    stockFound: !!stock
   },
   new Error().stack
 );
