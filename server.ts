@@ -745,53 +745,100 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
 
       // 1. Candidate stocks pool 100% focused on KOSPI momentum, VWAP support, CVD orderflow & heavy-volume market leaders across all price tiers
       const candidates = KOSPI_STOCKS
-  .slice(0, 300)
-  .map(stock => ({
-    symbol: stock.symbol,
-    name: stock.name,
-    basePrice: stock.basePrice || 0,
-    theme: stock.sector || 'KOSPI',
-    cat: 'SUPPORT_REBOUND' as const,
-    marketCategory: 'KOSPI' as const
-  }));
+        .filter(stock => (stock.basePrice || 0) >= 5000 && (stock.basePrice || 0) <= 500000)
+        .sort((a, b) => (b.basePrice || 0) - (a.basePrice || 0))
+        .slice(0, 30)
+        .map(stock => ({
+          symbol: stock.symbol,
+          name: stock.name,
+          basePrice: stock.basePrice || 0,
+          theme: stock.sector || 'KOSPI',
+          cat: 'SUPPORT_REBOUND' as const,
+          marketCategory: 'KOSPI' as const
+        }));
 
-      // Fetch live market quotes in parallel for candidate stocks with 1.2s timeout per stock
+
+      // Fetch live market quotes and orderbooks in parallel for candidate stocks with 1.2s timeout per stock
       const quotePromises = candidates.map(c => 
         Promise.race([
           fetchRealtimeQuote(c.symbol),
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200))
         ])
       );
-      const quotes = await Promise.allSettled(quotePromises);
+      const orderbookPromises = candidates.map(c => 
+        Promise.race([
+          fetchRealtimeOrderbook(c.symbol),
+          new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200))
+        ])
+      );
+      const [quotes, orderbooks] = await Promise.all([
+        Promise.allSettled(quotePromises),
+        Promise.allSettled(orderbookPromises)
+      ]);
 
       const scoredList = candidates.map((item, index) => {
         const quoteRes = quotes[index];
         const liveQuote = quoteRes.status === 'fulfilled' ? quoteRes.value : null;
+        const obRes = orderbooks[index];
+        const liveOrderbook = obRes.status === 'fulfilled' ? obRes.value : null;
 
-        const hash = item.symbol.split('').reduce((acc, c) => acc + c.charCodeAt(0), 0);
-        
-        // Use REAL live price and day change if available, else fallback
+     // Use REAL live price and day change if available, else fallback
         const currentPrice = (liveQuote && liveQuote.price > 0) ? liveQuote.price : item.basePrice;
         const change = (liveQuote && liveQuote.change !== undefined) ? liveQuote.change : Math.round(currentPrice * 0.025);
         const changePct = (liveQuote && liveQuote.changePercent !== undefined) ? liveQuote.changePercent : Number(((change / (currentPrice - change || 1)) * 100).toFixed(2));
-        const liveVol = (liveQuote && liveQuote.volume) ? liveQuote.volume : `${((hash * 23) % 45 + 12) / 10}M`;
+        const liveVol = liveQuote?.volume || '0';
 
-        const volumeSurge = Math.floor(180 + ((hash * 13) % 340));
-        const volumeIntensity = Math.floor(125 + ((hash * 19) % 95));
-        const rsi = Number((54 + ((hash * 3) % 18)).toFixed(1));
+        const volumeScoreRaw = liveQuote?.rawVolume
+          ? Math.min(500, Math.max(100, Math.floor(liveQuote.rawVolume / 10000)))
+          : 100;
+        const volumeIntensity =
+  liveOrderbook
+    ? Number(
+        (
+          liveOrderbook.totalBidVolume /
+          Math.max(liveOrderbook.totalAskVolume, 1)
+          * 100
+        ).toFixed(0)
+      )
+    : 100;
+         
+        const rsi =
+  changePct > 3
+    ? 70
+    : changePct > 0
+      ? 60
+      : changePct < -3
+        ? 30
+        : 45;
         
         // Scalping Score (90 ~ 99) for 100% KOSPI leaders
         const baseScore = 90;
-        const volumeScore = Math.min(10, Math.floor(volumeSurge / 40));
-        const intensityScore = Math.min(10, Math.floor((volumeIntensity - 100) / 10));
+        const volumeScore = Math.min(10, Math.floor(volumeScoreRaw / 40));
+        const intensityScore =
+  Math.max(
+    0,
+    Math.min(
+      10,
+      Math.floor(
+        (volumeIntensity - 100) / 10
+      )
+    )
+  );
         const momentumScore = Math.min(5, Math.floor(Math.abs(changePct)));
-        const scalpingScore = Math.min(99, Math.max(90, baseScore + (volumeScore + intensityScore + momentumScore) % 10));
+        const scalpingScore =
+  Math.min(
+    99,
+    baseScore +
+    volumeScore +
+    intensityScore +
+    momentumScore
+  );
 
         const targetP = Math.round(currentPrice * (1 + Number((1.5 + (scalpingScore % 5) * 0.3).toFixed(2)) / 100));
         const stopL = Math.round(currentPrice * 0.985);
         const expRet = Number((((targetP - currentPrice) / currentPrice) * 100).toFixed(2));
 
-        const rawVolNum = (liveQuote && liveQuote.rawVolume) ? liveQuote.rawVolume : ((hash * 23) % 45 + 12) * 100000;
+        const rawVolNum = liveQuote?.rawVolume || 0;
         const tradeAmtB = Math.floor((currentPrice * rawVolNum) / 100000000);
 
         let grade: 'SSS' | 'SS' | 'S' | 'A+' = 'A+';
@@ -800,7 +847,7 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
         else if (scalpingScore >= 90) grade = 'S';
 
         const reasonsMap: Record<string, string> = {
-          MOMENTUM_BREAKOUT: `[KOSPI] 실시간 거래량 ${volumeSurge}% 급증하며 당일 직전 고점 돌파. 체결강도 ${volumeIntensity}% 매수세 집중 유입으로 초단기 상방 탄력 우수.`,
+          MOMENTUM_BREAKOUT: `[KOSPI] 실시간 거래량 ${volumeScoreRaw}% 급증하며 당일 직전 고점 돌파. 체결강도 ${volumeIntensity}% 매수세 집중 유입으로 초단기 상방 탄력 우수.`,
           VOLUME_SURGE: `[KOSPI] CVD 누적 자금 유입 및 거래대금(${tradeAmtB > 0 ? tradeAmtB.toLocaleString() : '1,200'}억원) 폭증. 호가창 매수 받침 탄탄하여 스캘핑 돌파 매매 최적 구간.`,
           SUPPORT_REBOUND: `[KOSPI] 주요 지지선 및 5분봉 눌림목 지지 확인 후 체결강도 ${volumeIntensity}% 반등 시그널 포착. 손익비 우수한 저위험 고수익 타점 형성.`,
           VWAP_SUPPORT: `[KOSPI] 당일 VWAP(거래량 가중평균가) 상단 안정적 지지 확인. 기관·외인 평단가 위에서 매수 우위 형성.`
@@ -808,7 +855,7 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
 
         const tagsMap: Record<string, string[]> = {
           MOMENTUM_BREAKOUT: ['#KOSPI', '#고점돌파', `#체결강도${volumeIntensity}%`, '#5분봉골든크로스'],
-          VOLUME_SURGE: ['#KOSPI', '#CVD수급유입', `#거래량폭증+${volumeSurge}%`, `#거래대금${tradeAmtB > 0 ? tradeAmtB : 850}억`],
+          VOLUME_SURGE: ['#KOSPI', '#CVD수급유입', `#거래량폭증+${volumeScoreRaw}%`, `#거래대금${tradeAmtB > 0 ? tradeAmtB : 850}억`],
           SUPPORT_REBOUND: ['#KOSPI', '#눌림목반등', '#손익비최상', `#RSI${rsi}`],
           VWAP_SUPPORT: ['#KOSPI', '#VWAP지지', '#기관평단위', '#추세상승']
         };
@@ -822,7 +869,7 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
           changePercent: changePct,
           volume: liveVol,
           tradeAmount: `${tradeAmtB > 0 ? tradeAmtB.toLocaleString() : '850'}억원`,
-          volumeSurgeRate: volumeSurge,
+          volumeSurgeRate: volumeScoreRaw,
           volumeIntensity,
           scalpingScore,
           grade,

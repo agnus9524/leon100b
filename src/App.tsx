@@ -6555,30 +6555,40 @@ const newStock: Stock = {
             VOLUME_PROFILE_CVD: isVolumeProfileCond
           };
 
-         if (scalperStrategyMode === 'AI_MAX_YIELD') {
+          let meetsBuyCriteria = false;
+          let strategyLabel = "AI 스캘퍼";
 
-  const premiumEntry =
-    isPullbackCond &&
-    isVwapSupportCond &&
-    isVolumeProfileCond;
+          if (scalperStrategyMode === 'AI_MAX_YIELD') {
+            const premiumEntry =
+              isPullbackCond &&
+              isVwapSupportCond &&
+              isVolumeProfileCond;
 
-  const ultraEntry =
-    isPullbackCond &&
-    isBreakoutCond &&
-    isVwapSupportCond &&
-    isVolumeProfileCond;
+            const ultraEntry =
+              isPullbackCond &&
+              isBreakoutCond &&
+              isVwapSupportCond &&
+              isVolumeProfileCond;
 
-  if (ultraEntry) {
-    meetsBuyCriteria = true;
-    strategyLabel =
-      "🚀 [최고수익 AI] 4/4 올그린";
-  }
-  else if (premiumEntry) {
-    meetsBuyCriteria = true;
-    strategyLabel =
-      "🏆 [최고수익 AI] 눌림목+VWAP+CVD";
-  }
-}
+            if (ultraEntry) {
+              meetsBuyCriteria = true;
+              strategyLabel = "🚀 [최고수익 AI] 4/4 올그린";
+            } else if (premiumEntry) {
+              meetsBuyCriteria = true;
+              strategyLabel = "🏆 [최고수익 AI] 눌림목+VWAP+CVD";
+            }
+          } else {
+            const areAllSelectedMet = currentSelectedStrats.length > 0 && currentSelectedStrats.every(k => conditionsMap[k]);
+            meetsBuyCriteria = areAllSelectedMet;
+            const names = currentSelectedStrats.map(k => {
+              if (k === 'PULLBACK') return '눌림목';
+              if (k === 'BREAKOUT') return '돌파';
+              if (k === 'VWAP_SUPPORT') return 'VWAP';
+              if (k === 'VOLUME_PROFILE_CVD') return 'CVD';
+              return k;
+            });
+            strategyLabel = `🎯 [${names.join('+')}] 다중전략 진입`;
+          }
 
           const isUSStock = stockItem.market === 'US' || /^[A-Za-z]/.test(stockItem.symbol) || marketType === 'US';
           const tickSize = getTickSize(currentPrice, isUSStock ? 'US' : 'KR');
