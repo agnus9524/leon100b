@@ -54,10 +54,10 @@ public generateRealtimeRecommendations(
 
       let score = 0;
 
-      if (strat.isPullback) score += 25;
-      if (strat.isBreakout) score += 25;
-      if (strat.isVwapSupport) score += 25;
-      if (strat.isVolumeProfile) score += 25;
+      if (strat.isPullback) score += 40;
+      if (strat.isBreakout) score += 5;
+      if (strat.isVwapSupport) score += 40;
+      if (strat.isVolumeProfile) score += 40;
 
       if (strat.hasVolumeMomentum)
         score += 10;
