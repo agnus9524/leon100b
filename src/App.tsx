@@ -126,11 +126,13 @@ import { XTXPredictor } from './components/XTXPredictor';
 import { MarketSignal } from './services/aiTradingService';
 import { POPULAR_STOCKS, type StockSuggestion } from './constants/stockList';
 
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
 
 // --- Types & Mock Data ---
+
+function cn(...classes: (string | boolean | undefined | null)[]) {
+  return classes.filter(Boolean).join(' ');
+}
+
 
 export interface ScalperTab {
   id: string; // symbol e.g., '073240' or '001520'
@@ -1094,11 +1096,7 @@ export default function App() {
   const [time, setTime] = useState(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
   const [botStatus, setBotStatus] = useState<string>("대기 중...");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [news, setNews] = useState<NewsItem[]>([]);
-  const [isFetchingNews, setIsFetchingNews] = useState(false);
-  const [newsCache, setNewsCache] = useState<Record<string, { data: NewsItem[], timestamp: number }>>({});
-  const [newsError, setNewsError] = useState<string | null>(null);
-
+ 
   // AI Cooldown tracking
   const lastAiCallRef = React.useRef<number>(0);
   const AI_COOLDOWN_MS = 10000; // Minimum 10 seconds between AI calls
@@ -1817,7 +1815,7 @@ export default function App() {
       showNotification("한국투자증권 데이터 동기화가 진행 중입니다. 잠시 후 다시 시도해주세요.", "info");
       return;
     }
-    const isAnyActive = scalperT1abs.some(t => t.isBotActive) || isGapBotActive;
+    const isAnyActive = scalperTabs.some(t => t.isBotActive) || isGapBotActive;
     const nextState = !isAnyActive;
     setIsGapBotActive(nextState);
     setScalperTabs(prev => prev.map(tab => ({ ...tab, isBotActive: nextState })));
@@ -2536,7 +2534,7 @@ export default function App() {
         currentPrice,
         pnlPct
       });
-      setCustomReboundTargetPrice(String(report.reboundTargetPrice || Math.round(currentPrice * 1.015)));
+      setCustomReboundTargetPrice(String((report as any)?.reboundTargetPrice || Math.round(currentPrice * 1.015)));
     } catch (e) {
       console.error("Gap-Down Report generation error:", e);
     } finally {
@@ -4277,17 +4275,25 @@ export default function App() {
     }
   );
 
-  const newStock: Stock = {
-  
-    symbol:
-      recommendedStock.symbol ||
-      symbolToUse,
+  const safePrice =
+  livePrice > 0
+    ? livePrice
+    : stocksRef.current.find(
+        s => s.symbol === recommendedStock.symbol
+      )?.price || 0;
 
-    name:
-      liveName,
+if (safePrice <= 0) {
+  showNotification(
+    `${recommendedStock.name} 시세 조회 실패`,
+    "error"
+  );
+  return;
+}
 
-    price:
-      livePrice,
+const newStock: Stock = {
+  symbol: recommendedStock.symbol,
+  name: liveName,
+  price: safePrice,
 
     change:
       liveChange,
@@ -4322,7 +4328,7 @@ export default function App() {
         : 'US',
 
     isAI:
-      !!recommendedStock.isAI
+      'isAI' in recommendedStock ? !!recommendedStock.isAI : false
   };
 
   console.log(
@@ -4354,19 +4360,19 @@ export default function App() {
     }
 
     if (stocks.some(s => s.symbol.toUpperCase() === symbolToUse.toUpperCase())) {
-  const existingStock = stocks.find(
-    s => s.symbol.toUpperCase() === symbolToUpperCase()
-  );
+      const existingStock = stocks.find(
+        s => s.symbol.toUpperCase() === symbolToUse.toUpperCase()
+      );
 
-  openOrSwitchScalperTab(
-    symbolToUse,
-    resolvedName,
-    existingStock?.price
-  );
+      openOrSwitchScalperTab(
+        symbolToUse,
+        resolvedName || existingStock?.name || symbolToUse,
+        existingStock?.price
+      );
 
-  setSelectedSymbol(symbolToUse);
-  return;
-}
+      setSelectedSymbol(symbolToUse);
+      return;
+    }
 
     if (kisConfig.isConnected) {
       setIsSearchingStock(true);
@@ -4375,19 +4381,22 @@ export default function App() {
         const livePriceData = await kisService.getPrice(symbolToUse);
         if (livePriceData) {
           const liveName = livePriceData.name || customName || symbolToUse;
+          const livePrice = livePriceData.current || 0;
+          const liveChange = livePriceData.change || 0;
+          const liveChangePercent = livePriceData.changePercent || 0;
           const newStock: Stock = {
-            symbol: recommendedStock.symbol || symbolToUse,
+            symbol: symbolToUse,
             name: liveName,
             price: livePrice,
             change: liveChange,
             changePercent: liveChangePercent,
-            volume: String(recommendedStock.volume || '100K'),
+            volume: String(livePriceData.volume || '100K'),
             history: Array.from({ length: 40 }, (_, i) => ({ 
               time: `${i}:00`, 
               price: livePrice * (0.98 + (i % 5) * 0.008) 
             })),
-            market: /^\d{6}$/.test(recommendedStock.symbol) ? 'KR' : 'US',
-            isAI: !!(recommendedStock as any).isAI
+            market: /^\d{6}$/.test(symbolToUse) ? 'KR' : 'US',
+            isAI: false
           };
           setStocks(prev => {
             if (prev.some(s => s.symbol === symbolToUse)) {
@@ -5409,83 +5418,6 @@ export default function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Fetch News using Gemini Search with Caching
-  const fetchNews = async (symbol: string, isManual = false) => {
-    // Check cache first (valid for 60 minutes for news to save quota)
-    const cached = newsCache[symbol];
-    const now = Date.now();
-    if (!isManual && cached && now - cached.timestamp < 60 * 60 * 1000) {
-      setNews(cached.data);
-      setNewsError(null);
-      return;
-    }
-
-    // AI Rate Limiting
-    const timeSinceLastCall = now - lastAiCallRef.current;
-    if (timeSinceLastCall < AI_COOLDOWN_MS) {
-      const waitTime = AI_COOLDOWN_MS - timeSinceLastCall;
-      console.log(`AI Call throttled, waiting ${waitTime}ms...`);
-      await new Promise(resolve => setTimeout(resolve, waitTime));
-    }
-
-    setIsFetchingNews(true);
-    setNewsError(null);
-
-    const callWithRetry = async (retries = 3, delay = 2000): Promise<any> => {
-      lastAiCallRef.current = Date.now();
-      try {
-        const prompt = `${symbol} 주식과 관련된 최신 뉴스 3개를 가져와주세요. 
-        실제 기사 원문 URL이 있다면 'url' 필드에 "https://..." 형식의 순수 주소만 포함하고, 불확실하면 해당 기사를 검색할 수 있는 구글 뉴스 검색 링크(https://www.google.com/search?q=...)를 넣어주세요. 
-        대괄호[]나 설명 문구 없이 오직 URL 문자열만 입력해야 합니다.
-        각 뉴스는 다음 JSON 형식을 따라야 합니다: 
-        {"news": [{"title": "뉴스 제목", "summary": "1~2문장의 짧은 요약", "source": "뉴스 출처", "time": "방금 전/1시간 전 등", "url": "https://raw-url-here"}]}`;
-
-        const response = await axios.post('/api/ai/bot-decision', { prompt });
-        return { text: response.data.text };
-      } catch (error: any) {
-        if (error.response?.status === 429 && retries > 0) {
-          console.log(`Quota hit, retrying news fetch in ${delay}ms...`);
-          await new Promise(resolve => setTimeout(resolve, delay));
-          return callWithRetry(retries - 1, delay * 2);
-        }
-        throw error;
-      }
-    };
-
-    try {
-      const response = await callWithRetry();
-      const text = response.text;
-      if (text) {
-        const data = JSON.parse(text);
-        const newsData = data.news || [];
-        setNews(newsData);
-        setNewsCache(prev => ({ ...prev, [symbol]: { data: newsData, timestamp: now } }));
-      }
-    } catch (error: any) {
-      console.error("News Fetch Error:", error);
-      if (error?.message?.includes('429') || error?.status === 429) {
-        setNewsError("Gemini Search 일시적 한도 초과입니다. 잠시 후 다시 시도해주세요.");
-      } else {
-        setNewsError("뉴스를 가져오는 중 오류가 발생했습니다.");
-      }
-    } finally {
-      setIsFetchingNews(false);
-    }
-  };
-
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchNews(selectedSymbol);
-      // Also trigger a one-time strategy analysis for the new stock if not already analyzing
-      if (!isAnalyzing && isSubscribed) {
-        // We can't easily call the internal bot logic here without refactoring, 
-        // but we can at least ensure XTXPredictor handles the heavy lifting 
-        // which it now does with the updated dependency array.
-      }
-    }, 500);
-    return () => clearTimeout(timer);
-  }, [selectedSymbol, isSubscribed]);
-
   // AI Auto-Trade Logic
   useEffect(() => {
     if (!isBotActive) {
@@ -5514,9 +5446,7 @@ export default function App() {
       
       try {
         // Fetch latest news for this stock to provide as context
-        const currentNews = newsCache[stockToAnalyze.symbol]?.data || [];
-        const newsContext = currentNews.map(n => `제목: ${n.title}, 요약: ${n.summary}`).join('\n');
-
+       
         const safeStockHist = Array.isArray(stockToAnalyze.history) ? stockToAnalyze.history : [];
         const historyPrices = safeStockHist.map(h => h.price);
         const rsi = calculateRSI(historyPrices, 14);
@@ -5535,9 +5465,7 @@ export default function App() {
         - 볼린저 밴드: 상단($${bb.upper.toFixed(2)}), 중단($${bb.middle.toFixed(2)}), 하단($${bb.lower.toFixed(2)})
         - 이동평균선: SMA5($${sma5.toFixed(2)}), SMA20($${sma20.toFixed(2)}) -> ${sma5 > sma20 ? '골든크로스/상승추세' : '데드크로스/하락추세'}
         
-        시장 분석 데이터 (뉴스/센티먼트):
-        ${newsContext || "뉴스 없음. 기술적 지표에만 의존하여 판단할 것."}
-        
+                
         계좌 상황:
         - 가용 잔고: ${formatCurrency(balance)}
         - ${stockToAnalyze.symbol} 보유: ${holdings[stockToAnalyze.symbol] || 0}
@@ -5598,7 +5526,7 @@ export default function App() {
             // Update AI Intelligence result for UI
             setAiAnalysisResult({
               symbol: stockToAnalyze.symbol,
-              newsScore: decision.scores.sentiment,
+              newsScore: 0,
               momentumScore: decision.scores.technical,
               patternScore: decision.scores.overall_confidence,
               finalScore: decision.scores.overall_confidence * 10,
@@ -7912,27 +7840,7 @@ export default function App() {
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_360px] gap-px bg-sleek-border overflow-y-auto lg:overflow-hidden">
         {/* Main Terminal (Full Width Center & Left) */}
         <section className="bg-sleek-bg overflow-y-auto custom-scrollbar p-3 sm:p-4 md:p-5 space-y-4">
-          {/* 🔥 실시간 긴급 시장 뉴스 & 급등 테마 속보 알림 바 */}
-          <LiveNewsAlerts 
-            selectedSymbol={selectedSymbol}
-            onSelectStock={(sym, name) => {
-              if (sym) {
-                const stock = stocksRef.current.find(s => s.symbol === sym) ||
-                 INITIAL_STOCKS_KR.find(s => s.symbol === sym) ||
-                 INITIAL_STOCKS.find(s => s.symbol === sym);
-
-openOrSwitchScalperTab(
-  sym,
-  name,
-  stock?.price
-);
-``
-
-                if (name) showNotification(`[속보 연동] ${name}(${sym}) 종목으로 차트 및 스캘퍼가 전환되었습니다.`, "info");
-              }
-            }}
-          />
-
+        
           {/* 0. 스캘퍼 종합 일체형 통합 헤더 바 (종목명, 현재체결가, VP/CVD, 실시간메시지, 5개 제어창, 보유현황) */}
           {(() => {
             const heldQty = selectedStock ? (holdings[selectedStock.symbol] || 0) : 0;

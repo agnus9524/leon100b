@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { Stock } from '../types';
 
 /**
  * 한국투자증권 KIS API 연동 서비스
@@ -66,7 +67,7 @@ public generateRealtimeRecommendations(
 
       score = Math.min(score, 100);
 
-      const grade =
+      const grade: 'SSS' | 'SS' | 'S' | 'A+' =
         score >= 95 ? 'SSS' :
         score >= 85 ? 'SS' :
         score >= 70 ? 'S' :
@@ -78,10 +79,7 @@ public generateRealtimeRecommendations(
         symbol: stock.symbol,
         name: stock.name,
 
-        marketType:
-          stock.market === 'US'
-            ? 'KOSDAQ'
-            : 'KOSPI',
+        marketType: (stock.market === 'US' ? 'KOSDAQ' : 'KOSPI') as 'KOSPI' | 'KOSDAQ',
 
         price: stock.price,
 
@@ -107,14 +105,15 @@ public generateRealtimeRecommendations(
 
         grade,
 
-        category:
+        category: (
           strat.isVolumeProfile
             ? 'CVD_FLOW'
             : strat.isVwapSupport
             ? 'VWAP_SUPPORT'
             : strat.isBreakout
             ? 'MOMENTUM_BREAKOUT'
-            : 'SUPPORT_REBOUND',
+            : 'SUPPORT_REBOUND'
+        ) as 'VOLUME_SURGE' | 'MOMENTUM_BREAKOUT' | 'SUPPORT_REBOUND' | 'VWAP_SUPPORT' | 'CVD_FLOW',
 
         targetPrice:
           Math.round(
@@ -142,7 +141,7 @@ public generateRealtimeRecommendations(
           strat.isBreakout && '#돌파',
           strat.isVwapSupport && '#VWAP',
           strat.isVolumeProfile && '#CVD'
-        ].filter(Boolean),
+        ].filter(Boolean) as string[],
 
         holdingTime:
           '3분 ~ 15분'
