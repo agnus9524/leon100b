@@ -107,6 +107,63 @@ async function generateContentWithRetry(model: any, prompt: any, retries = 4) {
 const apiCache = new Map<string, { data: any; expiresAt: number }>();
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
+function getYahooSymbol(symbol: string) {
+  const stock = ALL_KRX_MASTER_STOCKS.find(
+    s => s.symbol === symbol
+  );
+
+  if (!stock) {
+    return `${symbol}.KS`;
+  }
+
+  return stock.market === 'KOSDAQ'
+    ? `${symbol}.KQ`
+    : `${symbol}.KS`;
+}
+
+function calculateRSI(prices: number[], period = 14): number {
+  if (prices.length < period + 1) {
+    return 50;
+  }
+
+  let gains = 0;
+  let losses = 0;
+
+  for (let i = 1; i <= period; i++) {
+    const diff = prices[i] - prices[i - 1];
+
+    if (diff > 0) {
+      gains += diff;
+    } else {
+      losses += Math.abs(diff);
+    }
+  }
+
+  let avgGain = gains / period;
+  let avgLoss = losses / period;
+
+  for (let i = period + 1; i < prices.length; i++) {
+    const diff = prices[i] - prices[i - 1];
+
+    const gain = diff > 0 ? diff : 0;
+    const loss = diff < 0 ? Math.abs(diff) : 0;
+
+    avgGain = ((avgGain * (period - 1)) + gain) / period;
+    avgLoss = ((avgLoss * (period - 1)) + loss) / period;
+  }
+
+  if (avgLoss === 0) {
+    return 100;
+  }
+
+  const rs = avgGain / avgLoss;
+
+  return Number(
+    (100 - (100 / (1 + rs))).toFixed(2)
+  );
+}
+
+
 function getCachedData(key: string) {
   const item = apiCache.get(key);
   if (item && item.expiresAt > Date.now()) {
@@ -446,6 +503,36 @@ async function startServer() {
 
   
 // Helper: Fetch Real-time Stock Quote (Supports KR stocks via Naver Finance Mobile API and US/KR via Yahoo Finance)
+async function fetchPriceHistory(symbol: string): Promise<number[]> {
+  try {
+    const yfSymbol = getYahooSymbol(symbol);
+
+    const resp = await axios.get(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${yfSymbol}`,
+      {
+        params: {
+          interval: '5m',
+          range: '5d'
+        },
+        timeout: 3000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0'
+        }
+      }
+    );
+
+    const closes =
+      resp.data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
+
+    return closes.filter(
+      (v: any) => typeof v === 'number'
+    );
+  } catch {
+    return [];
+  }
+}
+
+
 async function fetchRealtimeQuote(symbol: string): Promise<{
   symbol: string;
   name: string;
@@ -771,10 +858,21 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200))
         ])
       );
-      const [quotes, orderbooks] = await Promise.all([
-        Promise.allSettled(quotePromises),
-        Promise.allSettled(orderbookPromises)
-      ]);
+     const historyPromises = candidates.map(c =>
+  Promise.race([
+    fetchPriceHistory(c.symbol),
+    new Promise<number[]>(resolve =>
+      setTimeout(() => resolve([]), 1500)
+    )
+  ])
+);
+
+const [quotes, orderbooks, histories] =
+  await Promise.all([
+    Promise.allSettled(quotePromises),
+    Promise.allSettled(orderbookPromises),
+    Promise.allSettled(historyPromises)
+  ]);
 
       const scoredList = candidates.map((item, index) => {
         const quoteRes = quotes[index];
@@ -802,14 +900,26 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
       )
     : 100;
          
-        const rsi =
-  changePct > 3
-    ? 70
-    : changePct > 0
-      ? 60
-      : changePct < -3
-        ? 30
-        : 45;
+       const historyRes = histories[index];
+
+const closes =
+  historyRes.status === 'fulfilled'
+    ? historyRes.value
+    : [];
+
+const rsi =
+  closes.length >= 15
+    ? calculateRSI(closes)
+    : 50;
+
+    const rsiScore =
+  rsi < 30
+    ? 5
+    : rsi < 40
+      ? 3
+      : rsi > 70
+        ? -2
+        : 0;
         
         // Scalping Score (90 ~ 99) for 100% KOSPI leaders
         const baseScore = 90;
@@ -831,7 +941,8 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
     baseScore +
     volumeScore +
     intensityScore +
-    momentumScore
+    momentumScore +
+    rsiScore
   );
 
         const targetP = Math.round(currentPrice * (1 + Number((1.5 + (scalpingScore % 5) * 0.3).toFixed(2)) / 100));
