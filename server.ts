@@ -6,7 +6,7 @@ import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import iconv from 'iconv-lite';
-import { ALL_KRX_MASTER_STOCKS, KOSPI_STOCKS, KOSDAQ_STOCKS, searchKrMasterStocks, getChosung, MasterStock } from './src/constants/kospiMaster';
+import { ALL_KRX_MASTER_STOCKS, KOSPI_STOCKS, searchKrMasterStocks, getChosung, MasterStock } from './src/constants/kospiMaster';
 
 const currentFilename = typeof __filename !== 'undefined' ? __filename : '';
 const currentDirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(currentFilename || process.cwd());
@@ -107,18 +107,20 @@ async function generateContentWithRetry(model: any, prompt: any, retries = 4) {
 const apiCache = new Map<string, { data: any; expiresAt: number }>();
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
-function getYahooSymbol(symbol: string) {
+function getYahooSymbol(symbol: string): string | null {
   const stock = ALL_KRX_MASTER_STOCKS.find(
     s => s.symbol === symbol
   );
 
   if (!stock) {
-    return `${symbol}.KS`;
+    return null;
   }
 
-  return stock.market === 'KOSDAQ'
-    ? `${symbol}.KQ`
-    : `${symbol}.KS`;
+  if (stock.market !== 'KOSPI') {
+    return null;
+  }
+
+  return `${symbol}.KS`;
 }
 
 function calculateRSI(prices: number[], period = 14): number {
@@ -506,6 +508,9 @@ async function startServer() {
 async function fetchPriceHistory(symbol: string): Promise<number[]> {
   try {
     const yfSymbol = getYahooSymbol(symbol);
+if (!yfSymbol) {
+return [];
+}
 
     const resp = await axios.get(
       `https://query1.finance.yahoo.com/v8/finance/chart/${yfSymbol}`,
@@ -544,6 +549,8 @@ async function fetchRealtimeQuote(symbol: string): Promise<{
   rawVolume?: number;
   market: 'KR' | 'US';
 } | null> {
+
+ 
   const isKR = /^\d{6}$/.test(symbol);
   if (isKR) {
     // 1. Primary: Naver Polling Realtime API (Fastest & most direct for KRX domestic stocks)
@@ -642,9 +649,12 @@ async function fetchRealtimeQuote(symbol: string): Promise<{
       // ignore and try fallback
     }
 
-    // 2. Secondary: Yahoo Finance (.KS for KOSPI, .KQ for KOSDAQ)
+    // 2. Secondary: Yahoo Finance (.KS for KOSPI)
     try {
-      const yfSymbol = `${symbol}.KS`;
+       const yfSymbol = getYahooSymbol(symbol);
+if (!yfSymbol) {
+return null;
+}
       const yfResp = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${yfSymbol}`, {
         headers: { 'User-Agent': 'Mozilla/5.0' },
         timeout: 2500
@@ -1026,16 +1036,12 @@ const rsi =
         let data = getCachedData(cacheKey);
         if (!data) {
           data = [
-            { symbol: '196170', name: '알테오젠', price: 385000 },
             { symbol: '000660', name: 'SK하이닉스', price: 198000 },
-            { symbol: '000270', name: '삼천당제약', price: 158000 },
             { symbol: '042700', name: '한미반도체', price: 119500 },
             { symbol: '064350', name: '현대로템', price: 57400 },
             { symbol: '267260', name: 'HD현대일렉트릭', price: 348000 },
             { symbol: '034020', name: '두산에너빌리티', price: 22100 },
-            { symbol: '028300', name: 'HLB', price: 89600 },
-            { symbol: '141080', name: '리가켐바이오', price: 115500 },
-            { symbol: '277810', name: '레인보우로보틱스', price: 149500 }
+
           ];
         }
         return res.json({ text: JSON.stringify(data) });
@@ -1048,7 +1054,7 @@ const rsi =
 
       const prompt = `
 당신은 최고의 초단타(스캘핑) 및 데이트레이딩 퀀트 애널리스트입니다.
-오늘 현재 시점 기준으로 한국 KOSPI/KOSDAQ 시장에서 **거래량이 폭증**하고 있으며 **상승 추세(급등락 후 반등, 돌파 등)**에 있는 국내 주식 종목 10개를 선정해주세요.
+오늘 현재 시점 기준으로 한국 KOSPI 시장에서 **거래량이 폭증**하고 있으며 **상승 추세(급등락 후 반등, 돌파 등)**에 있는 국내 주식 종목 10개를 선정해주세요.
 인버스/레버리지 ETF는 제외하고, 실제로 시장에서 거래대금이 터진 테마/주도주를 추천하세요.
 
 반드시 다음 JSON 배열 형식으로만 응답하세요:
@@ -1063,16 +1069,13 @@ const rsi =
     } catch (error: any) {
       console.warn("[Gemini Deep Recommend Info] Fallback to quant stock list:", error.message);
       const fallbackList = [
-        { symbol: '196170', name: '알테오젠', price: 385000 },
         { symbol: '000660', name: 'SK하이닉스', price: 198000 },
-        { symbol: '000270', name: '삼천당제약', price: 158000 },
         { symbol: '042700', name: '한미반도체', price: 119500 },
         { symbol: '064350', name: '현대로템', price: 57400 },
         { symbol: '267260', name: 'HD현대일렉트릭', price: 348000 },
         { symbol: '034020', name: '두산에너빌리티', price: 22100 },
-        { symbol: '028300', name: 'HLB', price: 89600 },
-        { symbol: '141080', name: '리가켐바이오', price: 115500 },
-        { symbol: '277810', name: '레인보우로보틱스', price: 149500 }
+
+
       ];
       return res.json({ text: JSON.stringify(fallbackList) });
     }
@@ -1313,13 +1316,16 @@ const rsi =
         }
 
         // 1. Match from rich master stock utility (supports Hangul, Chosung 'ㅅㅅㅈㅈ', English name, symbol, sector)
-        const masterMatches = searchKrMasterStocks(cleanKeyword, 30);
+        const masterMatches =
+  searchKrMasterStocks(cleanKeyword, 30)
+    .filter(m => m.market === 'KOSPI');
         const seenSymbols = new Set<string>();
-        let matchedKR: Array<{ symbol: string; name: string; market: 'KR'; marketCategory?: 'KOSPI' | 'KOSDAQ' }> = [];
+        let matchedKR: Array<{ symbol: string; name: string; market: 'KR'; marketCategory?: 'KOSPI' }> = [];
 
         masterMatches.forEach(m => {
           if (!seenSymbols.has(m.symbol)) {
             seenSymbols.add(m.symbol);
+           
             matchedKR.push({
               symbol: m.symbol,
               name: m.name,
@@ -1331,7 +1337,11 @@ const rsi =
 
         // 2. Also search dynamic KIND cache for any newly listed or unindexed stocks
         krxStocksCache.forEach(stock => {
-          if (!seenSymbols.has(stock.symbol)) {
+  if (stock.marketCategory !== 'KOSPI') {
+    return;
+  }
+
+  if (!seenSymbols.has(stock.symbol)) {
             const nameLower = stock.name.toLowerCase();
             const symLower = stock.symbol.toLowerCase();
             if (nameLower.includes(lowerKeyword) || symLower.includes(lowerKeyword)) {
