@@ -744,51 +744,16 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
       }
 
       // 1. Candidate stocks pool 100% focused on KOSPI momentum, VWAP support, CVD orderflow & heavy-volume market leaders across all price tiers
-      const candidates: { symbol: string; name: string; basePrice: number; theme: string; cat: 'SUPPORT_REBOUND' | 'MOMENTUM_BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_SURGE'; marketCategory: 'KOSPI' }[] = [
-        // 1만원 이하 대형/중대형 KOSPI
-        { symbol: '088350', name: '한화생명', basePrice: 3250, theme: '밸류업 저PBR 수급', cat: 'SUPPORT_REBOUND', marketCategory: 'KOSPI' },
-        { symbol: '028670', name: '팬오션', basePrice: 4150, theme: 'BDI 운임지수 반등', cat: 'VWAP_SUPPORT', marketCategory: 'KOSPI' },
-        { symbol: '025820', name: '이구산업', basePrice: 5200, theme: '구리 원자재 수급 급등', cat: 'VOLUME_SURGE', marketCategory: 'KOSPI' },
-        { symbol: '006800', name: '미래에셋증권', basePrice: 8650, theme: '증시 거래대금 증가 수혜', cat: 'SUPPORT_REBOUND', marketCategory: 'KOSPI' },
-        { symbol: '010140', name: '삼성중공업', basePrice: 9850, theme: 'LNG선 수주 흑자전환', cat: 'MOMENTUM_BREAKOUT', marketCategory: 'KOSPI' },
-
-        // 1만원 ~ 5만원 이하 KOSPI
-        { symbol: '034220', name: 'LG디스플레이', basePrice: 12400, theme: 'OLED 패널 공급 확대', cat: 'SUPPORT_REBOUND', marketCategory: 'KOSPI' },
-        { symbol: '001440', name: '대한전선', basePrice: 13800, theme: '초고압 해저케이블 수주', cat: 'VOLUME_SURGE', marketCategory: 'KOSPI' },
-        { symbol: '011200', name: 'HMM', basePrice: 18900, theme: '컨테이너 운임 상승 모멘텀', cat: 'MOMENTUM_BREAKOUT', marketCategory: 'KOSPI' },
-        { symbol: '272210', name: '한화시스템', basePrice: 21200, theme: 'K-방산 레이더 & 우주위성', cat: 'VWAP_SUPPORT', marketCategory: 'KOSPI' },
-        { symbol: '034020', name: '두산에너빌리티', basePrice: 21500, theme: '체코 원전 & SMR 수주', cat: 'VWAP_SUPPORT', marketCategory: 'KOSPI' },
-        { symbol: '377300', name: '카카오페이', basePrice: 28500, theme: '핀테크 결제액 성장', cat: 'SUPPORT_REBOUND', marketCategory: 'KOSPI' },
-        { symbol: '035720', name: '카카오', basePrice: 39200, theme: '플랫폼 AI 신서비스 출시', cat: 'SUPPORT_REBOUND', marketCategory: 'KOSPI' },
-        { symbol: '007660', name: '이수페타시스', basePrice: 46500, theme: 'AI MLB 고다층 기판', cat: 'VOLUME_SURGE', marketCategory: 'KOSPI' },
-
-        // 5만원 ~ 10만원 이하 KOSPI
-        { symbol: '055550', name: '신한지주', basePrice: 54000, theme: '주주환원 밸류업 대장', cat: 'VWAP_SUPPORT', marketCategory: 'KOSPI' },
-        { symbol: '064350', name: '현대로템', basePrice: 56500, theme: '방산 수주 모멘텀 돌파', cat: 'MOMENTUM_BREAKOUT', marketCategory: 'KOSPI' },
-        { symbol: '005930', name: '삼성전자', basePrice: 77600, theme: '코스피 대장 외국인 순매수', cat: 'VWAP_SUPPORT', marketCategory: 'KOSPI' },
-        { symbol: '105560', name: 'KB금융', basePrice: 88500, theme: '외인 기관 동반 순매수', cat: 'VWAP_SUPPORT', marketCategory: 'KOSPI' },
-        { symbol: '000270', name: '기아', basePrice: 95000, theme: '글로벌 RV 판매 호조', cat: 'SUPPORT_REBOUND', marketCategory: 'KOSPI' },
-
-        // 10만원 ~ 20만원 이하 KOSPI
-        { symbol: '042700', name: '한미반도체', basePrice: 118000, theme: 'TC본더 AI 장비', cat: 'SUPPORT_REBOUND', marketCategory: 'KOSPI' },
-        { symbol: '000100', name: '유한양행', basePrice: 145000, theme: '렉라자 FDA 승인 모멘텀', cat: 'SUPPORT_REBOUND', marketCategory: 'KOSPI' },
-        { symbol: '329180', name: 'HD현대중공업', basePrice: 195000, theme: '조선 슈퍼사이클 신조선가', cat: 'MOMENTUM_BREAKOUT', marketCategory: 'KOSPI' },
-        { symbol: '000660', name: 'SK하이닉스', basePrice: 198000, theme: 'AI 반도체 HBM 주도주', cat: 'VOLUME_SURGE', marketCategory: 'KOSPI' },
-        { symbol: '068270', name: '셀트리온', basePrice: 198500, theme: '코스피 바이오 대장 짐펜트라', cat: 'SUPPORT_REBOUND', marketCategory: 'KOSPI' },
-
-        // 20만원 ~ 50만원 이하 KOSPI
-        { symbol: '079550', name: 'LIG넥스원', basePrice: 235000, theme: '천궁2 유도무기 수출', cat: 'MOMENTUM_BREAKOUT', marketCategory: 'KOSPI' },
-        { symbol: '005380', name: '현대차', basePrice: 245000, theme: '밸류업 & 글로벌 수출', cat: 'VWAP_SUPPORT', marketCategory: 'KOSPI' },
-        { symbol: '012450', name: '한화에어로스페이스', basePrice: 335000, theme: 'K-방산 우주항공 수급', cat: 'MOMENTUM_BREAKOUT', marketCategory: 'KOSPI' },
-        { symbol: '005490', name: 'POSCO홀딩스', basePrice: 340000, theme: '2차전지 소재 & 철강 반등', cat: 'SUPPORT_REBOUND', marketCategory: 'KOSPI' },
-        { symbol: '267260', name: 'HD현대일렉트릭', basePrice: 345000, theme: 'AI 전력 인프라 대장주', cat: 'VOLUME_SURGE', marketCategory: 'KOSPI' },
-        { symbol: '298040', name: '효성중공업', basePrice: 420000, theme: '글로벌 전력 인프라 호황', cat: 'VOLUME_SURGE', marketCategory: 'KOSPI' },
-
-        // 50만원 ~ 100만원 이하 KOSPI
-        { symbol: '003230', name: '삼양식품', basePrice: 560000, theme: '불닭 K-푸드 글로벌 수출', cat: 'MOMENTUM_BREAKOUT', marketCategory: 'KOSPI' },
-        { symbol: '010130', name: '고려아연', basePrice: 980000, theme: '경영권 지분 수급 폭증', cat: 'MOMENTUM_BREAKOUT', marketCategory: 'KOSPI' },
-        { symbol: '207940', name: '삼성바이오로직스', basePrice: 980000, theme: 'CDMO 글로벌 수주 1위', cat: 'SUPPORT_REBOUND', marketCategory: 'KOSPI' }
-      ];
+      const candidates = KOSPI_STOCKS
+  .slice(0, 300)
+  .map(stock => ({
+    symbol: stock.symbol,
+    name: stock.name,
+    basePrice: stock.basePrice || 0,
+    theme: stock.sector || 'KOSPI',
+    cat: 'SUPPORT_REBOUND' as const,
+    marketCategory: 'KOSPI' as const
+  }));
 
       // Fetch live market quotes in parallel for candidate stocks with 1.2s timeout per stock
       const quotePromises = candidates.map(c => 
