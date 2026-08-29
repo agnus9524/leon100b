@@ -1015,6 +1015,19 @@ public generateRealtimeRecommendations(
         'custtype': 'P',
       };
 
+console.log(
+  '[KIS BUY SEND]',
+  {
+    symbol,
+    qty,
+    price,
+    ordDvsn,
+    side
+  }
+);
+
+
+
       const res = await axios.post(`${this.baseUrl}${endpoint}`, body, { headers });
       if (res.data.rt_cd && res.data.rt_cd !== '0') {
         if (res.data.msg_cd === 'EGW00201' || res.data.msg1?.includes('초당 거래건수')) {

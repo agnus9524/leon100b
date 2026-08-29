@@ -6552,68 +6552,30 @@ const newStock: Stock = {
             VOLUME_PROFILE_CVD: isVolumeProfileCond
           };
 
-          // 다중선택된 모든 전략이 동시 충족되었는지 검사 (선택된 전략들의 AND 조합)
-          const areAllSelectedMet = currentSelectedStrats.length > 0 && currentSelectedStrats.every(k => conditionsMap[k]);
+         if (scalperStrategyMode === 'AI_MAX_YIELD') {
 
-          let meetsBuyCriteria = false;
-          let strategyLabel = "AI 스캘퍼";
+  const premiumEntry =
+    isPullbackCond &&
+    isVwapSupportCond &&
+    isVolumeProfileCond;
 
-          if (scalperStrategyMode === 'AI_MAX_YIELD') {
-            if (isAll4SensorsOn) {
-              meetsBuyCriteria = true;
-              strategyLabel = "⚡ [최고수익 AI] 4/4 올-그린 정밀수급 풀진입";
-            } else if (isBreakoutCond) {
-              meetsBuyCriteria = true;
-              strategyLabel = "⚡ [최고수익 AI] ②돌파 모멘텀 체결";
-            } else if (isPullbackCond) {
-              meetsBuyCriteria = true;
-              strategyLabel = "⚡ [최고수익 AI] ①상승 눌림목 지지진입";
-            } else if (isVwapSupportCond) {
-              meetsBuyCriteria = true;
-              strategyLabel = "⚡ [최고수익 AI] ③VWAP 반등 받쳐두기";
-            } else if (isVolumeProfileCond) {
-              meetsBuyCriteria = true;
-              strategyLabel = "⚡ [최고수익 AI] ④CVD 수급 유동성 흡수";
-            } else if (isSmartScalperMode && momentumPositive && (rsi < 40 || isNearLowerBand)) {
-              meetsBuyCriteria = true;
-              strategyLabel = "⚡ [최고수익 AI] 과매도 수급 반등 탐색";
-            }
-          } else {
-            // 다중선택 모드 (눌림목, 돌파, VWAP, CVD 단일/조합 일체)
-            meetsBuyCriteria = areAllSelectedMet;
+  const ultraEntry =
+    isPullbackCond &&
+    isBreakoutCond &&
+    isVwapSupportCond &&
+    isVolumeProfileCond;
 
-            if (currentSelectedStrats.length === 4) {
-              strategyLabel = "🎯 [4/4 올-그린] 4개 핵심전략 풀체결";
-            } else if (
-              currentSelectedStrats.length === 3 &&
-              currentSelectedStrats.includes('VWAP_SUPPORT') &&
-              currentSelectedStrats.includes('VOLUME_PROFILE_CVD') &&
-              currentSelectedStrats.includes('PULLBACK')
-            ) {
-              strategyLabel = "🏆 [A급 안정진입] VWAP+CVD+눌림목 지지";
-            } else if (
-              currentSelectedStrats.length === 3 &&
-              currentSelectedStrats.includes('VWAP_SUPPORT') &&
-              currentSelectedStrats.includes('VOLUME_PROFILE_CVD') &&
-              currentSelectedStrats.includes('BREAKOUT')
-            ) {
-              strategyLabel = "⚡ [S급 추세돌파] VWAP+CVD+돌파 모멘텀";
-            } else if (currentSelectedStrats.length === 1) {
-              if (currentSelectedStrats[0] === 'PULLBACK') strategyLabel = "① 상승추세 눌림목";
-              else if (currentSelectedStrats[0] === 'BREAKOUT') strategyLabel = "② 거래량 돌파";
-              else if (currentSelectedStrats[0] === 'VWAP_SUPPORT') strategyLabel = "③ VWAP 지지반등";
-              else if (currentSelectedStrats[0] === 'VOLUME_PROFILE_CVD') strategyLabel = "④ CVD 수급포착";
-            } else {
-              const names = currentSelectedStrats.map(k => {
-                if (k === 'PULLBACK') return '눌림목';
-                if (k === 'BREAKOUT') return '돌파';
-                if (k === 'VWAP_SUPPORT') return 'VWAP';
-                if (k === 'VOLUME_PROFILE_CVD') return 'CVD';
-                return k;
-              });
-              strategyLabel = `🎯 [${names.join('+')}] 다중전략 진입`;
-            }
-          }
+  if (ultraEntry) {
+    meetsBuyCriteria = true;
+    strategyLabel =
+      "🚀 [최고수익 AI] 4/4 올그린";
+  }
+  else if (premiumEntry) {
+    meetsBuyCriteria = true;
+    strategyLabel =
+      "🏆 [최고수익 AI] 눌림목+VWAP+CVD";
+  }
+}
 
           const isUSStock = stockItem.market === 'US' || /^[A-Za-z]/.test(stockItem.symbol) || marketType === 'US';
           const tickSize = getTickSize(currentPrice, isUSStock ? 'US' : 'KR');
@@ -6682,6 +6644,20 @@ const newStock: Stock = {
             } else if (isLockActive) {
               if (isSelected) setScalperMessage(`[주문 처리 중] ${formatCurrency(targetBuyPrice)} API 통신 대기...`);
             } else {
+
+              console.log(
+  '[BUY CHECK]',
+  {
+    symbol: stockItem.symbol,
+    pullback: isPullbackCond,
+    vwap: isVwapSupportCond,
+    cvd: isVolumeProfileCond,
+    meetsBuyCriteria,
+    targetBuyPrice,
+    currentPrice
+  }
+);
+
               const slotsToBuy = isAll4SensorsFullEntry ? Math.max(1, itemMaxSlots - totalOccupied) : 1;
 
               for (let i = 0; i < slotsToBuy; i++) {
@@ -6714,6 +6690,15 @@ const newStock: Stock = {
 
                 try {
                   const currentSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+                  console.log(
+  '[BUY ORDER]',
+  {
+    symbol: stockItem.symbol,
+    qty: scaledQuantity,
+    targetBuyPrice,
+    strategy: strategyLabel
+  }
+);
                   const executedQty = await executeTrade('BUY', stockItem, scaledQuantity, `Scalper Slot #${currentStep}/${itemMaxSlots} (${strategyLabel}): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId);
 
                   if (executedQty > 0) {
