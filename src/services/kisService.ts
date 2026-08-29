@@ -47,6 +47,18 @@ public generateRealtimeRecommendations(
 ): ScalperRecommendation[] {
 
   return stocks
+  .filter(stock => {
+const strat =
+detectStockStrategies(stock);
+
+return (
+strat.isPullback &&
+strat.isVwapSupport &&
+strat.isVolumeProfile &&
+strat.hasVolumeMomentum
+);
+
+})
     .map(stock => {
 
       const strat =
@@ -147,16 +159,16 @@ public generateRealtimeRecommendations(
           '3분 ~ 15분'
       };
     })
+    .map((item, idx) => ({
+      ...item,
+      rank: idx + 1
+    }))
     .sort(
       (a, b) =>
         b.scalpingScore -
         a.scalpingScore
     )
-    .map((item, idx) => ({
-      ...item,
-      rank: idx + 1
-    }))
-    .slice(0, 10);
+    .slice(0, 5);
 }
 
 
