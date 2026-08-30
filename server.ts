@@ -761,6 +761,8 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
         const totalBid = Number(String(data.totalBidVolume || data.totalBidQuantity || bidVolumes.reduce((a, b) => a + b, 0)).replace(/,/g, ''));
         const sum = (totalAsk + totalBid) || 1;
         const maxLevelVol = Math.max(...askVolumes, ...bidVolumes, 1);
+        const prices = await fetchPriceHistory(symbol);
+        const rsi = prices.length >= 15 ? calculateRSI(prices) : 50;
 
         return {
           symbol,
@@ -773,7 +775,8 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
           totalBidVolume: totalBid,
           askPctVal: ((totalAsk / sum) * 100).toFixed(1),
           bidPctVal: ((totalBid / sum) * 100).toFixed(1),
-          maxLevelVol
+          maxLevelVol,
+          rsi
         };
       }
     }
@@ -1320,7 +1323,7 @@ const rsi =
   searchKrMasterStocks(cleanKeyword, 30)
     .filter(m => m.market === 'KOSPI');
         const seenSymbols = new Set<string>();
-        let matchedKR: Array<{ symbol: string; name: string; market: 'KR'; marketCategory?: 'KOSPI' }> = [];
+        let matchedKR: Array<{ symbol: string; name: string; market: 'KR'; marketCategory?: 'KOSPI' | 'KOSDAQ' }> = [];
 
         masterMatches.forEach(m => {
           if (!seenSymbols.has(m.symbol)) {

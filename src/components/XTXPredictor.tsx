@@ -18,6 +18,34 @@ export const XTXPredictor: React.FC<XTXPredictorProps> = ({ symbol, name, histor
   const [analysisError, setAnalysisError] = useState<string | null>(null);
   const [lastAnalysis, setLastAnalysis] = useState<number>(0);
   const analyzingRef = useRef(false);
+  // 센서 이벤트 쿨다운
+const lastSensorTriggerRef = useRef(0);
+// 체결강도 이전값 저장
+const previousIntensityRef = useRef(100);
+
+const [intensityDelta, setIntensityDelta] =
+  useState(0);
+
+const [currentVolume, setCurrentVolume] =
+  useState(0);
+
+const [averageVolume, setAverageVolume] =
+  useState(0);
+
+const [volumeSurge, setVolumeSurge] =
+  useState(false);
+
+const previousVolumeRef =
+  useRef<number[]>([]);
+
+const [rsi, setRsi] =
+  useState(50);
+
+const rsiOversold =
+  rsi <= 30;
+
+const rsiOverbought =
+  rsi >= 70;
 
   const setSignal = (s: MarketSignal | null) => {
     setSignalState(s);
@@ -91,20 +119,102 @@ const currentPrice = React.useMemo(() => {
     : 0;
 }, [history]);
 
+const [volumeIntensity, setVolumeIntensity] = useState(100);
+const [bidAskRatio, setBidAskRatio] = useState(100);
+
 
 const lastPriceRef =
   useRef<number>(0);
 
 useEffect(() => {
+performAnalysis();
+  const timer = setInterval(async () => {
+try {
+    const res = await fetch(
+      `/api/stocks/orderbook?symbol=${symbol}`
+    );
+if (!res.ok) {
+throw new Error(
+`HTTP ${res.status}`
+);
+}
+    const data = await res.json();
+    setRsi(
+  Number(data.rsi || 50)
+);
 
-  performAnalysis();
-
-  const interval = setInterval(
-    performAnalysis,
-    300000
+    const currentVol =
+  Number(
+    data.totalBidVolume || 0
+  ) +
+  Number(
+    data.totalAskVolume || 0
   );
 
-  return () => clearInterval(interval);
+setCurrentVolume(currentVol);
+
+previousVolumeRef.current.push(
+  currentVol
+);
+
+if (
+  previousVolumeRef.current.length > 30
+) {
+  previousVolumeRef.current.shift();
+}
+
+const avgVolume =
+  previousVolumeRef.current.length > 0
+    ? previousVolumeRef.current.reduce(
+        (sum, v) => sum + v,
+        0
+      ) /
+      previousVolumeRef.current.length
+    : currentVol;
+
+setAverageVolume(avgVolume);
+
+const surge =
+  currentVol >
+  avgVolume * 3;
+
+setVolumeSurge(surge);
+
+    const pressureRatio =
+  data.totalAskVolume > 0
+    ? Number(
+        (
+          data.totalBidVolume /
+          data.totalAskVolume *
+          100
+        ).toFixed(0)
+      )
+    : 100;
+
+    const delta =
+pressureRatio -
+previousIntensityRef.current;
+
+setIntensityDelta(delta);
+
+previousIntensityRef.current =
+pressureRatio;
+
+setBidAskRatio(pressureRatio);
+setVolumeIntensity(pressureRatio);
+
+    
+} catch (err) {
+console.warn(
+`[BullGPT] ${symbol} orderbook error`,
+err
+);
+}
+
+
+  }, 1000);
+
+  return () => clearInterval(timer);
 
 }, [symbol]);
 
@@ -125,22 +235,59 @@ useEffect(() => {
 
   const changePct =
     Math.abs(
-      (
-        currentPrice -
-        previous
-      ) / previous
-    ) * 100;
-
-  if (changePct >= 0.5) {
-
-    console.log(
-      `[BullGPT] ${symbol} 가격 급변 감지 (${changePct.toFixed(2)}%)`
+      ((currentPrice - previous) / previous) * 100
     );
+
+  const shouldAnalyze =
+  changePct >= 0.5 ||
+
+  volumeSurge ||
+
+  volumeIntensity >= 170 ||
+
+  (
+volumeIntensity >= 140 &&
+Math.abs(intensityDelta) >= 20
+) ||
+(
+  rsi <= 30 &&
+volumeIntensity >= 130
+) ||
+rsi >= 70;
+
+  if (
+shouldAnalyze &&
+Date.now() - lastSensorTriggerRef.current > 30000
+) {
+lastSensorTriggerRef.current = Date.now();
+
+   console.log(
+  `[BullGPT] HFT SENSOR`,
+  {
+    symbol,
+    changePct,
+    volumeIntensity,
+    bidAskRatio,
+    intensityDelta,
+    currentVolume,
+    averageVolume,
+    volumeSurge,
+    rsi
+  }
+);
 
     performAnalysis();
   }
 
-}, [currentPrice]);
+}, [
+  currentPrice,
+  volumeIntensity,
+  bidAskRatio,
+  intensityDelta,
+  volumeSurge,
+  currentVolume,
+  rsi
+]);
 
   return (
     <div className="bg-[#0a0a0a] border-2 border-white/10 rounded-[32px] p-8 overflow-hidden relative shadow-2xl">
