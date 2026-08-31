@@ -1673,14 +1673,34 @@ console.log(
 "[APPROVAL KEY]",
 approvalKey
 );
-  const ws = new WebSocket(wsUrl);
-console.log(
-  "[KIS WS START]"
+ const ws = new WebSocket(wsUrl);
+
+ console.log(
+  "[USER AGENT]",
+  navigator.userAgent
 );
 
+console.log(
+  "[ORIGIN]",
+  window.location.origin
+);
+
+console.log(
+  "[WS CREATED]",
+  wsUrl
+);
+
+console.log(
+  "[WS CREATED]",
+  wsUrl
+);
 
   ws.onopen = () => {
 console.log("[KIS WS OPEN]");
+console.log(
+"[WS SUBSCRIBE SYMBOLS]",
+symbols
+);
     for (const symbol of symbols) {
 
       ws.send(
@@ -1714,17 +1734,26 @@ console.log("[KIS WS OPEN]");
 
 };
 
-  ws.onerror = (err) => {
-console.error(
-"[WS ERROR]",
-err
-);
-console.log(
-"[APPROVAL USED]",
-approvalKey
-);
+ws.onerror = (err) => {
+
+  console.error(
+    "[WS ERROR EVENT]",
+    err
+  );
+
+  console.log(
+    "[APPROVAL USED]",
+    approvalKey
+  );
+
+  console.log(
+    "[WS URL USED]",
+    wsUrl
+  );
+
 };
 ws.onclose = (event) => {
+
   console.warn(
     "[WS CLOSED]",
     {
@@ -1733,6 +1762,12 @@ ws.onclose = (event) => {
       wasClean: event.wasClean
     }
   );
+
+  console.log(
+    "[READY STATE]",
+    ws.readyState
+  );
+
 };
 
   return ws;
