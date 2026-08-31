@@ -202,6 +202,16 @@ setInterval(() => {
 
 async function getApprovalKey() {
 
+console.log(
+  "[KIS ENV CHECK]",
+  {
+    appKeyExists:
+      !!process.env.KIS_APP_KEY,
+    secretExists:
+      !!process.env.KIS_APP_SECRET
+  }
+);
+
   const appkey =
     process.env.KIS_APP_KEY;
 
@@ -1805,32 +1815,6 @@ wss.on("connection", (client, req) => {
     })
   );
 
-client.on(
-  "message",
-  (raw) => {
-
-    try {
-
-      const msg =
-        JSON.parse(
-          raw.toString()
-        );
-
-      if (
-        msg.type ===
-        "subscribe"
-      ) {
-
-        subscribeSymbol(
-          msg.symbol
-        );
-
-      }
-
-    } catch {}
-
-  }
-);
 
   client.on("message", (msg) => {
     try {
