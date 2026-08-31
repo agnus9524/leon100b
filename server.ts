@@ -849,7 +849,7 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
       const candidates = KOSPI_STOCKS
         .filter(stock => (stock.basePrice || 0) >= 5000 && (stock.basePrice || 0) <= 500000)
         .sort((a, b) => (b.basePrice || 0) - (a.basePrice || 0))
-        .slice(0, 30)
+        .slice(0, 5)
         .map(stock => ({
           symbol: stock.symbol,
           name: stock.name,
@@ -861,7 +861,12 @@ async function fetchRealtimeOrderbook(symbol: string): Promise<any> {
 
 
       // Fetch live market quotes and orderbooks in parallel for candidate stocks with 1.2s timeout per stock
+      console.log(
+  "[SCALPER CANDIDATES]",
+  candidates.length
+);
       const quotePromises = candidates.map(c => 
+     
         Promise.race([
           fetchRealtimeQuote(c.symbol),
           new Promise<null>((resolve) => setTimeout(() => resolve(null), 1200))
@@ -1017,7 +1022,7 @@ const rsi =
       scoredList.sort((a, b) => b.scalpingScore - a.scalpingScore);
 
       // Assign ranks across all candidates
-      const rankedCandidates = scoredList.slice(0, 30).map((s, idx) => ({
+      const rankedCandidates = scoredList.slice(0, 5).map((s, idx) => ({
         ...s,
         rank: idx + 1
       }));
@@ -1544,11 +1549,10 @@ server.on(
 const wss = new WebSocketServer({
   server,
   path: "/ws/kis"
+});
 console.log(
   "[WS SERVER CREATED]"
 );
-
-});
 
 
 
