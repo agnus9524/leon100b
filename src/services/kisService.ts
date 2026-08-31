@@ -1660,21 +1660,8 @@ public async connectWebSocket(
   symbols: string[],
   onTick: (data: any) => void
 ): Promise<WebSocket> {
-  const wsUrl = "wss://ops.koreainvestment.com:21000";
-  fetch(
-  "https://ops.koreainvestment.com"
-)
-.then(() =>
-  console.log(
-    "[KIS HTTPS OK]"
-  )
-)
-.catch(err =>
-  console.error(
-    "[KIS HTTPS FAIL]",
-    err
-  )
-);
+  const wsUrl = "wss://www.leo100b.ccd.kr/ws/kis";
+  
   console.log(
 "[WS URL]",
 wsUrl
