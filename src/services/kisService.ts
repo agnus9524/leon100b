@@ -1622,15 +1622,13 @@ public async connectWebSocket(
   const wsUrl = "wss://ops.koreainvestment.com:21000";
   console.log(
 "[WS URL]",
-wsUrL
+wsUrl
 );
 
   const approvalKey =
     await this.getWebsocketApprovalKey();
 
-  const ws = new WebSocket(
-    "wss://ops.koreainvestment.com:21000"
-  );
+  const ws = new WebSocket(wsUrl);
 console.log(
   "[KIS WS START]"
 );
