@@ -1679,8 +1679,15 @@ console.log("[KIS WS OPEN]");
 };
 
   ws.onerror = (err) => {
-    console.error("[WS ERROR]", err);
-  };
+console.error(
+"[WS ERROR]",
+err
+);
+console.log(
+"[APPROVAL USED]",
+approvalKey
+);
+};
 ws.onclose = (event) => {
   console.warn(
     "[WS CLOSED]",
