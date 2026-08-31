@@ -1117,45 +1117,6 @@ console.log(
 
   public async cancelOverseasOrder(orgNo: string, ordNo: string, symbol: string, qty: string) {
     return { rt_cd: "0", msg1: "Deleted", output: {} };
-
-    if (!this.config) throw new Error("KIS Config not initialized");
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/overseas-stock/v1/trading/order-rvsecncl';
-
-    const formattedOrdNo = ordNo ? ordNo.toString().trim().padStart(10, '0') : '';
-
-    const body = {
-      CANO: this.config.accountNo,
-      ACNT_PRDT_CD: this.config.accountCode,
-      OVRS_EXCG_CD: 'NASD',
-      PDNO: symbol,
-      ORGN_ODNO: formattedOrdNo,
-      RVSE_CNCL_DVSN_CD: '02', // '02': 취소
-      ORD_QTY: qty,
-      ORD_UNPR: '0',
-      MGENA_APLP_YN: 'N'
-    };
-
-    const hashkey = await this.getHashKey(body);
-    const isVirtual = this.baseUrl.includes('openapivts');
-    // TR_ID: TTTS1003U (실전 해외주식 정정/취소) / VTSM1003U (모의 해외주식 정정/취소)
-    const trId = isVirtual ? 'VTSM1003U' : 'TTTS1003U';
-
-    const headers = {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': trId,
-      'hashkey': hashkey,
-      'custtype': 'P',
-    };
-
-    const res = await axios.post(`${this.baseUrl}${endpoint}`, body, { headers });
-    if (res.data.rt_cd && res.data.rt_cd !== '0') {
-      console.warn(`[KIS Service] Overseas Cancel Order Result (${res.data.rt_cd}): ${res.data.msg1} (${res.data.msg_cd})`);
-    }
-    return res.data;
   }
 
   public async getDomesticDailyPrice(symbol: string, periodCode: 'D' | 'W' | 'M' = 'D') {
@@ -1684,11 +1645,6 @@ approvalKey
 console.log(
   "[ORIGIN]",
   window.location.origin
-);
-
-console.log(
-  "[WS CREATED]",
-  wsUrl
 );
 
 console.log(

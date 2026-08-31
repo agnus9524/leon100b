@@ -1527,35 +1527,35 @@ req.body?.appsecret?.length
       res.sendFile(path.join(distPath, 'index.html'));
     });
   }
+const server = http.createServer(app);
 
-  const server = app.listen(
+const wss = new WebSocketServer({
+  noServer: true
+});
+
+console.log(
+  "[WS SERVER CREATED]"
+);
+
+server.listen(
   PORT,
   "0.0.0.0",
   () => {
     console.log("server started");
-  }
-);
-server.on(
-  "upgrade",
-  (req) => {
 
     console.log(
-      "[UPGRADE REQUEST]",
-      req.url,
-      req.headers.host
+      "[BUILD VERSION]",
+      "WS-20260831"
     );
-
   }
 );
-const wss = new WebSocketServer({
-  noServer: true
-});
 
 server.on("upgrade", (req, socket, head) => {
 
   console.log(
     "[UPGRADE REQUEST]",
-    req.url
+    req.url,
+    req.headers.host
   );
 
   if (req.url !== "/ws/kis") {
@@ -1577,12 +1577,7 @@ server.on("upgrade", (req, socket, head) => {
   );
 });
 
-console.log(
-  "[WS SERVER CREATED]"
-);
-console.log(
-  "[WS SERVER CREATED]"
-);
+
 wss.on("error", (err) => {
 
   console.error(
