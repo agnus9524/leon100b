@@ -1602,23 +1602,35 @@ console.log(
   }
 
   public async getWebsocketApprovalKey() {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    const endpoint = '/oauth2/Approval';
-    
-    const payload = {
-      grant_type: 'client_credentials',
-      appkey: this.config.appKey,
-      appsecret: this.config.appSecret
-    };
 
-    const res = await axios.post(`${this.baseUrl}${endpoint}`, payload, {
+  if (!this.config)
+    throw new Error("KIS Config not initialized");
+
+  const endpoint = '/oauth2/Approval';
+
+  const payload = {
+    grant_type: 'client_credentials',
+    appkey: this.config.appKey,
+    appsecret: this.config.appSecret
+  };
+
+  const res = await axios.post(
+    `${this.baseUrl}${endpoint}`,
+    payload,
+    {
       headers: {
         'content-type': 'application/json'
       }
-    });
+    }
+  );
 
-    return res.data.approval_key;
-  }
+  console.log(
+    "[APPROVAL RAW]",
+    res.data
+  );
+
+  return res.data.approval_key;
+}
 
 public async connectWebSocket(
   symbols: string[],
