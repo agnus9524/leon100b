@@ -340,6 +340,19 @@ function subscribeSymbol(
   symbol: string
 ) {
 
+console.log(
+"[SUBSCRIBE REQUEST]",
+symbol
+);
+
+if (!/^\d{6}$/.test(symbol)) {
+console.log(
+"[SKIP NON-KR SYMBOL]",
+symbol
+);
+return;
+}
+
   if (
     subscribedSymbols.has(
       symbol
