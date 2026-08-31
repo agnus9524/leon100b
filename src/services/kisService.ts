@@ -1664,9 +1664,8 @@ console.log("[KIS WS OPEN]");
 };
 
   ws.onerror = (err) => {
-56
-console.error("[WS ERROR]", err);
-};
+    console.error("[WS ERROR]", err);
+  };
 ws.onclose = () => {
 console.warn("[WS CLOSED]");
 };

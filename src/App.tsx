@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { 
   TrendingUp, 
   TrendingDown,
@@ -3558,13 +3558,7 @@ kisConfig.isConnected
       const stock = stocks.find(s => s.symbol === sym) ||
                     (marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS).find(s => s.symbol === sym) ||
                     { name: sym, symbol: sym, price: 0, changePercent: 0, volume: '0', history: [], market: marketType };
-if (!stock) {
-  console.error(
-    "[TAB OPEN] Stock not found",
-    symbol
-  );
-  return;
-}
+
       const qty = holdings[sym] || 0;
       const isHeld = Number(qty) > 0;
       const isRising = stock.changePercent > 0;
@@ -4805,24 +4799,17 @@ const newStock: Stock = {
 const syncInProgressRef = useRef(false);
 
   const handleSyncKIS = async () => {
-if (syncInProgressRef.current) {
-console.log("[SYNC SKIPPED]");
-return;
-}
+    if (syncInProgressRef.current) {
+      console.log("[SYNC SKIPPED] Sync is already in progress");
+      return;
+    }
 
     if (!kisConfig.isConnected) {
       showNotification("KIS 실계좌가 연결되어 있지 않습니다. [KIS 연동 설정]에서 API 키와 계좌를 연결해주세요.", "info");
       setShowKisModal(true);
       return;
     }
-    try {
-syncInProgressRef.current = true;
-console.log("[SYNC START]");
-// 기존 handleSyncKIS 코드
-} finally {
-syncInProgressRef.current = false;
-console.log("[SYNC END]");
-}
+
     // Check for password
     const activeConfig = getActiveKisConfig(kisConfig);
     if (!activeConfig.accountPw) {
@@ -4833,6 +4820,8 @@ console.log("[SYNC END]");
     }
 
     try {
+      syncInProgressRef.current = true;
+      console.log("[SYNC START]");
       setIsSyncingKIS(true);
       setBotStatus("실거래 계좌 동기화 중...");
       
@@ -5174,6 +5163,8 @@ console.log("[SYNC END]");
       setBotStatus(`증권사 동기화 실패: ${msg}`);
     } finally {
       setIsSyncingKIS(false);
+      syncInProgressRef.current = false;
+      console.log("[SYNC END]");
     }
   };
 
