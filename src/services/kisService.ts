@@ -1601,30 +1601,42 @@ console.log(
     return [{ fx_rt: '1400.00' }]; 
   }
 
-  public async getWebsocketApprovalKey() {
-console.log(
-"[APPROVAL CONFIG]",
-{
-appKeyLength: this.config.appKey?.length,
-appSecretLength: this.config.appSecret?.length,
-accountNo: this.config?.accountNo
-}
-);
-
-
+public async getWebsocketApprovalKey() {
 
   if (!this.config)
     throw new Error("KIS Config not initialized");
 
+  console.log(
+    "[APPROVAL CONFIG]",
+    {
+      appKeyLength: this.config.appKey?.length,
+      appSecretLength: this.config.appSecret?.length,
+      accountNo: this.config.accountNo
+    }
+  );
 
   const endpoint = '/oauth2/Approval';
 
   const payload = {
     grant_type: "client_credentials",
-    appkey: 'this.config.appKey',
-    appsecret: 'this.config.appSecret'
-    
+    appkey: this.config.appKey,
+    appsecret: this.config.appSecret
   };
+
+  console.log(
+    "[APPROVAL REQUEST]",
+    payload
+  );
+
+  console.log(
+    "[APPKEY VALUE]",
+    this.config.appKey
+  );
+
+  console.log(
+    "[APPSECRET LENGTH]",
+    this.config.appSecret.length
+  );
 
   const res = await axios.post(
     `${this.baseUrl}${endpoint}`,

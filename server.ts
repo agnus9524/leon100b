@@ -1161,6 +1161,10 @@ const rsi =
     const targetUrl = req.path.replace('/api/kis', '');
 
     if (targetUrl === '/oauth2/Approval') {
+      console.log(
+'[APPROVAL HEADERS]',
+headers
+);
 console.log(
 '[APPROVAL SERVER BODY]',
 req.body
@@ -1261,7 +1265,11 @@ req.body?.appsecret?.length
     axiosConfig.data
   );
 
-}
+}console.log(
+  '[APPROVAL AXIOS DATA]',
+  axiosConfig.data
+);
+``
         response = await axios(axiosConfig);
         break;
       } catch (error: any) {
