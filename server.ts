@@ -1541,7 +1541,8 @@ server.on(
 
     console.log(
       "[UPGRADE REQUEST]",
-      req.url
+      req.url,
+      req.headers.host
     );
 
   }
@@ -1553,13 +1554,22 @@ const wss = new WebSocketServer({
 console.log(
   "[WS SERVER CREATED]"
 );
+wss.on("error", (err) => {
+
+  console.error(
+    "[WS SERVER ERROR]",
+    err
+  );
+
+});
 
 
 
-wss.on("connection", (client) => {
+wss.on("connection", (client, req) => {
 
   console.log(
-    "[CLIENT CONNECTED]"
+    "[CLIENT CONNECTED]",
+    req.url
   );
 
   client.send(
@@ -1567,7 +1577,9 @@ wss.on("connection", (client) => {
       type: "connected"
     })
   );
-
+console.log(
+"[CONNECTED MESSAGE SENT]"
+);
 });
 
 }
