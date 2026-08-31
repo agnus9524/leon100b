@@ -4802,14 +4802,27 @@ const newStock: Stock = {
   useEffect(() => {
     updateKisBuyableQty();
   }, [selectedSymbol, kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, updateKisBuyableQty]);
+const syncInProgressRef = useRef(false);
 
   const handleSyncKIS = async () => {
+if (syncInProgressRef.current) {
+console.log("[SYNC SKIPPED]");
+return;
+}
+
     if (!kisConfig.isConnected) {
       showNotification("KIS 실계좌가 연결되어 있지 않습니다. [KIS 연동 설정]에서 API 키와 계좌를 연결해주세요.", "info");
       setShowKisModal(true);
       return;
     }
-    
+    try {
+syncInProgressRef.current = true;
+console.log("[SYNC START]");
+// 기존 handleSyncKIS 코드
+} finally {
+syncInProgressRef.current = false;
+console.log("[SYNC END]");
+}
     // Check for password
     const activeConfig = getActiveKisConfig(kisConfig);
     if (!activeConfig.accountPw) {
@@ -5769,7 +5782,11 @@ setLiveOrderbook(ob);
               showNotification(`[KIS 주문정리] ${order.symbol} ${errMsg}`, "info");
               addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[주문정리] ${errMsg}`);
             }
-            setTimeout(() => handleSyncKIS(), 500);
+            setTimeout(() => {
+  if (!syncInProgressRef.current) {
+    handleSyncKIS();
+  }
+}, 500);
           } else {
             showNotification(`[KIS 매수취소 실패] ${errMsg}`, "error");
             addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 매수취소 실패] ${errMsg}`);
@@ -5777,7 +5794,11 @@ setLiveOrderbook(ob);
           }
         } else {
           addLog(order.symbol, '매수', order.orderPrice, order.quantity, `[KIS 매수취소] 수동 취소 완료`);
-          setTimeout(() => handleSyncKIS(), 500);
+          setTimeout(() => {
+  if (!syncInProgressRef.current) {
+    handleSyncKIS();
+  }
+}, 500);
         }
       } catch (e: any) {
         console.error("Failed to cancel KIS pending buy order:", e);
@@ -5810,7 +5831,11 @@ setLiveOrderbook(ob);
               showNotification(`[KIS 주문정리] ${order.symbol} ${errMsg}`, "info");
               addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[주문정리] ${errMsg}`);
             }
-            setTimeout(() => handleSyncKIS(), 500);
+            setTimeout(() => {
+  if (!syncInProgressRef.current) {
+    handleSyncKIS();
+  }
+}, 500);
           } else {
             showNotification(`[KIS 매도취소 실패] ${errMsg}`, "error");
             addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소 실패] ${errMsg}`);
@@ -5818,7 +5843,11 @@ setLiveOrderbook(ob);
           }
         } else {
           addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[KIS 매도취소] 수동 취소 완료`);
-          setTimeout(() => handleSyncKIS(), 500);
+          setTimeout(() => {
+  if (!syncInProgressRef.current) {
+    handleSyncKIS();
+  }
+}, 500);
         }
       } catch (e: any) {
         console.error("Failed to cancel KIS pending sell order:", e);
@@ -5885,7 +5914,11 @@ setLiveOrderbook(ob);
     setPendingBuyOrders([]);
     setPendingSellOrders([]);
     showNotification("모든 대기 (매수/매도) 주문이 취소되었습니다.", "info");
-    setTimeout(() => handleSyncKIS(), 500);
+   setTimeout(() => {
+  if (!syncInProgressRef.current) {
+    handleSyncKIS();
+  }
+}, 500);
   }, [exchangeRate, marketType, kisConfig.isConnected, kisConfig.isRealOrderEnabled]);
 
   // Monitor Pending Buy Orders for Price Changes, Fills, and Auto-Cancellations
@@ -5992,14 +6025,22 @@ setLiveOrderbook(ob);
                   // Log status silently without alarming false errors
                   addLog(order.symbol, '매수', orderPrice, order.quantity, `[주문정리] ${errMsg}`);
                   setBotStatus(`[자동취소 완료] ${formatCurrency(orderPrice)} 주문 정리됨`);
-                  setTimeout(() => handleSyncKIS(), 500);
+                  setTimeout(() => {
+  if (!syncInProgressRef.current) {
+    handleSyncKIS();
+  }
+}, 500);
                 }
               }
             } catch (e: any) {
               console.error("[KIS Auto-Cancel Exception]:", e);
               addLog(order.symbol, '매수', orderPrice, order.quantity, `[자동취소 처리] 대기 주문 정리 (${e?.message || '완료'})`);
               setBotStatus("대기 주문 정리 완료");
-              setTimeout(() => handleSyncKIS(), 500);
+              setTimeout(() => {
+  if (!syncInProgressRef.current) {
+    handleSyncKIS();
+  }
+}, 500);
             }
           }
           // Do NOT push to nextPending (it's cancelled/removed)
@@ -6263,14 +6304,22 @@ setLiveOrderbook(ob);
                 if (!isFilledInMeantime) {
                   addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[매도주문 정리] ${errMsg}`);
                   setBotStatus(`[매도취소 완료] 대기 주문 정리됨`);
-                  setTimeout(() => handleSyncKIS(), 500);
+                  setTimeout(() => {
+  if (!syncInProgressRef.current) {
+    handleSyncKIS();
+  }
+}, 500);
                 }
               }
             } catch (e: any) {
               console.error("[KIS Sell Order Auto-Cancel Exception]:", e);
               addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[매도취소 처리] 대기 주문 정리 (${e?.message || '완료'})`);
               setBotStatus("매도 대기 주문 정리 완료");
-              setTimeout(() => handleSyncKIS(), 500);
+              setTimeout(() => {
+  if (!syncInProgressRef.current) {
+    handleSyncKIS();
+  }
+}, 500);
             }
           }
           continue; // Order cancelled, do not push to nextPending
@@ -6433,7 +6482,11 @@ setLiveOrderbook(ob);
               if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
 
               playScalpingSound('SELL');
-              setTimeout(() => handleSyncKIS(), 500);
+              setTimeout(() => {
+  if (!syncInProgressRef.current) {
+    handleSyncKIS();
+  }
+}, 500);
             } else if (status.ccldQty > 0) {
               updated = true;
               const remainingQty = (status.ordQty || order.quantity) - status.ccldQty;
@@ -6463,7 +6516,11 @@ setLiveOrderbook(ob);
               addLog(order.symbol, '매도', status.price || order.orderPrice, status.ccldQty, `[KIS 지정가 매도 일부체결] ${status.ccldQty}주 체결`);
               showNotification(`${currentStock.name} KIS 매도 주문 일부 체결 (${status.ccldQty}주)`, "info");
               playScalpingSound('SELL');
-              setTimeout(() => handleSyncKIS(), 500);
+              setTimeout(() => {
+  if (!syncInProgressRef.current) {
+    handleSyncKIS();
+  }
+}, 500);
             } else {
               nextPending.push(order);
             }
