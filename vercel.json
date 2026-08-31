@@ -23,6 +23,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://service-100-221699414173.us-west1.run.app/api/:path*"
-    }
+    },
+    {
+"source": "/ws/:path*",
+"destination": "https://service-100-221699414173.us-west1.run.app/ws/:path*"
+}
   ]
 }
