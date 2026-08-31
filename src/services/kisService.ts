@@ -1650,11 +1650,16 @@ console.log("[KIS WS OPEN]");
       ws.send(
         JSON.stringify({
           header: {
-            approval_key: approvalKey
+            approval_key: approvalKey,
+            custtype: "P",
+            tr_type: "1",
+            "content-type": "utf-8"
           },
           body: {
+            input:{
             tr_id: "H0STCNT0",
             tr_key: symbol
+            }
           }
         })
       );
