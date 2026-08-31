@@ -1530,11 +1530,27 @@ req.body?.appsecret?.length
     console.log("server started");
   }
 );
+server.on(
+  "upgrade",
+  (req) => {
 
+    console.log(
+      "[UPGRADE REQUEST]",
+      req.url
+    );
+
+  }
+);
 const wss = new WebSocketServer({
   server,
   path: "/ws/kis"
+console.log(
+  "[WS SERVER CREATED]"
+);
+
 });
+
+
 
 wss.on("connection", (client) => {
 
