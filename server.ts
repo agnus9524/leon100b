@@ -7,6 +7,8 @@ import { createServer as createViteServer } from 'vite';
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import iconv from 'iconv-lite';
 import { ALL_KRX_MASTER_STOCKS, KOSPI_STOCKS, searchKrMasterStocks, getChosung, MasterStock } from './src/constants/kospiMaster';
+import { WebSocketServer } from 'ws';
+import WebSocket from 'ws';
 
 const currentFilename = typeof __filename !== 'undefined' ? __filename : '';
 const currentDirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(currentFilename || process.cwd());
@@ -1260,21 +1262,10 @@ req.body?.appsecret?.length
           axiosConfig.data = req.body;
         }
         if (targetUrl === '/oauth2/Approval') {
-
-  console.log(
-    '[APPROVAL AXIOS DATA]',
-    axiosConfig.data
-  );
-  console.log(
-'[APPROVAL HEADERS]',
-headers
-);
-console.log(
-'[APPROVAL FULL URL]',
-fullUrl
-);
+          console.log('[APPROVAL AXIOS DATA]', axiosConfig.data);
+          console.log('[APPROVAL HEADERS]', headers);
+          console.log('[APPROVAL FULL URL]', fullUrl);
         }
-``
         response = await axios(axiosConfig);
         break;
       } catch (error: any) {
@@ -1532,9 +1523,18 @@ fullUrl
     });
   }
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
+  const server = app.listen(
+  PORT,
+  "0.0.0.0",
+  () => {
+    console.log("server started");
+  }
+);
+
+const wss = new WebSocketServer({
+  server,
+  path: "/ws/kis"
+});
 }
 
 startServer();
