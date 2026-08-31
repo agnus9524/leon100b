@@ -1606,12 +1606,21 @@ console.log(
   if (!this.config)
     throw new Error("KIS Config not initialized");
 
+console.log(
+"[APPROVAL CONFIG]",
+{
+appKeyLength: this.config.appKey?.length,
+appSecretLength: this.config.appSecret?.length
+}
+);
+
   const endpoint = '/oauth2/Approval';
 
   const payload = {
     grant_type: "client_credentials",
-    appkey: "...",
-    appsecret: "..."
+    appkey: 'this.config.appKey',
+    appsecret: 'this.config.appSecret'
+    
   };
 
   const res = await axios.post(
