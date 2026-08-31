@@ -1620,7 +1620,7 @@ public async getWebsocketApprovalKey() {
   const payload = {
     grant_type: "client_credentials",
     appkey: this.config.appKey,
-    appsecret: this.config.appSecret
+    secretkey: this.config.appSecret
   };
 
   console.log(

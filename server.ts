@@ -1158,12 +1158,25 @@ const rsi =
 
   // KIS Proxy Routes with short-term quote caching & edge optimization
   app.all('/api/kis/*', async (req, res) => {
+    console.log(
+'[KIS PROXY HIT]',
+req.method,
+req.path
+);
     const targetUrl = req.path.replace('/api/kis', '');
 
     if (targetUrl === '/oauth2/Approval') {
       console.log(
+'[APPROVAL BODY RECEIVED]',
+req.body
+);
+     console.log(
+'[APPROVAL AXIOS DATA]',
+axiosConfig.data
+);
+   console.log(
 '[APPROVAL HEADERS]',
-headers
+axiosConfig.headers
 );
 console.log(
 '[APPROVAL SERVER BODY]',
