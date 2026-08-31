@@ -969,6 +969,7 @@ export default function App() {
   const [marketType, setMarketType] = useState<'KR' | 'US'>('KR');
 // Forced to KR always
   const holdingsViewTab = 'KR';
+  const syncInProgressRef = React.useRef(false);
 
   const [lastSelectedKR, setLastSelectedKR] = useState(() => {
     return localStorage.getItem('sleek_last_symbol_KR') || '073240';
@@ -4796,7 +4797,7 @@ const newStock: Stock = {
   useEffect(() => {
     updateKisBuyableQty();
   }, [selectedSymbol, kisConfig.isConnected, kisConfig.isRealOrderEnabled, kisConfig.domesticOrderType, updateKisBuyableQty]);
-const syncInProgressRef = useRef(false);
+
 
   const handleSyncKIS = async () => {
     if (syncInProgressRef.current) {

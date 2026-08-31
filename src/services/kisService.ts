@@ -641,6 +641,11 @@ strat.hasVolumeMomentum
   }
 
   public async getDomesticBalance() {
+    console.log(
+"[BALANCE CALL]",
+Date.now()
+);
+    await this.throttleRequest();
     if (!this.config) throw new Error("KIS Config not initialized");
     const token = await this.getAccessToken();
     const endpoint = '/uapi/domestic-stock/v1/trading/inquire-balance';
@@ -1186,7 +1191,7 @@ console.log(
   }
 
   private lastRequestTime = 0;
-  private minRequestInterval = 500; // Minimum 500ms interval between API calls to prevent Rate Limit (EGW00201 / 429)
+  private minRequestInterval = 2000; // Minimum 500ms interval between API calls to prevent Rate Limit (EGW00201 / 429)
   private requestQueueChain: Promise<any> = Promise.resolve();
 
   public async queueRequest<T>(fn: () => Promise<T>): Promise<T> {
@@ -1632,6 +1637,14 @@ wsUrl
 console.log(
   "[KIS WS START]"
 );
+console.warn(
+3
+"[WS CLOSED]",
+{
+code: event.code,
+reason: event.reason,
+wasClean: event.wasClean
+}
 
   ws.onopen = () => {
 console.log("[KIS WS OPEN]");
