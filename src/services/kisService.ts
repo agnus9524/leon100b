@@ -1609,9 +1609,9 @@ console.log(
   const endpoint = '/oauth2/Approval';
 
   const payload = {
-    grant_type: 'client_credentials',
-    appkey: this.config.appKey,
-    appsecret: this.config.appSecret
+    grant_type: "client_credentials",
+    appkey: "...",
+    appsecret: "..."
   };
 
   const res = await axios.post(
