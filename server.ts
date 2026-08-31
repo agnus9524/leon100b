@@ -1550,13 +1550,34 @@ server.listen(
   }
 );
 
-server.on("upgrade", (req, socket, head) => {
+const allowedOrigins = [
+"https://www.leo100b.ccd.kr",
+"https://leo100b.ccd.kr",
+"https://service-100-5121.ai.studio"
+];
 
+
+server.on("upgrade", (req, socket, head) => {
+const origin = req.headers.origin;
   console.log(
     "[UPGRADE REQUEST]",
     req.url,
+    origin,
     req.headers.host
   );
+
+if (
+origin &&
+!allowedOrigins.includes(origin)
+) {
+console.warn(
+"[ORIGIN BLOCKED]",
+origin
+);
+socket.destroy();
+
+return;
+}
 
   if (req.url !== "/ws/kis") {
     socket.destroy();
