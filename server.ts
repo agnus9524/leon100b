@@ -10,6 +10,14 @@ import { ALL_KRX_MASTER_STOCKS, KOSPI_STOCKS, searchKrMasterStocks, getChosung, 
 import { WebSocketServer } from 'ws';
 import WebSocket from 'ws';
 
+let kisWs: WebSocket | null = null;
+
+let approvalKey = "";
+
+const clients = new Set<WebSocket>();
+
+const subscribedSymbols = new Set<string>();
+
 const currentFilename = typeof __filename !== 'undefined' ? __filename : '';
 const currentDirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(currentFilename || process.cwd());
 
@@ -191,6 +199,176 @@ setInterval(() => {
     if (value.resetTime <= now) rateLimitMap.delete(ip);
   }
 }, 5 * 60 * 1000);
+
+async function getApprovalKey() {
+
+  const appkey =
+    process.env.KIS_APP_KEY;
+
+  const secretkey =
+    process.env.KIS_APP_SECRET;
+
+  const res = await axios.post(
+    "https://openapi.koreainvestment.com:9443/oauth2/Approval",
+    {
+      grant_type:
+        "client_credentials",
+      appkey,
+      secretkey
+    }
+  );
+
+  return res.data.approval_key;
+
+}
+
+async function connectKis() {
+
+  try {
+
+    approvalKey =
+      await getApprovalKey();
+
+    console.log(
+      "[APPROVAL KEY CREATED]"
+    );
+
+    kisWs =
+      new WebSocket(
+        "ws://ops.koreainvestment.com:21000"
+      );
+
+    kisWs.on(
+      "open",
+      () => {
+
+        console.log(
+          "[KIS CONNECTED]"
+        );
+
+      }
+    );
+
+    kisWs.on(
+      "message",
+      (data) => {
+
+        console.log(
+          "[KIS DATA]",
+          data.toString()
+        );
+
+        broadcastToClients(
+          data.toString()
+        );
+
+      }
+    );
+
+    kisWs.on(
+      "close",
+      () => {
+
+        console.log(
+          "[KIS RECONNECT]"
+        );
+
+        setTimeout(
+          connectKis,
+          5000
+        );
+
+      }
+    );
+
+    kisWs.on(
+      "error",
+      (err) => {
+
+        console.error(
+          "[KIS ERROR]",
+          err
+        );
+
+      }
+    );
+
+  } catch (err) {
+
+    console.error(
+      "[KIS CONNECT FAIL]",
+      err
+    );
+
+  }
+
+}
+
+function broadcastToClients(
+  message: string
+) {
+
+  for (
+    const client
+    of clients
+  ) {
+
+    if (
+      client.readyState ===
+      WebSocket.OPEN
+    ) {
+
+      client.send(message);
+
+    }
+
+  }
+
+}
+
+function subscribeSymbol(
+  symbol: string
+) {
+
+  if (
+    subscribedSymbols.has(
+      symbol
+    )
+  ) {
+    return;
+  }
+
+  subscribedSymbols.add(
+    symbol
+  );
+
+  kisWs?.send(
+    JSON.stringify({
+      header: {
+        approval_key:
+          approvalKey,
+        custtype: "P",
+        tr_type: "1",
+        "content-type":
+          "utf-8"
+      },
+      body: {
+        input: {
+          tr_id:
+            "H0STCNT0",
+          tr_key:
+            symbol
+        }
+      }
+    })
+  );
+
+  console.log(
+    "[KIS SUBSCRIBE]",
+    symbol
+  );
+
+}
 
 async function startServer() {
   // Populate the high-speed local KRX stock list cache immediately on boot
@@ -1537,6 +1715,9 @@ console.log(
   "[WS SERVER CREATED]"
 );
 
+
+connectKis();
+
 server.listen(
   PORT,
   "0.0.0.0",
@@ -1611,6 +1792,7 @@ wss.on("error", (err) => {
 
 
 wss.on("connection", (client, req) => {
+  clients.add(client);
 
   console.log(
     "[CLIENT CONNECTED]",
@@ -1622,9 +1804,49 @@ wss.on("connection", (client, req) => {
       type: "connected"
     })
   );
-console.log(
-"[CONNECTED MESSAGE SENT]"
+
+client.on(
+  "message",
+  (raw) => {
+
+    try {
+
+      const msg =
+        JSON.parse(
+          raw.toString()
+        );
+
+      if (
+        msg.type ===
+        "subscribe"
+      ) {
+
+        subscribeSymbol(
+          msg.symbol
+        );
+
+      }
+
+    } catch {}
+
+  }
 );
+
+  client.on("message", (msg) => {
+    try {
+      const data = JSON.parse(msg.toString());
+      if (data.type === "subscribe" && data.symbol) {
+        subscribeSymbol(data.symbol);
+      }
+    } catch (e) {
+      console.warn("[WS CLIENT MSG PARSE ERROR]", e);
+    }
+  });
+
+  client.on("close", () => {
+    clients.delete(client);
+    console.log("[CLIENT DISCONNECTED]");
+  });
 });
 
 }
