@@ -1845,7 +1845,7 @@ setGapInventory(nextInv);
     setIsGapBotActive(false);
     setGapBuyPrice(newTab.gapBuyPrice);
     setGapSellPrice(newTab.gapSellPrice);
-    setGapInventory(nextInv);
+    setGapInventory([]);
     gapInventoryRef.current = [];
     setGapTradingProfit(0);
     setGapTradeCount(0);
