@@ -1612,6 +1612,11 @@ kisConfig.isConnected
   }, [activeTabId]);
 
   const handleSwitchTab = (tabId: string) => {
+    console.log(
+  '[TAB INVENTORY RAW]',
+  targetTab.symbol,
+  targetTab.gapInventory
+);
     if (tabId === activeTabIdRef.current) return;
     const targetTab = scalperTabsRef.current.find(t => t.id === tabId);
     if (!targetTab) return;
@@ -1672,9 +1677,20 @@ kisConfig.isConnected
     });
 
     const nextInv = (targetTab.gapInventory || [])
-      .filter(s => !s.symbol || s.symbol === targetTab.symbol)
-      .map(s => (typeof s === 'object' ? { ...s, symbol: targetTab.symbol } : { id: `SLOT-${Date.now()}`, price: s, quantity: 1, symbol: targetTab.symbol }));
-    setGapInventory([]);
+  .filter(
+    slot =>
+      slot &&
+      typeof slot === 'object' &&
+      'id' in slot
+  )
+  .map(slot => ({
+    id: String(slot.id),
+    price: Number(slot.price || 0),
+    quantity: Number(slot.quantity || 0),
+    symbol: targetTab.symbol
+  }));
+
+setGapInventory(nextInv);
     gapInventoryRef.current = nextInv;
 
     setGapTradingProfit(targetTab.gapTradingProfit || 0);
@@ -1829,7 +1845,7 @@ kisConfig.isConnected
     setIsGapBotActive(false);
     setGapBuyPrice(newTab.gapBuyPrice);
     setGapSellPrice(newTab.gapSellPrice);
-    setGapInventory([]);
+    setGapInventory(nextInv);
     gapInventoryRef.current = [];
     setGapTradingProfit(0);
     setGapTradeCount(0);
