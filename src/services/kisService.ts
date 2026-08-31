@@ -1602,17 +1602,20 @@ console.log(
   }
 
   public async getWebsocketApprovalKey() {
-
-  if (!this.config)
-    throw new Error("KIS Config not initialized");
-
 console.log(
 "[APPROVAL CONFIG]",
 {
 appKeyLength: this.config.appKey?.length,
-appSecretLength: this.config.appSecret?.length
+appSecretLength: this.config.appSecret?.length,
+accountNo: this.config?.accountNo
 }
 );
+
+
+
+  if (!this.config)
+    throw new Error("KIS Config not initialized");
+
 
   const endpoint = '/oauth2/Approval';
 

@@ -1159,6 +1159,17 @@ const rsi =
   // KIS Proxy Routes with short-term quote caching & edge optimization
   app.all('/api/kis/*', async (req, res) => {
     const targetUrl = req.path.replace('/api/kis', '');
+
+    if (targetUrl === '/oauth2/Approval') {
+console.log(
+'[APPROVAL SERVER BODY]',
+req.body
+);
+console.log(
+'[APPROVAL SERVER APPSECRET]',
+req.body?.appsecret?.length
+);
+}
     
     // Check if client specifies real or virtual server
     const isRealServer = req.headers['x-is-real-server'] !== 'false';
@@ -1243,6 +1254,14 @@ const rsi =
         if (req.method !== 'GET' && req.method !== 'HEAD') {
           axiosConfig.data = req.body;
         }
+        if (targetUrl === '/oauth2/Approval') {
+
+  console.log(
+    '[APPROVAL AXIOS DATA]',
+    axiosConfig.data
+  );
+
+}
         response = await axios(axiosConfig);
         break;
       } catch (error: any) {
