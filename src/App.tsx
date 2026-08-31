@@ -5228,32 +5228,47 @@ const newStock: Stock = {
       await new Promise(r => setTimeout(r, 500));
 
       const currentStocks = stocksRef.current;
-      if (currentStocks.length > 0) {
-        try {
-          const updatedStocks = await Promise.all(currentStocks.map(async (s) => {
-            try {
-              const pData = await kisService.getPrice(s.symbol);
-              if (pData && pData.current > 0) {
-                return {
-                  ...s,
-                  price: pData.current,
-                  change: pData.change,
-                  changePercent: pData.changePercent,
-                  volume: pData.volume,
-                  isRealTime: true,
-                  lastUpdated: new Date().toLocaleTimeString()
-                };
-              }
-            } catch (pErr) {
-              console.warn("Stock price fetch skip in init sync:", s.symbol, pErr);
-            }
-            return s;
-          }));
-          setStocks(updatedStocks);
-        } catch (stErr) {
-          console.warn("Watchlist price fetch error:", stErr);
+
+if (currentStocks.length > 0) {
+  try {
+    const updatedStocks: Stock[] = [];
+
+    for (const s of currentStocks) {
+      try {
+        const pData = await kisService.getPrice(s.symbol);
+
+        if (pData && pData.current > 0) {
+          updatedStocks.push({
+            ...s,
+            price: pData.current,
+            change: pData.change,
+            changePercent: pData.changePercent,
+            volume: pData.volume,
+            isRealTime: true,
+            lastUpdated: new Date().toLocaleTimeString()
+          });
+        } else {
+          updatedStocks.push(s);
         }
+      } catch (pErr) {
+        console.warn(
+          "Stock price fetch skip in init sync:",
+          s.symbol,
+          pErr
+        );
+
+        updatedStocks.push(s);
       }
+
+      // KIS API 과호출 방지
+      await new Promise(resolve => setTimeout(resolve, 150));
+    }
+
+    setStocks(updatedStocks);
+  } catch (stErr) {
+    console.warn("Watchlist price fetch error:", stErr);
+  }
+}
 
       setStartupSteps(prev => prev.map(s => s.id === 'market-feed' ? { 
         ...s, 
