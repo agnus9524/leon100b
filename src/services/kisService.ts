@@ -1632,19 +1632,16 @@ wsUrl
 
   const approvalKey =
     await this.getWebsocketApprovalKey();
+console.log(
 
+"[APPROVAL KEY]",
+approvalKey
+);
   const ws = new WebSocket(wsUrl);
 console.log(
   "[KIS WS START]"
 );
-console.warn(
-3
-"[WS CLOSED]",
-{
-code: event.code,
-reason: event.reason,
-wasClean: event.wasClean
-}
+
 
   ws.onopen = () => {
 console.log("[KIS WS OPEN]");
@@ -1679,8 +1676,15 @@ console.log("[KIS WS OPEN]");
   ws.onerror = (err) => {
     console.error("[WS ERROR]", err);
   };
-ws.onclose = () => {
-console.warn("[WS CLOSED]");
+ws.onclose = (event) => {
+  console.warn(
+    "[WS CLOSED]",
+    {
+      code: event.code,
+      reason: event.reason,
+      wasClean: event.wasClean
+    }
+  );
 };
 
   return ws;
