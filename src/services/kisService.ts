@@ -1615,6 +1615,69 @@ console.log(
     return res.data.approval_key;
   }
 
+public async connectWebSocket(
+  symbols: string[],
+  onTick: (data: any) => void
+): Promise<WebSocket> {
+  const wsUrl = "wss://ops.koreainvestment.com:21000";
+  console.log(
+"[WS URL]",
+wsUrL
+);
+
+  const approvalKey =
+    await this.getWebsocketApprovalKey();
+
+  const ws = new WebSocket(
+    "wss://ops.koreainvestment.com:21000"
+  );
+console.log(
+  "[KIS WS START]"
+);
+
+  ws.onopen = () => {
+console.log("[KIS WS OPEN]");
+    for (const symbol of symbols) {
+
+      ws.send(
+        JSON.stringify({
+          header: {
+            approval_key: approvalKey
+          },
+          body: {
+            tr_id: "H0STCNT0",
+            tr_key: symbol
+          }
+        })
+      );
+
+    }
+
+  };
+
+  ws.onmessage = (event) => {
+
+  console.log(
+    "[RAW WS]",
+    event.data
+  );
+  onTick(event.data);
+
+};
+
+  ws.onerror = (err) => {
+56
+console.error("[WS ERROR]", err);
+};
+ws.onclose = () => {
+console.warn("[WS CLOSED]");
+};
+
+  return ws;
+}
+
+
+
   public async revokeToken() {
     if (!this.config || !this.accessToken) return;
     const endpoint = '/oauth2/revokeP';

@@ -1039,7 +1039,7 @@ export default function App() {
     return (saved !== null && !isNaN(Number(saved)) && Number(saved) !== 34.68) ? Number(saved) : 0;
   });
   const [kisTotalRealizedPnL, setKisTotalRealizedPnL] = useState<number | null>(null);
-
+  
   useEffect(() => {
     localStorage.setItem('sleek_orderable_krw', String(orderableKrw));
   }, [orderableKrw]);
@@ -1227,6 +1227,50 @@ export default function App() {
     isRealOrderEnabled: true // 실제 주문 전송 여부 (false일 경우 KIS 연동 가상 매매)
   });
 
+useEffect(() => {
+
+console.log(
+"[KIS WS START]",
+kisConfig.isConnected
+);
+  if (!kisConfig.isConnected) {
+    return;
+  }
+
+  const symbols =
+    scalperTabsRef.current
+      .map(t => t.symbol)
+      .filter(Boolean);
+
+  if (symbols.length === 0) {
+    return;
+  }
+
+  let socket: WebSocket | null = null;
+
+  kisService
+    .connectWebSocket(
+      symbols,
+      tick => {
+        console.log("[TICK]", tick);
+      }
+    )
+    .then(ws => {
+      socket = ws;
+    })
+    .catch(err => {
+      console.error(
+        "[KIS WS ERROR]",
+        err
+      );
+    });
+
+  return () => {
+    socket?.close();
+  };
+
+}, [kisConfig.isConnected]);
+
   // Helper to get active config
   const getActiveKisConfig = (config: any) => {
     return {
@@ -1252,6 +1296,7 @@ export default function App() {
   };
 
   const [liveOrderbook, setLiveOrderbook] = useState<any>(null);
+  const [liveOrderbooks, setLiveOrderbooks] = useState<Record<string, any>>({});
   const [isLiveOrderbookLoading, setIsLiveOrderbookLoading] = useState<boolean>(false);
   const [showKisModal, setShowKisModal] = useState(false);
   const [showKisPassword, setShowKisPassword] = useState(false);
@@ -5377,17 +5422,49 @@ const newStock: Stock = {
     };
 
     // 3. Live real-time orderbook sync for selected stock (every 1.5 seconds)
+    const [liveOrderbooks, setLiveOrderbooks] = useState<Record<string, any>>({});
+
     const syncLiveOrderbook = async () => {
-      if (!selectedSymbol) return;
-      try {
-        const ob = await kisService.fetchLiveOrderbook(selectedSymbol);
-        if (ob) {
-          setLiveOrderbook(ob);
-        }
-      } catch (e: any) {
-        console.warn(`Live orderbook fetch failed for ${selectedSymbol}:`, e);
+
+  const targets =
+    scalperTabsRef.current
+      .filter(tab => tab.symbol);
+
+  for (const tab of targets) {
+
+    try {
+
+      const ob =
+        await kisService.fetchLiveOrderbook(
+          tab.symbol
+        );
+
+      if (ob) {
+
+        setLiveOrderbooks(prev => ({
+          ...prev,
+          [tab.symbol]: ob
+        }));
+
+// 현재 선택 종목 UI 유지
+if (tab.symbol === selectedSymbol) {
+setLiveOrderbook(ob);
+}
+
       }
-    };
+
+    } catch (e) {
+
+      console.warn(
+        `Live orderbook fetch failed for ${tab.symbol}`,
+        e
+      );
+
+    }
+
+  }
+
+};
 
     // Immediate initial sync
     syncAllPrices();
