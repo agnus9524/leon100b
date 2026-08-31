@@ -3558,7 +3558,13 @@ kisConfig.isConnected
       const stock = stocks.find(s => s.symbol === sym) ||
                     (marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS).find(s => s.symbol === sym) ||
                     { name: sym, symbol: sym, price: 0, changePercent: 0, volume: '0', history: [], market: marketType };
-
+if (!stock) {
+  console.error(
+    "[TAB OPEN] Stock not found",
+    symbol
+  );
+  return;
+}
       const qty = holdings[sym] || 0;
       const isHeld = Number(qty) > 0;
       const isRising = stock.changePercent > 0;
