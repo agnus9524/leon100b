@@ -1548,9 +1548,38 @@ server.on(
   }
 );
 const wss = new WebSocketServer({
-  server,
-  path: "/ws/kis"
+  noServer: true
 });
+
+server.on("upgrade", (req, socket, head) => {
+
+  console.log(
+    "[UPGRADE REQUEST]",
+    req.url
+  );
+
+  if (req.url !== "/ws/kis") {
+    socket.destroy();
+    return;
+  }
+
+  wss.handleUpgrade(
+    req,
+    socket,
+    head,
+    (ws) => {
+      wss.emit(
+        "connection",
+        ws,
+        req
+      );
+    }
+  );
+});
+
+console.log(
+  "[WS SERVER CREATED]"
+);
 console.log(
   "[WS SERVER CREATED]"
 );
