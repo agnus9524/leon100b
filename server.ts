@@ -1170,19 +1170,7 @@ req.path
 '[APPROVAL BODY RECEIVED]',
 req.body
 );
-     console.log(
-'[APPROVAL AXIOS DATA]',
-axiosConfig.data
-);
-   console.log(
-'[APPROVAL HEADERS]',
-axiosConfig.headers
-);
-console.log(
-'[APPROVAL SERVER BODY]',
-req.body
-);
-console.log(
+      console.log(
 '[APPROVAL SERVER APPSECRET]',
 req.body?.appsecret?.length
 );
@@ -1277,11 +1265,15 @@ req.body?.appsecret?.length
     '[APPROVAL AXIOS DATA]',
     axiosConfig.data
   );
-
-}console.log(
-  '[APPROVAL AXIOS DATA]',
-  axiosConfig.data
+  console.log(
+'[APPROVAL HEADERS]',
+headers
 );
+console.log(
+'[APPROVAL FULL URL]',
+fullUrl
+);
+        }
 ``
         response = await axios(axiosConfig);
         break;
