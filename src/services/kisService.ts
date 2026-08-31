@@ -1621,7 +1621,7 @@ public async connectWebSocket(
   symbols: string[],
   onTick: (data: any) => void
 ): Promise<WebSocket> {
-  const wsUrl = "wss://www.leo100b.ccd.kr/ws/kis";
+  const wsUrl = "wss://leo100b.ccd.kr/ws/kis";
   
   console.log(
 "[WS URL]",
