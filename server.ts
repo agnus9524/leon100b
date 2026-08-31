@@ -1535,6 +1535,21 @@ const wss = new WebSocketServer({
   server,
   path: "/ws/kis"
 });
+
+wss.on("connection", (client) => {
+
+  console.log(
+    "[CLIENT CONNECTED]"
+  );
+
+  client.send(
+    JSON.stringify({
+      type: "connected"
+    })
+  );
+
+});
+
 }
 
 startServer();
