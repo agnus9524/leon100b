@@ -1674,7 +1674,7 @@ kisConfig.isConnected
     const nextInv = (targetTab.gapInventory || [])
       .filter(s => !s.symbol || s.symbol === targetTab.symbol)
       .map(s => (typeof s === 'object' ? { ...s, symbol: targetTab.symbol } : { id: `SLOT-${Date.now()}`, price: s, quantity: 1, symbol: targetTab.symbol }));
-    setGapInventory(nextInv);
+    setGapInventory([]);
     gapInventoryRef.current = nextInv;
 
     setGapTradingProfit(targetTab.gapTradingProfit || 0);
@@ -5433,7 +5433,7 @@ const newStock: Stock = {
     };
 
     // 3. Live real-time orderbook sync for selected stock (every 1.5 seconds)
-    const [liveOrderbooks, setLiveOrderbooks] = useState<Record<string, any>>({});
+   
 
     const syncLiveOrderbook = async () => {
 
