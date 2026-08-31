@@ -1652,25 +1652,30 @@ console.log(
   wsUrl
 );
 
-  ws.onopen = () => {
-console.log("[KIS WS OPEN]");
-console.log("[WS SUBSCRIBE SYMBOLS]",
-console.log("[CLOUD RUN WS OPEN]"),
-symbols
-);
-    for (const symbol of symbols) {
+ws.onopen = () => {
 
-      ws.send(
-JSON.stringify({
-type:
-"subscribe",
-symbol
-})
-);
-    }
+  console.log("[KIS WS OPEN]");
 
-  };
+  console.log("[CLOUD RUN WS OPEN]");
 
+  console.log(
+    "[WS SUBSCRIBE SYMBOLS]",
+    symbols
+  );
+
+  for (const symbol of symbols) {
+
+    ws.send(
+      JSON.stringify({
+        type: "subscribe",
+        symbol
+      })
+    );
+
+  }
+
+};
+``
   ws.onmessage = (event) => {
 
   console.log(
