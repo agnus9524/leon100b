@@ -4595,6 +4595,11 @@ const newStock: Stock = {
       };
 
       setStocks(prev => [newStock, ...prev]);
+      openOrSwitchScalperTab(
+symbolToUse,
+data.name,
+data.price
+);
       setSelectedSymbol(symbolToUse);
       setSearchSymbol("");
       addLog('SYSTEM', '매수', 0, 0, `[종목 추가] ${data.name}(${symbolToUse}) 종목이 분석 리스트에 추가되었습니다.`);
