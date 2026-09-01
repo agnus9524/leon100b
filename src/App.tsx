@@ -1612,14 +1612,16 @@ kisConfig.isConnected
   }, [activeTabId]);
 
   const handleSwitchTab = (tabId: string) => {
-    console.log(
+   
+    if (tabId === activeTabIdRef.current) return;
+    const targetTab = scalperTabsRef.current.find(t => t.id === tabId);
+    if (!targetTab) return;
+ console.log(
   '[TAB INVENTORY RAW]',
   targetTab.symbol,
   targetTab.gapInventory
 );
-    if (tabId === activeTabIdRef.current) return;
-    const targetTab = scalperTabsRef.current.find(t => t.id === tabId);
-    if (!targetTab) return;
+
 
     // 1. Save current active tab's properties into scalperTabs before switching
     const prevTabId = activeTabIdRef.current;
@@ -7001,7 +7003,8 @@ setLiveOrderbook(ob);
           const isMicroTrailingStop = overallProfitRatio >= microThreshold && dropFromPeak >= 0.0008;
           const isStandardTrailing = overallProfitRatio > 0.002 && dropFromPeak > 0.003;
           const isTrailingStop = isMicroTrailingStop || isStandardTrailing;
-          const isProfitTarget = (isOverBought || isNearUpperBand || overallProfitRatio >= effectiveTargetRatio) && (overallProfitRatio > 0);
+const sellSignal = (strat.rsi >= 75 && strat.isNearUpperBand) || strat.isBearishAbsorption || (strat.sma5 < strat.sma20 && overallProfitRatio > 0);
+const isProfitTarget = sellSignal;
           const effectiveStopLossRatio = isAiMaxYieldActive ? Math.min(scalpingStopLoss / 100, -0.005) : scalpingStopLoss / 100;
           const isStopLoss = overallProfitRatio <= effectiveStopLossRatio;
           const isSmartExit = (isSmartScalperMode || isAiMaxYieldActive) && (rsi > 70 || overallProfitRatio >= effectiveTargetRatio * 1.2);
