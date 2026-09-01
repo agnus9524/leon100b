@@ -5255,7 +5255,7 @@ data.price
         ...prev,
         progress: 55,
         currentStep: '3단계: 실시간 10단계 호가 및 체결 잔량 정밀 검증 중...',
-        completedSteps: ['1. KIS OpenAPI 보안 인증', '2. KRX 시장 시세 피드 동기화']
+        completedSteps: ['1. KIS OpenAPI 보안 인증', '2. 등록 종목 실시간 시세 동기화']
       }));
 
       // Step 3: Orderbook
@@ -5281,7 +5281,7 @@ data.price
         ...prev,
         progress: 80,
         currentStep: '4단계: KIS 실시간 계좌 잔고 및 주문 가능 예수금 산출 중...',
-        completedSteps: ['1. KIS OpenAPI 보안 인증', '2. KRX 시장 시세 피드', '3. 실시간 10단계 호가 데이터']
+        completedSteps: ['1. KIS OpenAPI 보안 인증', '2. 등록 종목 실시간 시세 동기화', '3. 실시간 10단계 호가 데이터']
       }));
 
       // Step 4: Account Balance & Orders
@@ -5299,7 +5299,7 @@ data.price
         ...prev,
         progress: 95,
         currentStep: '5단계: 스캘퍼 AI 알고리즘 및 리스크 관리 엔진 가동 준비 중...',
-        completedSteps: ['1. KIS 보안 인증', '2. 시장 시세 피드', '3. 10단계 호가 데이터', '4. 실시간 계좌 잔고']
+        completedSteps: ['1. KIS 보안 인증', '2. 등록 종목 동기화', '3. 10단계 호가 데이터', '4. 실시간 계좌 잔고']
       }));
 
       // Step 5: Engine Ready
@@ -5319,7 +5319,7 @@ data.price
         currentStep: '한국투자증권 모든 실시간 데이터 검증 완료! 스캘퍼 터미널을 시작합니다.',
         completedSteps: [
           '1. KIS OpenAPI 보안 인증 및 토큰 발급',
-          '2. KRX 정규 시장 시세 및 지수 피드 수신',
+          '2. 등록 종목 실시간 시세 동기화',
           '3. 실시간 10단계 호가 및 체결 잔량 정밀 체크',
           '4. 실시간 계좌 잔고 및 주문 가능 예수금 산출',
           '5. 스캘퍼 AI 알고리즘 및 리스크 관리 엔진 가동'
