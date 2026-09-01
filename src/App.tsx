@@ -136,8 +136,7 @@ function cn(...classes: (string | boolean | undefined | null)[]) {
 
 // ============================================================
 // 🔄 종목별 매매 라이프사이클 상태 머신
-// WATCHING → BUY_READY → BUYING → HOLDING → SELL_READY → COMPLETED
-// 실시간 조건에 따라 계속 바뀌는 값이므로 ScalperMonitorState(실시간 모니터) 소속.
+// WATCHING → BUY_READY → BUYING → HOLDING → SELL_READY → SELLING → COMPLETED(→WATCHING) / ERROR
 // ============================================================
 export type ScalperLifecycleStatus =
   | 'WATCHING'    // 추천/등록 완료, 전략 센서 감시 중
@@ -145,8 +144,11 @@ export type ScalperLifecycleStatus =
   | 'BUYING'      // 매수 주문 전송/체결 대기
   | 'HOLDING'     // 매수 체결 완료, 보유 중
   | 'SELL_READY'  // 매도 조건 발생, 매도 주문 준비
-  | 'COMPLETED';  // 매도 체결 완료 (이후 다시 WATCHING으로 순환)
+  | 'SELLING'     // 매도 주문 전송/체결 대기
+  | 'COMPLETED'   // 매도 체결 완료 (이후 다시 WATCHING으로 순환)
+  | 'ERROR';      // 주문/체결 처리 중 오류 발생
 
+// 파생 뷰(=기존 엔진 루프/컴포넌트가 그대로 참조하는 flat 형태). 저장 자체는 ScalperInventoryItem.
 export interface ScalperTab {
   id: string; // symbol e.g., '073240' or '001520'
   symbol: string;
@@ -169,57 +171,164 @@ export interface ScalperTab {
 }
 
 // ============================================================
-// 🏗️ SCALPER INVENTORY / REAL-TIME MONITOR 구조 분리
+// 🏗️ SCALPER INVENTORY — 종목 하나당 하나의 레코드, 관심사별로 완전히 분리된 네임스페이스
 // ------------------------------------------------------------
-// 추천 데이터(등록 시점 스냅샷)와 실시간 데이터(체결/가격/로그)는
-// 절대 같은 저장소(state)에 있으면 안 된다는 원칙에 따라 분리한다.
+// "추천 당시 스냅샷"과 "지금 이 순간의 데이터"는 절대 같은 필드에 있으면 안 된다는 원칙에 따라
+// recommendation(불변 스냅샷) / market·account·sensors·status(계속 갱신되는 실시간 데이터)를
+// 최상위가 아닌 네임스페이스 단위로 분리한다. 각 실시간 네임스페이스는 자기 lastUpdatedAt을 가져서
+// "이 값이 언제 마지막으로 갱신됐는지"를 항상 알 수 있다.
 //
-// - ScalperInventoryItem: "등록 레지스트리". 등록 시점에 한 번 기록되고
-//   이후에는 isBotActive/전략 설정값만 바뀐다. 가격/체결/로그는 절대 여기 쓰지 않는다.
-// - ScalperMonitorState : "실시간 모니터". symbol을 key로 하는 별도 맵에 저장되며,
-//   시세/체결/포지션/로그/매매 라이프사이클 상태처럼 계속 바뀌는 값만 담는다.
-// - ScalperTab은 위 두 저장소를 symbol 기준으로 join한 "파생 뷰"로만 존재한다
-//   (아래 useMemo 참고). 기존 컴포넌트/엔진 루프가 참조하는 필드 이름은
-//   전부 그대로 유지되므로 소비 측 코드는 수정할 필요가 없다.
+// ScalperTab은 이 구조를 기존 엔진 루프/컴포넌트가 쓰는 flat 필드명으로 펼친 "읽기 전용 파생 뷰"다
+// (아래 useMemo 참고). 저장은 여기(ScalperInventoryItem)에서만 하고, 절대 ScalperTab에 직접 쓰지 않는다.
 // ============================================================
 
+export interface ScalperPosition {
+  id: string;
+  price: number;
+  quantity: number;
+  symbol?: string;
+}
+
 export interface ScalperInventoryItem {
-  id: string;                 // = symbol (등록 시점에 고정되는 고유 ID)
+  id: string;            // = symbol
   symbol: string;
   name: string;
-  registeredAt: number;       // 등록시간
-  recommendedPrice: number;   // 추천/등록 당시 가격 스냅샷 — 이후 절대 갱신되지 않음
-  strategyCategory: string;   // 추천 당시 전략 카테고리 (눌림목/돌파/VWAP/CVD 등)
-  isBotActive: boolean;       // 모니터링(봇 실행) 상태
-  gapBuyPrice: number;
-  gapSellPrice: number;
-  tradeQuantity: number;
-  maxSlots: number;
-  entryPriceMode: 'CURRENT' | 'BID1' | 'BID2' | 'BID4';
-  autoCancelThreshold: number;
-}
+  registeredAt: number;
 
-export interface ScalperMonitorState {
-  symbol: string;
-  gapInventory: { id: string; price: number; quantity: number; symbol?: string }[]; // 실시간 보유 포지션 슬롯
-  gapTradingProfit: number;
-  gapTradeCount: number;
-  lastTradeType: 'BUY' | 'SELL' | null;
-  scalperMessage: string;     // 상태 메시지
+  // 추천 당시 스냅샷 — 등록 이후 절대 갱신되지 않는다
+  recommendation: {
+    score: number;
+    grade: string;
+    price: number;
+    reason: string;
+    tags: string[];
+    category: string; // 눌림목/돌파/VWAP/CVD 등
+  };
+
+  // 실시간 시장 데이터 — 시세 폴링이 갱신
+  market: {
+    currentPrice: number;
+    prevClose: number;
+    change: number;
+    changePercent: number;
+    volume: string;
+    lastUpdatedAt: number;
+  };
+
+  // 계좌/포지션 데이터 — 체결/KIS 동기화가 갱신
+  account: {
+    holdingQty: number;
+    orderableQty: number;
+    avgPrice: number;
+    evaluationAmount: number;
+    positions: ScalperPosition[]; // 실시간 보유 포지션 슬롯
+    realizedProfit: number;
+    tradeCount: number;
+    lastTradeType: 'BUY' | 'SELL' | null;
+    lastUpdatedAt: number;
+  };
+
+  // 전략 센서 — 스캘핑 엔진 루프가 매 틱마다 갱신
+  sensors: {
+    pullback: boolean;
+    breakout: boolean;
+    vwap: boolean;
+    cvd: boolean;
+    volumeMomentum: boolean;
+    rsi: number;
+    activeCount: number;
+    lastUpdatedAt: number;
+  };
+
+  // 전략 설정(봇 파라미터) — 사용자가 조정, 시세/체결로는 절대 갱신되지 않음
+  strategy: {
+    isBotActive: boolean;
+    gapBuyPrice: number;
+    gapSellPrice: number;
+    tradeQuantity: number;
+    maxSlots: number;
+    entryPriceMode: 'CURRENT' | 'BID1' | 'BID2' | 'BID4';
+    autoCancelThreshold: number;
+  };
+
+  // 시스템(매매 라이프사이클) 상태
+  status: {
+    state: ScalperLifecycleStatus;
+    message: string;
+    lastUpdatedAt: number;
+  };
+
   tradeLogs: TradeLog[];
-  lifecycleStatus: ScalperLifecycleStatus;
 }
 
-const createDefaultMonitor = (symbol: string): ScalperMonitorState => ({
-  symbol,
-  gapInventory: [],
-  gapTradingProfit: 0,
-  gapTradeCount: 0,
-  lastTradeType: null,
-  scalperMessage: "대기 중...",
-  tradeLogs: [],
-  lifecycleStatus: 'WATCHING'
-});
+const createInventoryItem = (params: {
+  symbol: string;
+  name: string;
+  price: number;
+  recommendation?: { score?: number; grade?: string; reason?: string; tags?: string[]; category?: string };
+  strategy?: Partial<ScalperInventoryItem['strategy']>;
+  initialLifecycleStatus?: ScalperLifecycleStatus;
+}): ScalperInventoryItem => {
+  const now = Date.now();
+  return {
+    id: params.symbol,
+    symbol: params.symbol,
+    name: params.name,
+    registeredAt: now,
+    recommendation: {
+      score: params.recommendation?.score ?? 0,
+      grade: params.recommendation?.grade ?? '-',
+      price: params.price,
+      reason: params.recommendation?.reason ?? '수동 등록',
+      tags: params.recommendation?.tags ?? [],
+      category: params.recommendation?.category ?? '수동 등록'
+    },
+    market: {
+      currentPrice: params.price,
+      prevClose: params.price,
+      change: 0,
+      changePercent: 0,
+      volume: '0',
+      lastUpdatedAt: now
+    },
+    account: {
+      holdingQty: 0,
+      orderableQty: 0,
+      avgPrice: 0,
+      evaluationAmount: 0,
+      positions: [],
+      realizedProfit: 0,
+      tradeCount: 0,
+      lastTradeType: null,
+      lastUpdatedAt: now
+    },
+    sensors: {
+      pullback: false,
+      breakout: false,
+      vwap: false,
+      cvd: false,
+      volumeMomentum: false,
+      rsi: 50,
+      activeCount: 0,
+      lastUpdatedAt: now
+    },
+    strategy: {
+      isBotActive: false,
+      gapBuyPrice: params.strategy?.gapBuyPrice ?? 0,
+      gapSellPrice: params.strategy?.gapSellPrice ?? 0,
+      tradeQuantity: params.strategy?.tradeQuantity ?? 1,
+      maxSlots: params.strategy?.maxSlots ?? 10,
+      entryPriceMode: params.strategy?.entryPriceMode ?? 'BID2',
+      autoCancelThreshold: params.strategy?.autoCancelThreshold ?? 0.2
+    },
+    status: {
+      state: params.initialLifecycleStatus ?? 'WATCHING',
+      message: '대기 중...',
+      lastUpdatedAt: now
+    },
+    tradeLogs: []
+  };
+};
 
 interface Stock {
   symbol: string;
@@ -1605,83 +1714,114 @@ kisConfig.isConnected
   };
 
   // 병합된 ScalperTab[] 시드 데이터를 "등록 레지스트리"와 "실시간 모니터" 두 저장소로 분리
-  const splitTabsIntoStores = (tabs: ScalperTab[]): { inventory: ScalperInventoryItem[]; monitors: Record<string, ScalperMonitorState> } => {
-    const inventory: ScalperInventoryItem[] = tabs.map(t => ({
+  // 저장된 구버전(flat) 데이터를 신규 중첩 구조로 마이그레이션
+  const migrateLegacyTabsToInventory = (tabs: ScalperTab[]): ScalperInventoryItem[] => {
+    const now = Date.now();
+    return tabs.map(t => ({
       id: t.id,
       symbol: t.symbol,
       name: t.name,
-      registeredAt: Date.now(),
-      recommendedPrice: t.gapBuyPrice || t.price || 0,
-      strategyCategory: '기존 등록',
-      isBotActive: t.isBotActive,
-      gapBuyPrice: t.gapBuyPrice,
-      gapSellPrice: t.gapSellPrice,
-      tradeQuantity: t.tradeQuantity,
-      maxSlots: t.maxSlots,
-      entryPriceMode: t.entryPriceMode,
-      autoCancelThreshold: t.autoCancelThreshold
-    }));
-    const monitors: Record<string, ScalperMonitorState> = {};
-    tabs.forEach(t => {
-      monitors[t.symbol] = {
-        symbol: t.symbol,
-        gapInventory: t.gapInventory || [],
-        gapTradingProfit: t.gapTradingProfit || 0,
-        gapTradeCount: t.gapTradeCount || 0,
+      registeredAt: now,
+      recommendation: {
+        score: 0,
+        grade: '-',
+        price: t.gapBuyPrice || t.price || 0,
+        reason: '기존 등록',
+        tags: [],
+        category: '기존 등록'
+      },
+      market: {
+        currentPrice: t.price || t.gapBuyPrice || 0,
+        prevClose: t.price || t.gapBuyPrice || 0,
+        change: 0,
+        changePercent: 0,
+        volume: '0',
+        lastUpdatedAt: now
+      },
+      account: {
+        holdingQty: (t.gapInventory || []).reduce((acc, s) => acc + (s.quantity || 0), 0),
+        orderableQty: 0,
+        avgPrice: 0,
+        evaluationAmount: 0,
+        positions: t.gapInventory || [],
+        realizedProfit: t.gapTradingProfit || 0,
+        tradeCount: t.gapTradeCount || 0,
         lastTradeType: t.lastTradeType || null,
-        scalperMessage: t.scalperMessage || "대기 중...",
-        tradeLogs: t.tradeLogs || [],
+        lastUpdatedAt: now
+      },
+      sensors: {
+        pullback: false, breakout: false, vwap: false, cvd: false, volumeMomentum: false,
+        rsi: 50, activeCount: 0, lastUpdatedAt: now
+      },
+      strategy: {
+        isBotActive: t.isBotActive,
+        gapBuyPrice: t.gapBuyPrice,
+        gapSellPrice: t.gapSellPrice,
+        tradeQuantity: t.tradeQuantity,
+        maxSlots: t.maxSlots,
+        entryPriceMode: t.entryPriceMode,
+        autoCancelThreshold: t.autoCancelThreshold
+      },
+      status: {
         // 재접속 시 이미 보유 포지션이 있으면 HOLDING부터, 없으면 WATCHING부터 시작
-        lifecycleStatus: (t.gapInventory && t.gapInventory.length > 0) ? 'HOLDING' : 'WATCHING'
-      };
-    });
-    return { inventory, monitors };
+        state: (t.gapInventory && t.gapInventory.length > 0) ? 'HOLDING' : 'WATCHING',
+        message: t.scalperMessage || "대기 중...",
+        lastUpdatedAt: now
+      },
+      tradeLogs: t.tradeLogs || []
+    }));
   };
 
-  // 🏗️ 저장소 1: 등록 레지스트리 (추천/등록 시점 스냅샷 + 전략 설정) — 시세/체결로 절대 갱신되지 않음
+  // 🏗️ 저장소: 종목별 등록/실시간 정보를 담은 단일 레지스트리.
+  // 관심사(recommendation/market/account/sensors/strategy/status)는 네임스페이스로 분리되어 있어
+  // "추천 당시 스냅샷"과 "지금 이 순간의 데이터"가 섞일 수 없는 구조다.
   const [scalperInventory, setScalperInventory] = useState<ScalperInventoryItem[]>(
-    () => splitTabsIntoStores(buildInitialScalperTabs()).inventory
-  );
-  // 🏗️ 저장소 2: 실시간 모니터 (symbol 기준 맵) — 시세 폴링/체결/로그가 계속 갱신
-  const [monitors, setMonitors] = useState<Record<string, ScalperMonitorState>>(
-    () => splitTabsIntoStores(buildInitialScalperTabs()).monitors
+    () => migrateLegacyTabsToInventory(buildInitialScalperTabs())
   );
 
-  // 인벤토리 필드 목록 (updateTab 헬퍼가 어느 저장소에 쓸지 자동 판별하는 데 사용)
-  const INVENTORY_FIELD_KEYS = React.useMemo(() => new Set([
-    'id', 'symbol', 'name', 'registeredAt', 'recommendedPrice', 'strategyCategory',
-    'isBotActive', 'gapBuyPrice', 'gapSellPrice', 'tradeQuantity', 'maxSlots',
-    'entryPriceMode', 'autoCancelThreshold'
-  ]), []);
-
-  // symbol 하나에 대해 등록정보/실시간정보를 부분 업데이트하는 공용 헬퍼.
-  // updates에 담긴 필드 이름을 보고 자동으로 scalperInventory / monitors 중 맞는 저장소에만 쓴다.
+  // symbol 하나에 대해 (기존 flat ScalperTab 필드명 기준) 부분 업데이트를 수행하는 공용 헬퍼.
+  // 필드 이름을 보고 자동으로 올바른 네임스페이스에만 쓴다. 기존 엔진 루프 호출부는 수정할 필요가 없다.
   const updateTab = React.useCallback((symbol: string, updates: Partial<ScalperTab>) => {
-    const invUpdates: Partial<ScalperInventoryItem> = {};
-    const monUpdates: Partial<ScalperMonitorState> = {};
-    (Object.keys(updates) as (keyof ScalperTab)[]).forEach(key => {
-      if (key === 'price') return; // ScalperTab.price는 파생 뷰 전용 필드 — 어느 저장소에도 쓰지 않음
-      if (INVENTORY_FIELD_KEYS.has(key as string)) {
-        (invUpdates as any)[key] = (updates as any)[key];
-      } else {
-        (monUpdates as any)[key] = (updates as any)[key];
-      }
-    });
-
-    if (Object.keys(invUpdates).length > 0) {
-      setScalperInventory(prev => prev.map(item => item.symbol === symbol ? { ...item, ...invUpdates } : item));
-    }
-    if (Object.keys(monUpdates).length > 0) {
-      setMonitors(prev => ({
-        ...prev,
-        [symbol]: { ...(prev[symbol] || createDefaultMonitor(symbol)), ...monUpdates }
-      }));
-    }
-  }, [INVENTORY_FIELD_KEYS]);
+    setScalperInventory(prev => prev.map(item => {
+      if (item.symbol !== symbol) return item;
+      const now = Date.now();
+      let next = item;
+      const touch = <K extends keyof ScalperInventoryItem>(key: K, patch: Partial<ScalperInventoryItem[K]>) => {
+        next = { ...next, [key]: { ...(next[key] as any), ...(patch as any) } };
+      };
+      (Object.keys(updates) as (keyof ScalperTab)[]).forEach(key => {
+        const val = (updates as any)[key];
+        switch (key) {
+          case 'name': next = { ...next, name: val }; break;
+          case 'isBotActive': touch('strategy', { isBotActive: val }); break;
+          case 'gapBuyPrice': touch('strategy', { gapBuyPrice: val }); break;
+          case 'gapSellPrice': touch('strategy', { gapSellPrice: val }); break;
+          case 'tradeQuantity': touch('strategy', { tradeQuantity: val }); break;
+          case 'maxSlots': touch('strategy', { maxSlots: val }); break;
+          case 'entryPriceMode': touch('strategy', { entryPriceMode: val }); break;
+          case 'autoCancelThreshold': touch('strategy', { autoCancelThreshold: val }); break;
+          case 'gapInventory': {
+            const positions: ScalperPosition[] = val || [];
+            touch('account', { positions, holdingQty: positions.reduce((acc, s) => acc + (s.quantity || 0), 0), lastUpdatedAt: now });
+            break;
+          }
+          case 'gapTradingProfit': touch('account', { realizedProfit: val, lastUpdatedAt: now }); break;
+          case 'gapTradeCount': touch('account', { tradeCount: val, lastUpdatedAt: now }); break;
+          case 'lastTradeType': touch('account', { lastTradeType: val, lastUpdatedAt: now }); break;
+          case 'scalperMessage': touch('status', { message: val, lastUpdatedAt: now }); break;
+          case 'lifecycleStatus': touch('status', { state: val, lastUpdatedAt: now }); break;
+          case 'tradeLogs': next = { ...next, tradeLogs: val }; break;
+          case 'price': break; // 파생 뷰 전용, 저장하지 않음
+          default: break;
+        }
+      });
+      return next;
+    }));
+  }, []);
 
   // ============================================================
   // 🔄 매매 라이프사이클 상태 전이 헬퍼
-  // WATCHING → BUY_READY → BUYING → HOLDING → SELL_READY → COMPLETED(→ WATCHING)
+  // WATCHING → BUY_READY → BUYING → HOLDING → SELL_READY → SELLING → COMPLETED(→ WATCHING) / ERROR
   // 모든 상태 변경은 예외 없이 TRADE LOGS에 기록된다.
   // ============================================================
   const LIFECYCLE_STATUS_LABEL: Record<ScalperLifecycleStatus, string> = {
@@ -1690,13 +1830,15 @@ kisConfig.isConnected
     BUYING: 'BUYING(매수주문)',
     HOLDING: 'HOLDING(보유중)',
     SELL_READY: 'SELL_READY(매도준비)',
-    COMPLETED: 'COMPLETED(매도완료)'
+    SELLING: 'SELLING(매도주문)',
+    COMPLETED: 'COMPLETED(매도완료)',
+    ERROR: 'ERROR(오류)'
   };
 
-  // 매수 계열 상태(WATCHING~HOLDING)는 '매수' 로그로, 매도 계열(SELL_READY~COMPLETED)은 '매도' 로그로 남긴다
+  // 매수 계열 상태는 '매수' 로그로, 매도 계열은 '매도' 로그로, ERROR는 직전 방향을 따라간다
   const LIFECYCLE_LOG_TYPE: Record<ScalperLifecycleStatus, '매수' | '매도'> = {
     WATCHING: '매수', BUY_READY: '매수', BUYING: '매수', HOLDING: '매수',
-    SELL_READY: '매도', COMPLETED: '매도'
+    SELL_READY: '매도', SELLING: '매도', COMPLETED: '매도', ERROR: '매도'
   };
 
   const transitionLifecycleStatus = React.useCallback((symbol: string, next: ScalperLifecycleStatus, reason: string) => {
@@ -1723,32 +1865,86 @@ kisConfig.isConnected
   }, [updateTab]);
 
   // 🔗 소비 측(엔진 루프/컴포넌트) 호환을 위한 파생(join) 뷰.
-  // scalperInventory와 monitors는 저장소 차원에서 완전히 분리되어 있으며,
-  // scalperTabs는 오직 "읽기 전용 합성 결과"로만 존재한다 (절대 setScalperTabs로 직접 쓰지 않음).
+  // scalperInventory는 관심사별 네임스페이스로 분리 저장되며,
+  // scalperTabs는 오직 "읽기 전용 평탄화 결과"로만 존재한다 (절대 setScalperTabs로 직접 쓰지 않음).
   const scalperTabs: ScalperTab[] = React.useMemo(() => {
-    return scalperInventory.map(inv => {
-      const mon = monitors[inv.symbol] || createDefaultMonitor(inv.symbol);
-      return {
-        id: inv.id,
-        symbol: inv.symbol,
-        name: inv.name,
-        isBotActive: inv.isBotActive,
-        gapBuyPrice: inv.gapBuyPrice,
-        gapSellPrice: inv.gapSellPrice,
-        tradeQuantity: inv.tradeQuantity,
-        maxSlots: inv.maxSlots,
-        entryPriceMode: inv.entryPriceMode,
-        autoCancelThreshold: inv.autoCancelThreshold,
-        gapInventory: mon.gapInventory,
-        gapTradingProfit: mon.gapTradingProfit,
-        gapTradeCount: mon.gapTradeCount,
-        lastTradeType: mon.lastTradeType,
-        scalperMessage: mon.scalperMessage,
-        tradeLogs: mon.tradeLogs,
-        lifecycleStatus: mon.lifecycleStatus
-      };
+    return scalperInventory.map(item => ({
+      id: item.id,
+      symbol: item.symbol,
+      name: item.name,
+      price: item.market.currentPrice,
+      isBotActive: item.strategy.isBotActive,
+      gapBuyPrice: item.strategy.gapBuyPrice,
+      gapSellPrice: item.strategy.gapSellPrice,
+      tradeQuantity: item.strategy.tradeQuantity,
+      maxSlots: item.strategy.maxSlots,
+      entryPriceMode: item.strategy.entryPriceMode,
+      autoCancelThreshold: item.strategy.autoCancelThreshold,
+      gapInventory: item.account.positions,
+      gapTradingProfit: item.account.realizedProfit,
+      gapTradeCount: item.account.tradeCount,
+      lastTradeType: item.account.lastTradeType,
+      scalperMessage: item.status.message,
+      tradeLogs: item.tradeLogs,
+      lifecycleStatus: item.status.state
+    }));
+  }, [scalperInventory]);
+
+  // 🔄 인벤토리의 market/account 네임스페이스를 실시간 시세/보유정보로 동기화.
+  // recommendation(추천 스냅샷)·strategy(봇 설정) 네임스페이스는 여기서 절대 건드리지 않는다.
+  useEffect(() => {
+    setScalperInventory(prev => {
+      let changed = false;
+      const next = prev.map(item => {
+        const live = stocks.find(s => s.symbol === item.symbol);
+        const holdingQty = holdings[item.symbol] || 0;
+        const avgPrice = avgPrices[item.symbol] || 0;
+        const currentPrice = (live && live.price > 0) ? live.price : item.market.currentPrice;
+        const evaluationAmount = Number((holdingQty * currentPrice).toFixed(2));
+
+        // 주문가능수량: 선택된 종목은 KIS 실계좌 조회값(kisBuyableQty) 우선, 그 외는 예수금/현재가 기반 추정치
+        const isThisSelected = selectedSymbol === item.symbol;
+        const orderableQty = (isThisSelected && kisBuyableQty !== null)
+          ? kisBuyableQty
+          : Math.max(0, Math.floor(balance / (currentPrice || 1)));
+
+        const marketChanged = !!live && (
+          item.market.currentPrice !== live.price ||
+          item.market.change !== (live.change || 0) ||
+          item.market.changePercent !== (live.changePercent || 0) ||
+          item.market.volume !== (live.volume || '0')
+        );
+        const accountChanged =
+          item.account.holdingQty !== holdingQty ||
+          item.account.avgPrice !== avgPrice ||
+          item.account.evaluationAmount !== evaluationAmount ||
+          item.account.orderableQty !== orderableQty;
+
+        if (!marketChanged && !accountChanged) return item;
+        changed = true;
+        return {
+          ...item,
+          market: marketChanged && live ? {
+            ...item.market,
+            currentPrice: live.price,
+            change: live.change || 0,
+            changePercent: live.changePercent || 0,
+            volume: live.volume || '0',
+            lastUpdatedAt: Date.now()
+          } : item.market,
+          account: accountChanged ? {
+            ...item.account,
+            holdingQty,
+            avgPrice,
+            evaluationAmount,
+            orderableQty,
+            lastUpdatedAt: Date.now()
+          } : item.account
+        };
+      });
+      return changed ? next : prev;
     });
-  }, [scalperInventory, monitors]);
+  }, [stocks, holdings, avgPrices, selectedSymbol, kisBuyableQty, balance]);
 
   const [activeTabId, setActiveTabId] = useState<string>(() => {
     const lastMarket = (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
@@ -1790,12 +1986,11 @@ kisConfig.isConnected
   // 프로그램 초기 로딩 시 모든 스캘퍼 봇이 반드시 정지(STOP) 상태로 시작되도록 보장
   useEffect(() => {
     setIsGapBotActive(false);
-    setScalperInventory(prev => prev.map(t => ({ ...t, isBotActive: false })));
-    setMonitors(prev => {
-      const next: Record<string, ScalperMonitorState> = {};
-      Object.keys(prev).forEach(sym => { next[sym] = { ...prev[sym], scalperMessage: "대기 중..." }; });
-      return next;
-    });
+    setScalperInventory(prev => prev.map(item => ({
+      ...item,
+      strategy: { ...item.strategy, isBotActive: false },
+      status: { ...item.status, message: "대기 중...", lastUpdatedAt: Date.now() }
+    })));
   }, []);
 
   // 🔄 종목 탭 자동 순환 (오른쪽 탭으로 연속 순환 - 수동 매도 모달 열림 시 일시 중지)
@@ -2010,23 +2205,15 @@ setGapInventory(nextInv);
       ]
     }));
 
-    const newInventoryItem: ScalperInventoryItem = {
-      id: symbol,
+    const newInventoryItem: ScalperInventoryItem = createInventoryItem({
       symbol,
       name: newStockObj.name || symbol,
-      registeredAt: Date.now(),
-      recommendedPrice: newStockObj.price || 0,
-      strategyCategory: '수동 등록',
-      isBotActive: false,
-      gapBuyPrice: limits.lowerLimit,
-      gapSellPrice: limits.upperLimit,
-      tradeQuantity: 1,
-      maxSlots: 10,
-      entryPriceMode: 'BID2',
-      autoCancelThreshold: 0.2
-    };
+      price: newStockObj.price || 0,
+      recommendation: { reason: '수동 등록', category: '수동 등록' },
+      strategy: { gapBuyPrice: limits.lowerLimit, gapSellPrice: limits.upperLimit }
+    });
 
-    // 8개 초과 시 제거할 대상을 현재 스냅샷(ref) 기준으로 먼저 결정 — inventory/monitors 양쪽에 일관되게 반영하기 위함
+    // 8개 초과 시 제거할 대상을 현재 스냅샷(ref) 기준으로 먼저 결정
     const currentInv = scalperTabsRef.current;
     const sameMarketNow = currentInv.filter(t => isUS ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol));
     let evictedSymbol: string | null = null;
@@ -2044,24 +2231,20 @@ setGapInventory(nextInv);
     setScalperInventory(prev => {
       const sameMarket = prev.filter(t => isUS ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol));
       const diffMarket = prev.filter(t => isUS ? !/^[A-Z]/.test(t.symbol) : /^[A-Z]/.test(t.symbol));
-      const updatedSame = evictedSymbol ? sameMarket.filter(t => t.symbol !== evictedSymbol) : sameMarket;
+      const updatedSame = evictedSymbol
+        ? sameMarket.filter(t => t.symbol !== evictedSymbol)
+        : sameMarket;
       return isUS ? [...diffMarket, newInventoryItem, ...updatedSame] : [newInventoryItem, ...updatedSame, ...diffMarket];
     });
 
-    setMonitors(prev => {
-      const next = { ...prev, [symbol]: createDefaultMonitor(symbol) };
-      if (evictedSymbol) delete next[evictedSymbol];
-      return next;
-    });
-
-    addLog(symbol, '매수', newInventoryItem.recommendedPrice, 0, `[상태변경] 등록 → ${LIFECYCLE_STATUS_LABEL.WATCHING} — 인벤토리 등록 완료, 전략 센서 감시 시작`);
+    addLog(symbol, '매수', newInventoryItem.recommendation.price, 0, `[상태변경] 등록 → ${LIFECYCLE_STATUS_LABEL.WATCHING} — 인벤토리 등록 완료, 전략 센서 감시 시작`);
 
     activeTabIdRef.current = symbol;
     setActiveTabId(symbol);
     setSelectedSymbol(symbol);
     setIsGapBotActive(false);
-    setGapBuyPrice(newInventoryItem.gapBuyPrice);
-    setGapSellPrice(newInventoryItem.gapSellPrice);
+    setGapBuyPrice(newInventoryItem.strategy.gapBuyPrice);
+    setGapSellPrice(newInventoryItem.strategy.gapSellPrice);
     setGapInventory([]);
     gapInventoryRef.current = [];
     setGapTradingProfit(0);
@@ -2080,12 +2263,6 @@ setGapInventory(nextInv);
 
     const remaining = scalperTabs.filter(t => t.id !== tabId);
     setScalperInventory(prev => prev.filter(t => t.id !== tabId));
-    setMonitors(prev => {
-      if (!targetTab) return prev;
-      const next = { ...prev };
-      delete next[targetTab.symbol];
-      return next;
-    });
 
     if (activeTabId === tabId) {
       // Find remaining tabs that belong to the SAME market as current active market
@@ -2115,7 +2292,7 @@ setGapInventory(nextInv);
     const isAnyActive = scalperTabs.some(t => t.isBotActive) || isGapBotActive;
     const nextState = !isAnyActive;
     setIsGapBotActive(nextState);
-    setScalperInventory(prev => prev.map(tab => ({ ...tab, isBotActive: nextState })));
+    setScalperInventory(prev => prev.map(item => ({ ...item, strategy: { ...item.strategy, isBotActive: nextState } })));
     showNotification(
       nextState
         ? "[전체 스캘퍼 실행] 추가된 모든 종목의 스캘퍼가 일괄 시작되었습니다."
@@ -5315,29 +5492,32 @@ data.price
             if (stockInfo) {
               const isUSStock = /^[A-Z]/.test(symbol);
               const limits = calculateStockLimits(stockInfo.price || (isUSStock ? 10 : 1000), stockInfo.changePercent || 0, isUSStock, stockInfo.basePrice);
-              const newInvItem: ScalperInventoryItem = {
-                id: symbol,
+              const newInvItem: ScalperInventoryItem = createInventoryItem({
                 symbol,
                 name: stockInfo.name || symbol,
-                registeredAt: Date.now(),
-                recommendedPrice: stockInfo.price || 0,
-                strategyCategory: 'KIS 보유 동기화',
-                isBotActive: false, // Explicitly keep inactive unless user starts it
-                gapBuyPrice: limits.lowerLimit,
-                gapSellPrice: limits.upperLimit,
-                tradeQuantity: 1,
-                maxSlots: 10,
-                entryPriceMode: 'BID2',
-                autoCancelThreshold: 0.2
-              };
+                price: stockInfo.price || 0,
+                recommendation: { reason: 'KIS 보유 동기화', category: 'KIS 보유 동기화' },
+                strategy: { gapBuyPrice: limits.lowerLimit, gapSellPrice: limits.upperLimit },
+                initialLifecycleStatus: 'HOLDING' // 이미 보유 중인 종목이므로 HOLDING부터 시작
+              });
               const newTab: ScalperTab = {
-                ...newInvItem,
+                id: newInvItem.id,
+                symbol: newInvItem.symbol,
+                name: newInvItem.name,
+                isBotActive: false, // Explicitly keep inactive unless user starts it
+                gapBuyPrice: newInvItem.strategy.gapBuyPrice,
+                gapSellPrice: newInvItem.strategy.gapSellPrice,
+                tradeQuantity: newInvItem.strategy.tradeQuantity,
+                maxSlots: newInvItem.strategy.maxSlots,
+                entryPriceMode: newInvItem.strategy.entryPriceMode,
+                autoCancelThreshold: newInvItem.strategy.autoCancelThreshold,
                 gapInventory: [],
                 gapTradingProfit: 0,
                 gapTradeCount: 0,
                 lastTradeType: null,
                 scalperMessage: "대기 중...",
-                tradeLogs: []
+                tradeLogs: [],
+                lifecycleStatus: 'HOLDING'
               };
               updatedTabs.push(newTab);
               newInventoryItemsToAdd.push(newInvItem);
@@ -5400,18 +5580,22 @@ data.price
       }
 
       if (tabsChanged) {
-        if (newInventoryItemsToAdd.length > 0) {
-          setScalperInventory(prev => [...prev, ...newInventoryItemsToAdd]);
-        }
-        setMonitors(prev => {
-          const next = { ...prev };
-          newInventoryItemsToAdd.forEach(item => {
-            if (!next[item.symbol]) next[item.symbol] = createDefaultMonitor(item.symbol);
+        setScalperInventory(prev => {
+          const withNewItems = newInventoryItemsToAdd.length > 0 ? [...prev, ...newInventoryItemsToAdd] : prev;
+          if (Object.keys(monitorGapInventoryUpdates).length === 0) return withNewItems;
+          return withNewItems.map(item => {
+            if (!monitorGapInventoryUpdates.hasOwnProperty(item.symbol)) return item;
+            const positions = monitorGapInventoryUpdates[item.symbol];
+            return {
+              ...item,
+              account: {
+                ...item.account,
+                positions,
+                holdingQty: positions.reduce((acc, s) => acc + (s.quantity || 0), 0),
+                lastUpdatedAt: Date.now()
+              }
+            };
           });
-          Object.keys(monitorGapInventoryUpdates).forEach(symbol => {
-            next[symbol] = { ...(next[symbol] || createDefaultMonitor(symbol)), gapInventory: monitorGapInventoryUpdates[symbol] };
-          });
-          return next;
         });
       }
       
@@ -6974,10 +7158,10 @@ useEffect(() => {
                         gapInventoryRef.current = next;
                         setGapInventory(next);
                       }
-                      setMonitors(prev => {
-                        const mon = prev[order.symbol] || createDefaultMonitor(order.symbol);
-                        return { ...prev, [order.symbol]: { ...mon, gapInventory: (mon.gapInventory || []).filter(s => s.id !== order.slotId) } };
-                      });
+                      {
+                        const curInv = scalperTabsRef.current.find(t => t.symbol === order.symbol)?.gapInventory || [];
+                        updateTab(order.symbol, { gapInventory: curInv.filter(s => s.id !== order.slotId) });
+                      }
                     }
                     addLog(order.symbol, '매도', order.orderPrice, order.quantity, `[체결완료] 매도 취소 전 체결 완료`);
                     showNotification(`${currentStock.name} 매도 취소 전 이미 체결 완료`, "success");
@@ -7037,9 +7221,8 @@ useEffect(() => {
                   }
                 }
               }
-              setMonitors(prev => {
-                const mon = prev[order.symbol] || createDefaultMonitor(order.symbol);
-                let prevInv = mon.gapInventory || [];
+              {
+                let prevInv = scalperTabsRef.current.find(t => t.symbol === order.symbol)?.gapInventory || [];
                 if (order.slotId) {
                   prevInv = prevInv.filter(s => s.id !== order.slotId);
                 } else if (order.buyPrice) {
@@ -7050,8 +7233,8 @@ useEffect(() => {
                     prevInv = updatedInv;
                   }
                 }
-                return { ...prev, [order.symbol]: { ...mon, gapInventory: prevInv } };
-              });
+                updateTab(order.symbol, { gapInventory: prevInv });
+              }
 
               // Immediately update holdings and avgPrices in React state for instant UI reflection
               const filledQty = status.ordQty || order.quantity;
@@ -7250,6 +7433,38 @@ useEffect(() => {
 
         const strat = detectStockStrategies(stockItem);
         const { rsi, bb, sma5, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice } = strat;
+
+        // 🔄 전략 센서 스냅샷을 인벤토리의 sensors 네임스페이스에 기록 (값이 실제로 바뀐 경우에만 갱신)
+        setScalperInventory(prev => {
+          const idx = prev.findIndex(it => it.symbol === stockItem.symbol);
+          if (idx === -1) return prev;
+          const cur = prev[idx].sensors;
+          const roundedRsi = Math.round(rsi);
+          if (
+            cur.pullback === strat.isPullback &&
+            cur.breakout === strat.isBreakout &&
+            cur.vwap === strat.isVwapSupport &&
+            cur.cvd === strat.isVolumeProfile &&
+            cur.volumeMomentum === momentumPositive &&
+            cur.rsi === roundedRsi &&
+            cur.activeCount === strat.activeCount
+          ) return prev; // 변화 없으면 그대로 반환 (불필요한 재렌더 방지)
+          const next = [...prev];
+          next[idx] = {
+            ...prev[idx],
+            sensors: {
+              pullback: strat.isPullback,
+              breakout: strat.isBreakout,
+              vwap: strat.isVwapSupport,
+              cvd: strat.isVolumeProfile,
+              volumeMomentum: momentumPositive,
+              rsi: roundedRsi,
+              activeCount: strat.activeCount,
+              lastUpdatedAt: Date.now()
+            }
+          };
+          return next;
+        });
 
         let minPrice = 0;
         let maxPrice = 0;
@@ -7797,10 +8012,10 @@ const isProfitTarget = sellSignal;
                                 gapInventoryRef.current = next;
                                 setGapInventory(next);
                             }
-                            setMonitors(prev => {
-                                const mon = prev[stock.symbol] || createDefaultMonitor(stock.symbol);
-                                return { ...prev, [stock.symbol]: { ...mon, gapInventory: (mon.gapInventory || []).filter(s => s.id !== slotId) } };
-                            });
+                            {
+                                const curInv = scalperTabsRef.current.find(t => t.symbol === stock.symbol)?.gapInventory || [];
+                                updateTab(stock.symbol, { gapInventory: curInv.filter(s => s.id !== slotId) });
+                            }
                         }
                    } else if (filledQty > 0) {
                        setBotStatus(`[일부 체결] 주문 번호(${odno})가 일부 체결되었습니다 (${filledQty}주).`);
@@ -7815,13 +8030,13 @@ const isProfitTarget = sellSignal;
                                 gapInventoryRef.current = next;
                                 setGapInventory(next);
                             }
-                            setMonitors(prev => {
-                                const mon = prev[stock.symbol] || createDefaultMonitor(stock.symbol);
-                                const inv = (mon.gapInventory || []).map(s =>
+                            {
+                                const curInv = scalperTabsRef.current.find(t => t.symbol === stock.symbol)?.gapInventory || [];
+                                const inv = curInv.map(s =>
                                     s.id === slotId ? { ...s, quantity: Math.max(0, s.quantity - filledQty) } : s
                                 ).filter(s => s.quantity > 0);
-                                return { ...prev, [stock.symbol]: { ...mon, gapInventory: inv } };
-                            });
+                                updateTab(stock.symbol, { gapInventory: inv });
+                            }
                         }
                    } else {
                        setBotStatus(`[미체결 상태] 주문 번호(${odno})가 아직 체결되지 않았습니다.`);
@@ -7950,10 +8165,10 @@ const isProfitTarget = sellSignal;
           return next;
         });
       }
-      setMonitors(prev => {
-        const mon = prev[stock.symbol] || createDefaultMonitor(stock.symbol);
-        return { ...prev, [stock.symbol]: { ...mon, gapInventory: [...(mon.gapInventory || []), newSlot] } };
-      });
+      {
+        const curInv = scalperTabsRef.current.find(t => t.symbol === stock.symbol)?.gapInventory || [];
+        updateTab(stock.symbol, { gapInventory: [...curInv, newSlot] });
+      }
 
       // Trigger Auto-Sell for immediate simulated or real fills that reached this point
       triggerAutoSell(stock.symbol, tradePrice, finalAmount, newAvg, newQty, createdSlotId);
@@ -8056,11 +8271,11 @@ const isProfitTarget = sellSignal;
           });
         }
 
-        setMonitors(prev => {
-          const mon = prev[stock.symbol] || createDefaultMonitor(stock.symbol);
+        {
+          const curInv = scalperTabsRef.current.find(t => t.symbol === stock.symbol)?.gapInventory || [];
           let rem = finalAmount;
-          const nextInv: typeof mon.gapInventory = [];
-          for (const slot of (mon.gapInventory || [])) {
+          const nextInv: typeof curInv = [];
+          for (const slot of curInv) {
             if (rem <= 0) {
               nextInv.push(slot);
             } else if (slot.quantity > rem) {
@@ -8070,8 +8285,8 @@ const isProfitTarget = sellSignal;
               rem -= slot.quantity;
             }
           }
-          return { ...prev, [stock.symbol]: { ...mon, gapInventory: nextInv } };
-        });
+          updateTab(stock.symbol, { gapInventory: nextInv });
+        }
 
         if (kisConfig.isConnected) {
           setTimeout(() => {
@@ -8122,17 +8337,11 @@ const isProfitTarget = sellSignal;
       logTargetSymbols.add(symbol);
     }
     if (logTargetSymbols.size > 0) {
-      setMonitors(prev => {
-        const next = { ...prev };
-        logTargetSymbols.forEach(sym => {
-          // 인벤토리에 등록된 종목에 대해서만 로그를 기록한다 (기존 tab.map과 동일한 매칭 범위 유지)
-          if (!scalperTabsRef.current.some(t => t.symbol === sym)) return;
-          const mon = next[sym] || createDefaultMonitor(sym);
-          const existing = (mon.tradeLogs || []).filter(l => !l.symbol || l.symbol === sym || l.symbol === 'SYSTEM');
-          next[sym] = { ...mon, tradeLogs: [newLog, ...existing].slice(0, 50) };
-        });
-        return next;
-      });
+      setScalperInventory(prev => prev.map(item => {
+        if (!logTargetSymbols.has(item.symbol)) return item;
+        const existing = (item.tradeLogs || []).filter(l => !l.symbol || l.symbol === item.symbol || l.symbol === 'SYSTEM');
+        return { ...item, tradeLogs: [newLog, ...existing].slice(0, 50) };
+      }));
     }
   };
 
