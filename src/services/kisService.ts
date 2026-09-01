@@ -486,9 +486,8 @@ strat.hasVolumeMomentum
     // Determine if KR or US (approximate)
     const isKR = /^\d{6}$/.test(symbol);
     try {
-      if (isKR) {
-        if (this.config) {
-          const data = await this.getDomesticPrice(symbol);
+     const data =
+await this.getDomesticPrice(symbol);
           if (data && data.stck_prpr) {
             const isFalling = data.prdy_vrss_sign === '4' || data.prdy_vrss_sign === '5';
             const rawChange = Math.abs(Number(data.prdy_vrss || 0));
@@ -507,61 +506,7 @@ strat.hasVolumeMomentum
               name: data.hts_kor_isnm || undefined
             };
           }
-        }
-
-        // Live fallback via Universal Quote Resolver
-        try {
-          const resp = await axios.get(`/api/stocks/quote?symbol=${encodeURIComponent(symbol)}`, { timeout: 3500 });
-          if (resp.data && resp.data.price) {
-            return {
-              current: Number(resp.data.price),
-              prevClose: Number(resp.data.prevClose || (resp.data.price - (resp.data.change || 0))),
-              change: Number(resp.data.change || 0),
-              changePercent: Number(resp.data.changePercent || 0),
-              volume: String(resp.data.volume || '0'),
-              name: resp.data.name || undefined
-            };
-          }
-        } catch {
-          // ignore
-        }
-      } else {
-        if (this.config) {
-          const data = await this.getOverseasPrice(symbol);
-          if (data && data.last) {
-            const current = Number(data.last);
-            const prevClose = Number(data.base);
-            const change = Number(data.diff || (current - prevClose));
-            const changePercent = Number(data.rate || (prevClose > 0 ? (change / prevClose) * 100 : 0));
-            
-            return {
-              current,
-              prevClose: prevClose > 0 ? prevClose : (current - change),
-              change,
-              changePercent,
-              volume: data.tvol || '0',
-              name: data.name || data.orgr_isnm || undefined
-            };
-          }
-        }
-
-        // Live fallback for US quotes
-        try {
-          const resp = await axios.get(`/api/stocks/quote?symbol=${encodeURIComponent(symbol)}`, { timeout: 3500 });
-          if (resp.data && resp.data.price) {
-            return {
-              current: Number(resp.data.price),
-              prevClose: Number(resp.data.prevClose || (resp.data.price - (resp.data.change || 0))),
-              change: Number(resp.data.change || 0),
-              changePercent: Number(resp.data.changePercent || 0),
-              volume: String(resp.data.volume || '0'),
-              name: resp.data.name || undefined
-            };
-          }
-        } catch {
-          // ignore
-        }
-      }
+       
     } catch (e) {
       console.warn(`[KIS Service] Failed to fetch price for ${symbol}:`, e);
     }
@@ -575,14 +520,23 @@ strat.hasVolumeMomentum
     return domesticData;
   }
 
-  public async order(symbol: string, side: 'BUY' | 'SELL', price: string, qty: string, ordDvsn?: string) {
-    const isKR = /^\d{6}$/.test(symbol);
-    if (isKR) {
-      return this.orderDomestic(symbol, side, price, qty, ordDvsn);
-    } else {
-      return this.orderOverseas(symbol, qty, price, side === 'BUY');
-    }
-  }
+ public async order(
+  symbol: string,
+  side: 'BUY' | 'SELL',
+  price: string,
+  qty: string,
+  ordDvsn?: string
+) {
+
+  return this.orderDomestic(
+    symbol,
+    side,
+    price,
+    qty,
+    ordDvsn
+  );
+
+}
 
   // --- Domestic (Korean) Stock ---
 
@@ -650,15 +604,14 @@ Date.now()
     const token = await this.getAccessToken();
     const endpoint = '/uapi/domestic-stock/v1/trading/inquire-balance';
     
-    const isVirtual = this.baseUrl.includes('openapivts');
-    const defaultTrId = isVirtual ? 'VTTC8434R' : 'TTTC8434R';
+    const trId = 'TTTC8434R';
     
     const headers: any = {
       'content-type': 'application/json',
       'authorization': `Bearer ${token}`,
       'appkey': this.config.appKey,
       'appsecret': this.config.appSecret,
-      'tr-id': defaultTrId,
+      'tr-id': trId,
       'tr-cont': '',
       'custtype': 'P',
     };
@@ -704,10 +657,7 @@ Date.now()
       await this.throttleRequest();
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/inquire-psbl-order';
-      
-      const isVirtual = this.baseUrl.includes('openapivts');
-      const trId = isVirtual ? 'VTTC8908R' : 'TTTC8908R';
-
+     const trId = 'TTTC8908R';
       const headers = {
         'content-type': 'application/json',
         'authorization': `Bearer ${token}`,
@@ -774,10 +724,13 @@ Date.now()
     }
   }
 
-    public async getOverseasBuyableAmount(symbol: string, price: string = '0', ovrsExchCd: string = 'NASD'): Promise<any> {
+  public async getOverseasBuyableAmount(symbol: string, price: string = '0', ovrsExchCd: string = 'NASD'): Promise<any> {
     return { rt_cd: '0', msg1: '', output: { max_ord_psbl_qty: '0', frcr_ord_psbl_amt1: '0', ord_psbl_frcr_amt: '0', frcr_ord_psbl_amt: '0', ovrs_ord_psbl_amt: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0', max_buy_qty: '0', max_ord_qty: '0' } };
   }
 
+  public async getExchangeRate(): Promise<{ fx_rt: string }[]> {
+    return [{ fx_rt: '1350.00' }];
+  }
 
   public async getDomesticSellableQuantity(symbol: string) {
     if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: { ord_psbl_qty: '0', nrc_psbl_qty: '0' } };
@@ -787,8 +740,7 @@ Date.now()
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/inquire-psbl-sell';
       
-      const isVirtual = this.baseUrl.includes('openapivts');
-      const trId = isVirtual ? 'VTTC8408R' : 'TTTC8408R';
+      const trId = 'TTTC8408R';
 
       const headers = {
         'content-type': 'application/json',
@@ -810,7 +762,13 @@ Date.now()
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Domestic Sellable Quantity Exception safely caught:", error?.response?.data || error?.message);
-      return { rt_cd: '0', output: { ord_psbl_qty: '0' } };
+      return {
+  rt_cd: '1',
+  msg1: error?.message || 'API Error',
+  output: {
+    ord_psbl_qty: '0'
+  }
+};
     }
   }
 
@@ -820,8 +778,7 @@ Date.now()
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/inquire-period-trade-profit';
 
-      const isVirtual = this.baseUrl.includes('openapivts');
-      const trId = isVirtual ? 'VTTC8715R' : 'TTTC8715R';
+      const trId = 'TTTC8715R';
 
       const headers = {
         'content-type': 'application/json',
@@ -859,8 +816,7 @@ Date.now()
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/inquire-period-profit';
 
-      const isVirtual = this.baseUrl.includes('openapivts');
-      const trId = isVirtual ? 'VTTC8494R' : 'TTTC8494R';
+      const trId = 'TTTC8494R';
 
       const headers = {
         'content-type': 'application/json',
@@ -907,8 +863,7 @@ Date.now()
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/inquire-daily-ccnl';
       
-      const isVirtual = this.baseUrl.includes('openapivts');
-      const trId = isVirtual ? 'VTTC8001R' : 'TTTC8001R';
+      const trId = 'TTTC8001R';
 
       const headers = {
         'content-type': 'application/json',
@@ -945,12 +900,12 @@ Date.now()
   }
 
   public async cancelOrder(symbol: string, orgNo: string, ordNo: string, qty: string, ordDvsn: string = '00') {
-    const isKR = /^\d{6}$/.test(symbol);
-    if (isKR) {
-      return this.cancelDomesticOrder(orgNo, ordNo, qty, ordDvsn);
-    } else {
-      return this.cancelOverseasOrder(orgNo, ordNo, symbol, qty);
-    }
+    return this.cancelDomesticOrder(
+  orgNo,
+  ordNo,
+  qty,
+  ordDvsn
+);
   }
 
   public async checkOrderExecution(odno: string) {
@@ -1017,10 +972,10 @@ Date.now()
 
       const hashkey = await this.getHashKey(body);
 
-      const isVirtual = this.baseUrl.includes('openapivts');
-      const trId = isVirtual
-        ? (side === 'BUY' ? 'VTTC0802U' : 'VTTC0801U')
-        : (side === 'BUY' ? 'TTTC0802U' : 'TTTC0801U');
+      const trId =
+  side === 'BUY'
+    ? 'TTTC0802U'
+    : 'TTTC0801U';
 
       const headers = {
         'content-type': 'application/json',
@@ -1094,9 +1049,8 @@ console.log(
 
     const hashkey = await this.getHashKey(body);
 
-    const isVirtual = this.baseUrl.includes('openapivts');
-    // TR_ID: TTTC0803U (실전 주식 정정/취소) / VTTC0803U (모의주식 정정/취소)
-    const trId = isVirtual ? 'VTTC0803U' : 'TTTC0803U';
+    // TR_ID: TTTC0803U (실전 주식 정정/취소)
+   const trId = 'TTTC0803U';
 
     const headers = {
       'content-type': 'application/json',
@@ -1152,7 +1106,7 @@ console.log(
   }
 
   private lastRequestTime = 0;
-  private minRequestInterval = 2000; // Minimum 500ms interval between API calls to prevent Rate Limit (EGW00201 / 429)
+  private minRequestInterval = 2000; // Minimum 2000ms interval between API calls to prevent Rate Limit (EGW00201 / 429)
   private requestQueueChain: Promise<any> = Promise.resolve();
 
   public async queueRequest<T>(fn: () => Promise<T>): Promise<T> {
@@ -1317,11 +1271,7 @@ console.log(
     }
   }
 
-  public async getOverseasMinuteChart(symbol: string, excd: string = 'NAS', time: string = '') {
-    return { rt_cd: '0', msg1: '', output2: [] };
-  }
-
-  public async getDomesticOvertimePrice(symbol: string, marketCode: string = 'J') {
+ public async getDomesticOvertimePrice(symbol: string, marketCode: string = 'J') {
     if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: {} };
     try {
       const token = await this.getAccessToken();
@@ -1481,87 +1431,7 @@ console.log(
 
     return null;
   }
-
-  public async getExchangeRate() {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    const token = await this.getAccessToken();
-    
-    // Fallback trials from overseas/present balance endpoints
-    const trials = [
-      { 
-        endpoint: '/uapi/overseas-price/v1/quotations/price', 
-        trId: 'HHDFS00000300', 
-        symbol: 'NAS@AAPL',
-        useAuth: true
-      },
-      { 
-        endpoint: '/uapi/overseas-price/v1/quotations/price', 
-        trId: 'HHDFS00000300', 
-        symbol: 'NAS@MSFT' 
-      },
-      { 
-        endpoint: '/uapi/overseas-stock/v1/trading/inquire-present-balance', 
-        trId: 'TTTS3012R', 
-        symbol: '' 
-      }
-    ];
-
-    for (const trial of trials) {
-      try {
-        const headers: any = {
-          'content-type': 'application/json',
-          'authorization': `Bearer ${token}`,
-          'appkey': this.config.appKey,
-          'appsecret': this.config.appSecret,
-          'tr-id': trial.trId,
-          'custtype': 'P'
-        };
-        
-        const params: any = {
-          FID_COND_MRKT_DIV_CODE: 'U',
-          FID_INPUT_ISCD: (trial as any).symbol || 'AAPL'
-        };
-
-        if (trial.endpoint.includes('balance') || trial.trId === 'TTTS3012R') {
-          params.CANO = this.config.accountNo;
-          params.ACNT_PRDT_CD = this.config.accountCode;
-          params.OVRS_EXGI_CD = 'NASD';
-          params.TR_CRC_CD = 'USD';
-          params.CTX_AREA_FK200 = '';
-          params.CTX_AREA_NK200 = '';
-          params.CANO_PWD = this.config.accountPw || '';
-        }
-
-        const res = await axios.get(`${this.baseUrl}${trial.endpoint}`, { headers, params });
-        if (res?.data?.rt_cd === '0') {
-          // Check for exchange rate in various common output fields
-          const out1 = res.data.output || res.data.output1;
-          const out2 = res.data.output2;
-          
-          const data1 = Array.isArray(out1) ? out1[0] : out1;
-          const data2 = Array.isArray(out2) ? out2[0] : out2;
-          
-          const rate = data1?.fx_rt || data1?.last || data1?.t_xrt || data1?.frcr_buy_mgn_rt || 
-                       data2?.frst_bltn_exrt || data2?.fx_rt;
-          
-          if (rate && Number(rate) > 500) {
-            console.log(`[KIS Service] Exchange rate found via ${trial.trId}: ${rate}`);
-            return [{ fx_rt: rate.toString() }];
-          }
-        }
-      } catch (e: any) {
-        if (e?.response?.status === 429) {
-          console.warn(`[KIS Service] 429 Rate Limit for ${trial.trId}. Waiting before next trial...`);
-          await new Promise(r => setTimeout(r, 2000));
-        } else {
-          console.warn(`[KIS Service] Exchange rate trial failed for ${trial.endpoint} (${trial.trId})`, e);
-        }
-      }
-    }
-    
-    return [{ fx_rt: '1400.00' }]; 
-  }
-
+  
 public async getWebsocketApprovalKey() {
 
   if (!this.config)
@@ -1770,13 +1640,7 @@ ws.onclose = (event) => {
   }
 
   
-  public async getOverseasPrice(symbol: string, excd?: string): Promise<any> { return null; }
-  public async getOverseasBalance(): Promise<any> { return { rt_cd: '0', msg1: '', output1: [], output2: [], output3: {} }; }
-  public async getOverseasOrderableCash(): Promise<any> { return { orderableUsd: 0, usdDeposit: 0, rt_cd: '0', msg1: '' }; }
-  public async getOverseasHoldings(): Promise<any> { return { rt_cd: '0', msg1: '', output1: [], output2: [] }; }
-  public async orderOverseas(symbol: string, qty: string, price: string, isBuy: boolean, excd: string = 'NASD'): Promise<any> { return { rt_cd: '0', msg1: 'Disabled', output: {} }; }
-
-  public async getScalperRecommendations(): Promise<ScalperRecommendation[]> {
+ public async getScalperRecommendations(): Promise<ScalperRecommendation[]> {
     try {
       const res = await axios.get('/api/stocks/scalper-recommendations', { timeout: 3500 });
       if (res.data && Array.isArray(res.data.recommendations) && res.data.recommendations.length > 0) {

@@ -991,7 +991,6 @@ export default function App() {
     changePercent: 0,
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1350 + Math.random() * 5 }))
   });
-  
   const [exchangeRateTrend, setExchangeRateTrend] = useState<'UP' | 'DOWN'>('UP');
   const [selectionMode, setSelectionMode] = useState<'RECOMMENDED' | 'MANUAL'>('RECOMMENDED');
   const [stocks, setStocks] = useState<Stock[]>(() => {
