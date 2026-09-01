@@ -1763,7 +1763,6 @@ setGapInventory(nextInv);
     finalPrice: price,
     stockFound: !!stock
   },
-  new Error().stack
 );
     const limits = calculateStockLimits(price, stock?.changePercent || 0, isUS, stock?.basePrice);
 
@@ -5517,7 +5516,7 @@ setLiveOrderbook(ob);
 
     slowInterval = setInterval(syncAllPrices, 10000);
     fastInterval = setInterval(syncSelectedPrice, 1500);
-    orderbookInterval = setInterval(syncLiveOrderbook, 1500);
+    orderbookInterval = setInterval(syncLiveOrderbook, 5000);
 
     if (kisConfig.isConnected) {
       kisSyncInterval = setInterval(() => {
