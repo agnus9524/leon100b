@@ -287,30 +287,16 @@ const calcStockChange = (currentPrice: number, basePrice: number, market: 'KR' |
 };
 
 interface PendingBuyOrder {
-
-  id: string; // generated SIM-ID or KIS odno
-
-  orgNo?: string; // KIS KRX_FWDG_ORD_ORGNO
-
+  id: string;
+  orgNo?: string;
   symbol: string;
-
   orderPrice: number;
-
-  // 현재 남아있는 미체결 수량
   quantity: number;
-
-  // 최초 KIS 주문 수량
-  // 부분체결이 발생해도 절대 변경하지 않음
   originalQuantity?: number;
-
   createdAt: number;
-
   isSimulated: boolean;
-
-  slotId?: string; // Track which slot this order is for
-
+  slotId?: string;
   ordDvsn?: string;
-
 }
 
 interface PendingSellOrder {
@@ -1939,6 +1925,7 @@ setGapInventory(nextInv);
   const [scalperMessage, setScalperMessage] = useState<string>("대기 중...");
   const [selectedTimeframeBar, setSelectedTimeframeBar] = useState<'1m' | '3m' | '5m' | '10m'>('1m');
   const gapInventoryRef = React.useRef<{id: string, price: number, quantity: number}[]>([]);
+  const processedFilledQtyRef = React.useRef<Record<string, number>>({});
   useEffect(() => {
     gapInventoryRef.current = gapInventory;
   }, [gapInventory]);
@@ -5554,7 +5541,6 @@ setLiveOrderbook(ob);
 
   // Auto KIS initial sync on connection
   const initialKisSyncTriggeredRef = React.useRef(false);
-  const processedFilledQtyRef = React.useRef<Record<string, number>>({});
   useEffect(() => {
     if (kisConfig.isConnected && !initialKisSyncTriggeredRef.current) {
       initialKisSyncTriggeredRef.current = true;
@@ -5969,670 +5955,978 @@ setLiveOrderbook(ob);
   }, [exchangeRate, marketType, kisConfig.isConnected, kisConfig.isRealOrderEnabled]);
 
   // Monitor Pending Buy Orders for Price Changes, Fills, and Auto-Cancellations
-  useEffect(() => {
-    if (pendingBuyOrders.length === 0) return;
+  // ============================================================
+// Monitor Pending Buy Orders
+// - KIS 누적체결수량 기준 신규 체결만 처리
+// - 부분체결 중복 반영 방지
+// - 실제 체결가격 사용
+// - 전량체결/부분체결 동일 로직 적용
+// - 미체결 자동취소
+// ============================================================
 
-    let updated = false;
-    const currentPending = [...pendingBuyOrders];
-    const nextPending: PendingBuyOrder[] = [];
+useEffect(() => {
+  if (pendingBuyOrders.length === 0) return;
 
-    const checkOrders = async () => {
+  let cancelled = false;
+
+  const currentPending = [...pendingBuyOrders];
+  const nextPending: PendingBuyOrder[] = [];
+
+  const checkOrders = async () => {
+    try {
       for (const order of currentPending) {
-        // Find latest price for this stock
-        const currentStock = stocksRef.current.find(s => s.symbol === order.symbol);
+
+        if (cancelled) return;
+
+        // ----------------------------------------------------
+        // 현재 종목 정보
+        // ----------------------------------------------------
+
+        const currentStock =
+          stocksRef.current.find(
+            s => s.symbol === order.symbol
+          );
+
         if (!currentStock) {
           nextPending.push(order);
           continue;
         }
 
-        const currentPrice = currentStock.price;
-        const orderPrice = order.orderPrice;
+        const currentPrice = Number(currentStock.price || 0);
+        const orderPrice = Number(order.orderPrice || 0);
 
-        const isUSStock = currentStock.market === 'US' || /^[A-Za-z]/.test(currentStock.symbol) || marketType === 'US';
-        const tickSize = getTickSize(orderPrice, isUSStock ? 'US' : 'KR');
-        const tickDiff = (currentPrice - orderPrice) / tickSize;
+        if (currentPrice <= 0 || orderPrice <= 0) {
+          nextPending.push(order);
+          continue;
+        }
 
-        // Calculate ratios from orderPrice
-        const dropPercent = ((orderPrice - currentPrice) / orderPrice) * 100;
-        const risePercent = ((currentPrice - orderPrice) / orderPrice) * 100;
+        // ----------------------------------------------------
+        // 미국 / 한국 종목 구분
+        // ----------------------------------------------------
 
-        // Auto-Cancel Criteria:
-        // 1. Upward: 미체결 상태에서 주가가 매수 주문가 대비 0.5% 이상 상승 이탈 시 자동 취소 (자금 회수 및 재진입 준비)
-        // 2. Downward: 급락 시 손실 방지 (autoCancelThreshold 이상 급락 또는 -3틱 이하)
-        const isRiseCancel = risePercent >= 0.5;
-        const isDropCancel = tickDiff <= -3 || dropPercent >= autoCancelThreshold;
+        const isUSStock =
+          currentStock.market === 'US' ||
+          /^[A-Za-z]/.test(currentStock.symbol) ||
+          marketType === 'US';
+
+        const tickSize =
+          getTickSize(
+            orderPrice,
+            isUSStock ? 'US' : 'KR'
+          );
+
+        const tickDiff =
+          tickSize > 0
+            ? (currentPrice - orderPrice) / tickSize
+            : 0;
+
+        // ----------------------------------------------------
+        // 주문가격 대비 등락률
+        // ----------------------------------------------------
+
+        const dropPercent =
+          ((orderPrice - currentPrice) / orderPrice) * 100;
+
+        const risePercent =
+          ((currentPrice - orderPrice) / orderPrice) * 100;
+
+        // ----------------------------------------------------
+        // 자동취소 조건
+        // ----------------------------------------------------
+
+        const isRiseCancel =
+          risePercent >= 0.5;
+
+        const isDropCancel =
+          tickDiff <= -3 ||
+          dropPercent >= autoCancelThreshold;
+
+        // ====================================================
+        // 1. 자동취소
+        // ====================================================
 
         if (isDropCancel || isRiseCancel) {
-          // 1. CANCEL CONDITION TRIGGERED
-          updated = true;
-          
-          const tickStr = Math.abs(Math.round(tickDiff)) > 0 ? `${Math.abs(Math.round(tickDiff))}틱` : '';
-          const cancelReason = isDropCancel 
-            ? `주문가 대비 ${dropPercent.toFixed(2)}%${tickStr ? ` (${tickStr})` : ''} 급락 이탈 (손실 방지 취소)`
-            : `주문가 대비 주가 +0.5% 이상 상승 이탈 (+${risePercent.toFixed(2)}%${tickStr ? ` +${tickStr}` : ''}) -> 미체결 자금 회수 자동 취소`;
-          
-          if (!order.id || order.id.startsWith('SLOT-')) {
-            // Placeholder / in-flight order without real KIS ID: clean up silently
-            console.log(`[Auto-Cancel] In-flight order cleared: ${formatCurrency(orderPrice)} (${cancelReason})`);
+
+          const tickStr =
+            Math.abs(Math.round(tickDiff)) > 0
+              ? `${Math.abs(Math.round(tickDiff))}틱`
+              : '';
+
+          const cancelReason =
+            isDropCancel
+              ? `주문가 대비 ${dropPercent.toFixed(2)}%${tickStr ? ` (${tickStr})` : ''} 급락 이탈 (손실 방지 취소)`
+              : `주문가 대비 주가 +0.5% 이상 상승 이탈 (+${risePercent.toFixed(2)}%${tickStr ? ` +${tickStr}` : ''}) -> 미체결 자금 회수 자동 취소`;
+
+          // --------------------------------------------------
+          // 아직 KIS 주문번호가 없는 임시 주문
+          // --------------------------------------------------
+
+          if (
+            !order.id ||
+            order.id.startsWith('SLOT-')
+          ) {
+            console.log(
+              `[Auto-Cancel] In-flight order cleared: ${formatCurrency(orderPrice)} (${cancelReason})`
+            );
+
             continue;
           }
 
+          // --------------------------------------------------
+          // 시뮬레이션 주문
+          // --------------------------------------------------
+
           if (order.isSimulated) {
-            // Refund simulated balance
-            const priceInKrw = isUSStock ? orderPrice * exchangeRate : orderPrice;
-            const refundAmount = priceInKrw * (order.quantity || 1);
-            setBalance(prev => prev + refundAmount);
-            addLog(order.symbol, '매수', orderPrice, order.quantity, `[자금회수 취소] ${cancelReason}`);
-            if (currentStock.symbol === selectedStock?.symbol) {
-              setScalperMessage(`[자금 회수 취소] ${currentStock.name} 0.5% 상승 미체결 매수 취소 -> 주문가능금액 ${formatCurrency(refundAmount)}원 복구`);
+
+            const priceInKrw =
+              isUSStock
+                ? orderPrice * exchangeRate
+                : orderPrice;
+
+            const refundAmount =
+              priceInKrw * (order.quantity || 1);
+
+            setBalance(
+              prev => prev + refundAmount
+            );
+
+            addLog(
+              order.symbol,
+              '매수',
+              orderPrice,
+              order.quantity,
+              `[자금회수 취소] ${cancelReason}`
+            );
+
+            if (
+              currentStock.symbol ===
+              selectedStock?.symbol
+            ) {
+              setScalperMessage(
+                `[자금 회수 취소] ${currentStock.name} 미체결 매수 취소 -> 주문가능금액 ${formatCurrency(refundAmount)}원 복구`
+              );
+
               setTimeout(() => {
                 setScalperMessage("대기 중...");
               }, 3000);
             }
-            showNotification(`[자금 회수 취소] ${currentStock.name} 주가 0.5% 이상 상승으로 미체결 매수 자동 취소 (주문가능금액 원복)`, "info");
-          } else if (kisConfig.isConnected && kisConfig.isRealOrderEnabled) {
-            // Real KIS order cancel request!
-            try {
-              setBotStatus(`[KIS API] 주문 번호(${order.id}) 0.5% 상승 미체결 자동 취소 요청 중...`);
-              const cancelRes = await kisService.cancelOrder(order.symbol, order.orgNo || "", order.id, (order.quantity || 1).toString(), order.ordDvsn || kisConfig.domesticOrderType || "00");
-              
-              if (cancelRes && cancelRes.rt_cd === '0') {
-                addLog(order.symbol, '매수', orderPrice, order.quantity, `[KIS 0.5%상승 취소] ${cancelReason}`);
-                showNotification(`${currentStock.name} KIS 매수 미체결 자동 취소 완료 (0.5% 상승 이탈, 주문가능금액 환원)`, "info");
-                if (currentStock.symbol === selectedStock?.symbol) {
-                  setScalperMessage(`[자금 회수 취소] ${currentStock.name} 미체결 매수 취소 완료 -> KIS 예수금/주문가능금액 원복`);
-                  setTimeout(() => {
-                    setScalperMessage("대기 중...");
-                  }, 3000);
-                }
-                setBotStatus(`[KIS 취소완료] ${formatCurrency(orderPrice)} 0.5% 상승 미체결 취소 및 자금 환원 완료`);
-                setTimeout(() => handleSyncKIS(), 300);
-              } else {
-                const errMsg = cancelRes?.msg1 || "알 수 없는 응답";
-                
-                // Check if execution completed in the meantime
-                let isFilledInMeantime = false;
-                try {
-                  const status = await kisService.checkOrderExecution(order.id);
-                  if (status.isFullyFilled) {
-                    const newSlotId = `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                    setGapInventory(prev => [...prev, { id: newSlotId, price: orderPrice, quantity: status.ordQty || order.quantity }]);
-                    const newHoldings = { ...holdings, [order.symbol]: Number(((holdings[order.symbol] || 0) + (status.ordQty || order.quantity)).toFixed(4)) };
-                    setHoldings(newHoldings);
-                    if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-                    addLog(order.symbol, '매수', orderPrice, order.quantity, `[체결완료] 취소 전 체결 완료됨`);
-                    showNotification(`${currentStock.name} 취소 전 이미 체결 완료`, "success");
-                    isFilledInMeantime = true;
-                  }
-                } catch (chkErr) {
-                  console.warn("[Auto-Cancel Execution Check Error]:", chkErr);
-                }
 
-                if (!isFilledInMeantime) {
-                  // Log status silently without alarming false errors
-                  addLog(order.symbol, '매수', orderPrice, order.quantity, `[주문정리] ${errMsg}`);
-                  setBotStatus(`[자동취소 완료] ${formatCurrency(orderPrice)} 주문 정리됨`);
-                  setTimeout(() => {
-  if (!syncInProgressRef.current) {
-    handleSyncKIS();
-  }
-}, 500);
-                }
-              }
-            } catch (e: any) {
-              console.error("[KIS Auto-Cancel Exception]:", e);
-              addLog(order.symbol, '매수', orderPrice, order.quantity, `[자동취소 처리] 대기 주문 정리 (${e?.message || '완료'})`);
-              setBotStatus("대기 주문 정리 완료");
-              setTimeout(() => {
-  if (!syncInProgressRef.current) {
-    handleSyncKIS();
-  }
-}, 500);
-            }
+            showNotification(
+              `[자금 회수 취소] ${currentStock.name} 미체결 매수 자동 취소`,
+              "info"
+            );
+
+            continue;
           }
-          // Do NOT push to nextPending (it's cancelled/removed)
-        } else if (currentPrice <= orderPrice) {
-          // 2. FILL CONDITION TRIGGERED: Price touched/went below orderPrice (and didn't trigger cancel yet)
-          updated = true;
-          
-          if (order.isSimulated) {
-            // Fill simulated order
-            const oldQty = holdings[order.symbol] || 0;
-            const oldAvg = avgPrices[order.symbol] || orderPrice;
-            const newQty =
-  Number(
-    (
-      oldQty +
-      newlyFilledQty
-    ).toFixed(4)
-  );
 
-// ============================================================
-// 실제 KIS 체결가격 사용
-// status.price = KIS 평균체결가
-// 값이 없을 경우에만 주문가격을 fallback으로 사용
-// ============================================================
+          // --------------------------------------------------
+          // 실제 KIS 주문
+          // --------------------------------------------------
 
-const filledPrice =
-  Number(status.price || 0) > 0
-    ? Number(status.price)
-    : orderPrice;
-
-// ============================================================
-// 실제 체결가격 기준 평단가 계산
-// ============================================================
-
-const newAvg =
-  newQty > 0
-    ? Math.round(
-        (
-          (oldQty * oldAvg) +
-          (newlyFilledQty * filledPrice)
-        ) / newQty
-      )
-    : filledPrice;
-            
-            recentLocalTradesRef.current[order.symbol] = {
-              timestamp: Date.now(),
-              quantity: newQty,
-              avgPrice: newAvg
-            };
-
-            const newHoldings = { ...holdings, [order.symbol]: newQty };
-            setHoldings(newHoldings);
-            setAvgPrices(prev => ({ ...prev, [order.symbol]: newAvg }));
+          if (
+            kisConfig.isConnected &&
+            kisConfig.isRealOrderEnabled
+          ) {
             try {
-              localStorage.setItem('sleek_holdings', JSON.stringify(newHoldings));
-              localStorage.setItem('sleek_avg_prices', JSON.stringify({ ...avgPrices, [order.symbol]: newAvg }));
-            } catch (e) {}
-            if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-            
-            // Add to gapInventory and update ref
-            const newSlotId = order.slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-            const newSlot = { id: newSlotId, price: orderPrice, quantity: order.quantity };
-            setGapInventory(prev => {
-              const next = [...prev, newSlot];
-              gapInventoryRef.current = next;
-              return next;
-            });
 
-            setLastTradeType('BUY');
-            setGapTradeCount(prev => prev + 1);
-            playScalpingSound('BUY');
+              setBotStatus(
+                `[KIS API] 주문번호 ${order.id} 자동취소 요청 중...`
+              );
 
-            // Trigger Auto-Sell
-            triggerAutoSell(order.symbol, orderPrice, order.quantity, newAvg, newQty, newSlotId);
-          } else {
-            // Real KIS order: check if KIS actually filled it!
-            try {
-              const status = await kisService.checkOrderExecution(order.id);
-              if (status.isFullyFilled) {
-                const kisSlotId = order.slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                setGapInventory(prev => {
-                  const next = [...prev, { id: kisSlotId, price: orderPrice, quantity: status.ordQty || order.quantity }];
-                  gapInventoryRef.current = next;
-                  return next;
-                });
-                const oldQty = holdings[order.symbol] || 0;
-                const oldAvg = avgPrices[order.symbol] || orderPrice;
-                const newQty = Number((oldQty + (status.ordQty || order.quantity)).toFixed(4));
-                const newAvg = newQty > 0 ? Math.round(((oldQty * oldAvg) + ((status.ordQty || order.quantity) * orderPrice)) / newQty) : orderPrice;
-                
-                recentLocalTradesRef.current[order.symbol] = {
-                  timestamp: Date.now(),
-                  quantity: newQty,
-                  avgPrice: newAvg
-                };
+              const cancelRes =
+                await kisService.cancelOrder(
+                  order.symbol,
+                  order.orgNo || "",
+                  order.id,
+                  (order.quantity || 1).toString(),
+                  order.ordDvsn ||
+                    kisConfig.domesticOrderType ||
+                    "00"
+                );
 
-                const newHoldings = { ...holdings, [order.symbol]: newQty };
-                setHoldings(newHoldings);
-                setAvgPrices(prev => ({ ...prev, [order.symbol]: newAvg }));
-                try {
-                  localStorage.setItem('sleek_holdings', JSON.stringify(newHoldings));
-                  localStorage.setItem('sleek_avg_prices', JSON.stringify({ ...avgPrices, [order.symbol]: newAvg }));
-                } catch (e) {}
-                if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-                
-                addLog(order.symbol, '매수', orderPrice, order.quantity, `[실제체결] 주문가 ${formatCurrency(orderPrice)} 전량 체결 완료`);
-                showNotification(`${currentStock.name} KIS 실거래 매수 체결 완료!`, "success");
-                setBotStatus(`[체결 완료] ${formatCurrency(orderPrice)} (${formatQuantity(order.quantity)})`);
-                setLastTradeType('BUY');
-                setGapTradeCount(prev => prev + 1);
-                playScalpingSound('BUY');
+              // ----------------------------------------------
+              // 취소 성공
+              // ----------------------------------------------
 
-                // Trigger Auto-Sell
-                triggerAutoSell(order.symbol, orderPrice, order.quantity, newAvg, newQty, kisSlotId);
-              } else if (status.ccldQty > 0) {
+              if (
+                cancelRes &&
+                cancelRes.rt_cd === '0'
+              ) {
 
-  // ============================================================
-  // KIS 누적 체결수량
-  // ============================================================
+                addLog(
+                  order.symbol,
+                  '매수',
+                  orderPrice,
+                  order.quantity,
+                  `[KIS 자동취소] ${cancelReason}`
+                );
 
-  const totalFilledQty =
-    Number(status.ccldQty || 0);
+                showNotification(
+                  `${currentStock.name} KIS 매수 미체결 자동 취소 완료`,
+                  "info"
+                );
 
-  // 이미 프로그램에서 반영한 누적 체결수량
-  const alreadyProcessedQty =
-    processedFilledQtyRef.current[order.id] || 0;
+                setBotStatus(
+                  `[KIS 취소완료] ${formatCurrency(orderPrice)} 미체결 주문 취소`
+                );
 
-  // 이번 조회에서 새롭게 체결된 수량
-  const newlyFilledQty =
-    totalFilledQty - alreadyProcessedQty;
+                setTimeout(() => {
+                  if (!syncInProgressRef.current) {
+                    handleSyncKIS();
+                  }
+                }, 300);
 
-  // 이미 처리한 체결이면 중복 반영하지 않음
-  if (newlyFilledQty <= 0) {
+                continue;
+              }
 
-    const originalQty =
-      Number(
-        order.originalQuantity ??
-        order.quantity ??
-        0
-      );
+              // ----------------------------------------------
+              // 취소 실패
+              // → 취소 요청 사이에 체결되었는지 확인
+              // ----------------------------------------------
 
-    const remainingQty =
-      Math.max(
-        0,
-        originalQty - totalFilledQty
-      );
+              const errMsg =
+                cancelRes?.msg1 ||
+                "알 수 없는 응답";
 
-    if (remainingQty > 0) {
-      nextPending.push({
-        ...order,
-        quantity: remainingQty
-      });
-    }
+              try {
 
-    continue;
-  }
+                const status =
+                  await kisService.checkOrderExecution(
+                    order.id
+                  );
 
-  // 이번까지 처리한 누적 체결수량 저장
-  processedFilledQtyRef.current[order.id] =
-    totalFilledQty;
+                const totalFilledQty =
+                  Number(status.ccldQty || 0);
 
-  // 실제 체결가격
-  const filledPrice =
-    Number(status.price || 0) > 0
-      ? Number(status.price)
-      : order.orderPrice;
+                const alreadyProcessedQty =
+                  processedFilledQtyRef.current[
+                    order.id
+                  ] || 0;
 
-  // 기존 보유수량
-  const oldQty =
-    holdings[order.symbol] || 0;
+                const newlyFilledQty =
+                  totalFilledQty -
+                  alreadyProcessedQty;
 
-  // 기존 평단
-  const oldAvg =
-    avgPrices[order.symbol] || filledPrice;
+                // ------------------------------------------
+                // 신규 체결 발생
+                // ------------------------------------------
 
-  // 신규 체결분만 추가
-  const newQty =
-    Number(
-      (
-        oldQty +
-        newlyFilledQty
-      ).toFixed(4)
-    );
+                if (newlyFilledQty > 0) {
 
-  // 실제 체결가격 기준 평단
-  const newAvg =
-    newQty > 0
-      ? Math.round(
-          (
-            (oldQty * oldAvg) +
-            (newlyFilledQty * filledPrice)
-          ) / newQty
-        )
-      : filledPrice;
+                  processedFilledQtyRef.current[
+                    order.id
+                  ] = totalFilledQty;
 
-  // 최근 체결 정보
-  recentLocalTradesRef.current[order.symbol] = {
-    timestamp: Date.now(),
-    quantity: newQty,
-    avgPrice: newAvg
-  };
+                  const filledPrice =
+                    Number(status.price || 0) > 0
+                      ? Number(status.price)
+                      : orderPrice;
 
-  // 보유수량 업데이트
-  const newHoldings = {
-    ...holdings,
-    [order.symbol]: newQty
-  };
+                  const oldQty =
+                    holdings[order.symbol] || 0;
 
-  setHoldings(newHoldings);
+                  const oldAvg =
+                    avgPrices[order.symbol] ||
+                    filledPrice;
 
-  setAvgPrices(prev => ({
-    ...prev,
-    [order.symbol]: newAvg
-  }));
+                  const newQty =
+                    Number(
+                      (
+                        oldQty +
+                        newlyFilledQty
+                      ).toFixed(4)
+                    );
 
-  // 저장
-  try {
+                  const newAvg =
+                    newQty > 0
+                      ? Math.round(
+                          (
+                            (oldQty * oldAvg) +
+                            (
+                              newlyFilledQty *
+                              filledPrice
+                            )
+                          ) / newQty
+                        )
+                      : filledPrice;
 
-    localStorage.setItem(
-      'sleek_holdings',
-      JSON.stringify(newHoldings)
-    );
+                  const newHoldings = {
+                    ...holdings,
+                    [order.symbol]: newQty
+                  };
 
-    localStorage.setItem(
-      'sleek_avg_prices',
-      JSON.stringify({
-        ...avgPrices,
-        [order.symbol]: newAvg
-      })
-    );
+                  setHoldings(newHoldings);
 
-  } catch (e) {}
+                  setAvgPrices(prev => ({
+                    ...prev,
+                    [order.symbol]: newAvg
+                  }));
 
-  if (currentUser) {
-    saveUserHoldings(
-      currentUser.uid,
-      newHoldings
-    );
-  }
-
-  // GAP Inventory
-  const partialSlotId =
-    `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-  const partialSlot = {
-    id: partialSlotId,
-    price: filledPrice,
-    quantity: newlyFilledQty
-  };
-
-  setGapInventory(prev => {
-
-    const next = [
-      ...prev,
-      partialSlot
-    ];
-
-    gapInventoryRef.current = next;
-
-    return next;
-  });
-
-  // 로그
-  addLog(
-    order.symbol,
-    '매수',
-    filledPrice,
-    newlyFilledQty,
-    `[일부체결] 신규 ${newlyFilledQty}주 / 누적 ${totalFilledQty}주 / 실제체결가 ${formatCurrency(filledPrice)}`
-  );
-
-  showNotification(
-    `${currentStock.name} ${newlyFilledQty}주 부분체결`,
-    "success"
-  );
-
-  setBotStatus(
-    `[부분체결] ${currentStock.name} 신규 ${newlyFilledQty}주 / 누적 ${totalFilledQty}주`
-  );
-
-  // 매수 체결 처리
-  setLastTradeType('BUY');
-
-  setGapTradeCount(
-    prev => prev + 1
-  );
-
-  playScalpingSound('BUY');
-
-  // 신규 체결분만 익절 감시
-  triggerAutoSell(
-    order.symbol,
-    filledPrice,
-    newlyFilledQty,
-    newAvg,
-    newQty,
-    partialSlotId
-  );
-
-  // ============================================================
-  // 남은 미체결 수량
-  // ============================================================
-
-  const originalQty =
-    Number(
-      order.originalQuantity ??
-      order.quantity ??
-      0
-    );
-
-  const remainingQty =
-    Math.max(
-      0,
-      originalQty - totalFilledQty
-    );
-
-  if (remainingQty > 0) {
-
-    nextPending.push({
-      ...order,
-      quantity: remainingQty
-    });
-  
-                  // Add filled portion to inventory
-                  const partialSlotId = order.slotId || `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-                  setGapInventory(prev => {
-                    const next = [...prev, { id: partialSlotId, price: orderPrice, quantity: status.ccldQty }];
-                    gapInventoryRef.current = next;
-                    return next;
-                  });
-                  const oldQty = holdings[order.symbol] || 0;
-                  const newQty = Number((oldQty + status.ccldQty).toFixed(4));
-                  const oldAvg = avgPrices[order.symbol] || orderPrice;
-                  recentLocalTradesRef.current[order.symbol] = {
+                  recentLocalTradesRef.current[
+                    order.symbol
+                  ] = {
                     timestamp: Date.now(),
                     quantity: newQty,
-                    avgPrice: oldAvg
+                    avgPrice: newAvg
                   };
-                  const newHoldings = { ...holdings, [order.symbol]: newQty };
-                  setHoldings(newHoldings);
+
                   try {
-                    localStorage.setItem('sleek_holdings', JSON.stringify(newHoldings));
+
+                    localStorage.setItem(
+                      'sleek_holdings',
+                      JSON.stringify(newHoldings)
+                    );
+
+                    localStorage.setItem(
+                      'sleek_avg_prices',
+                      JSON.stringify({
+                        ...avgPrices,
+                        [order.symbol]: newAvg
+                      })
+                    );
+
                   } catch (e) {}
-                  if (currentUser) saveUserHoldings(currentUser.uid, newHoldings);
-                  addLog(order.symbol, '매수', orderPrice, status.ccldQty, `[일부체결] KIS 일부 체결 완료 (${status.ccldQty}주 / 남은 수량: ${remainingQty}주)`);
+
+                  if (currentUser) {
+                    saveUserHoldings(
+                      currentUser.uid,
+                      newHoldings
+                    );
+                  }
+
+                  const slotId =
+                    order.slotId ||
+                    `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+                  const newSlot = {
+                    id: slotId,
+                    price: filledPrice,
+                    quantity: newlyFilledQty
+                  };
+
+                  setGapInventory(prev => {
+
+                    const next = [
+                      ...prev,
+                      newSlot
+                    ];
+
+                    gapInventoryRef.current =
+                      next;
+
+                    return next;
+                  });
+
+                  addLog(
+                    order.symbol,
+                    '매수',
+                    filledPrice,
+                    newlyFilledQty,
+                    `[취소 중 체결] 신규 ${newlyFilledQty}주 / 누적 ${totalFilledQty}주 / 실제체결가 ${formatCurrency(filledPrice)}`
+                  );
+
+                  showNotification(
+                    `${currentStock.name} ${newlyFilledQty}주 체결 확인`,
+                    "success"
+                  );
+
+                  setLastTradeType('BUY');
+
+                  setGapTradeCount(
+                    prev => prev + 1
+                  );
+
+                  playScalpingSound('BUY');
+
+                  triggerAutoSell(
+                    order.symbol,
+                    filledPrice,
+                    newlyFilledQty,
+                    newAvg,
+                    newQty,
+                    slotId
+                  );
+
+                  // ----------------------------------------
+                  // 남은 수량 계산
+                  // ----------------------------------------
+
+                  const originalQty =
+                    Number(
+                      order.originalQuantity ??
+                      order.quantity ??
+                      0
+                    );
+
+                  const remainingQty =
+                    Math.max(
+                      0,
+                      originalQty -
+                      totalFilledQty
+                    );
+
+                  if (remainingQty > 0) {
+
+                    nextPending.push({
+                      ...order,
+                      quantity:
+                        remainingQty,
+                      originalQuantity:
+                        originalQty
+                    });
+
+                  }
+
+                  continue;
                 }
-              } else {
-                // Not filled on KIS yet, keep waiting
-                nextPending.push(order);
+
+              } catch (checkError) {
+                console.warn(
+                  "[Auto-Cancel 체결확인 오류]",
+                  checkError
+                );
               }
-            } catch (e) {
-              console.error("[KIS Fill Check Error]:", e);
-              nextPending.push(order); // Keep tracking
+
+              addLog(
+                order.symbol,
+                '매수',
+                orderPrice,
+                order.quantity,
+                `[주문정리] ${errMsg}`
+              );
+
+              setBotStatus(
+                `[자동취소 완료] ${formatCurrency(orderPrice)} 주문 정리됨`
+              );
+
+              setTimeout(() => {
+                if (!syncInProgressRef.current) {
+                  handleSyncKIS();
+                }
+              }, 500);
+
+            } catch (e: any) {
+
+              console.error(
+                "[KIS Auto-Cancel Exception]:",
+                e
+              );
+
+              addLog(
+                order.symbol,
+                '매수',
+                orderPrice,
+                order.quantity,
+                `[자동취소 처리] 대기 주문 정리 (${e?.message || '완료'})`
+              );
+
+              setBotStatus(
+                "대기 주문 정리 완료"
+              );
+
+              setTimeout(() => {
+                if (!syncInProgressRef.current) {
+                  handleSyncKIS();
+                }
+              }, 500);
             }
           }
-        } else {
-          // 3. Price is still higher than order price: Keep waiting
-          // For KIS orders, check if they got filled at a different price or manually filled/cancelled
-          if (!order.isSimulated) {
-             try {
-               const status = await kisService.checkOrderExecution(order.id);
-               if (status.isFullyFilled) {
 
-  // ============================================================
-  // KIS 누적 체결수량 기준 신규 체결수량 계산
-  // ============================================================
-
-  const totalFilledQty = Number(status.ccldQty || 0);
-
-  const alreadyProcessedQty =
-    processedFilledQtyRef.current[order.id] || 0;
-
-  const newlyFilledQty =
-    totalFilledQty - alreadyProcessedQty;
-
-  // 이미 처리한 체결이면 중복 처리하지 않음
-  if (newlyFilledQty <= 0) {
-    continue;
-  }
-
-  // 이번까지 처리한 누적 체결수량 저장
-  processedFilledQtyRef.current[order.id] =
-    totalFilledQty;
-
-  // ============================================================
-  // 보유수량 / 평단 계산
-  // ============================================================
-
-  const oldQty =
-    holdings[order.symbol] || 0;
-
-  const oldAvg =
-    avgPrices[order.symbol] || orderPrice;
-
-  const newQty =
-    Number(
-      (oldQty + newlyFilledQty).toFixed(4)
-    );
-
-  const newAvg =
-    newQty > 0
-      ? Math.round(
-          (
-            (oldQty * oldAvg) +
-            (newlyFilledQty * orderPrice)
-          ) / newQty
-        )
-      : orderPrice;
-
-  // ============================================================
-  // 최근 체결 정보
-  // ============================================================
-
-  recentLocalTradesRef.current[order.symbol] = {
-    timestamp: Date.now(),
-    quantity: newQty,
-    avgPrice: newAvg
-  };
-
-  // ============================================================
-  // 보유수량 업데이트
-  // ============================================================
-
-  const newHoldings = {
-    ...holdings,
-    [order.symbol]: newQty
-  };
-
-  setHoldings(newHoldings);
-
-  setAvgPrices(prev => ({
-    ...prev,
-    [order.symbol]: newAvg
-  }));
-
-  try {
-    localStorage.setItem(
-      'sleek_holdings',
-      JSON.stringify(newHoldings)
-    );
-
-    localStorage.setItem(
-      'sleek_avg_prices',
-      JSON.stringify({
-        ...avgPrices,
-        [order.symbol]: newAvg
-      })
-    );
-  } catch (e) {}
-
-  if (currentUser) {
-    saveUserHoldings(
-      currentUser.uid,
-      newHoldings
-    );
-  }
-
-  // ============================================================
-  // 거래 로그
-  // ============================================================
-
-  addLog(
-  order.symbol,
-  '매수',
-  filledPrice,
-  newlyFilledQty,
-  `[실제체결] ${newlyFilledQty}주 신규 체결 / 누적 ${totalFilledQty}주 / 실제체결가 ${formatCurrency(filledPrice)}`
-);
-
-  showNotification(
-    `${currentStock.name} KIS 매수 ${newlyFilledQty}주 체결 완료!`,
-    "success"
-  );
-
-  setBotStatus(
-  `[체결 완료] 실제체결가 ${formatCurrency(filledPrice)} × ${newlyFilledQty}주`
-);
-
-  // ============================================================
-  // GAP Inventory
-  // ============================================================
-
-  const realSlotId =
-    order.slotId ||
-    `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-
-  const newSlot = {
-  id: realSlotId,
-  price: filledPrice,
-  quantity: newlyFilledQty
-};
-
-  setGapInventory(prev => {
-    const next = [
-      ...prev,
-      newSlot
-    ];
-
-    gapInventoryRef.current = next;
-
-    return next;
-  });
-
-  // ============================================================
-  // 매수 완료 처리
-  // ============================================================
-
-  setLastTradeType('BUY');
-
-  setGapTradeCount(
-    prev => prev + 1
-  );
-
-  playScalpingSound('BUY');
-
-  // ============================================================
-  // 자동 익절 감시
-  // ============================================================
-
-  triggerAutoSell(
-  order.symbol,
-  filledPrice,
-  newlyFilledQty,
-  newAvg,
-  newQty,
-  realSlotId
-);
-
-  continue;
-}
-             } catch (e) {
-               console.warn(e);
-             }
-          }
-          nextPending.push(order);
+          continue;
         }
+
+        // ====================================================
+        // 2. KIS 실제 주문 체결상태 확인
+        // ====================================================
+
+        if (!order.isSimulated) {
+
+          try {
+
+            const status =
+              await kisService.checkOrderExecution(
+                order.id
+              );
+
+            const totalFilledQty =
+              Number(status.ccldQty || 0);
+
+            const originalQty =
+              Number(
+                order.originalQuantity ??
+                order.quantity ??
+                status.ordQty ??
+                0
+              );
+
+            // ------------------------------------------------
+            // 신규 체결수량
+            // ------------------------------------------------
+
+            const alreadyProcessedQty =
+              processedFilledQtyRef.current[
+                order.id
+              ] || 0;
+
+            const newlyFilledQty =
+              totalFilledQty -
+              alreadyProcessedQty;
+
+            // ------------------------------------------------
+            // 신규 체결이 있는 경우
+            // ------------------------------------------------
+
+            if (newlyFilledQty > 0) {
+
+              // 누적 체결수량 저장
+              processedFilledQtyRef.current[
+                order.id
+              ] = totalFilledQty;
+
+              // ----------------------------------------------
+              // 실제 체결가격
+              // ----------------------------------------------
+
+              const filledPrice =
+                Number(status.price || 0) > 0
+                  ? Number(status.price)
+                  : orderPrice;
+
+              // ----------------------------------------------
+              // 기존 보유수량 / 평단
+              // ----------------------------------------------
+
+              const oldQty =
+                holdings[order.symbol] || 0;
+
+              const oldAvg =
+                avgPrices[order.symbol] ||
+                filledPrice;
+
+              // ----------------------------------------------
+              // 신규 체결수량만 추가
+              // ----------------------------------------------
+
+              const newQty =
+                Number(
+                  (
+                    oldQty +
+                    newlyFilledQty
+                  ).toFixed(4)
+                );
+
+              // ----------------------------------------------
+              // 실제 체결가격 기준 평단
+              // ----------------------------------------------
+
+              const newAvg =
+                newQty > 0
+                  ? Math.round(
+                      (
+                        (oldQty * oldAvg) +
+                        (
+                          newlyFilledQty *
+                          filledPrice
+                        )
+                      ) / newQty
+                    )
+                  : filledPrice;
+
+              // ----------------------------------------------
+              // 최근 체결 정보
+              // ----------------------------------------------
+
+              recentLocalTradesRef.current[
+                order.symbol
+              ] = {
+                timestamp: Date.now(),
+                quantity: newQty,
+                avgPrice: newAvg
+              };
+
+              // ----------------------------------------------
+              // 보유수량
+              // ----------------------------------------------
+
+              const newHoldings = {
+                ...holdings,
+                [order.symbol]: newQty
+              };
+
+              setHoldings(newHoldings);
+
+              setAvgPrices(prev => ({
+                ...prev,
+                [order.symbol]: newAvg
+              }));
+
+              // ----------------------------------------------
+              // localStorage
+              // ----------------------------------------------
+
+              try {
+
+                localStorage.setItem(
+                  'sleek_holdings',
+                  JSON.stringify(newHoldings)
+                );
+
+                localStorage.setItem(
+                  'sleek_avg_prices',
+                  JSON.stringify({
+                    ...avgPrices,
+                    [order.symbol]: newAvg
+                  })
+                );
+
+              } catch (e) {}
+
+              if (currentUser) {
+
+                saveUserHoldings(
+                  currentUser.uid,
+                  newHoldings
+                );
+
+              }
+
+              // ----------------------------------------------
+              // GAP Inventory
+              // ----------------------------------------------
+
+              const slotId =
+                order.slotId ||
+                `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+              const newSlot = {
+                id: slotId,
+                price: filledPrice,
+                quantity: newlyFilledQty
+              };
+
+              setGapInventory(prev => {
+
+                const next = [
+                  ...prev,
+                  newSlot
+                ];
+
+                gapInventoryRef.current =
+                  next;
+
+                return next;
+              });
+
+              // ----------------------------------------------
+              // 로그
+              // ----------------------------------------------
+
+              addLog(
+                order.symbol,
+                '매수',
+                filledPrice,
+                newlyFilledQty,
+                `[실제체결] 신규 ${newlyFilledQty}주 / 누적 ${totalFilledQty}주 / 실제체결가 ${formatCurrency(filledPrice)}`
+              );
+
+              showNotification(
+                `${currentStock.name} KIS 매수 ${newlyFilledQty}주 체결`,
+                "success"
+              );
+
+              setBotStatus(
+                `[체결] ${currentStock.name} 실제체결가 ${formatCurrency(filledPrice)} × ${newlyFilledQty}주`
+              );
+
+              setLastTradeType('BUY');
+
+              setGapTradeCount(
+                prev => prev + 1
+              );
+
+              playScalpingSound('BUY');
+
+              // ----------------------------------------------
+              // 자동 익절 감시
+              // ----------------------------------------------
+
+              triggerAutoSell(
+                order.symbol,
+                filledPrice,
+                newlyFilledQty,
+                newAvg,
+                newQty,
+                slotId
+              );
+            }
+
+            // ------------------------------------------------
+            // 남은 미체결 수량
+            // ------------------------------------------------
+
+            const remainingQty =
+              Math.max(
+                0,
+                originalQty -
+                totalFilledQty
+              );
+
+            // ------------------------------------------------
+            // 전량 체결
+            // ------------------------------------------------
+
+            if (
+              totalFilledQty >= originalQty &&
+              originalQty > 0
+            ) {
+
+              // 주문 감시 종료
+              continue;
+            }
+
+            // ------------------------------------------------
+            // 부분체결 또는 미체결
+            // ------------------------------------------------
+
+            if (remainingQty > 0) {
+
+              nextPending.push({
+                ...order,
+                quantity:
+                  remainingQty,
+                originalQuantity:
+                  originalQty
+              });
+
+            }
+
+            continue;
+
+          } catch (e) {
+
+            console.error(
+              "[KIS Fill Check Error]:",
+              e
+            );
+
+            nextPending.push(order);
+
+            continue;
+          }
+        }
+
+        // ====================================================
+        // 3. 시뮬레이션 주문
+        // ====================================================
+
+        if (order.isSimulated && currentPrice <= orderPrice) {
+
+          const oldQty =
+            holdings[order.symbol] || 0;
+
+          const oldAvg =
+            avgPrices[order.symbol] ||
+            orderPrice;
+
+          const fillQty =
+            Number(order.quantity || 0);
+
+          if (fillQty <= 0) {
+            continue;
+          }
+
+          const newQty =
+            Number(
+              (
+                oldQty +
+                fillQty
+              ).toFixed(4)
+            );
+
+          const filledPrice =
+            orderPrice;
+
+          const newAvg =
+            newQty > 0
+              ? Math.round(
+                  (
+                    (oldQty * oldAvg) +
+                    (
+                      fillQty *
+                      filledPrice
+                    )
+                  ) / newQty
+                )
+              : filledPrice;
+
+          recentLocalTradesRef.current[
+            order.symbol
+          ] = {
+            timestamp: Date.now(),
+            quantity: newQty,
+            avgPrice: newAvg
+          };
+
+          const newHoldings = {
+            ...holdings,
+            [order.symbol]: newQty
+          };
+
+          setHoldings(newHoldings);
+
+          setAvgPrices(prev => ({
+            ...prev,
+            [order.symbol]: newAvg
+          }));
+
+          try {
+
+            localStorage.setItem(
+              'sleek_holdings',
+              JSON.stringify(newHoldings)
+            );
+
+            localStorage.setItem(
+              'sleek_avg_prices',
+              JSON.stringify({
+                ...avgPrices,
+                [order.symbol]: newAvg
+              })
+            );
+
+          } catch (e) {}
+
+          if (currentUser) {
+
+            saveUserHoldings(
+              currentUser.uid,
+              newHoldings
+            );
+
+          }
+
+          // ----------------------------------------------
+          // GAP Inventory
+          // ----------------------------------------------
+
+          const slotId =
+            order.slotId ||
+            `SLOT-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+
+          const newSlot = {
+            id: slotId,
+            price: filledPrice,
+            quantity: fillQty
+          };
+
+          setGapInventory(prev => {
+
+            const next = [
+              ...prev,
+              newSlot
+            ];
+
+            gapInventoryRef.current =
+              next;
+
+            return next;
+          });
+
+          addLog(
+            order.symbol,
+            '매수',
+            filledPrice,
+            fillQty,
+            `[가상체결] ${fillQty}주 × ${formatCurrency(filledPrice)}`
+          );
+
+          setLastTradeType('BUY');
+
+          setGapTradeCount(
+            prev => prev + 1
+          );
+
+          playScalpingSound('BUY');
+
+          triggerAutoSell(
+            order.symbol,
+            filledPrice,
+            fillQty,
+            newAvg,
+            newQty,
+            slotId
+          );
+
+          continue;
+        }
+
+        // ====================================================
+        // 4. 아직 미체결
+        // ====================================================
+
+        nextPending.push(order);
       }
 
-      if (updated) {
-        setPendingBuyOrders(nextPending);
-      }
-    };
+      // ======================================================
+      // Pending 주문 상태 업데이트
+      // ======================================================
 
-    checkOrders();
-  }, [pendingBuyOrders, stocks, autoCancelThreshold, marketType, exchangeRate, holdings, currentUser, playScalpingSound, triggerAutoSell]);
+      if (!cancelled) {
+
+        setPendingBuyOrders(prev => {
+
+          const validIds =
+            new Set(
+              nextPending.map(
+                order => order.id
+              )
+            );
+
+          return prev.filter(
+            order =>
+              validIds.has(order.id)
+          ).map(order => {
+
+            const updatedOrder =
+              nextPending.find(
+                next =>
+                  next.id === order.id
+              );
+
+            return updatedOrder || order;
+          });
+        });
+
+      }
+
+    } catch (e) {
+
+      console.error(
+        "[Pending Buy Monitor Error]:",
+        e
+      );
+
+    }
+  };
+
+  checkOrders();
+
+  return () => {
+    cancelled = true;
+  };
+
+}, [
+  pendingBuyOrders,
+  stocks,
+  autoCancelThreshold,
+  marketType,
+  exchangeRate,
+  holdings,
+  avgPrices,
+  currentUser,
+  playScalpingSound,
+  triggerAutoSell
+]);
 
   // Monitor Pending Sell Orders for Price Changes, Fills, and Market Target Hits
   useEffect(() => {
