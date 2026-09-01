@@ -1106,7 +1106,7 @@ console.log(
   }
 
   private lastRequestTime = 0;
-  private minRequestInterval = 2000; // Minimum 2000ms interval between API calls to prevent Rate Limit (EGW00201 / 429)
+  private minRequestInterval = 500; // Minimum 500ms interval between API calls to prevent Rate Limit (EGW00201 / 429)
   private requestQueueChain: Promise<any> = Promise.resolve();
 
   public async queueRequest<T>(fn: () => Promise<T>): Promise<T> {

@@ -138,6 +138,7 @@ export interface ScalperTab {
   id: string; // symbol e.g., '073240' or '001520'
   symbol: string;
   name: string;
+  price?: number;
   isBotActive: boolean;
   gapBuyPrice: number;
   gapSellPrice: number;
@@ -1805,7 +1806,8 @@ setGapInventory(nextInv);
     const newTab: ScalperTab = {
       id: symbol,
       symbol,
-      name,
+      name: stockInfo.name || symbol,
+      price: stockInfo.price || 0,
       isBotActive: false,
       gapBuyPrice: limits.lowerLimit,
       gapSellPrice: limits.upperLimit,
@@ -5231,61 +5233,22 @@ data.price
       setInitSyncState(prev => ({
         ...prev,
         progress: 30,
-        currentStep: '2단계: KRX 정규 시장 시세 및 코스피/코스닥 지수 피드 수신 중...',
+        currentStep: '2단계: 등록 종목 실시간 시세 동기화 중...',
         completedSteps: ['1. KIS OpenAPI 보안 인증 및 토큰 발급']
       }));
 
       // Step 2: Market Feed & Index
-      setStartupSteps(prev => prev.map(s => s.id === 'market-feed' ? { ...s, status: 'loading', detail: '실시간 KRX 주식 시세 및 시장 지수 갱신 중...' } : s));
+      setStartupSteps(prev => prev.map(s => s.id === 'market-feed' ? { ...s, status: 'loading', detail: '등록 종목 실시간 시세 동기화 중...' } : s));
       await new Promise(r => setTimeout(r, 500));
 
       const currentStocks = stocksRef.current;
 
-if (currentStocks.length > 0) {
-  try {
-    const updatedStocks: Stock[] = [];
 
-    for (const s of currentStocks) {
-      try {
-        const pData = await kisService.getPrice(s.symbol);
-
-        if (pData && pData.current > 0) {
-          updatedStocks.push({
-            ...s,
-            price: pData.current,
-            change: pData.change,
-            changePercent: pData.changePercent,
-            volume: pData.volume,
-            isRealTime: true,
-            lastUpdated: new Date().toLocaleTimeString()
-          });
-        } else {
-          updatedStocks.push(s);
-        }
-      } catch (pErr) {
-        console.warn(
-          "Stock price fetch skip in init sync:",
-          s.symbol,
-          pErr
-        );
-
-        updatedStocks.push(s);
-      }
-
-      // KIS API 과호출 방지
-      await new Promise(resolve => setTimeout(resolve, 150));
-    }
-
-    setStocks(updatedStocks);
-  } catch (stErr) {
-    console.warn("Watchlist price fetch error:", stErr);
-  }
-}
 
       setStartupSteps(prev => prev.map(s => s.id === 'market-feed' ? { 
         ...s, 
         status: 'success', 
-        detail: 'KOSPI / KOSDAQ 지수 및 상·하한가 가격 제한폭 동기화 완료' 
+        detail: 'KOSPI 지수 및 상·하한가 가격 제한폭 동기화 완료' 
       } : s));
 
       setInitSyncState(prev => ({
