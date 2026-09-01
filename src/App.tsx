@@ -1741,7 +1741,12 @@ setGapInventory(nextInv);
     const isUS = stock?.market === 'US' || /^[A-Za-z]/.test(symbol) || marketType === 'US';
 
     const name = customName || stock?.name || getResolvedStockName(symbol) || symbol;
-    const price = customPrice ?? stock?.price ?? 0;
+    const price =
+  customPrice && customPrice > 0
+    ? customPrice
+    : stock?.price && stock.price > 0
+    ? stock.price
+    : 1000;
     if (price <= 0) {
   console.warn(
     '[TAB OPEN BLOCKED]',
