@@ -7472,8 +7472,8 @@ useEffect(() => {
         const currentPrice = stockItem.price;
         if (!currentPrice || currentPrice <= 0) continue;
 
-        const strat = detectStockStrategies(stockItem);
-        const { rsi, bb, sma5, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice } = strat;
+        const strat = detectStockStrategies(stockItem, marketType);
+        const { rsi, bb, sma5, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice, hasVolumeMomentum } = strat;
 
         // 🔄 전략 센서 스냅샷을 인벤토리의 sensors 네임스페이스에 기록 (값이 실제로 바뀐 경우에만 갱신)
         setScalperInventory(prev => {
@@ -7486,7 +7486,7 @@ useEffect(() => {
             cur.breakout === strat.isBreakout &&
             cur.vwap === strat.isVwapSupport &&
             cur.cvd === strat.isVolumeProfile &&
-            cur.volumeMomentum === momentumPositive &&
+            cur.volumeMomentum === hasVolumeMomentum &&
             cur.rsi === roundedRsi &&
             cur.activeCount === strat.activeCount
           ) return prev; // 변화 없으면 그대로 반환 (불필요한 재렌더 방지)
@@ -7498,7 +7498,7 @@ useEffect(() => {
               breakout: strat.isBreakout,
               vwap: strat.isVwapSupport,
               cvd: strat.isVolumeProfile,
-              volumeMomentum: momentumPositive,
+              volumeMomentum: hasVolumeMomentum,
               rsi: roundedRsi,
               activeCount: strat.activeCount,
               lastUpdatedAt: Date.now()
