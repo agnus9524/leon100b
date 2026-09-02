@@ -593,7 +593,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 pb-2.5 border-b border-white/10">
 
         {/* 1열: 종목 검색창 → 종목명 → 현재체결가 → 4/4 올-그린 센서 → 상태메시지 */}
-        <div className="flex flex-col gap-2.5 min-w-0 lg:col-start-1" style={{ order: 1 }}>
+        <div className="flex flex-col gap-2.5 min-w-0 lg:col-start-1" style={{ order: 1, gridRowStart: 1 }}>
           
           {/* 종목 검색 & 추가 인풋 (기존 대비 2배 폭) */}
           <div ref={searchRef} className="relative z-[100] w-full sm:w-[22rem] md:w-96">
@@ -788,8 +788,8 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           )}
         </div>
 
-        {/* 2열 참고자료: 스캘핑 매매 참고용 4/4 올-그린 + 4대 개별 전략 센서 버튼 (눌림목/돌파/VWAP/CVD) */}
-        <div className="flex items-center gap-1.5 flex-wrap lg:col-start-2" style={{ order: 3 }}>
+        {/* 1열: 4/4 올-그린 + 4대 개별 전략 센서 버튼 (눌림목/돌파/VWAP/CVD) — 왼쪽 */}
+        <div className="flex items-center gap-1.5 flex-wrap lg:col-start-1" style={{ order: 3, gridRowStart: 3 }}>
 
           {/* 🎯 4/4 올-그린 (4대 핵심전략 일괄 선택 토글) — 눌림목 버튼 바로 왼쪽 */}
           <button
@@ -980,8 +980,8 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
 
         </div>
 
-        {/* 1열: 실시간 상태 메시지창 */}
-        <div className="text-xs sm:text-sm font-mono flex items-center bg-black/40 px-3.5 py-2 rounded-2xl border border-sleek-blue/30 shadow-inner lg:col-start-1" style={{ order: 3 }}>
+        {/* 2열: 실시간 상태 메시지창 — 오른쪽 */}
+        <div className="text-xs sm:text-sm font-mono flex items-center bg-black/40 px-3.5 py-2 rounded-2xl border border-sleek-blue/30 shadow-inner lg:col-start-2" style={{ order: 3, gridRowStart: 3 }}>
           <div className="flex items-center gap-2.5 w-full overflow-hidden">
             <span className="text-xs font-black text-slate-300 uppercase shrink-0 flex items-center gap-1.5">
               <Activity className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
@@ -1169,7 +1169,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
       </div>
 
       {/* 2열: 실시간 체결 내역(왼쪽) + 실시간 잔량 호가창(4호가, 오른쪽) */}
-        <div className="lg:col-start-2 flex items-stretch gap-2 min-w-0" style={{ order: 2 }}>
+        <div className="lg:col-start-2 flex items-stretch gap-2 min-w-0" style={{ order: 2, gridRowStart: 2 }}>
         {selectedStock && (
           <TickFeed symbol={selectedStock.symbol} price={price} formatCurrency={formatCurrency} />
         )}
@@ -1273,7 +1273,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         </div>
 
         {/* 4. 스캘퍼 등록 종목 & 추천종목 찾기 (col-span-3) */}
-        <div className="lg:col-start-2 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0 shadow-inner" style={{ order: 1 }}>
+        <div className="lg:col-start-2 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0 shadow-inner" style={{ order: 1, gridRowStart: 1 }}>
           <div className="flex items-center justify-between border-b border-white/10 pb-1.5 gap-1.5 flex-wrap">
             <div className="flex items-center gap-1.5 min-w-0">
               
@@ -1458,8 +1458,8 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           </div>
         </div>
 
-        {/* 5. START AI SCALPER 버튼 & 탭 순환 컨트롤 (col-span-2) */}
-        <div className="lg:col-start-2 flex flex-col justify-between gap-1.5" style={{ order: 4 }}>
+        {/* 5-1. START AI SCALPER 버튼 (왼쪽) */}
+        <div className="lg:col-start-1" style={{ order: 4, gridRowStart: 4 }}>
           <button 
             type="button"
             onClick={() => {
@@ -1496,8 +1496,10 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
               </>
             )}
           </button>
+        </div>
 
-          {/* 탭 순환 스위치 */}
+        {/* 5-2. 탭 순환 컨트롤 (오른쪽) */}
+        <div className="lg:col-start-2" style={{ order: 4, gridRowStart: 4 }}>
           <div className={cn(
             "flex items-center justify-between rounded-xl border p-1 transition-all shadow-inner",
             isAutoRotateTabs 

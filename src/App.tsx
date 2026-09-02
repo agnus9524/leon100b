@@ -8660,8 +8660,8 @@ const isProfitTarget = sellSignal;
 
   return (
     <div className="min-h-screen bg-sleek-bg text-slate-200 flex flex-col font-sans select-none overflow-x-hidden">
-      <header className="h-auto md:h-[60px] border-b border-sleek-border glass-header flex flex-col md:flex-row items-center justify-between px-6 py-4 md:py-0 sticky top-0 z-50 gap-4 md:gap-0">
-        <div className="flex items-center gap-4">
+      <header className="h-auto md:h-[60px] border-b border-sleek-border glass-header flex flex-col md:grid md:grid-cols-[1fr_auto_1fr] items-center px-6 py-4 md:py-0 sticky top-0 z-50 gap-4 md:gap-2">
+        <div className="flex items-center gap-4 md:justify-self-start">
           <div className="flex bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 items-center gap-2">
             <SouthKoreaFlag />
             <span className="text-[11px] font-black text-white">국내주식 (KRX)</span>
@@ -8672,20 +8672,23 @@ const isProfitTarget = sellSignal;
               <span>실시간 시세 동기화 중...</span>
             </div>
           )}
-          <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-sleek-blue rounded-md flex items-center justify-center">
-              <Bot className="w-4 h-4 text-white" />
-            </div>
-            <h1 className="text-[16px] md:text-[18px] font-extrabold tracking-tighter uppercase relative">
-              <span className="text-sleek-blue">LEO</span> SCALPER BOT <span className="text-white/40 font-normal ml-2 text-xl tracking-widest">PRO</span>
-            {currentUser?.email === "agnus9524@gmail.com" && (
-              <span className="absolute -top-1 -right-8 bg-sleek-blue text-[white] text-[7px] px-1 rounded-sm font-black tracking-widest leading-normal">SUPER</span>
-            )}
-          </h1>
         </div>
+
+        {/* 프로그램 이름 — 화면(헤더) 정중앙에 배치 */}
+        <div className="flex items-center gap-2 md:justify-self-center">
+          <div className="w-6 h-6 bg-sleek-blue rounded-md flex items-center justify-center">
+            <Bot className="w-4 h-4 text-white" />
+          </div>
+          <h1 className="text-[16px] md:text-[18px] font-extrabold tracking-tighter uppercase relative whitespace-nowrap">
+            <span className="text-sleek-blue">LEO</span> SCALPER BOT <span className="text-white/40 font-normal ml-2 text-xl tracking-widest">PRO</span>
+          {currentUser?.email === "agnus9524@gmail.com" && (
+            <span className="absolute -top-1 -right-8 bg-sleek-blue text-[white] text-[7px] px-1 rounded-sm font-black tracking-widest leading-normal">SUPER</span>
+          )}
+        </h1>
       </div>
 
-        <div className="flex items-center gap-2.5 flex-wrap">
+        {/* KIS 토큰/연동설정/Admin/로그인/로그아웃 — 모바일에서는 중앙 정렬로 차례대로 배치 */}
+        <div className="flex items-center justify-center md:justify-self-end gap-2.5 flex-wrap">
           {/* KIS OAuth Token Validity Status Card */}
           <div 
             onClick={() => setShowKisModal(true)}
