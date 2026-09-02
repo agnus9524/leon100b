@@ -125,6 +125,7 @@ import { StrategyPanel } from './components/StrategyPanel';
 import { XTXPredictor } from './components/XTXPredictor';
 import { MarketSignal } from './services/aiTradingService';
 import { POPULAR_STOCKS, type StockSuggestion } from './constants/stockList';
+import { KOSPI_STOCKS, ALL_KRX_MASTER_STOCKS, searchKrMasterStocks, type MasterStock } from './constants/kospiMaster';
 
 
 // --- Types & Mock Data ---
@@ -5036,23 +5037,43 @@ data.price
   // Real-time Search Suggestions
   useEffect(() => {
     const term = searchSymbol.trim();
+
     if (!term || term.length < 1) {
-      setSearchSuggestions([]);
+      // 입력이 없으면: 최근 등록된 종목(스캘퍼 인벤토리, 최신순) + 전체 KOSPI 마스터 목록을 보여준다.
+      // (추천종목 목업 데이터와는 완전히 분리된, 별도의 KOSPI 마스터 데이터 사용)
+      const registeredSymbols = new Set(scalperTabs.filter(t => !/^[A-Za-z]/.test(t.symbol)).map(t => t.symbol));
+      const recent: StockSuggestion[] = scalperTabs
+        .filter(t => !/^[A-Za-z]/.test(t.symbol)) // KR 종목만
+        .map(t => ({ symbol: t.symbol, name: t.name, market: 'KR' as const, marketType: 'KOSPI' as const, price: t.price }));
+
+      const fullList: StockSuggestion[] = KOSPI_STOCKS
+        .filter(s => !registeredSymbols.has(s.symbol))
+        .map(s => ({ symbol: s.symbol, name: s.name, market: 'KR' as const, marketType: s.market, sector: s.sector }));
+
+      setSearchSuggestions([...recent, ...fullList]);
       setShowSuggestions(false);
       return;
     }
 
     const lowerTerm = term.toLowerCase();
 
-    // 1. Instantly show local filtered popular stocks first for speed (case-insensitive for both symbol and name)
-    const localFiltered = POPULAR_STOCKS.filter(s => 
-      (s.market === marketType) && 
-      (s.name.toLowerCase().includes(lowerTerm) || s.symbol.toLowerCase().includes(lowerTerm))
+    // 1. 로컬 KOSPI/KOSDAQ 마스터 데이터에서 즉시 검색 (네트워크 대기 없이 즉시 표시, 코스피 우선순위 스코어링 적용)
+    const masterMatches = searchKrMasterStocks(term, 30)
+      .filter(s => marketType === 'KR') // 검색 인풋은 KR 마켓 탭에서만 마스터 데이터 검색 (US는 기존 방식 유지)
+      .map(s => ({ symbol: s.symbol, name: s.name, market: 'KR' as const, marketType: s.market, sector: s.sector }));
+
+    // 2. 혹시 마스터 데이터에 없는 경우를 대비해 기존 POPULAR_STOCKS 로컬 필터도 함께 병합 (중복 제거)
+    const popularMatches = POPULAR_STOCKS.filter(s =>
+      (s.market === marketType) &&
+      (s.name.toLowerCase().includes(lowerTerm) || s.symbol.toLowerCase().includes(lowerTerm)) &&
+      !masterMatches.some(m => m.symbol === s.symbol)
     );
-    setSearchSuggestions(localFiltered.slice(0, 10));
+
+    const localFiltered = [...masterMatches, ...popularMatches].slice(0, 30);
+    setSearchSuggestions(localFiltered);
     setShowSuggestions(localFiltered.length > 0);
 
-    // 2. Fetch comprehensive search results from our backend in real-time
+    // 3. Fetch comprehensive search results from our backend in real-time (실시간 시세/최신 상장 종목 등 마스터 데이터에 없는 것까지 보강)
     const delayDebounceFn = setTimeout(async () => {
       try {
         const response = await axios.get('/api/stocks/search', {
@@ -5070,7 +5091,7 @@ data.price
                 merged.push(item);
               }
             });
-            return merged.slice(0, 20);
+            return merged.slice(0, 30);
           });
           setShowSuggestions(true);
         }
@@ -5086,7 +5107,7 @@ data.price
     }
 
     return () => clearTimeout(delayDebounceFn);
-  }, [searchSymbol, marketType]);
+  }, [searchSymbol, marketType, scalperTabs]);
 
   // Handle click outside search
   useEffect(() => {

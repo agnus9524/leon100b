@@ -85,7 +85,6 @@ export interface IntegratedTradingHeaderProps {
   showNotification: (msg: string, type: 'success' | 'error' | 'info') => void;
   isGapBotActive: boolean;
   setIsGapBotActive: React.Dispatch<React.SetStateAction<boolean>>;
-  handleToggleScalperEngine?: () => void;
   setLastTradeType: (t: any) => void;
   isAutoRotateTabs: boolean;
   setIsAutoRotateTabs: React.Dispatch<React.SetStateAction<boolean>>;
@@ -164,7 +163,6 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
   showNotification,
   isGapBotActive,
   setIsGapBotActive,
-  handleToggleScalperEngine,
   setLastTradeType,
   isAutoRotateTabs,
   setIsAutoRotateTabs,
@@ -182,6 +180,20 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
   INITIAL_STOCKS_KR,
   INITIAL_STOCKS,
 }) => {
+  // 검색 드롭다운 키보드(↑↓ + Enter) 네비게이션용 로컬 상태
+  const [highlightedIndex, setHighlightedIndex] = React.useState(-1);
+  const suggestionItemRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
+
+  React.useEffect(() => {
+    setHighlightedIndex(-1);
+  }, [searchSuggestions, showSuggestions]);
+
+  React.useEffect(() => {
+    if (highlightedIndex >= 0) {
+      suggestionItemRefs.current[highlightedIndex]?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [highlightedIndex]);
+
   const isUS = selectedStock ? (selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US') : false;
   const price = selectedStock?.price || 0;
   const changeVal = selectedStock?.change || 0;
@@ -228,36 +240,63 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                 if (searchSuggestions.length > 0) setShowSuggestions(true);
               }}
               onKeyDown={(e) => {
-  if (e.key !== 'Enter') return;
+                if (e.key === 'ArrowDown') {
+                  e.preventDefault();
+                  if (searchSuggestions.length === 0) return;
+                  setShowSuggestions(true);
+                  setHighlightedIndex(prev => (prev + 1) % searchSuggestions.length);
+                  return;
+                }
+                if (e.key === 'ArrowUp') {
+                  e.preventDefault();
+                  if (searchSuggestions.length === 0) return;
+                  setShowSuggestions(true);
+                  setHighlightedIndex(prev => (prev - 1 + searchSuggestions.length) % searchSuggestions.length);
+                  return;
+                }
+                if (e.key === 'Escape') {
+                  setShowSuggestions(false);
+                  setHighlightedIndex(-1);
+                  return;
+                }
+                if (e.key !== 'Enter') return;
 
-  const exactMatch = searchSuggestions.find(
-    s =>
-      s.symbol.toLowerCase() ===
-      searchSymbol.trim().toLowerCase()
-  );
+                // ↑↓로 하이라이트된 항목이 있으면 그것을 최우선으로 선택
+                if (highlightedIndex >= 0 && highlightedIndex < searchSuggestions.length) {
+                  const picked = searchSuggestions[highlightedIndex];
+                  handleAddStock(picked.symbol, picked, picked.name);
+                  setHighlightedIndex(-1);
+                  return;
+                }
 
-  if (exactMatch) {
-    handleAddStock(
-      exactMatch.symbol,
-      exactMatch,
-      exactMatch.name
-    );
-    return;
-  }
+                const exactMatch = searchSuggestions.find(
+                  s =>
+                    s.symbol.toLowerCase() ===
+                    searchSymbol.trim().toLowerCase()
+                );
 
-  if (searchSuggestions.length > 0) {
-    const first = searchSuggestions[0];
+                if (exactMatch) {
+                  handleAddStock(
+                    exactMatch.symbol,
+                    exactMatch,
+                    exactMatch.name
+                  );
+                  return;
+                }
 
-    handleAddStock(
-      first.symbol,
-      first,
-      first.name
-    );
-    return;
-  }
+                if (searchSuggestions.length > 0) {
+                  const first = searchSuggestions[0];
 
-  handleAddStock();
-}}
+                  handleAddStock(
+                    first.symbol,
+                    first,
+                    first.name
+                  );
+                  return;
+                }
+
+                handleAddStock();
+              }}
               className="w-full bg-black/50 border border-white/15 focus:border-sleek-blue rounded-xl py-1.5 pl-7 pr-12 text-xs font-semibold text-white placeholder:text-slate-500 outline-none transition-all shadow-inner" 
               placeholder="종목코드/명"
             />
@@ -281,16 +320,22 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                 >
                   <div className="px-4 py-2 bg-slate-950/90 border-b border-white/10 flex items-center justify-between text-xs text-slate-400 font-bold uppercase tracking-wider">
                     <span className="flex items-center gap-1.5 text-sleek-blue">
-                      <Search className="w-3.5 h-3.5" /> 실시간 검색 종목 ({searchSuggestions.length}개)
+                      <Search className="w-3.5 h-3.5" />
+                      {searchSymbol.trim() ? `검색 결과 (${searchSuggestions.length}개)` : `최근 등록 + 전체 KOSPI 종목 (${searchSuggestions.length}개)`}
                     </span>
-                    <span className="text-[11px] text-emerald-400 font-medium">클릭 시 즉시 스캘핑 탭 추가</span>
+                    <span className="text-[11px] text-emerald-400 font-medium hidden sm:inline">클릭 또는 ↑↓ + Enter로 등록</span>
                   </div>
 
                   <div className="max-h-[340px] overflow-y-auto custom-scrollbar divide-y divide-white/5">
-                    {searchSuggestions.map((s, idx) => (
+                    {searchSuggestions.map((s, idx) => {
+                      const isAlreadyRegistered = scalperTabs.some(t => t.symbol === s.symbol);
+                      const isHighlighted = idx === highlightedIndex;
+                      return (
                       <button 
                         key={`${s.symbol}-${idx}`}
+                        ref={(el) => { suggestionItemRefs.current[idx] = el; }}
                         type="button"
+                        onMouseEnter={() => setHighlightedIndex(idx)}
                         onMouseDown={(e) => {
                           e.preventDefault();
                           e.stopPropagation();
@@ -301,32 +346,33 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                           e.stopPropagation();
                           handleAddStock(s.symbol, s as any, s.name);
                         }}
-                        className="w-full flex items-center justify-between p-3.5 hover:bg-sleek-blue/20 active:bg-sleek-blue/30 transition-colors text-left cursor-pointer group"
+                        className={cn(
+                          "w-full flex items-center justify-between p-3 transition-colors text-left cursor-pointer group",
+                          isHighlighted ? "bg-sleek-blue/25" : "hover:bg-sleek-blue/20 active:bg-sleek-blue/30"
+                        )}
                       >
-                        <div className="flex flex-col gap-1">
-                          <div className="flex items-center gap-2.5">
-                            <div className="text-sm sm:text-base font-extrabold text-white group-hover:text-sleek-blue transition-colors">
-                              {s.name}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2 text-xs font-mono text-slate-400">
-                            <span className="text-slate-300 font-semibold">{s.symbol}</span>
-                            {s.price !== undefined && s.price > 0 && (
-                              <>
-                                <span>•</span>
-                                <span className="text-sleek-blue font-bold">
-                                  {formatCurrency(s.price)}
-                                </span>
-                              </>
-                            )}
-                          </div>
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="text-sm font-extrabold text-white group-hover:text-sleek-blue transition-colors truncate">
+                            {s.name} <span className="text-slate-400 font-mono font-semibold">({s.symbol})</span>
+                          </span>
+                          {isAlreadyRegistered && (
+                            <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                              등록됨
+                            </span>
+                          )}
+                          {s.price !== undefined && s.price > 0 && (
+                            <span className="shrink-0 text-xs font-mono text-sleek-blue font-bold">
+                              {formatCurrency(s.price)}
+                            </span>
+                          )}
                         </div>
-                        <div className="flex items-center gap-2 text-xs font-bold text-sleek-blue opacity-80 group-hover:opacity-100 group-hover:translate-x-1 transition-all">
-                          <span>탭 추가</span>
+                        <div className="flex items-center gap-1 text-xs font-bold text-sleek-blue opacity-80 group-hover:opacity-100 group-hover:translate-x-1 transition-all shrink-0">
+                          <span className="hidden sm:inline">{isAlreadyRegistered ? '탭 선택' : '탭 추가'}</span>
                           <ChevronRight className="w-4 h-4" />
                         </div>
                       </button>
-                    ))}
+                      );
+                    })}
                   </div>
                 </motion.div>
               )}
@@ -1023,16 +1069,20 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           <button 
             type="button"
             onClick={() => {
-              if (handleToggleScalperEngine) {
-                handleToggleScalperEngine();
-              } else {
-                if (!isGapBotActive) {
-                  setLastTradeType(null);
+              if (!isGapBotActive) {
+                if (gapBuyPrice <= 0 || gapSellPrice <= 0) {
+                  alert("금액 구간(하한선과 상한선)을 정확하게 설정해주세요.");
+                  return;
                 }
-                setIsGapBotActive(!isGapBotActive);
+                if (gapBuyPrice >= gapSellPrice) {
+                  alert("상한가는 하한가보다 높은 금액이어야 합니다.");
+                  return;
+                }
+                setLastTradeType(null);
               }
+              setIsGapBotActive(!isGapBotActive);
             }}
-            title="등록된 모든 종목에 대한 AI 스캘퍼 엔진 일괄 시작 / 정지"
+            title="현재 선택된 종목의 개별 스캘퍼 시작/정지"
             className={cn(
               "w-full grow min-h-[80px] py-2.5 px-3 rounded-2xl font-black text-base sm:text-lg italic tracking-tight uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-1 border cursor-pointer",
               isGapBotActive 
@@ -1043,18 +1093,12 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
             {isGapBotActive ? (
               <>
                 <Square className="w-5 h-5 fill-current animate-pulse text-white" />
-                <span className="leading-tight">STOP AI SCALPER</span>
-                <span className="text-[10px] font-mono opacity-80 font-normal tracking-normal not-italic lowercase">
-                  모든 등록 종목 동시 감시 중
-                </span>
+                <span>SCALPER STOP</span>
               </>
             ) : (
               <>
                 <Play className="w-5 h-5 fill-current text-white" />
                 <span className="text-center leading-tight text-sm sm:text-base">START AI SCALPER</span>
-                <span className="text-[10px] font-mono opacity-80 font-normal tracking-normal not-italic">
-                  등록 종목 전체 동시 가동
-                </span>
               </>
             )}
           </button>
