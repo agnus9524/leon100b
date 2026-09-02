@@ -4,133 +4,298 @@ import {
   Search, ChevronRight, Sparkles, Activity, TrendingUp, TrendingDown, 
   Layers, Zap, Loader2, Flame, RefreshCw, X, Play, Square, Briefcase, Coins 
 } from 'lucide-react';
-import { Stock, ScalperTab } from '../types';
+import { Stock, ScalperTab, TradeLog } from '../types';
 import { cn } from '../lib/utils';
 import { kisService } from '../services/kisService';
-import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 
 // ============================================================
-// 📈 일반 주식창 스타일의 가격 차트 (일/주/월/년)
+// 📈 봉(캔들스틱) 차트 — 일반 증권 앱 스타일
+// ------------------------------------------------------------
+// 위쪽 라벨/메뉴 없이 캔들 + 우측 가격축 + 하단 분봉간격/기간 선택만 남긴 최소 구성.
+// 매수 체결 시점엔 B, 매도 체결 시점엔 S 마커를 캔들 위/아래에 표시한다.
 // 고급 설정(1회 거래수량/최대슬롯/목표순익/손절/추가매수간격/진입호가/실행속도)을
 // 기본 화면에서 숨긴 자리에 대신 표시된다.
 // ============================================================
-type ChartPeriod = 'D' | 'W' | 'M' | 'Y';
+type ChartPeriod = 'MIN' | 'D' | 'W' | 'M' | 'Y';
+const MINUTE_INTERVALS = [1, 3, 5, 10, 15, 30, 60, 120, 240];
 
-const CHART_PERIOD_LABEL: Record<ChartPeriod, string> = { D: '일', W: '주', M: '월', Y: '년' };
+interface CandleBar {
+  date: string;   // YYYYMMDD (D/W/M/Y) 또는 HHMMSS(MIN)
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+}
 
-const StockPriceChart: React.FC<{ symbol: string; name: string; formatCurrency: (n: number) => string }> = ({ symbol, name, formatCurrency }) => {
-  const [period, setPeriod] = React.useState<ChartPeriod>('D');
-  const [chartData, setChartData] = React.useState<{ date: string; price: number }[]>([]);
+interface TradeMarker {
+  barIndex: number;
+  price: number;
+  type: 'BUY' | 'SELL';
+}
+
+const CandlestickChart: React.FC<{
+  symbol: string;
+  name: string;
+  scalperTabs: ScalperTab[];
+  formatCurrency: (n: number) => string;
+}> = ({ symbol, name, scalperTabs, formatCurrency }) => {
+  const [period, setPeriod] = React.useState<ChartPeriod>('MIN');
+  const [minuteInterval, setMinuteInterval] = React.useState(1);
+  const [showMinuteMenu, setShowMinuteMenu] = React.useState(false);
+  const [bars, setBars] = React.useState<CandleBar[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
-  const [error, setError] = React.useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
+  const minuteMenuRef = React.useRef<HTMLDivElement>(null);
+
+  // 분봉 간격 드롭다운 바깥 클릭 시 닫기
+  React.useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (minuteMenuRef.current && !minuteMenuRef.current.contains(e.target as Node)) {
+        setShowMinuteMenu(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
 
   React.useEffect(() => {
     if (!symbol) return;
     let cancelled = false;
     setIsLoading(true);
-    setError(null);
+    setErrorMsg(null);
 
-    // KIS 일별시세 조회는 일/주/월 코드만 지원한다. "년" 탭은 월봉을 조회해 가장 긴 구간을 보여주는 방식으로 근사한다.
-    const kisPeriodCode = period === 'Y' ? 'M' : period;
+    const load = async () => {
+      try {
+        if (period === 'MIN') {
+          const res = await kisService.getDomesticMinuteChart(symbol);
+          if (cancelled) return;
+          if (res && Array.isArray(res.output2) && res.output2.length > 0) {
+            const raw: CandleBar[] = [...res.output2].reverse().map((b: any) => ({
+              date: String(b.stck_cntg_hour || b.stck_cntg_time || ''),
+              open: Number(b.stck_oprc || b.stck_prpr || 0),
+              high: Number(b.stck_hgpr || b.stck_prpr || 0),
+              low: Number(b.stck_lwpr || b.stck_prpr || 0),
+              close: Number(b.stck_prpr || b.stck_clpr || 0)
+            })).filter(b => b.close > 0);
 
-    kisService.getDomesticDailyPrice(symbol, kisPeriodCode as 'D' | 'W' | 'M')
-      .then(res => {
-        if (cancelled) return;
-        if (res && Array.isArray(res.output) && res.output.length > 0) {
-          const bars = [...res.output]
-            .reverse() // KIS는 최신 → 과거 순으로 내려주므로 시간순으로 뒤집는다
-            .map((b: any) => ({
-              date: String(b.stck_bsop_date || ''),
-              price: Number(b.stck_clpr || 0)
-            }))
-            .filter(b => b.price > 0);
-          setChartData(bars);
-          if (bars.length === 0) setError('표시할 시세 데이터가 없습니다.');
+            // 1분봉을 요청한 분봉 간격만큼 묶어서 집계 (KIS는 1분 단위로만 내려주므로 클라이언트에서 합산)
+            const grouped: CandleBar[] = [];
+            for (let i = 0; i < raw.length; i += minuteInterval) {
+              const chunk = raw.slice(i, i + minuteInterval);
+              if (chunk.length === 0) continue;
+              grouped.push({
+                date: chunk[0].date,
+                open: chunk[0].open,
+                close: chunk[chunk.length - 1].close,
+                high: Math.max(...chunk.map(c => c.high)),
+                low: Math.min(...chunk.filter(c => c.low > 0).map(c => c.low))
+              });
+            }
+            setBars(grouped);
+            if (grouped.length === 0) setErrorMsg('표시할 분봉 데이터가 없습니다.');
+          } else {
+            setBars([]);
+            setErrorMsg('분봉 데이터를 불러오지 못했습니다.');
+          }
         } else {
-          setChartData([]);
-          setError('시세 데이터를 불러오지 못했습니다.');
+          const kisCode = period === 'Y' ? 'M' : period; // KIS 기본 API는 연봉 코드가 없어 월봉으로 근사
+          const res = await kisService.getDomesticDailyPrice(symbol, kisCode as 'D' | 'W' | 'M');
+          if (cancelled) return;
+          if (res && Array.isArray(res.output) && res.output.length > 0) {
+            const parsed: CandleBar[] = [...res.output].reverse().map((b: any) => ({
+              date: String(b.stck_bsop_date || ''),
+              open: Number(b.stck_oprc || 0),
+              high: Number(b.stck_hgpr || 0),
+              low: Number(b.stck_lwpr || 0),
+              close: Number(b.stck_clpr || 0)
+            })).filter(b => b.close > 0);
+            setBars(parsed);
+            if (parsed.length === 0) setErrorMsg('표시할 시세 데이터가 없습니다.');
+          } else {
+            setBars([]);
+            setErrorMsg('시세 데이터를 불러오지 못했습니다.');
+          }
         }
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) {
-          setChartData([]);
-          setError('시세 조회 중 오류가 발생했습니다.');
+          setBars([]);
+          setErrorMsg('시세 조회 중 오류가 발생했습니다.');
         }
-      })
-      .finally(() => {
+      } finally {
         if (!cancelled) setIsLoading(false);
-      });
-
+      }
+    };
+    load();
     return () => { cancelled = true; };
-  }, [symbol, period]);
+  }, [symbol, period, minuteInterval]);
+
+  // 매수(B)/매도(S) 체결 마커 — 해당 종목의 tradeLogs 중 실제 체결 이벤트만 추출해 가장 가까운 캔들에 매칭
+  const markers = React.useMemo<TradeMarker[]>(() => {
+    if (bars.length === 0) return [];
+    const tab = scalperTabs.find(t => t.symbol === symbol);
+    const logs = (tab?.tradeLogs || []).filter(l => l.reason && l.reason.includes('체결'));
+    const result: TradeMarker[] = [];
+
+    logs.forEach(log => {
+      const isBuy = log.type === 'BUY' || log.type === '매수';
+      // 로그의 time("HH:MM:SS")을 분봉 date("HHMMSS")와 비교하기 위해 숫자만 추출
+      const logTimeDigits = log.time.replace(/[^0-9]/g, '');
+      let bestIdx = -1;
+      let bestDiff = Infinity;
+      bars.forEach((bar, idx) => {
+        const barDigits = bar.date.length >= 6 ? bar.date.slice(-6) : bar.date;
+        const diff = Math.abs(Number(logTimeDigits.slice(-6) || 0) - Number(barDigits || 0));
+        if (diff < bestDiff) {
+          bestDiff = diff;
+          bestIdx = idx;
+        }
+      });
+      if (bestIdx >= 0) {
+        result.push({ barIndex: bestIdx, price: log.price, type: isBuy ? 'BUY' : 'SELL' });
+      }
+    });
+    return result;
+  }, [bars, scalperTabs, symbol]);
 
   const formatDateLabel = (raw: string) => {
+    if (period === 'MIN') {
+      return raw.length >= 6 ? `${raw.slice(0, 2)}:${raw.slice(2, 4)}` : raw;
+    }
     if (raw.length !== 8) return raw;
     return period === 'D' ? `${raw.slice(4, 6)}/${raw.slice(6, 8)}` : `${raw.slice(0, 4)}.${raw.slice(4, 6)}`;
   };
 
-  const first = chartData[0]?.price || 0;
-  const last = chartData[chartData.length - 1]?.price || 0;
-  const changePct = first > 0 ? ((last - first) / first) * 100 : 0;
+  // ── SVG 캔들 렌더링 좌표 계산 ──
+  const CHART_W = 1000;
+  const CHART_H = 380;
+  const PADDING_TOP = 16;
+  const PADDING_BOTTOM = 22;
+  const PADDING_RIGHT = 58;
+  const plotW = CHART_W - PADDING_RIGHT;
+  const plotH = CHART_H - PADDING_TOP - PADDING_BOTTOM;
+
+  const allHighs = bars.map(b => b.high).filter(v => v > 0);
+  const allLows = bars.map(b => b.low).filter(v => v > 0);
+  const maxPrice = allHighs.length > 0 ? Math.max(...allHighs) * 1.002 : 1;
+  const minPrice = allLows.length > 0 ? Math.min(...allLows) * 0.998 : 0;
+  const priceRange = (maxPrice - minPrice) || 1;
+
+  const priceToY = (price: number) => PADDING_TOP + (1 - (price - minPrice) / priceRange) * plotH;
+  const barSlot = bars.length > 0 ? plotW / bars.length : plotW;
+  const candleWidth = Math.max(1.5, Math.min(barSlot * 0.62, 14));
+  const barCenterX = (idx: number) => idx * barSlot + barSlot / 2;
+
+  const priceGridLines = 5;
+  const priceTicks = Array.from({ length: priceGridLines + 1 }, (_, i) => minPrice + (priceRange * i) / priceGridLines);
 
   return (
     <div className="lg:col-span-4 bg-black/30 border border-sleek-border rounded-2xl p-3 flex flex-col min-w-0">
-      <div className="flex items-center justify-between mb-2 shrink-0">
-        <div className="min-w-0 truncate">
-          <span className="text-xs font-black text-white truncate">{name}</span>
-          <span className="text-[10px] font-mono text-slate-500 ml-1.5">{symbol}</span>
-        </div>
-        {chartData.length > 1 && (
-          <span className={cn("text-[11px] font-bold font-mono shrink-0", changePct >= 0 ? "text-rose-400" : "text-sky-400")}>
-            {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
-          </span>
+      <div className="flex-1 min-h-[260px] w-full relative">
+        {isLoading ? (
+          <div className="w-full h-full flex items-center justify-center text-[11px] text-slate-500 animate-pulse">차트 불러오는 중...</div>
+        ) : errorMsg || bars.length === 0 ? (
+          <div className="w-full h-full flex items-center justify-center text-[11px] text-slate-500">{errorMsg || '데이터 없음'}</div>
+        ) : (
+          <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} className="w-full h-full" preserveAspectRatio="none">
+            {/* 가격 그리드 + 우측 축 라벨 */}
+            {priceTicks.map((p, i) => {
+              const y = priceToY(p);
+              return (
+                <g key={i}>
+                  <line x1={0} y1={y} x2={plotW} y2={y} stroke="#ffffff12" strokeDasharray="3 3" />
+                  <text x={plotW + 6} y={y + 3} fontSize={10} fill="#94a3b8">{formatCurrency(p)}</text>
+                </g>
+              );
+            })}
+
+            {/* 캔들 */}
+            {bars.map((bar, idx) => {
+              const isUp = bar.close >= bar.open;
+              const color = isUp ? '#f43f5e' : '#3b82f6'; // 상승 빨강 / 하락 파랑
+              const cx = barCenterX(idx);
+              const yHigh = priceToY(bar.high);
+              const yLow = priceToY(bar.low);
+              const yOpen = priceToY(bar.open);
+              const yClose = priceToY(bar.close);
+              const bodyTop = Math.min(yOpen, yClose);
+              const bodyH = Math.max(1, Math.abs(yClose - yOpen));
+              return (
+                <g key={idx}>
+                  <line x1={cx} y1={yHigh} x2={cx} y2={yLow} stroke={color} strokeWidth={1} />
+                  <rect x={cx - candleWidth / 2} y={bodyTop} width={candleWidth} height={bodyH} fill={color} />
+                </g>
+              );
+            })}
+
+            {/* 매수(B) / 매도(S) 마커 */}
+            {markers.map((m, i) => {
+              const cx = barCenterX(m.barIndex);
+              const isBuy = m.type === 'BUY';
+              const y = isBuy ? priceToY(m.price) + 16 : priceToY(m.price) - 16;
+              return (
+                <g key={i}>
+                  <circle cx={cx} cy={y} r={8} fill={isBuy ? '#f43f5e' : '#3b82f6'} stroke="#0f172a" strokeWidth={1.5} />
+                  <text x={cx} y={y + 3.5} fontSize={10} fontWeight={900} fill="#fff" textAnchor="middle">
+                    {isBuy ? 'B' : 'S'}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* x축 시간 라벨 (양 끝 + 중간) */}
+            {bars.length > 0 && [0, Math.floor(bars.length / 2), bars.length - 1].map((idx, i) => (
+              <text key={i} x={barCenterX(idx)} y={CHART_H - 6} fontSize={9} fill="#64748b" textAnchor="middle">
+                {formatDateLabel(bars[idx].date)}
+              </text>
+            ))}
+          </svg>
         )}
       </div>
 
-      <div className="flex items-center gap-1 mb-2 shrink-0">
+      {/* 하단: 분봉 간격 드롭다운 + 일/주/월/년 */}
+      <div className="flex items-center gap-1 mt-2 shrink-0 flex-wrap">
+        <div className="relative" ref={minuteMenuRef}>
+          <button
+            type="button"
+            onClick={() => { setShowMinuteMenu(v => !v); setPeriod('MIN'); }}
+            className={cn(
+              "px-2 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 transition-all",
+              period === 'MIN' ? "bg-sleek-blue/25 border-sleek-blue/60 text-sleek-blue" : "bg-black/30 border-white/10 text-slate-400 hover:text-white"
+            )}
+          >
+            {minuteInterval}분 ▾
+          </button>
+          {showMinuteMenu && (
+            <div className="absolute bottom-full mb-1 left-0 bg-slate-900 border border-white/10 rounded-lg shadow-xl z-20 py-1 min-w-[64px]">
+              {MINUTE_INTERVALS.map(m => (
+                <button
+                  key={m}
+                  type="button"
+                  onClick={() => { setMinuteInterval(m); setPeriod('MIN'); setShowMinuteMenu(false); }}
+                  className={cn(
+                    "block w-full text-left px-3 py-1 text-[11px] font-bold hover:bg-white/10",
+                    minuteInterval === m && period === 'MIN' ? "text-sleek-blue" : "text-slate-300"
+                  )}
+                >
+                  {m}분
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         {(['D', 'W', 'M', 'Y'] as ChartPeriod[]).map(p => (
           <button
             key={p}
             type="button"
             onClick={() => setPeriod(p)}
             className={cn(
-              "px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all",
-              period === p
-                ? "bg-sleek-blue/25 border-sleek-blue/60 text-sleek-blue"
-                : "bg-black/30 border-white/10 text-slate-400 hover:text-white"
+              "px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all",
+              period === p ? "bg-sleek-blue/25 border-sleek-blue/60 text-sleek-blue" : "bg-black/30 border-white/10 text-slate-400 hover:text-white"
             )}
           >
-            {CHART_PERIOD_LABEL[p]}
+            {p === 'D' ? '일' : p === 'W' ? '주' : p === 'M' ? '월' : '년'}
           </button>
         ))}
-      </div>
-
-      <div className="flex-1 min-h-[140px] w-full">
-        {isLoading ? (
-          <div className="w-full h-full flex items-center justify-center text-[11px] text-slate-500 animate-pulse">차트 불러오는 중...</div>
-        ) : error || chartData.length === 0 ? (
-          <div className="w-full h-full flex items-center justify-center text-[11px] text-slate-500">{error || '데이터 없음'}</div>
-        ) : (
-          <ResponsiveContainer width="100%" height="100%" minHeight={140}>
-            <AreaChart data={chartData}>
-              <defs>
-                <linearGradient id="chartPriceGradient" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={changePct >= 0 ? '#f43f5e' : '#38bdf8'} stopOpacity={0.35} />
-                  <stop offset="95%" stopColor={changePct >= 0 ? '#f43f5e' : '#38bdf8'} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
-              <XAxis dataKey="date" tickFormatter={formatDateLabel} tick={{ fontSize: 9, fill: '#94a3b8' }} interval="preserveStartEnd" />
-              <YAxis domain={['auto', 'auto']} tick={{ fontSize: 9, fill: '#94a3b8' }} width={50} tickFormatter={(v) => formatCurrency(v)} />
-              <Tooltip
-                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '10px', fontSize: '11px' }}
-                labelFormatter={formatDateLabel}
-                formatter={(value: number) => [formatCurrency(value), '종가']}
-              />
-              <Area type="monotone" dataKey="price" stroke={changePct >= 0 ? '#f43f5e' : '#38bdf8'} strokeWidth={2} fill="url(#chartPriceGradient)" />
-            </AreaChart>
-          </ResponsiveContainer>
-        )}
       </div>
     </div>
   );
@@ -954,7 +1119,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           </>
         ) : (
           selectedStock && (
-            <StockPriceChart symbol={selectedStock.symbol} name={selectedStock.name} formatCurrency={formatCurrency} />
+            <CandlestickChart symbol={selectedStock.symbol} name={selectedStock.name} scalperTabs={scalperTabs} formatCurrency={formatCurrency} />
           )
         )}
 
