@@ -1892,6 +1892,62 @@ kisConfig.isConnected
     }));
   }, [scalperInventory]);
 
+  // ============================================================
+  // 🔄 인벤토리에 등록된 "모든" 종목이 stocks 배열에 존재하도록 보장한다.
+  // ------------------------------------------------------------
+  // stocks에 없는 종목은 syncAllPrices()(10초 주기 전체 동기화)나 market/account 동기화
+  // effect가 아예 그 존재를 인지하지 못해서 갱신 대상에서 빠진다. 그 결과 "선택된 1개 종목만
+  // 실시간 가격이 반영되고, 나머지 등록 종목은 로딩 시점의(어쩌면 0원이거나 다른 값인) 스냅샷에
+  // 계속 갇혀있는" 증상이 생긴다. 새로 나타난 종목은 fallback 값으로만 채우지 않고, 그 자리에서
+  // 바로 KIS 실제가를 조회해서 정확한 값으로 채운다.
+  // ============================================================
+  useEffect(() => {
+    const missing = scalperTabs.filter(t => !stocksRef.current.some(s => s.symbol === t.symbol));
+    if (missing.length === 0) return;
+
+    setStocks(prev => {
+      const existing = new Set(prev.map(s => s.symbol));
+      const additions: Stock[] = missing
+        .filter(t => !existing.has(t.symbol))
+        .map(t => {
+          const isUS = /^[A-Za-z]/.test(t.symbol);
+          const seedPrice = (t.price && t.price > 0) ? t.price : (isUS ? 10 : 1000);
+          return {
+            symbol: t.symbol,
+            name: t.name,
+            price: seedPrice,
+            change: 0,
+            changePercent: 0,
+            volume: '0',
+            history: [{ time: '09:00', price: seedPrice }],
+            market: isUS ? 'US' : 'KR',
+            isAI: false
+          };
+        });
+      return additions.length > 0 ? [...prev, ...additions] : prev;
+    });
+
+    // 10초 주기 전체 동기화를 기다리지 않고, 새로 나타난 종목들은 지금 즉시 실제가를 조회해서 correction한다.
+    missing.forEach(async (t) => {
+      try {
+        const priceData = await kisService.getPrice(t.symbol);
+        if (priceData && priceData.current > 0) {
+          setStocks(prev => prev.map(s => s.symbol === t.symbol ? {
+            ...s,
+            price: priceData.current,
+            change: priceData.change,
+            changePercent: priceData.changePercent,
+            volume: priceData.volume,
+            isRealTime: true,
+            lastUpdated: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+          } : s));
+        }
+      } catch (err) {
+        console.warn(`[인벤토리 초기가격 보정] ${t.symbol} 조회 실패`, err);
+      }
+    });
+  }, [scalperTabs]);
+
   // 🔄 인벤토리의 market/account 네임스페이스를 실시간 시세/보유정보로 동기화.
   // recommendation(추천 스냅샷)·strategy(봇 설정) 네임스페이스는 여기서 절대 건드리지 않는다.
   useEffect(() => {
@@ -1910,7 +1966,7 @@ kisConfig.isConnected
           ? kisBuyableQty
           : Math.max(0, Math.floor(balance / (currentPrice || 1)));
 
-        const marketChanged = !!live && (
+        const marketChanged = !!live && live.price > 0 && (
           item.market.currentPrice !== live.price ||
           item.market.change !== (live.change || 0) ||
           item.market.changePercent !== (live.changePercent || 0) ||
@@ -2289,11 +2345,17 @@ setGapInventory(nextInv);
         // Switch to adjacent/last tab in the same market
         const nextTab = sameMarketTabs[sameMarketTabs.length - 1];
         handleSwitchTab(nextTab.id);
+      } else if (remaining.length > 0) {
+        // 현재 시장(KR/US)에는 남은 탭이 없지만 다른 시장에 탭이 있다면 그쪽으로 전환한다.
+        // (기본 종목을 몰래 새로 등록하지 않는다 — "등록만 하고 매매는 시작하지 않는다"는 원칙을 위반하게 됨)
+        const otherMarketTab = remaining[remaining.length - 1];
+        setMarketType(/^[A-Z]/.test(otherMarketTab.symbol) ? 'US' : 'KR');
+        handleSwitchTab(otherMarketTab.id);
       } else {
-        // If all tabs in current market were closed, open default stock tab for current market
-        const pool = marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS;
-        const defaultStock = pool[0];
-        openOrSwitchScalperTab(defaultStock.symbol, defaultStock.name, defaultStock.price);
+        // 등록된 종목이 완전히 하나도 없는 상태 — 어떤 종목도 자동으로 다시 채워 넣지 않는다.
+        activeTabIdRef.current = '';
+        setActiveTabId('');
+        setSelectedSymbol('');
       }
     }
   };
