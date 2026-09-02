@@ -2500,13 +2500,24 @@ setGapInventory(nextInv);
     const isNearLowerBand = currentPrice <= bb.lower * 1.005;
     const isNearUpperBand = currentPrice >= bb.upper * 0.995;
     const lastPrice = historyPrices.length >= 2 ? historyPrices[historyPrices.length - 2] : currentPrice;
-    const hasVolumeMomentum = currentPrice >= lastPrice || rsi >= 25;
 
-    const isPullback = momentumPositive && (rsi < 40 || isNearLowerBand) && currentPrice >= sma5 && hasVolumeMomentum;
-    const isBreakout = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
-    const isVwapSupport = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
-    const isPocSupport = Math.abs(currentPrice - poc) / (poc || 1) < 0.008;
-    const isVolumeProfile = isPocSupport || isBullishAbsorption;
+    // 🩺 실제 시장 거래(가격 변동)가 있었는지 확인. 장 마감/무거래 상태에서 history가 전부
+    // 동일한 값(또는 합성 seed 값)으로 채워져 있으면, 아래 계산식들이 "가격 변동 없음"을
+    // "상승/지지"로 잘못 해석해 센서가 거짓으로 켜질 수 있다. 최근 구간에 실제 변동이
+    // 있었는지 먼저 확인해서, 없으면 모든 센서를 강제로 끈다.
+    const recentWindow = historyPrices.slice(-10);
+    const hasRecentPriceMovement = recentWindow.length >= 2 && recentWindow.some(p => p !== recentWindow[0]);
+
+    // hasVolumeMomentum: 진짜 체결 거래량 데이터가 아니라 가격 움직임으로 근사한 값이다(REST API 한계).
+    // 실제 변동이 없으면 무조건 false — 이전에는 currentPrice >= lastPrice(등호 포함) 때문에
+    // 가격이 그대로 멈춰있어도(장마감 등) 항상 true로 계산되던 버그가 있었다.
+    const hasVolumeMomentum = hasRecentPriceMovement && (currentPrice > lastPrice || rsi >= 25);
+
+    const isPullback = hasRecentPriceMovement && momentumPositive && (rsi < 40 || isNearLowerBand) && currentPrice >= sma5 && hasVolumeMomentum;
+    const isBreakout = hasRecentPriceMovement && currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
+    const isVwapSupport = hasRecentPriceMovement && currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
+    const isPocSupport = hasRecentPriceMovement && Math.abs(currentPrice - poc) / (poc || 1) < 0.008;
+    const isVolumeProfile = isPocSupport || (hasRecentPriceMovement && isBullishAbsorption);
 
     const activeCount = (isPullback ? 1 : 0) + (isBreakout ? 1 : 0) + (isVwapSupport ? 1 : 0) + (isVolumeProfile ? 1 : 0);
 
@@ -4723,60 +4734,9 @@ setGapInventory(nextInv);
     resolvedName ||
     symbolToUse;
 
-  try {
-
-    const liveData =
-      await kisService.getPrice(
-        recommendedStock.symbol
-      );
-
-    if (liveData) {
-
-      if (liveData.current > 0) {
-        livePrice =
-          liveData.current;
-      }
-
-      liveChange =
-        liveData.change || 0;
-
-      liveChangePercent =
-        liveData.changePercent || 0;
-
-      if (liveData.name) {
-        liveName =
-          liveData.name;
-      }
-    }
-
-  } catch (err) {
-
-    console.warn(
-      '[추천종목 실시간 시세 조회 실패]',
-      err
-    );
-
-  }
-
-  console.log(
-    '[추천종목 등록]',
-    {
-      symbol:
-        recommendedStock.symbol,
-
-      name:
-        liveName,
-
-      price:
-        livePrice,
-
-      change:
-        liveChange,
-
-      changePercent:
-        liveChangePercent
-    }
-  );
+  // 🚀 KIS 시세 재조회를 기다리지 않고 지금 가진 값(추천/검색 데이터)으로 즉시 등록한다.
+  // getPrice()는 다른 폴링 요청들과 같은 대기열을 공유해서, 여기서 await하면
+  // 인벤토리 반영이 몇 초씩 늦어지는 원인이 된다 — 최신 시세는 등록 후 비동기로 보정한다.
 
   const safePrice =
   livePrice > 0
@@ -4859,6 +4819,19 @@ const newStock: Stock = {
       setSelectedSymbol(newStock.symbol);
       setAiRecommendations(prev => prev.filter(r => r.symbol !== newStock.symbol));
       showNotification(`[스캘퍼 탭 등록] ${liveName}(${newStock.symbol}) 종목이 스캘퍼 탭으로 추가되었습니다.`, "success");
+
+      // 등록은 이미 끝났으니, 최신 KIS 체결가는 백그라운드에서 보정한다 (등록 자체를 지연시키지 않음)
+      kisService.getPrice(newStock.symbol).then(liveData => {
+        if (liveData && liveData.current > 0) {
+          setStocks(prev => prev.map(s => s.symbol === newStock.symbol ? {
+            ...s,
+            price: liveData.current,
+            change: liveData.change || 0,
+            changePercent: liveData.changePercent || 0,
+            name: liveData.name || s.name
+          } : s));
+        }
+      }).catch(err => console.warn('[등록 후 시세 보정 실패]', err));
       return;
     }
 
@@ -5106,7 +5079,10 @@ data.price
             response.data.forEach((item: StockSuggestion) => {
               // Filter out stocks with 0 price if price is provided
               if (item.price !== undefined && item.price <= 0) return;
-              
+              // 현재 마켓(KR/US)과 다른 종목은 절대 섞여 들어오지 않도록 명시적으로 걸러낸다.
+              // marketType 파라미터를 백엔드에 보내긴 하지만, 응답 자체를 신뢰하지 않고 여기서도 재검증한다.
+              if (item.market !== marketType) return;
+
               if (!merged.some(m => m.symbol.toLowerCase() === item.symbol.toLowerCase() && m.market === item.market)) {
                 merged.push(item);
               }
@@ -9079,7 +9055,7 @@ const isProfitTarget = sellSignal;
               });
 
               return (
-                <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-[480px] overflow-hidden shadow-2xl">
+                <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-0 overflow-hidden shadow-2xl">
                   <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
                     <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
                       <Layers className="w-4 h-4 text-sleek-blue" /> 선택 종목 슬롯 현황
@@ -9092,7 +9068,7 @@ const isProfitTarget = sellSignal;
                     </span>
                   </div>
                   
-                  <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
+                  <div className="flex-1 overflow-hidden space-y-3 pr-1">
                     {enableCombinedAvgProfitExit ? (
                       /* Combined Average Profit Exit Mode (통합평단가 익절) */
                       currentInventory.length === 0 ? (
@@ -9231,7 +9207,7 @@ const isProfitTarget = sellSignal;
             })()}
 
             {/* 1.5 GLOBAL TRADE LOGS — 선택된 종목과 무관하게 등록된 모든 종목의 이벤트가 시간순으로 표시된다 */}
-            <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-[420px] overflow-hidden shadow-2xl">
+            <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-0 overflow-hidden shadow-2xl">
               <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
                 <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
                   <Layers className="w-4 h-4 text-emerald-400" /> GLOBAL TRADE LOGS
@@ -9273,7 +9249,7 @@ const isProfitTarget = sellSignal;
                 ))}
               </div>
 
-              <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
+              <div className="flex-1 overflow-hidden space-y-1.5 pr-1">
                 {(() => {
                   const filteredLogs = logFilterSymbol === 'ALL' ? tradeLogs : tradeLogs.filter(l => l.symbol === logFilterSymbol);
                   if (filteredLogs.length === 0) {
@@ -9288,21 +9264,25 @@ const isProfitTarget = sellSignal;
                     return (
                       <div
                         key={log.id || `${log.time}-${idx}`}
-                        className="flex items-start gap-2 text-[11px] font-mono bg-black/20 hover:bg-black/30 transition-colors p-2 rounded-lg border border-white/5"
+                        className="flex flex-col gap-0.5 text-[11px] font-mono bg-black/20 hover:bg-black/30 transition-colors p-2 rounded-lg border border-white/5"
                       >
-                        <span className="text-slate-500 shrink-0 tabular-nums">{log.time}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={cn("shrink-0 w-1.5 h-1.5 rounded-full", isBuy ? "bg-rose-400" : "bg-sky-400")} />
+                          <span className="text-slate-500 tabular-nums">{log.time}</span>
+                        </div>
                         {log.symbol !== 'SYSTEM' && (
-                          <span className="shrink-0 px-1.5 py-0.5 rounded bg-white/10 text-slate-300 font-bold truncate max-w-[90px]">
+                          <span className="text-slate-300 font-bold">
                             {log.symbolName || log.symbol}
                           </span>
                         )}
-                        <span className={cn("shrink-0 w-1.5 h-1.5 rounded-full mt-1", isBuy ? "bg-rose-400" : "bg-sky-400")} />
-                        <span className="text-slate-200 leading-relaxed break-words min-w-0 flex-1">
+                        <span className="text-slate-200 leading-relaxed break-words">
                           {log.reason}
-                          {log.price > 0 && (
-                            <span className="text-slate-400"> ({formatCurrency(log.price)}{log.amount > 0 ? ` x ${log.amount}` : ''})</span>
-                          )}
                         </span>
+                        {log.price > 0 && (
+                          <span className="text-slate-400">
+                            {formatCurrency(log.price)}{log.amount > 0 ? ` x ${log.amount}` : ''}
+                          </span>
+                        )}
                       </div>
                     );
                   });

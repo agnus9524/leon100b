@@ -788,9 +788,10 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           )}
         </div>
 
-        {/* 4/4 올-그린 센서 (1열, 검색창/종목명/현재가 아래) */}
-        <div className="lg:col-start-1" style={{ order: 2 }}>
-          {/* 🎯 4/4 올-그린 (4대 핵심전략 일괄 선택 토글) */}
+        {/* 2열 참고자료: 스캘핑 매매 참고용 4/4 올-그린 + 4대 개별 전략 센서 버튼 (눌림목/돌파/VWAP/CVD) */}
+        <div className="flex items-center gap-1.5 flex-wrap lg:col-start-2" style={{ order: 3 }}>
+
+          {/* 🎯 4/4 올-그린 (4대 핵심전략 일괄 선택 토글) — 눌림목 버튼 바로 왼쪽 */}
           <button
             type="button"
             onClick={() => {
@@ -824,10 +825,6 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
             )} />
             <span>🎯 4/4 올-그린</span>
           </button>
-        </div>
-
-        {/* 2열 참고자료: 스캘핑 매매 참고용 4대 개별 전략 센서 버튼 (눌림목/돌파/VWAP/CVD) */}
-        <div className="flex items-center gap-1.5 flex-wrap lg:col-start-2" style={{ order: 3 }}>
 
           {/* ① 눌림목 (진입 타이밍 ★★★★) */}
           <button
@@ -1176,7 +1173,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         {selectedStock && (
           <TickFeed symbol={selectedStock.symbol} price={price} formatCurrency={formatCurrency} />
         )}
-        <div className="flex-1 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
+        <div className="flex-1 max-w-[300px] bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
           <div>
             <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
               <span className="text-[10.5px] font-black text-slate-300 uppercase tracking-wider flex items-center gap-1">
