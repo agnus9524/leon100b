@@ -7,7 +7,7 @@ import { Stock } from '../types';
 
 // 스캘퍼 추천종목 개수 제한 — UI 라벨("실시간 초단타 스캘핑 최적 추천 10선")과 실제 반환 개수를
 // 이 상수 하나로 통일한다. 실시간 계산 추천, 기본(fallback) 추천, 백엔드 API 응답 전부 이 값으로 캡.
-export const MAX_SCALPER_RECOMMENDATIONS = 10;
+export const MAX_SCALPER_RECOMMENDATIONS = 8;
 
 interface KISConfig {
   appKey: string;
@@ -89,12 +89,11 @@ public generateRealtimeRecommendations(
 const strat =
 detectStockStrategies(stock);
 
-return (
-strat.isPullback &&
-strat.isVwapSupport &&
-strat.isVolumeProfile &&
-strat.hasVolumeMomentum
-);
+// 4개 센서 전부 요구하면 조건이 너무 엄격해서 실제 시장에서 거의 항상 0개가 나온다
+// (그 결과 항상 고정 fallback 데이터만 보이게 된다). 최소 1개 이상 센서가 감지되면
+// 후보에 포함시키고, scalpingScore로 랭킹해서 상위 8개만 남긴다 — 다중 신호 종목은
+// 자연히 점수가 높아 상위에 랭크된다.
+return strat.activeCount >= 1;
 
 })
     .map(stock => {
@@ -198,16 +197,16 @@ strat.hasVolumeMomentum
           '3분 ~ 15분'
       };
     })
-    .map((item, idx) => ({
-      ...item,
-      rank: idx + 1
-    }))
     .sort(
       (a, b) =>
         b.scalpingScore -
         a.scalpingScore
     )
-    .slice(0, MAX_SCALPER_RECOMMENDATIONS);
+    .slice(0, MAX_SCALPER_RECOMMENDATIONS)
+    .map((item, idx) => ({
+      ...item,
+      rank: idx + 1
+    }));
 }
 
 

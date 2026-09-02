@@ -89,7 +89,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import axios from 'axios';
-import { kisService, type ScalperRecommendation } from './services/kisService';
+import { kisService, type ScalperRecommendation, MAX_SCALPER_RECOMMENDATIONS } from './services/kisService';
 import { generateGapDownReport } from './services/geminiService';
 import ScalperGuide from './components/ScalperGuide';
 import ScalperRecommendationsModal from './components/ScalperRecommendationsModal';
@@ -4472,13 +4472,48 @@ setGapInventory(nextInv);
     return success;
   }, []);
 
+  // ============================================================
+  // 🔄 추천종목 목록 로딩 — 실시간 전략센서 분석을 실제로 사용한다
+  // ------------------------------------------------------------
+  // 이전에는 kisService.getScalperRecommendations()만 호출했는데, 이 함수는
+  // 백엔드 API가 실패하면 곧바로 "고정된 fallback 데이터"로 넘어가도록 되어 있었다.
+  // 로컬에 detectStockStrategies 기반 실시간 분석 엔진(generateRealtimeRecommendations)이
+  // 이미 만들어져 있었는데도 실제로는 어디서도 호출되지 않고 있었다 — 이게 "왜 항상
+  // 똑같은 종목만 나오는지"의 진짜 원인이다. 여기서 그 엔진을 1순위로 사용하고,
+  // 결과가 부족할 때만 백엔드/기본 목록으로 보강한다.
+  // ============================================================
+  const loadScalperRecommendations = useCallback(async (): Promise<ScalperRecommendation[]> => {
+    const candidatePool = stocksRef.current.filter(s => !/^[A-Za-z]/.test(s.symbol) && s.market !== 'US' && s.price > 0);
+    let list: ScalperRecommendation[] = candidatePool.length > 0
+      ? kisService.generateRealtimeRecommendations(candidatePool, detectStockStrategies)
+      : [];
+
+    if (list.length < MAX_SCALPER_RECOMMENDATIONS) {
+      try {
+        const fallback = await kisService.getScalperRecommendations();
+        const existingSymbols = new Set(list.map(r => r.symbol));
+        for (const r of fallback) {
+          if (list.length >= MAX_SCALPER_RECOMMENDATIONS) break;
+          if (!existingSymbols.has(r.symbol)) {
+            list.push(r);
+            existingSymbols.add(r.symbol);
+          }
+        }
+      } catch (err) {
+        console.warn('[추천 목록 보강 실패]', err);
+      }
+    }
+
+    return list.slice(0, MAX_SCALPER_RECOMMENDATIONS);
+  }, [detectStockStrategies]);
+
   const handleOpenScalperRecommendations = useCallback(async () => {
     setShowScalperRecModal(true);
     setIsScalperRecLoading(true);
     setIsRefreshingTop3(true);
     try {
      const list =
-  await kisService.getScalperRecommendations();
+  await loadScalperRecommendations();
       if (list && list.length > 0) {
         // Sync any recommendation item with real-time execution price (현재 체결가) from the current stock list
         const syncedList = list.map(rec => {
@@ -4508,7 +4543,7 @@ setGapInventory(nextInv);
           isAI: true,
           market: 'KR'
         })));
-        showNotification("[스캘퍼 최적 종목 10선 포착] 실시간 거래량 및 체결강도 기반 추천 목록이 로드되었습니다.", "success");
+        showNotification("[스캘퍼 최적 종목 8선 포착] 실시간 거래량 및 체결강도 기반 추천 목록이 로드되었습니다.", "success");
       }
     } catch (err: any) {
       console.error("Failed to load scalper recommendations:", err);
@@ -4517,13 +4552,13 @@ setGapInventory(nextInv);
       setIsScalperRecLoading(false);
       setIsRefreshingTop3(false);
     }
-  }, [stocks, showNotification]);
+  }, [loadScalperRecommendations, stocks, showNotification]);
 
   const handleRefreshScalperRecList = useCallback(async () => {
     setIsScalperRecLoading(true);
     try {
       const list =
-  await kisService.getScalperRecommendations();
+  await loadScalperRecommendations();
       if (list && list.length > 0) {
         // Sync any recommendation item with real-time execution price (현재 체결가) from the current stock list
         const syncedList = list.map(rec => {
@@ -4560,7 +4595,7 @@ setGapInventory(nextInv);
     } finally {
       setIsScalperRecLoading(false);
     }
-  }, [stocks, showNotification]);
+  }, [loadScalperRecommendations, stocks, showNotification]);
 
   const handleSelectRecommendationStock = useCallback((rec: ScalperRecommendation) => {
     try {
@@ -4745,18 +4780,18 @@ setGapInventory(nextInv);
         s => s.symbol === recommendedStock.symbol
       )?.price || 0;
 
-if (safePrice <= 0) {
-  showNotification(
-    `${recommendedStock.name} 시세 조회 실패`,
-    "error"
-  );
-  return;
-}
+  // 🛡️ 가격 정보가 전혀 없어도(신규 종목, KOSPI 마스터 검색 결과 등) 등록 자체가 막혀서는 안 된다.
+  // 이전에는 여기서 조용히 return해서 "클릭해도 인벤토리에 안 들어오는" 증상의 원인이 되었다.
+  // 합리적인 임시 가격으로 즉시 등록하고, 실제 시세는 등록 직후 비동기로 보정한다.
+  const finalPrice = safePrice > 0 ? safePrice : 1000;
+  if (safePrice <= 0) {
+    console.warn(`[가격 정보 없음 — 임시가로 등록 후 보정] ${recommendedStock.symbol}`);
+  }
 
 const newStock: Stock = {
   symbol: recommendedStock.symbol,
   name: liveName,
-  price: safePrice,
+  price: finalPrice,
 
     change:
       liveChange,
@@ -5041,7 +5076,7 @@ data.price
 
       const fullList: StockSuggestion[] = KOSPI_STOCKS
         .filter(s => !registeredSymbols.has(s.symbol))
-        .map(s => ({ symbol: s.symbol, name: s.name, market: 'KR' as const, marketType: s.market, sector: s.sector }));
+        .map(s => ({ symbol: s.symbol, name: s.name, market: 'KR' as const, marketType: s.market, sector: s.sector, price: s.basePrice || 0 }));
 
       setSearchSuggestions([...recent, ...fullList]);
       setShowSuggestions(false);
@@ -5053,7 +5088,7 @@ data.price
     // 1. 로컬 KOSPI/KOSDAQ 마스터 데이터에서 즉시 검색 (네트워크 대기 없이 즉시 표시, 코스피 우선순위 스코어링 적용)
     const masterMatches = searchKrMasterStocks(term, 30)
       .filter(s => marketType === 'KR') // 검색 인풋은 KR 마켓 탭에서만 마스터 데이터 검색 (US는 기존 방식 유지)
-      .map(s => ({ symbol: s.symbol, name: s.name, market: 'KR' as const, marketType: s.market, sector: s.sector }));
+      .map(s => ({ symbol: s.symbol, name: s.name, market: 'KR' as const, marketType: s.market, sector: s.sector, price: s.basePrice || 0 }));
 
     // 2. 혹시 마스터 데이터에 없는 경우를 대비해 기존 POPULAR_STOCKS 로컬 필터도 함께 병합 (중복 제거)
     const popularMatches = POPULAR_STOCKS.filter(s =>
@@ -10807,7 +10842,7 @@ const isProfitTarget = sellSignal;
         )}
       </AnimatePresence>
 
-      {/* 🔥 KIS & AI 실시간 초단타 스캘핑 최적 추천종목 TOP 10 모달 */}
+      {/* 🔥 KIS & AI 실시간 초단타 스캘핑 최적 추천종목 TOP 8 모달 */}
       <ScalperRecommendationsModal
         isOpen={showScalperRecModal}
         onClose={() => setShowScalperRecModal(false)}

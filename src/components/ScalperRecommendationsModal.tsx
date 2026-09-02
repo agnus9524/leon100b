@@ -191,7 +191,7 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="text-base sm:text-lg font-black tracking-tight text-white flex items-center gap-1.5">
-                    <span>코스피(KOSPI) 실시간 초단타 스캘핑 최적 추천 10선</span>
+                    <span>코스피(KOSPI) 실시간 초단타 스캘핑 최적 추천 8선</span>
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10.5px] font-mono font-bold">
                       <Flame className="w-3 h-3 text-emerald-400 fill-emerald-400 animate-pulse" />
                       실시간 퀀트 점수

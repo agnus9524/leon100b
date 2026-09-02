@@ -1283,7 +1283,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                 onClick={handleOpenScalperRecommendations}
                 disabled={isScalperRecLoading || isRefreshingTop3}
                 className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-600/90 to-teal-600/90 hover:from-emerald-500 hover:to-teal-500 text-white border border-emerald-400/40 text-[11px] font-black font-mono flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.3)] active:scale-95 shrink-0 disabled:opacity-50"
-                title="한국투자증권 실시간 수급 및 거래량 데이터를 분석하여 스캘퍼 최적 추천종목 10선을 확인합니다."
+                title="한국투자증권 실시간 수급 및 거래량 데이터를 분석하여 스캘퍼 최적 추천종목 8선을 확인합니다."
               >
                 {(isScalperRecLoading || isRefreshingTop3) ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-200" />
@@ -1293,76 +1293,6 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                 <span>{(isScalperRecLoading || isRefreshingTop3) ? "추천 분석중..." : "추천종목 찾기"}</span>
               </button>
 
-              {/* 종목추가 버튼 */}
-              <button
-                type="button"
-                onClick={() => {
-                  const currentMarketTabs = scalperTabs.filter(t => 
-                    marketType === 'US' ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol)
-                  );
-                  if (currentMarketTabs.length >= 8) {
-                    showNotification("최대 8개 종목까지 스캘퍼 탭을 등록할 수 있습니다.", "info");
-                    return;
-                  }
-
-                  const aiAvailable = aiRecommendations.find(s => 
-                    s.market === marketType && 
-                    !scalperTabs.some(t => t.symbol === s.symbol)
-                  );
-                  
-                  if (aiAvailable) {
-                    if (!stocks.some(s => s.symbol === aiAvailable.symbol)) {
-                      setStocks(prev => [...prev, aiAvailable]);
-                    }
-                    openOrSwitchScalperTab(aiAvailable.symbol, aiAvailable.name);
-                    showNotification(`[AI 분석 추천] ${aiAvailable.name}(${aiAvailable.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
-                    return;
-                  }
-
-                  const pool = marketType === 'KR' ? INITIAL_STOCKS_KR : INITIAL_STOCKS;
-                  const poolAvailable = pool.find(s => !scalperTabs.some(t => t.symbol === s.symbol));
-                  
-                  if (poolAvailable) {
-                    if (!stocks.some(s => s.symbol === poolAvailable.symbol)) {
-                      setStocks(prev => [...prev, poolAvailable]);
-                    }
-                    openOrSwitchScalperTab(poolAvailable.symbol, poolAvailable.name);
-                    showNotification(`[AI 종목 추천] ${poolAvailable.name}(${poolAvailable.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
-                    return;
-                  }
-
-                  const tabIdx = currentMarketTabs.length + 1;
-                  const newSymbol = marketType === 'US' ? `AIUS${tabIdx}` : `099${String(tabIdx).padStart(3, '0')}`;
-                  const newName = marketType === 'US' ? `AI 추천 종목 ${tabIdx}` : `AI 최적추천주 ${tabIdx}`;
-                  const basePrice = marketType === 'US' ? 10 + Math.floor(Math.random() * 90) : 5000 + Math.floor(Math.random() * 45000);
-                  const dynamicStock: Stock = {
-                    symbol: newSymbol,
-                    name: newName,
-                    price: basePrice,
-                    change: Math.round(basePrice * 0.035),
-                    changePercent: 3.5,
-                    volume: '15.5M',
-                    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: basePrice * (0.95 + (i/40)*0.1) })),
-                    market: marketType,
-                    isAI: true
-                  };
-
-                  setStocks(prev => [...prev, dynamicStock]);
-                  openOrSwitchScalperTab(dynamicStock.symbol, dynamicStock.name);
-                  showNotification(`[AI 분석 추천] ${dynamicStock.name}(${dynamicStock.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
-                }}
-                className="px-2 py-0.5 rounded-lg bg-sleek-blue/20 hover:bg-sleek-blue/30 text-sleek-blue hover:text-white border border-sleek-blue/40 text-[10.5px] font-black font-mono flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
-                title={`종목 추가 (최대 ${maxInventoryPerMarket}개)`}
-              >
-                <Sparkles className="w-3 h-3 text-sleek-blue" />
-                <span>종목추가</span>
-                <span className="text-[10px] font-mono font-bold text-sleek-blue bg-sleek-blue/20 px-1 py-0.2 rounded border border-sleek-blue/30">
-                  {scalperTabs.filter(tab => {
-                    const isUS = /^[A-Z]/.test(tab.symbol);
-                    return marketType === 'US' ? isUS : !isUS;
-                  }).length}/{maxInventoryPerMarket}
-                </span>
-              </button>
             </div>
 
             <div className="flex items-center gap-1.5 shrink-0">
