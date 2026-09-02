@@ -5,6 +5,10 @@ import { Stock } from '../types';
  * 한국투자증권 KIS API 연동 서비스
  */
 
+// 스캘퍼 추천종목 개수 제한 — UI 라벨("실시간 초단타 스캘핑 최적 추천 10선")과 실제 반환 개수를
+// 이 상수 하나로 통일한다. 실시간 계산 추천, 기본(fallback) 추천, 백엔드 API 응답 전부 이 값으로 캡.
+export const MAX_SCALPER_RECOMMENDATIONS = 10;
+
 interface KISConfig {
   appKey: string;
   appSecret: string;
@@ -169,7 +173,7 @@ strat.hasVolumeMomentum
         b.scalpingScore -
         a.scalpingScore
     )
-    .slice(0, 5);
+    .slice(0, MAX_SCALPER_RECOMMENDATIONS);
 }
 
 
@@ -1647,7 +1651,7 @@ ws.onclose = (event) => {
       if (res.data && Array.isArray(res.data.recommendations) && res.data.recommendations.length > 0) {
         // 백엔드가 recommendedPrice를 내려주지 않는 경우, 응답을 받은 이 순간의 price를 스냅샷으로 고정한다.
         // 한 번 고정된 recommendedPrice는 이후 어떤 동기화 로직으로도 재할당되어서는 안 된다.
-        return res.data.recommendations.map((r: ScalperRecommendation) => ({
+        return res.data.recommendations.slice(0, MAX_SCALPER_RECOMMENDATIONS).map((r: ScalperRecommendation) => ({
           ...r,
           recommendedPrice: r.recommendedPrice ?? r.price
         }));
@@ -1976,7 +1980,7 @@ ws.onclose = (event) => {
     ];
     // recommendedPrice는 이 목록이 생성되는 이 순간의 price를 그대로 스냅샷으로 고정한다.
     // 이후 화면단에서 price(현재가)가 실시간으로 바뀌어도 recommendedPrice는 절대 갱신되지 않는다.
-    return rawList.map(r => ({ ...r, recommendedPrice: r.price }));
+    return rawList.slice(0, MAX_SCALPER_RECOMMENDATIONS).map(r => ({ ...r, recommendedPrice: r.price }));
   }
 
 }

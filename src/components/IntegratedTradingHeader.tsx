@@ -6,6 +6,135 @@ import {
 } from 'lucide-react';
 import { Stock, ScalperTab } from '../types';
 import { cn } from '../lib/utils';
+import { kisService } from '../services/kisService';
+import { AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+
+// ============================================================
+// 📈 일반 주식창 스타일의 가격 차트 (일/주/월/년)
+// 고급 설정(1회 거래수량/최대슬롯/목표순익/손절/추가매수간격/진입호가/실행속도)을
+// 기본 화면에서 숨긴 자리에 대신 표시된다.
+// ============================================================
+type ChartPeriod = 'D' | 'W' | 'M' | 'Y';
+
+const CHART_PERIOD_LABEL: Record<ChartPeriod, string> = { D: '일', W: '주', M: '월', Y: '년' };
+
+const StockPriceChart: React.FC<{ symbol: string; name: string; formatCurrency: (n: number) => string }> = ({ symbol, name, formatCurrency }) => {
+  const [period, setPeriod] = React.useState<ChartPeriod>('D');
+  const [chartData, setChartData] = React.useState<{ date: string; price: number }[]>([]);
+  const [isLoading, setIsLoading] = React.useState(false);
+  const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (!symbol) return;
+    let cancelled = false;
+    setIsLoading(true);
+    setError(null);
+
+    // KIS 일별시세 조회는 일/주/월 코드만 지원한다. "년" 탭은 월봉을 조회해 가장 긴 구간을 보여주는 방식으로 근사한다.
+    const kisPeriodCode = period === 'Y' ? 'M' : period;
+
+    kisService.getDomesticDailyPrice(symbol, kisPeriodCode as 'D' | 'W' | 'M')
+      .then(res => {
+        if (cancelled) return;
+        if (res && Array.isArray(res.output) && res.output.length > 0) {
+          const bars = [...res.output]
+            .reverse() // KIS는 최신 → 과거 순으로 내려주므로 시간순으로 뒤집는다
+            .map((b: any) => ({
+              date: String(b.stck_bsop_date || ''),
+              price: Number(b.stck_clpr || 0)
+            }))
+            .filter(b => b.price > 0);
+          setChartData(bars);
+          if (bars.length === 0) setError('표시할 시세 데이터가 없습니다.');
+        } else {
+          setChartData([]);
+          setError('시세 데이터를 불러오지 못했습니다.');
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setChartData([]);
+          setError('시세 조회 중 오류가 발생했습니다.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [symbol, period]);
+
+  const formatDateLabel = (raw: string) => {
+    if (raw.length !== 8) return raw;
+    return period === 'D' ? `${raw.slice(4, 6)}/${raw.slice(6, 8)}` : `${raw.slice(0, 4)}.${raw.slice(4, 6)}`;
+  };
+
+  const first = chartData[0]?.price || 0;
+  const last = chartData[chartData.length - 1]?.price || 0;
+  const changePct = first > 0 ? ((last - first) / first) * 100 : 0;
+
+  return (
+    <div className="lg:col-span-4 bg-black/30 border border-sleek-border rounded-2xl p-3 flex flex-col min-w-0">
+      <div className="flex items-center justify-between mb-2 shrink-0">
+        <div className="min-w-0 truncate">
+          <span className="text-xs font-black text-white truncate">{name}</span>
+          <span className="text-[10px] font-mono text-slate-500 ml-1.5">{symbol}</span>
+        </div>
+        {chartData.length > 1 && (
+          <span className={cn("text-[11px] font-bold font-mono shrink-0", changePct >= 0 ? "text-rose-400" : "text-sky-400")}>
+            {changePct >= 0 ? '+' : ''}{changePct.toFixed(2)}%
+          </span>
+        )}
+      </div>
+
+      <div className="flex items-center gap-1 mb-2 shrink-0">
+        {(['D', 'W', 'M', 'Y'] as ChartPeriod[]).map(p => (
+          <button
+            key={p}
+            type="button"
+            onClick={() => setPeriod(p)}
+            className={cn(
+              "px-2 py-0.5 rounded-lg text-[10px] font-bold border transition-all",
+              period === p
+                ? "bg-sleek-blue/25 border-sleek-blue/60 text-sleek-blue"
+                : "bg-black/30 border-white/10 text-slate-400 hover:text-white"
+            )}
+          >
+            {CHART_PERIOD_LABEL[p]}
+          </button>
+        ))}
+      </div>
+
+      <div className="flex-1 min-h-[140px] w-full">
+        {isLoading ? (
+          <div className="w-full h-full flex items-center justify-center text-[11px] text-slate-500 animate-pulse">차트 불러오는 중...</div>
+        ) : error || chartData.length === 0 ? (
+          <div className="w-full h-full flex items-center justify-center text-[11px] text-slate-500">{error || '데이터 없음'}</div>
+        ) : (
+          <ResponsiveContainer width="100%" height="100%" minHeight={140}>
+            <AreaChart data={chartData}>
+              <defs>
+                <linearGradient id="chartPriceGradient" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={changePct >= 0 ? '#f43f5e' : '#38bdf8'} stopOpacity={0.35} />
+                  <stop offset="95%" stopColor={changePct >= 0 ? '#f43f5e' : '#38bdf8'} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#ffffff10" vertical={false} />
+              <XAxis dataKey="date" tickFormatter={formatDateLabel} tick={{ fontSize: 9, fill: '#94a3b8' }} interval="preserveStartEnd" />
+              <YAxis domain={['auto', 'auto']} tick={{ fontSize: 9, fill: '#94a3b8' }} width={50} tickFormatter={(v) => formatCurrency(v)} />
+              <Tooltip
+                contentStyle={{ backgroundColor: '#0f172a', border: '1px solid #334155', borderRadius: '10px', fontSize: '11px' }}
+                labelFormatter={formatDateLabel}
+                formatter={(value: number) => [formatCurrency(value), '종가']}
+              />
+              <Area type="monotone" dataKey="price" stroke={changePct >= 0 ? '#f43f5e' : '#38bdf8'} strokeWidth={2} fill="url(#chartPriceGradient)" />
+            </AreaChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+    </div>
+  );
+};
 
 export interface IntegratedTradingHeaderProps {
   selectedStock: Stock | null;
@@ -100,6 +229,8 @@ export interface IntegratedTradingHeaderProps {
   setManualSellPrice: (p: number) => void;
   setManualSellModalOpen: (open: boolean) => void;
   INITIAL_STOCKS_KR: Stock[];
+  maxInventoryPerMarket: number;
+  updateTab: (symbol: string, updates: Partial<ScalperTab>) => void;
   INITIAL_STOCKS: Stock[];
 }
 
@@ -179,9 +310,14 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
   setManualSellModalOpen,
   INITIAL_STOCKS_KR,
   INITIAL_STOCKS,
+  maxInventoryPerMarket,
+  updateTab,
 }) => {
   // 검색 드롭다운 키보드(↑↓ + Enter) 네비게이션용 로컬 상태
   const [highlightedIndex, setHighlightedIndex] = React.useState(-1);
+  // 1회거래수량/최대슬롯/목표순익/손절/추가매수간격/진입호가/실행속도 — 기본적으로 숨기고, 필요할 때만 펼친다.
+  // 숨겨진 자리에는 대신 일/주/월/년 가격 차트가 표시된다.
+  const [showAdvancedSettings, setShowAdvancedSettings] = React.useState(false);
   const suggestionItemRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
 
   React.useEffect(() => {
@@ -655,7 +791,22 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           (1회거래수량/슬롯/순익, SMART SCALPER, 호가창, 종목관리/추천, START 버튼)
           ───────────────────────────────────────────────────────────── */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-stretch text-xs">
-        
+
+        {/* 고급 설정(1회거래수량/최대슬롯/목표순익/손절/추가매수간격/진입호가/실행속도) 토글.
+            기본값은 숨김이며, 숨긴 자리에는 일/주/월/년 가격 차트가 대신 표시된다. */}
+        <div className="lg:col-span-12 flex justify-end -mb-1">
+          <button
+            type="button"
+            onClick={() => setShowAdvancedSettings(v => !v)}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border border-white/10 bg-black/30 text-slate-400 hover:text-white hover:border-white/30 transition-all"
+          >
+            <Zap className="w-3 h-3" />
+            {showAdvancedSettings ? '차트 보기' : '고급 설정 (거래수량/슬롯/순익/손절 등)'}
+          </button>
+        </div>
+
+        {showAdvancedSettings ? (
+          <>
         {/* 1. 1회 거래수량, 최대 분할 슬롯, 목표순익 & 손절 (col-span-2) */}
         <div className="lg:col-span-2 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0">
           <div>
@@ -800,6 +951,12 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
             </select>
           </div>
         </div>
+          </>
+        ) : (
+          selectedStock && (
+            <StockPriceChart symbol={selectedStock.symbol} name={selectedStock.name} formatCurrency={formatCurrency} />
+          )
+        )}
 
         {/* 3. 실시간 잔량 호가창 (4호가) (col-span-3) */}
         <div className="lg:col-span-3 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
@@ -980,7 +1137,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   showNotification(`[AI 분석 추천] ${dynamicStock.name}(${dynamicStock.symbol}) 종목을 스캘퍼 타겟으로 추가했습니다.`, "success");
                 }}
                 className="px-2 py-0.5 rounded-lg bg-sleek-blue/20 hover:bg-sleek-blue/30 text-sleek-blue hover:text-white border border-sleek-blue/40 text-[10.5px] font-black font-mono flex items-center gap-1.5 transition-all cursor-pointer shadow-sm active:scale-95 shrink-0"
-                title="종목 추가 (최대 8개)"
+                title={`종목 추가 (최대 ${maxInventoryPerMarket}개)`}
               >
                 <Sparkles className="w-3 h-3 text-sleek-blue" />
                 <span>종목추가</span>
@@ -988,7 +1145,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   {scalperTabs.filter(tab => {
                     const isUS = /^[A-Z]/.test(tab.symbol);
                     return marketType === 'US' ? isUS : !isUS;
-                  }).length}/8
+                  }).length}/{maxInventoryPerMarket}
                 </span>
               </button>
             </div>
@@ -998,7 +1155,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                 {scalperTabs.filter(tab => {
                   const isUS = /^[A-Z]/.test(tab.symbol);
                   return marketType === 'US' ? isUS : !isUS;
-                }).length}/8
+                }).length}/{maxInventoryPerMarket}
               </span>
             </div>
           </div>
@@ -1016,7 +1173,10 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                                  ? INITIAL_STOCKS_KR.find(s => s.symbol === tab.symbol) 
                                  : INITIAL_STOCKS.find(s => s.symbol === tab.symbol));
               const tabName = (tab.name && tab.name !== tab.symbol) ? tab.name : getResolvedStockName(tab.symbol, tabStock);
-              const tabPrice = tabStock?.price || 0;
+              // 가격은 반드시 symbol 기준 단일 출처(scalperInventory.market.currentPrice = tab.price)를 우선한다.
+              // stocks 배열 조회(tabStock)는 아직 market 동기화가 반영되기 전 순간을 위한 보조 수단일 뿐이다.
+              const tabPrice = (tab.price && tab.price > 0) ? tab.price : (tabStock?.price || 0);
+              const isPriceLoading = tab.priceStatus === 'LOADING' && tabPrice <= 0;
 
               return (
                 <div
@@ -1039,15 +1199,34 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   </div>
 
                   <div className="flex items-center gap-1.5 shrink-0">
-                    <span className="text-xs font-black font-mono text-rose-500 tabular-nums">
-                      {formatCurrency(tabPrice)}
-                    </span>
+                    {isPriceLoading ? (
+                      <span className="text-[10px] font-bold text-slate-500 animate-pulse">연결 중...</span>
+                    ) : (
+                      <span className="text-xs font-black font-mono text-rose-500 tabular-nums">
+                        {formatCurrency(tabPrice)}
+                      </span>
+                    )}
 
                     {tab.isBotActive && (
                       <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/30 shrink-0">
                         ON
                       </span>
                     )}
+
+                    <select
+                      value={tab.tradeQuantity}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        updateTab(tab.symbol, { tradeQuantity: Number(e.target.value) });
+                      }}
+                      className="shrink-0 bg-black/60 border border-white/10 rounded-md text-[10px] font-bold text-slate-300 outline-none cursor-pointer appearance-none px-1 py-0.5 hover:border-sleek-blue/50"
+                      title={`${tabName} 1회 거래수량 (종목별 개별 설정)`}
+                    >
+                      {[1, 2, 3, 5, 10, 15, 20, 30, 50, 100].map(val => (
+                        <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
+                      ))}
+                    </select>
 
                     <button
                       type="button"

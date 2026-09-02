@@ -169,6 +169,7 @@ export interface ScalperTab {
   autoCancelThreshold: number;
   tradeLogs?: TradeLog[];
   lifecycleStatus?: ScalperLifecycleStatus;
+  priceStatus?: 'LOADING' | 'LIVE';
 }
 
 // ============================================================
@@ -213,6 +214,7 @@ export interface ScalperInventoryItem {
     change: number;
     changePercent: number;
     volume: string;
+    priceStatus: 'LOADING' | 'LIVE'; // KIS로부터 실제 현재가를 한 번이라도 받으면 LIVE로 전환, 그 전까지는 LOADING
     lastUpdatedAt: number;
   };
 
@@ -291,6 +293,7 @@ const createInventoryItem = (params: {
       change: 0,
       changePercent: 0,
       volume: '0',
+      priceStatus: 'LOADING',
       lastUpdatedAt: now
     },
     account: {
@@ -786,6 +789,9 @@ interface TradeLog {
   price: number;
   amount: number;
   reason: string;
+  id?: string;          // GLOBAL TRADE LOGS 필터 UI의 React key 용도
+  timestamp?: number;   // 정렬/필터링용 원본 타임스탬프
+  symbolName?: string;  // 종목명 (필터 버튼 라벨 등에 사용)
 }
 
 interface NewsItem {
@@ -795,6 +801,11 @@ interface NewsItem {
   time: string;
   url?: string;
 }
+
+// 스캘퍼 인벤토리에 시장(KR/US)별로 등록 가능한 최대 종목 수.
+// kisService.MAX_SCALPER_RECOMMENDATIONS(추천종목 표시 개수)와는 서로 다른 목적의 값이므로
+// 의도적으로 별도 상수로 관리한다 — 두 값을 억지로 같은 숫자로 맞추지 않는다.
+const MAX_INVENTORY_PER_MARKET = 8;
 
 const INITIAL_STOCKS_KR: Stock[] = [
   {
@@ -1169,7 +1180,6 @@ export default function App() {
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1350 + Math.random() * 5 }))
   });
   const [exchangeRateTrend, setExchangeRateTrend] = useState<'UP' | 'DOWN'>('UP');
-  const [selectionMode, setSelectionMode] = useState<'RECOMMENDED' | 'MANUAL'>('RECOMMENDED');
   const [stocks, setStocks] = useState<Stock[]>(() => {
     const lastMarket = (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
     const lastUS = localStorage.getItem('sleek_last_symbol_US') || 'NVDA';
@@ -1269,15 +1279,9 @@ export default function App() {
     }
   }, [selectedSymbol, marketType]);
   const [sellableHoldings, setSellableHoldings] = useState<Record<string, number>>({});
-  const [isBotActive, setIsBotActive] = useState(false);
   const [tradeLogs, setTradeLogs] = useState<TradeLog[]>([]);
   const [time, setTime] = useState(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
   const [botStatus, setBotStatus] = useState<string>("대기 중...");
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
- 
-  // AI Cooldown tracking
-  const lastAiCallRef = React.useRef<number>(0);
-  const AI_COOLDOWN_MS = 10000; // Minimum 10 seconds between AI calls
 
   // Authentication & Subscription State
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
@@ -1382,6 +1386,8 @@ export default function App() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [searchSuggestions, setSearchSuggestions] = useState<StockSuggestion[]>([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
+  // GLOBAL TRADE LOGS 필터 — 'ALL'이면 등록된 모든 종목의 로그를 보여주고, 특정 symbol이면 그 종목만 필터링
+  const [logFilterSymbol, setLogFilterSymbol] = useState<string>('ALL');
   const [searchCursorOffset, setSearchCursorOffset] = useState(0);
   const [aiRecommendations, setAiRecommendations] = useState<Stock[]>([]);
   const [isGettingRecommendations, setIsGettingRecommendations] = useState(false);
@@ -1557,7 +1563,6 @@ kisConfig.isConnected
   const [dashboardTab, setDashboardTab] = useState<'TRADING' | 'PORTFOLIO' | 'STRATEGY'>('TRADING');
   const [aiAnalysisResult, setAiAnalysisResult] = useState<AIAnalysisResult | null>(null);
   const [activeSignal, setActiveSignal] = useState<MarketSignal | null>(null);
-  const [isBotThinking, setIsBotThinking] = useState(false);
   const [selectedTimeframe, setSelectedTimeframe] = useState('15m');
   const timeframes = ['1m', '5m', '15m', '30m', '60m', '120m', '240m'];
 
@@ -1579,10 +1584,6 @@ kisConfig.isConnected
 
   // Multi-Tab Scalper Trading State
   const buildInitialScalperTabs = (): ScalperTab[] => {
-    const lastMarket = (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
-    const lastUS = localStorage.getItem('sleek_last_symbol_US') || 'NVDA';
-    const lastKR = localStorage.getItem('sleek_last_symbol_KR') || '073240';
-
     let saved: ScalperTab[] = [];
     try {
       const parsed = JSON.parse(localStorage.getItem('sleek_scalper_tabs') || '[]');
@@ -1593,51 +1594,11 @@ kisConfig.isConnected
       console.error("Failed to parse saved scalperTabs", e);
     }
 
+    // 저장된 인벤토리가 없으면(첫 설치, 또는 사용자가 전부 삭제한 뒤 새로고침) 빈 배열로 시작한다.
+    // 과거에는 여기서 KR/US 기본 종목(이구산업 등)을 자동으로 채워 넣었으나, 이는 "빈 인벤토리를
+    // 몰래 복구하지 않는다"는 원칙을 위반하므로 완전히 제거했다. 사용자는 검색창에서 직접 등록한다.
     if (saved.length === 0) {
-      const krStock = INITIAL_STOCKS_KR.find(s => s.symbol === lastKR) || INITIAL_STOCKS_KR[0];
-      const krLimits = calculateStockLimits(krStock.price || 1000, krStock.changePercent || 0, false, krStock.basePrice);
-      
-      const usStock = INITIAL_STOCKS.find(s => s.symbol === lastUS) || INITIAL_STOCKS[0];
-      const usLimits = calculateStockLimits(usStock.price || 10, usStock.changePercent || 0, true, usStock.basePrice);
-
-      saved = [
-        {
-          id: krStock.symbol,
-          symbol: krStock.symbol,
-          name: krStock.name || krStock.symbol,
-          isBotActive: false,
-          gapBuyPrice: krLimits.lowerLimit,
-          gapSellPrice: krLimits.upperLimit,
-          tradeQuantity: 1,
-          maxSlots: 10,
-          gapInventory: [],
-          gapTradingProfit: 0,
-          gapTradeCount: 0,
-          lastTradeType: null,
-          scalperMessage: "대기 중...",
-          entryPriceMode: 'BID2',
-          autoCancelThreshold: 0.2,
-          tradeLogs: []
-        },
-        {
-          id: usStock.symbol,
-          symbol: usStock.symbol,
-          name: usStock.name || usStock.symbol,
-          isBotActive: false,
-          gapBuyPrice: usLimits.lowerLimit,
-          gapSellPrice: usLimits.upperLimit,
-          tradeQuantity: 1,
-          maxSlots: 10,
-          gapInventory: [],
-          gapTradingProfit: 0,
-          gapTradeCount: 0,
-          lastTradeType: null,
-          scalperMessage: "대기 중...",
-          entryPriceMode: 'BID2',
-          autoCancelThreshold: 0.2,
-          tradeLogs: []
-        }
-      ];
+      return [];
     }
 
     // Sanitize any previously contaminated slots, ensure isBotActive is strictly false on load
@@ -1656,62 +1617,9 @@ kisConfig.isConnected
       tradeLogs: (t.tradeLogs || []).filter(l => !l.symbol || l.symbol === t.symbol || l.symbol === 'SYSTEM')
     }));
 
-    let usTabs = saved.filter(t => /^[A-Z]/.test(t.symbol));
-    let krTabs = saved.filter(t => !/^[A-Z]/.test(t.symbol));
-
-    // Ensure lastUS is present in usTabs
-    let usTargetTab = usTabs.find(t => t.symbol === lastUS || t.id === lastUS);
-    if (!usTargetTab) {
-      const usStock = INITIAL_STOCKS.find(s => s.symbol === lastUS) || POPULAR_STOCKS.find(s => s.symbol === lastUS) || { symbol: lastUS, name: lastUS, price: 10, changePercent: 0 };
-      const changePct = 'changePercent' in usStock ? (usStock.changePercent || 0) : 0;
-      const usLimits = calculateStockLimits(usStock.price || 10, changePct, true);
-      usTargetTab = {
-        id: lastUS,
-        symbol: lastUS,
-        name: usStock.name || lastUS,
-        isBotActive: false,
-        gapBuyPrice: usLimits.lowerLimit,
-        gapSellPrice: usLimits.upperLimit,
-        tradeQuantity: 1,
-        maxSlots: 10,
-        gapInventory: [],
-        gapTradingProfit: 0,
-        gapTradeCount: 0,
-        lastTradeType: null,
-        scalperMessage: "대기 중...",
-        entryPriceMode: 'BID2',
-        autoCancelThreshold: 0.2,
-        tradeLogs: []
-      };
-      usTabs = [...usTabs, usTargetTab];
-    }
-
-    // Ensure lastKR is present in krTabs
-    let krTargetTab = krTabs.find(t => t.symbol === lastKR || t.id === lastKR);
-    if (!krTargetTab) {
-      const krStock = INITIAL_STOCKS_KR.find(s => s.symbol === lastKR) || { symbol: lastKR, name: lastKR, price: 1000, changePercent: 0 };
-      const krLimits = calculateStockLimits(krStock.price || 1000, krStock.changePercent || 0, false);
-      krTargetTab = {
-        id: lastKR,
-        symbol: lastKR,
-        name: krStock.name || lastKR,
-        isBotActive: false,
-        gapBuyPrice: krLimits.lowerLimit,
-        gapSellPrice: krLimits.upperLimit,
-        tradeQuantity: 1,
-        maxSlots: 10,
-        gapInventory: [],
-        gapTradingProfit: 0,
-        gapTradeCount: 0,
-        lastTradeType: null,
-        scalperMessage: "대기 중...",
-        entryPriceMode: 'BID2',
-        autoCancelThreshold: 0.2,
-        tradeLogs: []
-      };
-      krTabs = [...krTabs, krTargetTab];
-    }
-
+    // 저장된 그대로 반환한다 — 특정 시장(KR/US)에 종목이 하나도 없어도 강제로 채워 넣지 않는다.
+    const usTabs = saved.filter(t => /^[A-Z]/.test(t.symbol));
+    const krTabs = saved.filter(t => !/^[A-Z]/.test(t.symbol));
     return [...krTabs, ...usTabs];
   };
 
@@ -1738,6 +1646,7 @@ kisConfig.isConnected
         change: 0,
         changePercent: 0,
         volume: '0',
+        priceStatus: 'LOADING', // 저장된 값이라도 재접속 시에는 실제 KIS 조회로 재검증하기 전까지 LOADING
         lastUpdatedAt: now
       },
       account: {
@@ -1888,7 +1797,8 @@ kisConfig.isConnected
       lastTradeType: item.account.lastTradeType,
       scalperMessage: item.status.message,
       tradeLogs: item.tradeLogs,
-      lifecycleStatus: item.status.state
+      lifecycleStatus: item.status.state,
+      priceStatus: item.market.priceStatus
     }));
   }, [scalperInventory]);
 
@@ -1967,6 +1877,7 @@ kisConfig.isConnected
           : Math.max(0, Math.floor(balance / (currentPrice || 1)));
 
         const marketChanged = !!live && live.price > 0 && (
+          item.market.priceStatus === 'LOADING' ||
           item.market.currentPrice !== live.price ||
           item.market.change !== (live.change || 0) ||
           item.market.changePercent !== (live.changePercent || 0) ||
@@ -1988,6 +1899,7 @@ kisConfig.isConnected
             change: live.change || 0,
             changePercent: live.changePercent || 0,
             volume: live.volume || '0',
+            priceStatus: 'LIVE',
             lastUpdatedAt: Date.now()
           } : item.market,
           account: accountChanged ? {
@@ -2107,8 +2019,8 @@ kisConfig.isConnected
         lastTradeType: lastTradeTypeRef.current,
         scalperMessage: scalperMessageRef.current,
         entryPriceMode: entryPriceModeRef.current,
-        autoCancelThreshold: autoCancelThresholdRef.current,
-        tradeLogs: (tradeLogsRef.current || []).filter(l => !l.symbol || l.symbol === prevTabId || l.symbol === 'SYSTEM')
+        autoCancelThreshold: autoCancelThresholdRef.current
+        // tradeLogs는 전역 GLOBAL TRADE LOGS이므로 여기서 다루지 않는다 (addLog가 종목별 로그를 직접 기록함)
       });
     }
 
@@ -2166,7 +2078,8 @@ setGapInventory(nextInv);
     setScalperMessage(targetTab.scalperMessage || "대기 중...");
     setEntryPriceMode(targetTab.entryPriceMode || 'BID2');
     setAutoCancelThreshold(targetTab.autoCancelThreshold || 0.2);
-    setTradeLogs((targetTab.tradeLogs || []).filter(l => !l.symbol || l.symbol === targetTab.symbol || l.symbol === 'SYSTEM'));
+    // tradeLogs(전역 GLOBAL TRADE LOGS)는 탭을 전환해도 그대로 유지된다 — 여기서 덮어쓰지 않는다.
+    // 선택 종목만의 로그는 화면에서 scalperTabs의 해당 항목(tradeLogs) 또는 GLOBAL 필터로 조회한다.
   };
 
   const openOrSwitchScalperTab = (
@@ -2196,8 +2109,8 @@ setGapInventory(nextInv);
         lastTradeType: lastTradeTypeRef.current,
         scalperMessage: scalperMessageRef.current,
         entryPriceMode: entryPriceModeRef.current,
-        autoCancelThreshold: autoCancelThresholdRef.current,
-        tradeLogs: (tradeLogsRef.current || []).filter(l => !l.symbol || l.symbol === prevTabId || l.symbol === 'SYSTEM')
+        autoCancelThreshold: autoCancelThresholdRef.current
+        // tradeLogs는 전역 GLOBAL TRADE LOGS이므로 여기서 다루지 않는다 (addLog가 종목별 로그를 직접 기록함)
       });
     }
 
@@ -2287,7 +2200,7 @@ setGapInventory(nextInv);
     const currentInv = scalperTabsRef.current;
     const sameMarketNow = currentInv.filter(t => isUS ? /^[A-Z]/.test(t.symbol) : !/^[A-Z]/.test(t.symbol));
     let evictedSymbol: string | null = null;
-    if (sameMarketNow.length >= 8) {
+    if (sameMarketNow.length >= MAX_INVENTORY_PER_MARKET) {
       let inactiveIdx = -1;
       for (let i = sameMarketNow.length - 1; i >= 0; i--) {
         if (!sameMarketNow[i].isBotActive && sameMarketNow[i].id !== prevTabId) {
@@ -2309,6 +2222,13 @@ setGapInventory(nextInv);
 
     addLog(symbol, '매수', newInventoryItem.recommendation.price, 0, `[상태변경] 등록 → ${LIFECYCLE_STATUS_LABEL.WATCHING} — 인벤토리 등록 완료, 전략 센서 감시 시작`);
 
+    // 합성(가짜) history 대신 실제 KIS 분봉 데이터로 즉시 교체 — 전략 센서 신뢰도 확보
+    seedRealHistory(symbol).then(realHistory => {
+      if (realHistory && realHistory.length > 0) {
+        setStocks(prev => prev.map(s => s.symbol === symbol ? { ...s, history: realHistory } : s));
+      }
+    });
+
     activeTabIdRef.current = symbol;
     setActiveTabId(symbol);
     setSelectedSymbol(symbol);
@@ -2321,7 +2241,7 @@ setGapInventory(nextInv);
     setGapTradeCount(0);
     setLastTradeType(null);
     setScalperMessage("대기 중...");
-    setTradeLogs([]);
+    // tradeLogs(전역 GLOBAL TRADE LOGS)는 새 종목을 등록해도 비우지 않는다 — 다른 종목들의 로그가 유지되어야 한다.
   };
 
   const closeScalperTab = (tabId: string, e: React.MouseEvent) => {
@@ -2639,8 +2559,10 @@ setGapInventory(nextInv);
       };
     }
 
-    const fallback = stocks.find(matchesMarket) || (isCurrentUS ? INITIAL_STOCKS[0] : INITIAL_STOCKS_KR[0]);
-    return fallback ? { ...fallback, name: getResolvedStockName(fallback.symbol, fallback) } : null;
+    // selectedSymbol이 비어있다는 것은 "선택된 종목이 없음"을 뜻한다.
+    // 이 경우 임의의 종목(하드코딩된 기본 종목 등)을 대신 보여주지 않고 null을 반환해
+    // 화면이 "선택된 종목 없음" 상태를 정직하게 나타내도록 한다.
+    return null;
   }, [stocks, stocksCache, selectedSymbol, marketType, scalperTabs, getResolvedStockName]);
 
   const displayScalperMessage = useMemo(() => {
@@ -2743,10 +2665,11 @@ setGapInventory(nextInv);
       lastTradeType,
       scalperMessage,
       entryPriceMode,
-      autoCancelThreshold,
-      tradeLogs: (tradeLogs || []).filter(l => !l.symbol || l.symbol === activeSym || l.symbol === 'SYSTEM')
+      autoCancelThreshold
+      // tradeLogs는 여기서 다루지 않는다 — tradeLogs(전역 GLOBAL TRADE LOGS)는 addLog()가
+      // 종목별 인벤토리 로그(item.tradeLogs)에 직접 기록하므로, 여기서 다시 덮어쓰면 충돌/중복이 생긴다.
     });
-  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, tradeLogs, updateTab]);
+  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, maxSlots, gapInventory, gapTradingProfit, gapTradeCount, lastTradeType, scalperMessage, entryPriceMode, autoCancelThreshold, updateTab]);
 
   // Helper for tick-aware target sell price calculation to guarantee positive net profit above tick size, fees, and taxes
   const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number) => {
@@ -4260,7 +4183,6 @@ setGapInventory(nextInv);
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      setIsBotActive(false);
       showNotification("로그아웃 되었습니다.", "info");
     } catch (e: any) {
       showNotification("로그아웃 중 오류가 발생했습니다.", "error");
@@ -5315,6 +5237,34 @@ data.price
   // 화면에 노출해서는 안 된다. 선택되는 즉시, 그리고 선택되어 있는 동안
   // 2초 주기로 이 함수가 해당 심볼의 데이터를 능동적으로 다시 가져온다.
   // ============================================================
+  // ============================================================
+  // 🔄 전략 센서용 실제 이력(history) 시딩
+  // ------------------------------------------------------------
+  // detectStockStrategies()가 계산하는 RSI/SMA/볼린저밴드/VWAP/CVD는 전부 Stock.history에서 나온다.
+  // 신규 등록 직후에는 history가 합성(가짜) 데이터로 채워져 있어서(가격이 거의 일정하거나 임의 공식으로
+  // 생성됨), 등록 초기 몇 분간 센서가 실제 시장과 무관한 값을 낼 수 있다. KIS 국내 분봉 조회 API로
+  // 즉시 실제 이력을 받아와 교체함으로써 이 문제를 없앤다.
+  // ============================================================
+  const seedRealHistory = React.useCallback(async (symbol: string): Promise<{ time: string; price: number }[] | null> => {
+    if (!kisConfig.isConnected || /^[A-Za-z]/.test(symbol)) return null; // 분봉 API는 국내 종목만 지원
+    try {
+      const res = await kisService.getDomesticMinuteChart(symbol);
+      if (res && Array.isArray(res.output2) && res.output2.length > 0) {
+        // KIS는 보통 최신 → 과거 순으로 내려주므로 시간순(과거 → 최신)으로 뒤집는다
+        const bars = [...res.output2].reverse()
+          .map((b: any) => ({
+            time: String(b.stck_cntg_hour || b.stck_cntg_time || ''),
+            price: Number(b.stck_prpr || b.stck_prc || 0)
+          }))
+          .filter(b => b.price > 0);
+        if (bars.length >= 5) return bars.slice(-40);
+      }
+    } catch (err) {
+      console.warn(`[실제 이력 시딩 실패] ${symbol}`, err);
+    }
+    return null;
+  }, [kisConfig.isConnected]);
+
   const refreshInventoryItem = React.useCallback(async (symbol: string) => {
     if (!symbol) return;
     try {
@@ -5351,6 +5301,18 @@ data.price
             cur.rsi === roundedRsi &&
             cur.activeCount === sensor.activeCount
           ) return prev; // 변화 없으면 그대로 반환 (불필요한 재렌더 방지)
+
+          const sensorTransitions: string[] = [];
+          if (!cur.pullback && sensor.isPullback) sensorTransitions.push('PULLBACK(눌림목) 감지');
+          if (!cur.breakout && sensor.isBreakout) sensorTransitions.push('BREAKOUT(돌파) 감지');
+          if (!cur.vwap && sensor.isVwapSupport) sensorTransitions.push('VWAP SUPPORT 감지');
+          if (!cur.cvd && sensor.isVolumeProfile) sensorTransitions.push('CVD(거래량 프로파일) 감지');
+          if (sensorTransitions.length > 0) {
+            setTimeout(() => {
+              sensorTransitions.forEach(msg => addLog(symbol, '매수', updatedStock.price || 0, 0, `[전략센서] ${msg}`));
+            }, 0);
+          }
+
           const next = [...prev];
           next[idx] = {
             ...prev[idx],
@@ -5707,6 +5669,11 @@ data.price
               };
               updatedTabs.push(newTab);
               newInventoryItemsToAdd.push(newInvItem);
+              seedRealHistory(symbol).then(realHistory => {
+                if (realHistory && realHistory.length > 0) {
+                  setStocks(prev => prev.map(s => s.symbol === symbol ? { ...s, history: realHistory } : s));
+                }
+              });
               tabsChanged = true;
             }
           }
@@ -6126,164 +6093,6 @@ setLiveOrderbook(ob);
     return () => clearInterval(interval);
   }, []);
 
-  // AI Auto-Trade Logic
-  useEffect(() => {
-    if (!isBotActive) {
-      setBotStatus("매뉴얼 모드");
-      return;
-    }
-
-    setBotStatus("AI 엔진 최적화 완료. 분석 시작...");
-    setTradeLogs(prev => [{
-      time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
-      symbol: 'SYSTEM', type: 'BUY', price: 0, amount: 0, reason: 'AI 트레이딩 엔진이 기동되었습니다. (소수점 매매 활성화)'
-    } as any, ...prev].slice(0, 50));
-
-    const botInterval = setInterval(async () => {
-      // In Manual mode, focus analysis on the selected stock more often (70%)
-      let stockToAnalyze: Stock;
-      if (selectionMode === 'MANUAL' && Math.random() < 0.7) {
-        stockToAnalyze = selectedStock;
-      } else {
-        stockToAnalyze = stocks[Math.floor(Math.random() * stocks.length)];
-      }
-      
-      setBotStatus(`${stockToAnalyze.symbol} 정밀 분석 중...`);
-      setIsAnalyzing(true);
-      setIsBotThinking(true);
-      
-      try {
-        // Fetch latest news for this stock to provide as context
-       
-        const safeStockHist = Array.isArray(stockToAnalyze.history) ? stockToAnalyze.history : [];
-        const historyPrices = safeStockHist.map(h => h.price);
-        const rsi = calculateRSI(historyPrices, 14);
-        const bb = calculateBollingerBands(historyPrices, 20, 2);
-        const sma5 = calculateSMA(historyPrices, 5);
-        const sma20 = calculateSMA(historyPrices, 20);
-
-        const prompt = `당신은 수익 극대화에 미친 세계 최고의 퀀트 트레이더 'PROFIT-MAX-V3'입니다. 
-        모든 감정을 배제하고 오직 수학적 데이터와 승률만을 계산하여 ${stockToAnalyze.symbol}에 대한 초정밀 매매 지시를 내리세요.
-        
-        핵심 목표: 연 수익률 40% 이상의 공격적 자산 증식
-        
-        기술적 데이터:
-        - 현재가: $${stockToAnalyze.price} (최근 5봉: ${JSON.stringify(safeStockHist.slice(-5))})
-        - RSI(14): ${rsi.toFixed(2)} (${rsi < 30 ? '과매도' : rsi > 70 ? '과매수' : '중립'})
-        - 볼린저 밴드: 상단($${bb.upper.toFixed(2)}), 중단($${bb.middle.toFixed(2)}), 하단($${bb.lower.toFixed(2)})
-        - 이동평균선: SMA5($${sma5.toFixed(2)}), SMA20($${sma20.toFixed(2)}) -> ${sma5 > sma20 ? '골든크로스/상승추세' : '데드크로스/하락추세'}
-        
-                
-        계좌 상황:
-        - 가용 잔고: ${formatCurrency(balance)}
-        - ${stockToAnalyze.symbol} 보유: ${holdings[stockToAnalyze.symbol] || 0}
-        
-        매매 규칙:
-        1. RSI가 70 이상이거나 볼린저 상단 터치 시 강력 매도 고려
-        2. RSI가 30 이하이거나 볼린저 하단 지지 확인 시 강력 매수 고려
-        3. 추세가 불분명할 경우(SMA5/20 혼조) HOLD 유지하여 자산 보호
-        
-        반드시 다음 JSON 형식으로만 응답하세요:
-        {
-          "action": "BUY" | "SELL" | "HOLD",
-          "amount": number,
-          "reason": "수익 극대화를 위한 논리적/수학적 근거 (한국어)",
-          "scores": {
-            "technical": number (1-10),
-            "sentiment": number (1-10),
-            "overall_confidence": number (1-10)
-          },
-          "expectedAnnualReturn": number,
-          "analysis": {
-            "rsi_status": "${(rsi ?? 0).toFixed(1)}",
-            "trend_strength": "강력" | "보통" | "약함",
-            "risk_score": number (1-10)
-          }
-        }`;
-
-        const callWithRetry = async (retries = 3, delay = 5000): Promise<any> => {
-          const now = Date.now();
-          const timeSinceLastCall = now - lastAiCallRef.current;
-          if (timeSinceLastCall < AI_COOLDOWN_MS) {
-            const waitTime = AI_COOLDOWN_MS - timeSinceLastCall;
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-          }
-          
-          lastAiCallRef.current = Date.now();
-          try {
-            const response = await axios.post('/api/ai/bot-decision', { prompt });
-            return response.data;
-          } catch (error: any) {
-            if (error.response?.status === 429 && retries > 0) {
-              setBotStatus(`한도 초과로 인해 ${delay/1000}초 후 재시도 중...`);
-              await new Promise(resolve => setTimeout(resolve, delay + Math.random() * 2000));
-              return callWithRetry(retries - 1, delay * 2);
-            }
-            throw error;
-          }
-        };
-
-        const result = await callWithRetry();
-        const text = result.text;
-        
-        if (text) {
-          try {
-            const decision = JSON.parse(text);
-            const actionMap = { 'BUY': '매수', 'SELL': '매도', 'HOLD': '관망' };
-            
-            // Update AI Intelligence result for UI
-            setAiAnalysisResult({
-              symbol: stockToAnalyze.symbol,
-              newsScore: 0,
-              momentumScore: decision.scores.technical,
-              patternScore: decision.scores.overall_confidence,
-              finalScore: decision.scores.overall_confidence * 10,
-              recommendation: decision.reason,
-              expectedAnnualReturn: decision.expectedAnnualReturn
-            });
-
-            // Update stock properties for visual feedback
-            setStocks(prev => prev.map(s => s.symbol === stockToAnalyze.symbol ? {
-              ...s,
-              momentum: decision.scores.momentum * 10,
-              sentiment: decision.analysis.sentiment === '긍정' ? 1 : decision.analysis.sentiment === '부정' ? -1 : 0,
-              pattern: decision.analysis.detectedPattern
-            } : s));
-
-            executeTrade(decision.action, stockToAnalyze, decision.amount, decision.reason, undefined, decision.action === 'SELL' ? avgPrices[stockToAnalyze.symbol] : undefined);
-            const actionStr = actionMap[decision.action as keyof typeof actionMap] || decision.action;
-            setBotStatus(`${stockToAnalyze.symbol} 전략 수립 완료: ${actionStr}`);
-            
-            if (decision.action !== 'HOLD') {
-              showNotification(`AI가 ${stockToAnalyze.name} ${actionStr}을 결정했습니다.`, "info");
-              if (decision.action === 'BUY' && (decision.scores?.overall_confidence || 0) >= 8) {
-                triggerAiRecommendationPopup(stockToAnalyze, decision.reason);
-              }
-            }
-          } catch (err: any) {
-            console.error("Analysis Parse Error", err);
-            setBotStatus("AI 응답 데이터 분석 오류");
-          }
-        }
-      } catch (error: any) {
-        console.error("AI Trading Error:", error);
-        if (error?.message?.includes('429') || error?.status === 429) {
-           setBotStatus("Gemini API 한도 초과: 잠시 후 자동 재개됩니다.");
-           showNotification("AI 분석 요청 한도 도달. 잠시 후 재개합니다.", "error");
-           // Force a longer cooldown if quota hit
-           lastAiCallRef.current = Date.now() + 30000;
-         } else {
-           setBotStatus("매매 분석 데이터 부족.");
-           showNotification("AI 분석 중 오류가 발생했습니다.", "error");
-         }
-      } finally {
-        setIsAnalyzing(false);
-        setIsBotThinking(false);
-      }
-    }, 45000); // 45 seconds interval to save quota
-
-    return () => clearInterval(botInterval);
-  }, [isBotActive]);
   // 1. High-frequency simulated/micro-tick price fluctuations to show real-time fast-paced activity when bot is active
   useEffect(() => {
     if (!isGapBotActive || !selectedStock) return;
@@ -7635,6 +7444,19 @@ useEffect(() => {
             cur.rsi === roundedRsi &&
             cur.activeCount === strat.activeCount
           ) return prev; // 변화 없으면 그대로 반환 (불필요한 재렌더 방지)
+
+          // 센서가 OFF→ON으로 바뀐 항목만 GLOBAL TRADE LOGS에 기록 (가격 변동처럼 매번 기록하지 않음)
+          const sensorTransitions: string[] = [];
+          if (!cur.pullback && strat.isPullback) sensorTransitions.push('PULLBACK(눌림목) 감지');
+          if (!cur.breakout && strat.isBreakout) sensorTransitions.push('BREAKOUT(돌파) 감지');
+          if (!cur.vwap && strat.isVwapSupport) sensorTransitions.push('VWAP SUPPORT 감지');
+          if (!cur.cvd && strat.isVolumeProfile) sensorTransitions.push('CVD(거래량 프로파일) 감지');
+          if (sensorTransitions.length > 0) {
+            setTimeout(() => {
+              sensorTransitions.forEach(msg => addLog(stockItem.symbol, '매수', stockItem.price || 0, 0, `[전략센서] ${msg}`));
+            }, 0);
+          }
+
           const next = [...prev];
           next[idx] = {
             ...prev[idx],
@@ -8508,14 +8330,24 @@ const isProfitTarget = sellSignal;
   }, [handleSelectRecommendationStock, executeTrade]);
 
   const addLog = (symbol: string, type: 'BUY' | 'SELL' | '매수' | '매도', price: number, amount: number, reason: string) => {
+    const symbolName = symbol === 'SYSTEM'
+      ? 'SYSTEM'
+      : (scalperTabsRef.current.find(t => t.symbol === symbol)?.name || stocksRef.current.find(s => s.symbol === symbol)?.name || symbol);
+
     const newLog: TradeLog = {
       time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
-      symbol, type, price, amount, reason
+      symbol, type, price, amount, reason,
+      id: `LOG-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
+      timestamp: Date.now(),
+      symbolName
     };
+
+    // 🌐 GLOBAL TRADE LOGS: 현재 선택된 탭이 무엇이든 상관없이, 등록된 모든 종목의 이벤트가 전부 쌓인다.
+    // (과거에는 currentActiveSym과 일치할 때만 반영되어 "선택 안 한 종목의 체결/신호가 안 보이는" 버그가 있었다)
+    setTradeLogs(prev => [newLog, ...prev].slice(0, 200));
+
+    // 종목별 상세 로그(인벤토리 항목 안의 tradeLogs)도 별도로 유지 — 선택 종목 상세 패널에서 사용
     const currentActiveSym = activeTabIdRef.current;
-    if (symbol === currentActiveSym || symbol === 'SYSTEM' || (selectedStock && symbol === selectedStock.symbol)) {
-      setTradeLogs(prev => [newLog, ...prev.filter(l => !l.symbol || l.symbol === currentActiveSym || l.symbol === 'SYSTEM')].slice(0, 50));
-    }
     const logTargetSymbols = new Set<string>();
     if (symbol === 'SYSTEM') {
       if (currentActiveSym) logTargetSymbols.add(currentActiveSym);
@@ -9078,6 +8910,8 @@ const isProfitTarget = sellSignal;
                 setManualSellPrice={setManualSellPrice}
                 setManualSellModalOpen={setManualSellModalOpen}
                 INITIAL_STOCKS_KR={INITIAL_STOCKS_KR}
+                maxInventoryPerMarket={MAX_INVENTORY_PER_MARKET}
+                updateTab={updateTab}
                 INITIAL_STOCKS={INITIAL_STOCKS}
               />
             );
@@ -9199,7 +9033,7 @@ const isProfitTarget = sellSignal;
             
             {/* 1. Trade Logs / Active Slot Monitor (Top Right) */}
             {(() => {
-              const currentStock = selectedStock || (marketType === 'US' ? INITIAL_STOCKS[0] : INITIAL_STOCKS_KR[0]);
+              const currentStock = selectedStock;
               const currentInventory = gapInventory.filter(s => {
                 if (!s) return false;
                 if (typeof s === 'object' && s.symbol && currentStock?.symbol) {
@@ -9212,7 +9046,7 @@ const isProfitTarget = sellSignal;
                 <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-[480px] overflow-hidden shadow-2xl">
                   <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
                     <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-sleek-blue" /> Trade Logs
+                      <Layers className="w-4 h-4 text-sleek-blue" /> 선택 종목 슬롯 현황
                     </h3>
                     <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">
                       {enableCombinedAvgProfitExit 
@@ -9359,6 +9193,87 @@ const isProfitTarget = sellSignal;
                 </div>
               );
             })()}
+
+            {/* 1.5 GLOBAL TRADE LOGS — 선택된 종목과 무관하게 등록된 모든 종목의 이벤트가 시간순으로 표시된다 */}
+            <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-[420px] overflow-hidden shadow-2xl">
+              <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
+                <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-emerald-400" /> GLOBAL TRADE LOGS
+                </h3>
+                <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">
+                  {(logFilterSymbol === 'ALL' ? tradeLogs : tradeLogs.filter(l => l.symbol === logFilterSymbol)).length}건
+                </span>
+              </div>
+
+              {/* 종목 필터 버튼: [ALL] [종목1] [종목2] ... */}
+              <div className="flex items-center gap-1.5 flex-wrap mb-3 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setLogFilterSymbol('ALL')}
+                  className={cn(
+                    "px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all",
+                    logFilterSymbol === 'ALL'
+                      ? "bg-emerald-500/20 border-emerald-500/50 text-emerald-300"
+                      : "bg-black/30 border-white/10 text-slate-400 hover:text-white hover:border-white/30"
+                  )}
+                >
+                  ALL
+                </button>
+                {scalperTabs.map(tab => (
+                  <button
+                    key={tab.symbol}
+                    type="button"
+                    onClick={() => setLogFilterSymbol(tab.symbol)}
+                    className={cn(
+                      "px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all truncate max-w-[100px]",
+                      logFilterSymbol === tab.symbol
+                        ? "bg-sleek-blue/25 border-sleek-blue/60 text-sleek-blue"
+                        : "bg-black/30 border-white/10 text-slate-400 hover:text-white hover:border-white/30"
+                    )}
+                    title={`${tab.name} (${tab.symbol})`}
+                  >
+                    {tab.name}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar">
+                {(() => {
+                  const filteredLogs = logFilterSymbol === 'ALL' ? tradeLogs : tradeLogs.filter(l => l.symbol === logFilterSymbol);
+                  if (filteredLogs.length === 0) {
+                    return (
+                      <div className="text-[11px] text-gray-500 text-center py-6 font-mono">
+                        {logFilterSymbol === 'ALL' ? '아직 이벤트가 없습니다. START AI SCALPER를 눌러 감시를 시작하세요.' : `[${logFilterSymbol}] 종목의 이벤트가 없습니다.`}
+                      </div>
+                    );
+                  }
+                  return filteredLogs.map((log, idx) => {
+                    const isBuy = log.type === 'BUY' || log.type === '매수';
+                    return (
+                      <div
+                        key={log.id || `${log.time}-${idx}`}
+                        className="flex items-start gap-2 text-[11px] font-mono bg-black/20 hover:bg-black/30 transition-colors p-2 rounded-lg border border-white/5"
+                      >
+                        <span className="text-slate-500 shrink-0 tabular-nums">{log.time}</span>
+                        {log.symbol !== 'SYSTEM' && (
+                          <span className="shrink-0 px-1.5 py-0.5 rounded bg-white/10 text-slate-300 font-bold truncate max-w-[90px]">
+                            {log.symbolName || log.symbol}
+                          </span>
+                        )}
+                        <span className={cn("shrink-0 w-1.5 h-1.5 rounded-full mt-1", isBuy ? "bg-rose-400" : "bg-sky-400")} />
+                        <span className="text-slate-200 leading-relaxed break-words min-w-0 flex-1">
+                          {log.reason}
+                          {log.price > 0 && (
+                            <span className="text-slate-400"> ({formatCurrency(log.price)}{log.amount > 0 ? ` x ${log.amount}` : ''})</span>
+                          )}
+                        </span>
+                      </div>
+                    );
+                  });
+                })()}
+              </div>
+            </div>
+
             {/* 2. Real-time Gap Monitor Gauge */}
             {isGapBotActive && selectedStock && gapBuyPrice > 0 && gapSellPrice > 0 && (
               <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-3xl p-5 space-y-4 shrink-0">
