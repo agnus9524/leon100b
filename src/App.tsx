@@ -125,6 +125,14 @@ import { StrategyPanel } from './components/StrategyPanel';
 import { XTXPredictor } from './components/XTXPredictor';
 import { MarketSignal } from './services/aiTradingService';
 import { POPULAR_STOCKS, type StockSuggestion } from './constants/stockList';
+import { 
+  detectStockStrategies, 
+  createSensorsSnapshot, 
+  calculateSMA, 
+  calculateRSI, 
+  calculateBollingerBands,
+  type StrategySensorResult
+} from './utils/strategySensors';
 
 
 // --- Types & Mock Data ---
@@ -168,6 +176,7 @@ export interface ScalperTab {
   autoCancelThreshold: number;
   tradeLogs?: TradeLog[];
   lifecycleStatus?: ScalperLifecycleStatus;
+  sensors?: ScalperInventoryItem['sensors'];
 }
 
 // ============================================================
@@ -1887,15 +1896,18 @@ kisConfig.isConnected
       lastTradeType: item.account.lastTradeType,
       scalperMessage: item.status.message,
       tradeLogs: item.tradeLogs,
-      lifecycleStatus: item.status.state
+      lifecycleStatus: item.status.state,
+      sensors: item.sensors
     }));
   }, [scalperInventory]);
 
-  // 🔄 인벤토리의 market/account 네임스페이스를 실시간 시세/보유정보로 동기화.
+  // 🔄 인벤토리의 market/account/sensors 네임스페이스를 실시간 시세/보유정보/전략센서로 동기화.
+  // KIS 시세 수신 -> 시세 분석(detectStockStrategies) -> sensors 갱신 -> UI 즉시 반영의 Decoupled 아키텍처.
   // recommendation(추천 스냅샷)·strategy(봇 설정) 네임스페이스는 여기서 절대 건드리지 않는다.
   useEffect(() => {
     setScalperInventory(prev => {
       let changed = false;
+      const now = Date.now();
       const next = prev.map(item => {
         const live = stocks.find(s => s.symbol === item.symbol);
         const holdingQty = holdings[item.symbol] || 0;
@@ -1921,8 +1933,35 @@ kisConfig.isConnected
           item.account.evaluationAmount !== evaluationAmount ||
           item.account.orderableQty !== orderableQty;
 
-        if (!marketChanged && !accountChanged) return item;
+        // 🧠 실시간 전략 센서 분석 (KIS 시세 변동 반영)
+        const isUSStock = /^[A-Za-z]/.test(item.symbol) || marketType === 'US';
+        const targetStockForSensor: Stock = live || {
+          symbol: item.symbol,
+          name: item.name,
+          price: currentPrice,
+          change: item.market.change,
+          changePercent: item.market.changePercent,
+          volume: item.market.volume,
+          history: [{ time: '09:00', price: currentPrice }],
+          market: isUSStock ? 'US' : 'KR'
+        };
+
+        const strat = detectStockStrategies(targetStockForSensor, isUSStock ? 'US' : 'KR');
+        const roundedRsi = Math.round(strat.rsi);
+        const curSensors = item.sensors;
+        const sensorsChanged = (
+          curSensors.pullback !== strat.isPullback ||
+          curSensors.breakout !== strat.isBreakout ||
+          curSensors.vwap !== strat.isVwapSupport ||
+          curSensors.cvd !== strat.isVolumeProfile ||
+          curSensors.volumeMomentum !== strat.hasVolumeMomentum ||
+          curSensors.rsi !== roundedRsi ||
+          curSensors.activeCount !== strat.activeCount
+        );
+
+        if (!marketChanged && !accountChanged && !sensorsChanged) return item;
         changed = true;
+
         return {
           ...item,
           market: marketChanged && live ? {
@@ -1931,7 +1970,7 @@ kisConfig.isConnected
             change: live.change || 0,
             changePercent: live.changePercent || 0,
             volume: live.volume || '0',
-            lastUpdatedAt: Date.now()
+            lastUpdatedAt: now
           } : item.market,
           account: accountChanged ? {
             ...item.account,
@@ -1939,13 +1978,23 @@ kisConfig.isConnected
             avgPrice,
             evaluationAmount,
             orderableQty,
-            lastUpdatedAt: Date.now()
-          } : item.account
+            lastUpdatedAt: now
+          } : item.account,
+          sensors: sensorsChanged ? {
+            pullback: strat.isPullback,
+            breakout: strat.isBreakout,
+            vwap: strat.isVwapSupport,
+            cvd: strat.isVolumeProfile,
+            volumeMomentum: strat.hasVolumeMomentum,
+            rsi: roundedRsi,
+            activeCount: strat.activeCount,
+            lastUpdatedAt: now
+          } : item.sensors
         };
       });
       return changed ? next : prev;
     });
-  }, [stocks, holdings, avgPrices, selectedSymbol, kisBuyableQty, balance]);
+  }, [stocks, holdings, avgPrices, selectedSymbol, kisBuyableQty, balance, marketType]);
 
   const [activeTabId, setActiveTabId] = useState<string>(() => {
     const lastMarket = (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
@@ -2389,109 +2438,9 @@ setGapInventory(nextInv);
   const [top3RefreshNonce, setTop3RefreshNonce] = useState<number>(0);
   const [isRefreshingTop3, setIsRefreshingTop3] = useState<boolean>(false);
 
-  // Technical Indicators Utility Functions
-  const calculateSMA = (data: number[], period: number) => {
-    if (data.length < period) return data.length > 0 ? data[data.length - 1] : 0;
-    const slice = data.slice(-period);
-    return slice.reduce((a, b) => a + b, 0) / period;
-  };
-
-  const calculateRSI = (data: number[], period: number = 14) => {
-    if (data.length <= period) return 50;
-    let gains = 0;
-    let losses = 0;
-
-    for (let i = data.length - period; i < data.length; i++) {
-      const diff = data[i] - data[i - 1];
-      if (diff >= 0) gains += diff;
-      else losses -= diff;
-    }
-
-    const avgGain = gains / period;
-    const avgLoss = losses / period;
-    if (avgLoss === 0) return 100;
-    const rs = avgGain / avgLoss;
-    return 100 - (100 / (1 + rs));
-  };
-
-  const calculateBollingerBands = (data: number[], period: number = 20, multiplier: number = 2) => {
-    if (data.length < period) return { upper: 0, middle: 0, lower: 0 };
-    const sma = calculateSMA(data, period);
-    const slice = data.slice(-period);
-    const variance = slice.reduce((a, b) => a + Math.pow(b - sma, 2), 0) / period;
-    const stdDev = Math.sqrt(variance);
-    return {
-      upper: sma + multiplier * stdDev,
-      middle: sma,
-      lower: sma - multiplier * stdDev
-    };
-  };
-
-  // 실시간 4대 스캘핑 전략 조건 감지 센서 (종목별 자율 연산)
-  const detectStockStrategies = useCallback((targetStock: Stock) => {
-    if (!targetStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
-
-    const historyPrices = (targetStock.history ? targetStock.history.map(h => h.price) : [targetStock.price]).filter((p): p is number => typeof p === 'number' && !isNaN(p));
-    const currentPrice = targetStock.price || 0;
-    if (currentPrice <= 0 || historyPrices.length === 0) {
-      return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
-    }
-
-    const rsi = calculateRSI(historyPrices, 14);
-    const bb = calculateBollingerBands(historyPrices, 20, 2);
-    const sma5 = calculateSMA(historyPrices, 5);
-    const sma20 = calculateSMA(historyPrices, 20);
-    const vwap = historyPrices.length > 0 ? (historyPrices.reduce((a, b) => a + b, 0) / historyPrices.length) : currentPrice;
-
-    const isUSStock = targetStock.market === 'US' || /^[A-Za-z]/.test(targetStock.symbol) || marketType === 'US';
-
-    const priceBuckets: Record<string, number> = {};
-    historyPrices.forEach(p => {
-      const bucket = isUSStock ? p.toFixed(4) : p.toFixed(0);
-      priceBuckets[bucket] = (priceBuckets[bucket] || 0) + 1;
-    });
-    let maxVolBucket = 0;
-    let poc = currentPrice;
-    Object.entries(priceBuckets).forEach(([pStr, count]) => {
-      if (count > maxVolBucket) {
-        maxVolBucket = count;
-        poc = Number(pStr);
-      }
-    });
-
-    let cvd = 0;
-    let prevP = historyPrices[0] || currentPrice;
-    const cvdSeries: number[] = [];
-    historyPrices.forEach(p => {
-      const delta = p > prevP ? 1 : p < prevP ? -1 : 0;
-      cvd += delta;
-      cvdSeries.push(cvd);
-      prevP = p;
-    });
-
-    const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
-    const recentLow = historyPrices.length >= 5 ? Math.min(...historyPrices.slice(-10, -1)) : currentPrice;
-    const recentMaxCvd = cvdSeries.length >= 5 ? Math.max(...cvdSeries.slice(-10, -1)) : cvd;
-    const recentMinCvd = cvdSeries.length >= 5 ? Math.min(...cvdSeries.slice(-10, -1)) : cvd;
-
-    const isBullishAbsorption = (currentPrice <= recentLow * 1.01) && (cvd > recentMinCvd);
-    const isBearishAbsorption = (currentPrice >= recentPeak * 0.995) && (cvd < recentMaxCvd);
-
-    const momentumPositive = sma5 >= sma20;
-    const isNearLowerBand = currentPrice <= bb.lower * 1.005;
-    const isNearUpperBand = currentPrice >= bb.upper * 0.995;
-    const lastPrice = historyPrices.length >= 2 ? historyPrices[historyPrices.length - 2] : currentPrice;
-    const hasVolumeMomentum = currentPrice >= lastPrice || rsi >= 25;
-
-    const isPullback = momentumPositive && (rsi < 40 || isNearLowerBand) && currentPrice >= sma5 && hasVolumeMomentum;
-    const isBreakout = currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
-    const isVwapSupport = currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
-    const isPocSupport = Math.abs(currentPrice - poc) / (poc || 1) < 0.008;
-    const isVolumeProfile = isPocSupport || isBullishAbsorption;
-
-    const activeCount = (isPullback ? 1 : 0) + (isBreakout ? 1 : 0) + (isVwapSupport ? 1 : 0) + (isVolumeProfile ? 1 : 0);
-
-    return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd, isBullishAbsorption, isBearishAbsorption, bb, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice, hasVolumeMomentum };
+  // 실시간 4대 스캘핑 전략 조건 감지 센서 (종목별 자율 연산 위임)
+  const detectStockStrategiesCallback = useCallback((targetStock: Stock) => {
+    return detectStockStrategies(targetStock, marketType);
   }, [marketType]);
 
   const selectedStock = useMemo(() => {
@@ -5224,6 +5173,56 @@ data.price
     updateKisBuyableQty();
   }, [selectedSymbol, kisConfig.isConnected, kisConfig.domesticOrderType, updateKisBuyableQty]);
 
+  // ============================================================
+  // 🔄 종목 "선택"과 "데이터 갱신"의 완전한 분리
+  // ------------------------------------------------------------
+  // 인벤토리에서 종목을 클릭하는 것은 selectedSymbol을 바꾸는 행위일 뿐,
+  // 그 종목 객체에 저장돼 있던(어쩌면 오래된) market/account 값을 그대로
+  // 화면에 노출해서는 안 된다. 선택되는 즉시, 그리고 선택되어 있는 동안
+  // 2초 주기로 이 함수가 해당 심볼의 데이터를 능동적으로 다시 가져온다.
+  // ============================================================
+  const refreshInventoryItem = React.useCallback(async (symbol: string) => {
+    if (!symbol) return;
+    try {
+      const priceData = await kisService.getPrice(symbol);
+      if (priceData && priceData.current > 0) {
+        setStocks(prev => prev.map(s => s.symbol === symbol ? {
+          ...s,
+          price: priceData.current,
+          change: priceData.change,
+          changePercent: priceData.changePercent,
+          volume: priceData.volume,
+          isRealTime: true,
+          lastUpdated: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+        } : s));
+      }
+    } catch (err) {
+      console.warn(`[refreshInventoryItem] ${symbol} 현재가 재조회 실패`, err);
+    }
+    // 위 setStocks로 갱신된 신선한 시세는 market/account 동기화 effect(useEffect on [stocks, holdings, avgPrices, ...])가
+    // 자동으로 scalperInventory.market/account에 반영한다 — 여기서 직접 쓰지 않는다 (단일 소스 원칙 유지).
+    if (kisConfig.isConnected) {
+      await updateKisBuyableQty();
+    }
+  }, [kisConfig.isConnected, updateKisBuyableQty]);
+
+  useEffect(() => {
+    if (!selectedSymbol) return;
+
+    refreshInventoryItem(selectedSymbol);
+
+    const timer = setInterval(() => {
+      refreshInventoryItem(selectedSymbol);
+    }, 2000);
+
+    return () => clearInterval(timer);
+  }, [selectedSymbol, refreshInventoryItem]);
+
+  // 인벤토리 클릭 핸들러 — "선택"만 한다. 데이터 최신화는 위 refreshInventoryItem effect가 전담한다.
+  const handleSelectInventory = React.useCallback((symbol: string) => {
+    handleSwitchTab(symbol);
+  }, [handleSwitchTab]);
+
 
   const handleSyncKIS = async () => {
     if (syncInProgressRef.current) {
@@ -7412,9 +7411,36 @@ useEffect(() => {
   }, [holdings, avgPrices, scalpingTargetProfit, kisConfig.isConnected, stocks, isGapBotActive, selectedSymbol, calculateTargetSellPrice]);
 
   const activeStrategyDetection = useMemo(() => {
-    if (!selectedStock) return { isPullback: false, isBreakout: false, isVwapSupport: false, isVolumeProfile: false, activeCount: 0, rsi: 50, sma5: 0, sma20: 0, vwap: 0, poc: 0, cvd: 0, isBullishAbsorption: false, isBearishAbsorption: false, bb: { upper: 0, middle: 0, lower: 0 }, momentumPositive: false, isNearLowerBand: false, isNearUpperBand: false, lastPrice: 0, hasVolumeMomentum: false };
-    return detectStockStrategies(selectedStock);
-  }, [selectedStock, detectStockStrategies]);
+    if (!selectedStock) {
+      return { 
+        isPullback: false, 
+        isBreakout: false, 
+        isVwapSupport: false, 
+        isVolumeProfile: false, 
+        activeCount: 0, 
+        rsi: 50, 
+        sma5: 0, 
+        sma20: 0, 
+        vwap: 0, 
+        poc: 0, 
+        cvd: 0, 
+        isBullishAbsorption: false, 
+        isBearishAbsorption: false, 
+        bb: { upper: 0, middle: 0, lower: 0 }, 
+        momentumPositive: false, 
+        isNearLowerBand: false, 
+        isNearUpperBand: false, 
+        lastPrice: 0, 
+        hasVolumeMomentum: false,
+        isAllGreen: false
+      };
+    }
+    const res = detectStockStrategies(selectedStock, marketType);
+    return {
+      ...res,
+      isAllGreen: res.activeCount === 4
+    };
+  }, [selectedStock, marketType]);
 
   // Trailing Stop Loss State to track the peak price after each buy
   const [highWaterMark, setHighWaterMark] = useState<{ [key: string]: number }>({});
