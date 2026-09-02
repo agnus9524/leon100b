@@ -524,13 +524,13 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
       {/* ─────────────────────────────────────────────────────────────
           1행: 종목 검색/추가, 종목명/체결가, 그리고 6대 전략 센서 버튼
           ───────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col 2xl:flex-row 2xl:items-center justify-between gap-3 pb-2.5 border-b border-white/10">
-        
-        {/* 좌측 영역: 종목 검색 & 추가 + 선택 종목 정보 & 현재 체결가 */}
-        <div className="flex items-center gap-2.5 flex-wrap grow py-0.5 overflow-visible">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 pb-2.5 border-b border-white/10">
+
+        {/* 1열: 종목 검색창 → 종목명 → 현재체결가 → 4/4 올-그린 센서 → 상태메시지 */}
+        <div className="flex flex-col gap-2.5 min-w-0 lg:col-start-1" style={{ order: 1 }}>
           
-          {/* 종목 검색 & 추가 인풋 */}
-          <div ref={searchRef} className="relative z-[100] w-full sm:w-44 md:w-48 shrink-0">
+          {/* 종목 검색 & 추가 인풋 (기존 대비 2배 폭) */}
+          <div ref={searchRef} className="relative z-[100] w-full sm:w-[22rem] md:w-96">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
             <input 
               ref={searchInputRef}
@@ -682,10 +682,10 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
 
           {/* 선택된 종목 기본 정보 */}
           {selectedStock && (
-            <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+            <div className="flex flex-col gap-2.5 min-w-0">
               
               {/* 종목명 & 종목코드 & 보유/주문가능수량 */}
-              <div className="w-full sm:w-[180px] md:w-[200px] shrink-0 flex flex-col justify-center overflow-hidden">
+              <div className="w-full flex flex-col justify-center overflow-hidden">
                 <div className="flex items-center gap-1.5 min-w-0">
                   <h2 className="text-base sm:text-lg font-black text-white tracking-tight leading-none truncate" title={selectedStock.name}>
                     {selectedStock.name}
@@ -701,7 +701,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
               </div>
 
               {/* 현재 체결가 및 전일 대비 */}
-              <div className="w-full sm:w-auto shrink-0 bg-black/70 px-3 py-1.5 rounded-2xl border border-white/20 shadow-xl flex items-center gap-3 backdrop-blur-md">
+              <div className="w-full bg-black/70 px-3 py-1.5 rounded-2xl border border-white/20 shadow-xl flex items-center gap-3 backdrop-blur-md">
                 <div className="flex flex-col">
                   <span className="text-[10px] font-black text-amber-300 flex items-center gap-1">
                     <Activity className="w-3 h-3 text-amber-400" /> 현재 체결가
@@ -727,25 +727,8 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           )}
         </div>
 
-        {/* 우측 영역: 스캘퍼 AI 실시간 전략 감지 센서 & 4대 전략 다중선택 모드 (눌림목/돌파/VWAP/CVD) */}
-        <div className="flex items-center gap-1.5 flex-wrap justify-end shrink-0">
-          
-          {/* ⚡ 최고수익 AI★ 버튼 */}
-          <button
-            type="button"
-            onClick={() => setIsMaxYieldModalOpen(true)}
-            className={cn(
-              "px-2.5 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1 shadow-md shrink-0",
-              scalperStrategyMode === 'AI_MAX_YIELD'
-                ? "bg-gradient-to-r from-amber-500 via-rose-500 to-purple-600 text-white border-amber-300 shadow-[0_0_16px_rgba(245,158,11,0.6)] animate-pulse"
-                : "bg-amber-500/15 text-amber-300 hover:bg-amber-500/25 border-amber-500/40"
-            )}
-            title="⚡ 최고수익 AI 전자동 모드"
-          >
-            <Zap className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-bounce" />
-            <span>⚡ 최고수익 AI★</span>
-          </button>
-
+        {/* 4/4 올-그린 센서 (1열, 검색창/종목명/현재가 아래) */}
+        <div className="lg:col-start-1" style={{ order: 2 }}>
           {/* 🎯 4/4 올-그린 (4대 핵심전략 일괄 선택 토글) */}
           <button
             type="button"
@@ -780,6 +763,10 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
             )} />
             <span>🎯 4/4 올-그린</span>
           </button>
+        </div>
+
+        {/* 2열 참고자료: 스캘핑 매매 참고용 4대 개별 전략 센서 버튼 (눌림목/돌파/VWAP/CVD) */}
+        <div className="flex items-center gap-1.5 flex-wrap lg:col-start-2" style={{ order: 3 }}>
 
           {/* ① 눌림목 (진입 타이밍 ★★★★) */}
           <button
@@ -934,28 +921,25 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           </button>
 
         </div>
-      </div>
 
-      {/* ─────────────────────────────────────────────────────────────
-          2행: 실시간 상태 메시지창
-          ───────────────────────────────────────────────────────────── */}
-      <div className="text-xs sm:text-sm font-mono flex items-center bg-black/40 px-3.5 py-2 rounded-2xl border border-sleek-blue/30 shadow-inner">
-        <div className="flex items-center gap-2.5 w-full overflow-hidden">
-          <span className="text-xs font-black text-slate-300 uppercase shrink-0 flex items-center gap-1.5">
-            <Activity className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-            실시간 상태 메시지:
-          </span>
-          <span className="font-bold text-sleek-blue text-xs sm:text-sm leading-snug truncate">
-            {displayScalperMessage}
-          </span>
+        {/* 1열: 실시간 상태 메시지창 */}
+        <div className="text-xs sm:text-sm font-mono flex items-center bg-black/40 px-3.5 py-2 rounded-2xl border border-sleek-blue/30 shadow-inner lg:col-start-1" style={{ order: 3 }}>
+          <div className="flex items-center gap-2.5 w-full overflow-hidden">
+            <span className="text-xs font-black text-slate-300 uppercase shrink-0 flex items-center gap-1.5">
+              <Activity className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+              실시간 상태 메시지:
+            </span>
+            <span className="font-bold text-sleek-blue text-xs sm:text-sm leading-snug truncate">
+              {displayScalperMessage}
+            </span>
+          </div>
         </div>
-      </div>
 
       {/* ─────────────────────────────────────────────────────────────
           3행: 핵심 스캘퍼 5열 종합 제어 대시보드
           (1회거래수량/슬롯/순익, SMART SCALPER, 호가창, 종목관리/추천, START 버튼)
           ───────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-stretch text-xs">
+      <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-stretch text-xs" style={{ order: 10 }}>
 
         {/* 고급 설정(1회거래수량/최대슬롯/목표순익/손절/추가매수간격/진입호가/실행속도) 토글.
             기본값은 숨김이며, 숨긴 자리에는 일/주/월/년 가격 차트가 대신 표시된다. */}
@@ -1124,7 +1108,10 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         )}
 
         {/* 3. 실시간 잔량 호가창 (4호가) (col-span-3) */}
-        <div className="lg:col-span-4 order-5 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
+      </div>
+
+      {/* 2열: 실시간 잔량 호가창 (4호가) */}
+        <div className="lg:col-start-2 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner" style={{ order: 2 }}>
           <div>
             <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
               <span className="text-[10.5px] font-black text-slate-300 uppercase tracking-wider flex items-center gap-1">
@@ -1223,7 +1210,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         </div>
 
         {/* 4. 스캘퍼 등록 종목 & 추천종목 찾기 (col-span-3) */}
-        <div className="lg:col-span-8 order-1 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0 shadow-inner">
+        <div className="lg:col-start-2 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0 shadow-inner" style={{ order: 1 }}>
           <div className="flex items-center justify-between border-b border-white/10 pb-1.5 gap-1.5 flex-wrap">
             <div className="flex items-center gap-1.5 min-w-0">
               
@@ -1409,7 +1396,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         </div>
 
         {/* 5. START AI SCALPER 버튼 & 탭 순환 컨트롤 (col-span-2) */}
-        <div className="lg:col-span-4 order-2 flex flex-col justify-between gap-1.5">
+        <div className="lg:col-start-2 flex flex-col justify-between gap-1.5" style={{ order: 4 }}>
           <button 
             type="button"
             onClick={() => {
