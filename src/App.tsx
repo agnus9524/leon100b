@@ -1915,11 +1915,13 @@ kisConfig.isConnected
         const currentPrice = (live && live.price > 0) ? live.price : item.market.currentPrice;
         const evaluationAmount = Number((holdingQty * currentPrice).toFixed(2));
 
-        // 주문가능수량: 선택된 종목은 KIS 실계좌 조회값(kisBuyableQty) 우선, 그 외는 예수금/현재가 기반 추정치
+        // 📊 보유수량(holdingQty)과 주문가능수량(orderableQty)을 명확히 분리
+        // 보유 종목의 경우: getDomesticSellableQuantity / getDomesticBalance 기반 실제 매도가능/주문가능 수량
+        // 미보유 종목의 경우: KIS 실계좌 조회값(kisBuyableQty) 우선, 그 외 예수금 기반 매수가능 수량
         const isThisSelected = selectedSymbol === item.symbol;
-        const orderableQty = (isThisSelected && kisBuyableQty !== null)
-          ? kisBuyableQty
-          : Math.max(0, Math.floor(balance / (currentPrice || 1)));
+        const orderableQty = holdingQty > 0
+          ? (sellableHoldings[item.symbol] !== undefined ? sellableHoldings[item.symbol] : holdingQty)
+          : (isThisSelected && kisBuyableQty !== null ? kisBuyableQty : Math.max(0, Math.floor(balance / (currentPrice || 1))));
 
         const marketChanged = !!live && (
           item.market.currentPrice !== live.price ||
@@ -1994,7 +1996,7 @@ kisConfig.isConnected
       });
       return changed ? next : prev;
     });
-  }, [stocks, holdings, avgPrices, selectedSymbol, kisBuyableQty, balance, marketType]);
+  }, [stocks, holdings, sellableHoldings, avgPrices, selectedSymbol, kisBuyableQty, balance, marketType]);
 
   const [activeTabId, setActiveTabId] = useState<string>(() => {
     const lastMarket = (localStorage.getItem('sleek_last_market') as 'KR' | 'US') || 'KR';
@@ -5289,6 +5291,23 @@ data.price
               }
             }
           }
+
+          // 🔍 보유 종목별 실시간 매도가능/주문가능 수량(TTTC8408R) 정밀 동기화
+          const heldList = Object.keys(newHoldings).filter(s => /^\d{6}$/.test(s));
+          for (const sym of heldList.slice(0, 5)) {
+            try {
+              const sellableInq = await kisService.getDomesticSellableQuantity(sym);
+              if (sellableInq?.rt_cd === '0' && sellableInq.output) {
+                const actualSellable = Number(sellableInq.output.nrc_psbl_qty ?? sellableInq.output.ord_psbl_qty);
+                if (!isNaN(actualSellable)) {
+                  newSellable[sym] = actualSellable;
+                }
+              }
+            } catch (inqErr) {
+              console.warn(`[KIS Sync] Sellable quantity query skip for ${sym}:`, inqErr);
+            }
+          }
+
           if (marketType === 'KR') setSellableHoldings(prev => ({ ...prev, ...newSellable }));
         }
 
