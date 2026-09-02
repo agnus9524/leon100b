@@ -442,6 +442,9 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
                                     </span>
                                   )}
                                 </div>
+                                {stock.recommendedPrice > 0 && stock.recommendedPrice !== stock.price && (
+                                  <div className="text-[9px] text-slate-500 mt-0.5">추천가 {stock.recommendedPrice.toLocaleString()}원</div>
+                                )}
                               </div>
                             </div>
 
@@ -569,6 +572,9 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
                                 <div className={`text-[11px] font-bold ${stock.changePercent >= 0 ? 'text-rose-400' : 'text-sky-400'}`}>
                                   {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
                                 </div>
+                                {stock.recommendedPrice > 0 && stock.recommendedPrice !== stock.price && (
+                                  <div className="text-[9.5px] text-slate-500 mt-0.5">추천가 {stock.recommendedPrice.toLocaleString()}원 (고정)</div>
+                                )}
                               </div>
 
                               <div className="text-right hidden sm:block">

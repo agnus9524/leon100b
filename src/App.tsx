@@ -264,7 +264,8 @@ export interface ScalperInventoryItem {
 const createInventoryItem = (params: {
   symbol: string;
   name: string;
-  price: number;
+  price: number; // 현재가 스냅샷 — market.currentPrice의 초기값으로만 사용
+  recommendedPrice?: number; // 추천 당시 고정 가격. 미지정 시(수동 등록 등)에만 price로 대체
   recommendation?: { score?: number; grade?: string; reason?: string; tags?: string[]; category?: string };
   strategy?: Partial<ScalperInventoryItem['strategy']>;
   initialLifecycleStatus?: ScalperLifecycleStatus;
@@ -278,7 +279,7 @@ const createInventoryItem = (params: {
     recommendation: {
       score: params.recommendation?.score ?? 0,
       grade: params.recommendation?.grade ?? '-',
-      price: params.price,
+      price: params.recommendedPrice ?? params.price, // 추천 당시 가격 스냅샷 — 이후 절대 재할당되지 않음
       reason: params.recommendation?.reason ?? '수동 등록',
       tags: params.recommendation?.tags ?? [],
       category: params.recommendation?.category ?? '수동 등록'
@@ -2111,7 +2112,12 @@ setGapInventory(nextInv);
     setTradeLogs((targetTab.tradeLogs || []).filter(l => !l.symbol || l.symbol === targetTab.symbol || l.symbol === 'SYSTEM'));
   };
 
-  const openOrSwitchScalperTab = (symbol: string, customName?: string, customPrice?: number) => {
+  const openOrSwitchScalperTab = (
+    symbol: string,
+    customName?: string,
+    customPrice?: number,
+    recommendationSource?: ScalperRecommendation
+  ) => {
     const existing = scalperTabsRef.current.find(t => t.symbol === symbol || t.id === symbol);
     if (existing) {
       handleSwitchTab(existing.id);
@@ -2209,7 +2215,14 @@ setGapInventory(nextInv);
       symbol,
       name: newStockObj.name || symbol,
       price: newStockObj.price || 0,
-      recommendation: { reason: '수동 등록', category: '수동 등록' },
+      recommendedPrice: recommendationSource?.recommendedPrice, // 추천 당시 가격 — 없으면 createInventoryItem이 price로 대체
+      recommendation: recommendationSource ? {
+        score: recommendationSource.scalpingScore,
+        grade: recommendationSource.grade,
+        reason: recommendationSource.reason,
+        tags: recommendationSource.tags,
+        category: recommendationSource.category
+      } : { reason: '수동 등록', category: '수동 등록' },
       strategy: { gapBuyPrice: limits.lowerLimit, gapSellPrice: limits.upperLimit }
     });
 
@@ -4555,8 +4568,8 @@ setGapInventory(nextInv);
         } : s);
       });
 
-      openOrSwitchScalperTab(rec.symbol, rec.name, resolvedPrice);
-      showNotification(`[스캘퍼 타겟 등록] ${rec.name}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (현재 체결가 ${resolvedPrice.toLocaleString()}원, 스캘핑 점수 ${rec.scalpingScore}점)`, "success");
+      openOrSwitchScalperTab(rec.symbol, rec.name, resolvedPrice, rec);
+      showNotification(`[스캘퍼 타겟 등록] ${rec.name}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (현재 체결가 ${resolvedPrice.toLocaleString()}원, 추천가 ${rec.recommendedPrice.toLocaleString()}원, 스캘핑 점수 ${rec.scalpingScore}점)`, "success");
       setShowScalperRecModal(false);
     } catch (err: any) {
       console.error('[스캘퍼 등록 실패] 예외 발생:', err);
@@ -4594,7 +4607,7 @@ setGapInventory(nextInv);
           volume: rec.volume || s.volume
         } : s);
       });
-      openOrSwitchScalperTab(rec.symbol, rec.name, livePrice);
+      openOrSwitchScalperTab(rec.symbol, rec.name, livePrice, rec);
     });
     if (top3List.length > 0) {
       showNotification(`[스캘퍼 TOP 3 일괄 등록] ${top3List.map(s => {
@@ -5496,6 +5509,8 @@ data.price
                 symbol,
                 name: stockInfo.name || symbol,
                 price: stockInfo.price || 0,
+                // 실제 평단가를 알 수 있으면 그것을 기준가 스냅샷으로 사용 (모르면 동기화 시점 현재가로 대체)
+                recommendedPrice: (avgPrices[symbol] && avgPrices[symbol] > 0) ? avgPrices[symbol] : undefined,
                 recommendation: { reason: 'KIS 보유 동기화', category: 'KIS 보유 동기화' },
                 strategy: { gapBuyPrice: limits.lowerLimit, gapSellPrice: limits.upperLimit },
                 initialLifecycleStatus: 'HOLDING' // 이미 보유 중인 종목이므로 HOLDING부터 시작

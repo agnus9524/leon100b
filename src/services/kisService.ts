@@ -94,6 +94,7 @@ strat.hasVolumeMomentum
         marketType: (stock.market === 'US' ? 'KOSDAQ' : 'KOSPI') as 'KOSPI' | 'KOSDAQ',
 
         price: stock.price,
+        recommendedPrice: stock.price, // 이 함수가 호출된 지금 이 순간의 가격을 스냅샷으로 고정 — 이후 절대 재할당하지 않음
 
         change: stock.change || 0,
 
@@ -432,7 +433,7 @@ strat.hasVolumeMomentum
         if (kisDetail.includes('EGW00201') || kisDetail.includes('APPKEY')) {
           userFriendlyReason = "유효하지 않은 AppKey/AppSecret입니다. 한국투자증권 KIS Developers에서 발급된 키인지 확인해주세요.";
         } else if (kisDetail.includes('400') || kisDetail.includes('401')) {
-          userFriendlyReason = "인증 실패: AppKey/AppSecret 복사 시 앞뒤 공백이 포함되었거나 모의투자/실전 계좌 키가 다를 수 있습니다.";
+          userFriendlyReason = "인증 실패: AppKey/AppSecret 복사 시 앞뒤 공백이 포함되었거나 실전투자 계좌 키가 아닐 수 있습니다.";
         }
 
         throw new Error(userFriendlyReason.startsWith('[토큰 발급 오류]') ? userFriendlyReason : `[토큰 발급 오류] ${userFriendlyReason}`);
@@ -1644,7 +1645,12 @@ ws.onclose = (event) => {
     try {
       const res = await axios.get('/api/stocks/scalper-recommendations', { timeout: 3500 });
       if (res.data && Array.isArray(res.data.recommendations) && res.data.recommendations.length > 0) {
-        return res.data.recommendations;
+        // 백엔드가 recommendedPrice를 내려주지 않는 경우, 응답을 받은 이 순간의 price를 스냅샷으로 고정한다.
+        // 한 번 고정된 recommendedPrice는 이후 어떤 동기화 로직으로도 재할당되어서는 안 된다.
+        return res.data.recommendations.map((r: ScalperRecommendation) => ({
+          ...r,
+          recommendedPrice: r.recommendedPrice ?? r.price
+        }));
       }
     } catch (error) {
       console.warn("KIS getScalperRecommendations API error, using safe fallback:", error);
@@ -1654,7 +1660,7 @@ ws.onclose = (event) => {
   }
 
   public getDefaultScalperRecommendations(): ScalperRecommendation[] {
-    const rawList: ScalperRecommendation[] = [
+    const rawList: Omit<ScalperRecommendation, 'recommendedPrice'>[] = [
       {
         rank: 1,
         symbol: '000660',
@@ -1968,7 +1974,9 @@ ws.onclose = (event) => {
         holdingTime: '5분 ~ 20분 (단기)'
       }
     ];
-    return rawList;
+    // recommendedPrice는 이 목록이 생성되는 이 순간의 price를 그대로 스냅샷으로 고정한다.
+    // 이후 화면단에서 price(현재가)가 실시간으로 바뀌어도 recommendedPrice는 절대 갱신되지 않는다.
+    return rawList.map(r => ({ ...r, recommendedPrice: r.price }));
   }
 
 }
@@ -1978,7 +1986,8 @@ export interface ScalperRecommendation {
   symbol: string;
   name: string;
   marketType?: 'KOSPI' | 'KOSDAQ';
-  price: number;
+  price: number;               // 화면 표시용 "현재가" — 실시간으로 계속 동기화됨
+  recommendedPrice: number;    // 추천 당시 가격 스냅샷 — 생성 이후 절대 갱신되지 않음
   change: number;
   changePercent: number;
   volume: string;
