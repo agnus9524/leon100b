@@ -189,12 +189,12 @@ const CandlestickChart: React.FC<{
   const priceTicks = Array.from({ length: priceGridLines + 1 }, (_, i) => minPrice + (priceRange * i) / priceGridLines);
 
   return (
-    <div className="lg:col-span-4 bg-black/30 border border-sleek-border rounded-2xl p-3 flex flex-col min-w-0">
-      <div className="flex-1 min-h-[260px] w-full relative">
+    <div className="lg:col-span-12 order-3 bg-white border border-slate-200 rounded-2xl p-4 flex flex-col min-w-0 shadow-lg">
+      <div className="flex-1 min-h-[480px] w-full relative">
         {isLoading ? (
-          <div className="w-full h-full flex items-center justify-center text-[11px] text-slate-500 animate-pulse">차트 불러오는 중...</div>
+          <div className="w-full h-full flex items-center justify-center text-[11px] text-slate-400 animate-pulse">차트 불러오는 중...</div>
         ) : errorMsg || bars.length === 0 ? (
-          <div className="w-full h-full flex items-center justify-center text-[11px] text-slate-500">{errorMsg || '데이터 없음'}</div>
+          <div className="w-full h-full flex items-center justify-center text-[11px] text-slate-400">{errorMsg || '데이터 없음'}</div>
         ) : (
           <svg viewBox={`0 0 ${CHART_W} ${CHART_H}`} className="w-full h-full" preserveAspectRatio="none">
             {/* 가격 그리드 + 우측 축 라벨 */}
@@ -202,8 +202,8 @@ const CandlestickChart: React.FC<{
               const y = priceToY(p);
               return (
                 <g key={i}>
-                  <line x1={0} y1={y} x2={plotW} y2={y} stroke="#ffffff12" strokeDasharray="3 3" />
-                  <text x={plotW + 6} y={y + 3} fontSize={10} fill="#94a3b8">{formatCurrency(p)}</text>
+                  <line x1={0} y1={y} x2={plotW} y2={y} stroke="#e2e8f0" strokeDasharray="3 3" />
+                  <text x={plotW + 6} y={y + 3} fontSize={10} fill="#64748b">{formatCurrency(p)}</text>
                 </g>
               );
             })}
@@ -244,7 +244,7 @@ const CandlestickChart: React.FC<{
 
             {/* x축 시간 라벨 (양 끝 + 중간) */}
             {bars.length > 0 && [0, Math.floor(bars.length / 2), bars.length - 1].map((idx, i) => (
-              <text key={i} x={barCenterX(idx)} y={CHART_H - 6} fontSize={9} fill="#64748b" textAnchor="middle">
+              <text key={i} x={barCenterX(idx)} y={CHART_H - 6} fontSize={9} fill="#94a3b8" textAnchor="middle">
                 {formatDateLabel(bars[idx].date)}
               </text>
             ))}
@@ -260,21 +260,21 @@ const CandlestickChart: React.FC<{
             onClick={() => { setShowMinuteMenu(v => !v); setPeriod('MIN'); }}
             className={cn(
               "px-2 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 transition-all",
-              period === 'MIN' ? "bg-sleek-blue/25 border-sleek-blue/60 text-sleek-blue" : "bg-black/30 border-white/10 text-slate-400 hover:text-white"
+              period === 'MIN' ? "bg-sleek-blue/10 border-sleek-blue/50 text-sleek-blue" : "bg-slate-100 border-slate-200 text-slate-500 hover:text-slate-900"
             )}
           >
             {minuteInterval}분 ▾
           </button>
           {showMinuteMenu && (
-            <div className="absolute bottom-full mb-1 left-0 bg-slate-900 border border-white/10 rounded-lg shadow-xl z-20 py-1 min-w-[64px]">
+            <div className="absolute bottom-full mb-1 left-0 bg-white border border-slate-200 rounded-lg shadow-xl z-20 py-1 min-w-[64px]">
               {MINUTE_INTERVALS.map(m => (
                 <button
                   key={m}
                   type="button"
                   onClick={() => { setMinuteInterval(m); setPeriod('MIN'); setShowMinuteMenu(false); }}
                   className={cn(
-                    "block w-full text-left px-3 py-1 text-[11px] font-bold hover:bg-white/10",
-                    minuteInterval === m && period === 'MIN' ? "text-sleek-blue" : "text-slate-300"
+                    "block w-full text-left px-3 py-1 text-[11px] font-bold hover:bg-slate-100",
+                    minuteInterval === m && period === 'MIN' ? "text-sleek-blue" : "text-slate-600"
                   )}
                 >
                   {m}분
@@ -290,7 +290,7 @@ const CandlestickChart: React.FC<{
             onClick={() => setPeriod(p)}
             className={cn(
               "px-2.5 py-1 rounded-lg text-[10px] font-bold border transition-all",
-              period === p ? "bg-sleek-blue/25 border-sleek-blue/60 text-sleek-blue" : "bg-black/30 border-white/10 text-slate-400 hover:text-white"
+              period === p ? "bg-sleek-blue/10 border-sleek-blue/50 text-sleek-blue" : "bg-slate-100 border-slate-200 text-slate-500 hover:text-slate-900"
             )}
           >
             {p === 'D' ? '일' : p === 'W' ? '주' : p === 'M' ? '월' : '년'}
@@ -959,7 +959,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
 
         {/* 고급 설정(1회거래수량/최대슬롯/목표순익/손절/추가매수간격/진입호가/실행속도) 토글.
             기본값은 숨김이며, 숨긴 자리에는 일/주/월/년 가격 차트가 대신 표시된다. */}
-        <div className="lg:col-span-12 flex justify-end -mb-1">
+        <div className="lg:col-span-12 order-0 flex justify-end -mb-1">
           <button
             type="button"
             onClick={() => setShowAdvancedSettings(v => !v)}
@@ -973,7 +973,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         {showAdvancedSettings ? (
           <>
         {/* 1. 1회 거래수량, 최대 분할 슬롯, 목표순익 & 손절 (col-span-2) */}
-        <div className="lg:col-span-2 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0">
+        <div className="lg:col-span-6 order-3 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0">
           <div>
             <div className="flex items-center justify-between mb-0.5">
               <label className="text-[11px] font-black text-slate-300 uppercase flex items-center gap-1">
@@ -1051,7 +1051,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         </div>
 
         {/* 2. SMART SCALPER 세부 설정 (col-span-2) */}
-        <div className="lg:col-span-2 bg-sleek-blue/5 border border-sleek-blue/20 p-2.5 rounded-2xl flex flex-col justify-between space-y-1.5 min-w-0">
+        <div className="lg:col-span-6 order-4 bg-sleek-blue/5 border border-sleek-blue/20 p-2.5 rounded-2xl flex flex-col justify-between space-y-1.5 min-w-0">
           <div className="flex items-center justify-between">
             <span className="text-[11px] font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1">
               <Zap className="w-3 h-3 text-amber-400" /> SMART SCALPER
@@ -1124,7 +1124,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         )}
 
         {/* 3. 실시간 잔량 호가창 (4호가) (col-span-3) */}
-        <div className="lg:col-span-3 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
+        <div className="lg:col-span-4 order-5 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
           <div>
             <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
               <span className="text-[10.5px] font-black text-slate-300 uppercase tracking-wider flex items-center gap-1">
@@ -1223,7 +1223,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         </div>
 
         {/* 4. 스캘퍼 등록 종목 & 추천종목 찾기 (col-span-3) */}
-        <div className="lg:col-span-3 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0 shadow-inner">
+        <div className="lg:col-span-8 order-1 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0 shadow-inner">
           <div className="flex items-center justify-between border-b border-white/10 pb-1.5 gap-1.5 flex-wrap">
             <div className="flex items-center gap-1.5 min-w-0">
               
@@ -1409,7 +1409,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         </div>
 
         {/* 5. START AI SCALPER 버튼 & 탭 순환 컨트롤 (col-span-2) */}
-        <div className="lg:col-span-2 flex flex-col justify-between gap-2">
+        <div className="lg:col-span-4 order-2 flex flex-col justify-between gap-1.5">
           <button 
             type="button"
             onClick={() => {
@@ -1428,21 +1428,21 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
             }}
             title="현재 선택된 종목의 개별 스캘퍼 시작/정지"
             className={cn(
-              "w-full grow min-h-[80px] py-2.5 px-3 rounded-2xl font-black text-base sm:text-lg italic tracking-tight uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-1 border cursor-pointer",
+              "w-full py-2 px-3 rounded-xl font-black text-xs italic tracking-tight uppercase shadow-lg transition-all flex items-center justify-center gap-1.5 border cursor-pointer",
               isGapBotActive 
-                ? "bg-gradient-to-br from-rose-600 to-red-800 text-white border-rose-500/50 shadow-rose-900/40 hover:scale-[1.02] active:scale-95" 
-                : "bg-gradient-to-br from-sleek-blue to-indigo-700 text-white border-sleek-blue/50 shadow-sleek-blue/40 hover:scale-[1.02] active:scale-95"
+                ? "bg-gradient-to-br from-rose-600 to-red-800 text-white border-rose-500/50 hover:scale-[1.02] active:scale-95" 
+                : "bg-gradient-to-br from-sleek-blue to-indigo-700 text-white border-sleek-blue/50 hover:scale-[1.02] active:scale-95"
             )}
           >
             {isGapBotActive ? (
               <>
-                <Square className="w-5 h-5 fill-current animate-pulse text-white" />
+                <Square className="w-3.5 h-3.5 fill-current animate-pulse text-white" />
                 <span>SCALPER STOP</span>
               </>
             ) : (
               <>
-                <Play className="w-5 h-5 fill-current text-white" />
-                <span className="text-center leading-tight text-sm sm:text-base">START AI SCALPER</span>
+                <Play className="w-3.5 h-3.5 fill-current text-white" />
+                <span>START AI SCALPER</span>
               </>
             )}
           </button>
