@@ -85,6 +85,7 @@ export interface IntegratedTradingHeaderProps {
   showNotification: (msg: string, type: 'success' | 'error' | 'info') => void;
   isGapBotActive: boolean;
   setIsGapBotActive: React.Dispatch<React.SetStateAction<boolean>>;
+  handleToggleScalperEngine?: () => void;
   setLastTradeType: (t: any) => void;
   isAutoRotateTabs: boolean;
   setIsAutoRotateTabs: React.Dispatch<React.SetStateAction<boolean>>;
@@ -163,6 +164,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
   showNotification,
   isGapBotActive,
   setIsGapBotActive,
+  handleToggleScalperEngine,
   setLastTradeType,
   isAutoRotateTabs,
   setIsAutoRotateTabs,
@@ -1021,20 +1023,16 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           <button 
             type="button"
             onClick={() => {
-              if (!isGapBotActive) {
-                if (gapBuyPrice <= 0 || gapSellPrice <= 0) {
-                  alert("금액 구간(하한선과 상한선)을 정확하게 설정해주세요.");
-                  return;
+              if (handleToggleScalperEngine) {
+                handleToggleScalperEngine();
+              } else {
+                if (!isGapBotActive) {
+                  setLastTradeType(null);
                 }
-                if (gapBuyPrice >= gapSellPrice) {
-                  alert("상한가는 하한가보다 높은 금액이어야 합니다.");
-                  return;
-                }
-                setLastTradeType(null);
+                setIsGapBotActive(!isGapBotActive);
               }
-              setIsGapBotActive(!isGapBotActive);
             }}
-            title="현재 선택된 종목의 개별 스캘퍼 시작/정지"
+            title="등록된 모든 종목에 대한 AI 스캘퍼 엔진 일괄 시작 / 정지"
             className={cn(
               "w-full grow min-h-[80px] py-2.5 px-3 rounded-2xl font-black text-base sm:text-lg italic tracking-tight uppercase shadow-2xl transition-all flex flex-col items-center justify-center gap-1 border cursor-pointer",
               isGapBotActive 
@@ -1045,12 +1043,18 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
             {isGapBotActive ? (
               <>
                 <Square className="w-5 h-5 fill-current animate-pulse text-white" />
-                <span>SCALPER STOP</span>
+                <span className="leading-tight">STOP AI SCALPER</span>
+                <span className="text-[10px] font-mono opacity-80 font-normal tracking-normal not-italic lowercase">
+                  모든 등록 종목 동시 감시 중
+                </span>
               </>
             ) : (
               <>
                 <Play className="w-5 h-5 fill-current text-white" />
                 <span className="text-center leading-tight text-sm sm:text-base">START AI SCALPER</span>
+                <span className="text-[10px] font-mono opacity-80 font-normal tracking-normal not-italic">
+                  등록 종목 전체 동시 가동
+                </span>
               </>
             )}
           </button>

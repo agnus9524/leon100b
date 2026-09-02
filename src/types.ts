@@ -49,12 +49,47 @@ export interface Stock {
   lastUpdated?: string;
 }
 
+export interface ScalperEngineState {
+  running: boolean;
+  startedAt: number | null;
+  monitoredSymbols: string[];
+  globalLogs: TradeLog[];
+  selectedSymbol: string | null;
+}
+
+export interface ScalperRuntime {
+  symbol: string;
+  state:
+    | 'WATCHING'
+    | 'BUY_READY'
+    | 'BUYING'
+    | 'HOLDING'
+    | 'SELL_READY'
+    | 'SELLING'
+    | 'ERROR';
+  currentPrice: number;
+  holdingQty: number;
+  orderableQty: number;
+  sensors: {
+    pullback: boolean;
+    breakout: boolean;
+    vwap: boolean;
+    cvd: boolean;
+    volumeMomentum?: boolean;
+    rsi?: number;
+    activeCount?: number;
+  };
+}
+
 export interface TradeLog {
-  id: string;
+  id?: string;
   time: string;
-  type: 'BUY' | 'SELL';
+  symbol: string;
+  type: 'BUY' | 'SELL' | '매수' | '매도' | 'SYSTEM' | 'SENSOR' | 'STATUS';
   price: number;
-  quantity: number;
-  profit?: number;
+  amount?: number;
+  quantity?: number;
+  reason?: string;
   message?: string;
+  profit?: number;
 }

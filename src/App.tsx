@@ -156,6 +156,19 @@ export type ScalperLifecycleStatus =
   | 'COMPLETED'   // 매도 체결 완료 (이후 다시 WATCHING으로 순환)
   | 'ERROR';      // 주문/체결 처리 중 오류 발생
 
+export interface TradeLog {
+  id?: string;
+  time: string;
+  symbol: string;
+  type: 'BUY' | 'SELL' | '매수' | '매도' | 'SYSTEM' | 'SENSOR' | 'STATUS' | 'BUY_READY' | 'SELL_READY' | 'BUY_FILLED' | 'SELL_FILLED' | 'BUY ORDER' | 'BUY FILLED' | 'SELL ORDER' | 'SELL FILLED';
+  price: number;
+  amount?: number;
+  quantity?: number;
+  reason?: string;
+  message?: string;
+  profit?: number;
+}
+
 // 파생 뷰(=기존 엔진 루프/컴포넌트가 그대로 참조하는 flat 형태). 저장 자체는 ScalperInventoryItem.
 export interface ScalperTab {
   id: string; // symbol e.g., '073240' or '001520'
@@ -787,15 +800,6 @@ const INITIAL_STOCKS: Stock[] = [
   }
 ];
 
-interface TradeLog {
-  time: string;
-  symbol: string;
-  type: 'BUY' | 'SELL' | '매수' | '매도';
-  price: number;
-  amount: number;
-  reason: string;
-}
-
 interface NewsItem {
   title: string;
   summary: string;
@@ -1279,6 +1283,8 @@ export default function App() {
   const [sellableHoldings, setSellableHoldings] = useState<Record<string, number>>({});
   const [isBotActive, setIsBotActive] = useState(false);
   const [tradeLogs, setTradeLogs] = useState<TradeLog[]>([]);
+  const [logViewMode, setLogViewMode] = useState<'GLOBAL' | 'SELECTED'>('GLOBAL');
+  const [logFilterType, setLogFilterType] = useState<'ALL' | 'TRADE' | 'SENSOR' | 'SYSTEM'>('ALL');
   const [time, setTime] = useState(new Date().toLocaleTimeString('ko-KR', { hour12: false }));
   const [botStatus, setBotStatus] = useState<string>("대기 중...");
   const [isAnalyzing, setIsAnalyzing] = useState(false);
@@ -2160,7 +2166,6 @@ setGapInventory(nextInv);
     setScalperMessage(targetTab.scalperMessage || "대기 중...");
     setEntryPriceMode(targetTab.entryPriceMode || 'BID2');
     setAutoCancelThreshold(targetTab.autoCancelThreshold || 0.2);
-    setTradeLogs((targetTab.tradeLogs || []).filter(l => !l.symbol || l.symbol === targetTab.symbol || l.symbol === 'SYSTEM'));
   };
 
   const openOrSwitchScalperTab = (
@@ -2348,22 +2353,58 @@ setGapInventory(nextInv);
     }
   };
 
-  const handleToggleAllScalping = () => {
+  // Notification State
+  const [notifications, setNotifications] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string }[]>([]);
+
+  const showNotification = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setNotifications(prev => [...prev, { id, type, message }]);
+    setTimeout(() => {
+      setNotifications(prev => prev.filter(n => n.id !== id));
+    }, 5000);
+  }, []);
+
+  const handleToggleScalperEngine = useCallback(() => {
     if (isSyncingKIS || initSyncState.status === 'syncing') {
       showNotification("한국투자증권 데이터 동기화가 진행 중입니다. 잠시 후 다시 시도해주세요.", "info");
       return;
     }
-    const isAnyActive = scalperTabs.some(t => t.isBotActive) || isGapBotActive;
-    const nextState = !isAnyActive;
-    setIsGapBotActive(nextState);
-    setScalperInventory(prev => prev.map(item => ({ ...item, strategy: { ...item.strategy, isBotActive: nextState } })));
-    showNotification(
-      nextState
-        ? "[전체 스캘퍼 실행] 추가된 모든 종목의 스캘퍼가 일괄 시작되었습니다."
-        : "[전체 스캘퍼 정지] 추가된 모든 종목의 스캘퍼가 일괄 정지되었습니다.",
-      nextState ? "success" : "info"
-    );
-  };
+    const nextRunning = !isGapBotActive;
+    setIsGapBotActive(nextRunning);
+    isGapBotActiveRef.current = nextRunning;
+
+    // Update all scalper inventory items
+    setScalperInventory(prev => prev.map(item => ({
+      ...item,
+      strategy: { ...item.strategy, isBotActive: nextRunning }
+    })));
+
+    scalperTabsRef.current.forEach(tab => {
+      updateTab(tab.id, { isBotActive: nextRunning });
+    });
+
+    if (nextRunning) {
+      const count = scalperInventory.length || scalperTabsRef.current.length || 1;
+      addLog('SYSTEM', 'SYSTEM', 0, 0, `[SYSTEM] AI SCALPER STARTED (등록된 ${count}개 종목 감시 시작)`);
+      scalperInventory.forEach(item => {
+        const s = item.sensors;
+        const curPrice = item.market?.currentPrice || item.recommendation?.price || 0;
+        addLog(
+          item.symbol,
+          'SENSOR',
+          curPrice,
+          0,
+          `[${item.name}] 전략 센서 초기화 (PULLBACK ${s.pullback ? '●' : '○'}, BREAKOUT ${s.breakout ? '●' : '○'}, VWAP ${s.vwap ? '●' : '○'}, CVD ${s.cvd ? '●' : '○'})`
+        );
+      });
+      showNotification(`[AI Scalper Engine = RUNNING] 등록된 ${count}개 전 종목 동시 감시 시작`, 'success');
+    } else {
+      addLog('SYSTEM', 'SYSTEM', 0, 0, `[SYSTEM] AI SCALPER ENGINE STOPPED (모든 감시 종목 모니터링 중지)`);
+      showNotification(`[AI Scalper Engine = STOPPED] 전체 종목 감시 정지`, 'info');
+    }
+  }, [isGapBotActive, isSyncingKIS, initSyncState.status, scalperInventory, updateTab, showNotification]);
+
+  const handleToggleAllScalping = handleToggleScalperEngine;
 
   const [pendingBuyOrders, setPendingBuyOrders] = useState<PendingBuyOrder[]>([]);
   const pendingBuyOrdersRef = React.useRef<PendingBuyOrder[]>([]);
@@ -2397,6 +2438,53 @@ setGapInventory(nextInv);
   const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-0.5); // Scalping stop loss (-0.5% default)
   const [scalpingSpeed, setScalpingSpeed] = useState<number>(300); // 300ms (0.3s) fast execution speed
   const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(false);
+
+  const playScalpingSound = useCallback((type: 'BUY' | 'SELL') => {
+    if (!scalpingSoundEnabled) return;
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (!AudioContextClass) return;
+      const ctx = new AudioContextClass();
+      
+      if (type === 'BUY') {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
+        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start();
+        osc.stop(ctx.currentTime + 0.15);
+      } else {
+        const osc1 = ctx.createOscillator();
+        const osc2 = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc1.type = 'triangle';
+        osc2.type = 'sine';
+        
+        osc1.frequency.setValueAtTime(880, ctx.currentTime); // A5
+        osc1.frequency.setValueAtTime(1046.50, ctx.currentTime + 0.08); // C6
+        osc2.frequency.setValueAtTime(1318.51, ctx.currentTime + 0.04); // E6
+        
+        gain.gain.setValueAtTime(0.08, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
+        
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(ctx.destination);
+        
+        osc1.start();
+        osc2.start();
+        osc1.stop(ctx.currentTime + 0.25);
+        osc2.stop(ctx.currentTime + 0.25);
+      }
+    } catch (e) {
+      console.warn("Audio Context blocked or failed:", e);
+    }
+  }, [scalpingSoundEnabled]);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
   const [maxSlots, setMaxSlots] = useState<number>(10);
@@ -2640,64 +2728,6 @@ setGapInventory(nextInv);
   const calculateTargetSellPrice = useCallback((basePrice: number, targetProfitPct: number) => {
     return calcTargetSellPriceByNetProfit(basePrice, targetProfitPct, marketType);
   }, [marketType]); 
-
-  // Notification State
-  const [notifications, setNotifications] = useState<{ id: string; type: 'success' | 'error' | 'info'; message: string }[]>([]);
-
-  const playScalpingSound = (type: 'BUY' | 'SELL') => {
-    if (!scalpingSoundEnabled) return;
-    try {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      if (!AudioContextClass) return;
-      const ctx = new AudioContextClass();
-      
-      if (type === 'BUY') {
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.type = 'sine';
-        osc.frequency.setValueAtTime(587.33, ctx.currentTime); // D5
-        osc.frequency.exponentialRampToValueAtTime(880, ctx.currentTime + 0.15); // A5
-        gain.gain.setValueAtTime(0.08, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.15);
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.15);
-      } else {
-        const osc1 = ctx.createOscillator();
-        const osc2 = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc1.type = 'triangle';
-        osc2.type = 'sine';
-        
-        osc1.frequency.setValueAtTime(880, ctx.currentTime); // A5
-        osc1.frequency.setValueAtTime(1046.50, ctx.currentTime + 0.08); // C6
-        osc2.frequency.setValueAtTime(1318.51, ctx.currentTime + 0.04); // E6
-        
-        gain.gain.setValueAtTime(0.08, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.25);
-        
-        osc1.connect(gain);
-        osc2.connect(gain);
-        gain.connect(ctx.destination);
-        
-        osc1.start();
-        osc2.start();
-        osc1.stop(ctx.currentTime + 0.25);
-        osc2.stop(ctx.currentTime + 0.25);
-      }
-    } catch (e) {
-      console.warn("Audio Context blocked or failed:", e);
-    }
-  };
-
-  const showNotification = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    const id = Math.random().toString(36).substring(2, 9);
-    setNotifications(prev => [...prev, { id, type, message }]);
-    setTimeout(() => {
-      setNotifications(prev => prev.filter(n => n.id !== id));
-    }, 5000);
-  }, []);
 
   const handleToggleStrategy = useCallback((strat: 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD') => {
     setSelectedScalperStrategies(prev => {
@@ -8381,15 +8411,29 @@ const isProfitTarget = sellSignal;
     setShowScalperRecModal(false);
   }, [handleSelectRecommendationStock, executeTrade]);
 
-  const addLog = (symbol: string, type: 'BUY' | 'SELL' | '매수' | '매도', price: number, amount: number, reason: string) => {
+  const addLog = (
+    symbol: string,
+    type: 'BUY' | 'SELL' | '매수' | '매도' | 'SYSTEM' | 'SENSOR' | 'STATUS' | 'BUY_READY' | 'SELL_READY' | 'BUY_FILLED' | 'SELL_FILLED' | 'BUY ORDER' | 'BUY FILLED' | 'SELL ORDER' | 'SELL FILLED',
+    price: number,
+    amount: number,
+    reason: string
+  ) => {
     const newLog: TradeLog = {
+      id: `${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
       time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
-      symbol, type, price, amount, reason
+      symbol,
+      type: type as any,
+      price: price || 0,
+      amount: amount || 0,
+      quantity: amount || 0,
+      reason: reason || ''
     };
+
+    // 1. Global Trade Log (Chronological log stream of all registered stocks & system events)
+    setTradeLogs(prev => [newLog, ...prev].slice(0, 200));
+
+    // 2. Selected Stock / Inventory Detailed Log
     const currentActiveSym = activeTabIdRef.current;
-    if (symbol === currentActiveSym || symbol === 'SYSTEM' || (selectedStock && symbol === selectedStock.symbol)) {
-      setTradeLogs(prev => [newLog, ...prev.filter(l => !l.symbol || l.symbol === currentActiveSym || l.symbol === 'SYSTEM')].slice(0, 50));
-    }
     const logTargetSymbols = new Set<string>();
     if (symbol === 'SYSTEM') {
       if (currentActiveSym) logTargetSymbols.add(currentActiveSym);
@@ -8937,6 +8981,7 @@ const isProfitTarget = sellSignal;
                 showNotification={showNotification}
                 isGapBotActive={isGapBotActive}
                 setIsGapBotActive={setIsGapBotActive}
+                handleToggleScalperEngine={handleToggleScalperEngine}
                 setLastTradeType={setLastTradeType}
                 isAutoRotateTabs={isAutoRotateTabs}
                 setIsAutoRotateTabs={setIsAutoRotateTabs}
@@ -9071,165 +9116,340 @@ const isProfitTarget = sellSignal;
         {/* Right Aside: Real-time Status Window & Trade Logs */}
         <aside className="border-t lg:border-t-0 lg:border-l border-white/5 bg-black/30 flex flex-col p-4 sm:p-5 lg:p-6 gap-4 sm:gap-6 overflow-hidden">
             
-            {/* 1. Trade Logs / Active Slot Monitor (Top Right) */}
+            {/* 1. Global Trade Logs & Selected Stock Log separation */}
             {(() => {
               const currentStock = selectedStock || (marketType === 'US' ? INITIAL_STOCKS[0] : INITIAL_STOCKS_KR[0]);
-              const currentInventory = gapInventory.filter(s => {
-                if (!s) return false;
-                if (typeof s === 'object' && s.symbol && currentStock?.symbol) {
-                  return s.symbol === currentStock.symbol;
-                }
+              const invItem = scalperInventory.find(i => i.symbol === currentStock?.symbol);
+              const holdingCount = holdings[currentStock?.symbol || ''] || invItem?.holdingQty || 0;
+              const orderableCount = sellableHoldings[currentStock?.symbol || ''] ?? invItem?.orderableQty ?? holdingCount;
+              const sensors = invItem?.sensors || {
+                pullback: false,
+                breakout: false,
+                vwap: false,
+                cvd: false,
+                lastCalculatedPrice: currentStock?.price || 0,
+                lastUpdated: Date.now()
+              };
+
+              // Filter logs for Global view
+              const filteredGlobalLogs = tradeLogs.filter(log => {
+                if (logFilterType === 'ALL') return true;
+                if (logFilterType === 'TRADE') return log.type === 'BUY' || log.type === 'SELL' || log.type === '매수' || log.type === '매도' || log.type === 'BUY_FILLED' || log.type === 'SELL_FILLED' || log.type === 'BUY ORDER' || log.type === 'SELL ORDER';
+                if (logFilterType === 'SENSOR') return log.type === 'SENSOR' || log.reason?.includes('감지') || log.reason?.includes('센서');
+                if (logFilterType === 'SYSTEM') return log.symbol === 'SYSTEM' || log.type === 'SYSTEM' || log.type === 'STATUS';
                 return true;
               });
 
+              // Filter logs for Selected Stock view
+              const stockLogs = tradeLogs.filter(log => log.symbol === currentStock?.symbol || (log.symbol === 'SYSTEM' && log.reason?.includes(currentStock?.name || '')));
+
               return (
-                <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-[480px] overflow-hidden shadow-2xl">
-                  <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
-                    <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
-                      <Layers className="w-4 h-4 text-sleek-blue" /> Trade Logs
-                    </h3>
-                    <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">
-                      {enableCombinedAvgProfitExit 
-                        ? (currentInventory.length > 0 ? "통합 (1/1)" : "통합 (대기)") 
-                        : `#${currentInventory.length}/${maxSlots || 10}`
-                      }
-                    </span>
+                <div className="bg-white/5 border border-white/10 rounded-3xl p-4 sm:p-5 flex flex-col flex-1 min-h-[500px] overflow-hidden shadow-2xl">
+                  {/* Mode Selector Tabs (Global vs Selected) */}
+                  <div className="flex items-center justify-between gap-1.5 mb-3 shrink-0 border-b border-white/10 pb-2.5">
+                    <div className="flex items-center gap-1 bg-black/40 p-1 rounded-2xl border border-white/5">
+                      <button
+                        type="button"
+                        onClick={() => setLogViewMode('GLOBAL')}
+                        className={cn(
+                          "px-2.5 py-1 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer",
+                          logViewMode === 'GLOBAL'
+                            ? "bg-sleek-blue text-white shadow-md shadow-sleek-blue/30"
+                            : "text-sleek-text-secondary hover:text-white"
+                        )}
+                      >
+                        <Layers className="w-3.5 h-3.5" />
+                        <span>Global Log</span>
+                        <span className="text-[10px] opacity-80 font-mono bg-black/30 px-1.5 py-0.2 rounded-full">
+                          {tradeLogs.length}
+                        </span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setLogViewMode('SELECTED')}
+                        className={cn(
+                          "px-2.5 py-1 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer max-w-[170px] truncate",
+                          logViewMode === 'SELECTED'
+                            ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+                            : "text-sleek-text-secondary hover:text-white"
+                        )}
+                        title="선택 종목 상세 인벤토리 및 이벤트 로그"
+                      >
+                        <Flame className="w-3.5 h-3.5 text-amber-300" />
+                        <span className="truncate">{currentStock?.name || '종목 상세'}</span>
+                      </button>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <span className={cn(
+                        "w-2 h-2 rounded-full",
+                        isGapBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_8px_#10B981]" : "bg-slate-500"
+                      )} />
+                      <span className="text-[10px] font-mono text-sleek-text-secondary">
+                        {isGapBotActive ? "ENGINE RUNNING" : "STOPPED"}
+                      </span>
+                    </div>
                   </div>
                   
-                  <div className="flex-1 overflow-y-auto space-y-3 pr-1 custom-scrollbar">
-                    {enableCombinedAvgProfitExit ? (
-                      /* Combined Average Profit Exit Mode (통합평단가 익절) */
-                      currentInventory.length === 0 ? (
-                        <div className="bg-black/20 border border-dashed border-white/10 rounded-2xl p-6 flex flex-col items-center justify-center text-center gap-2">
-                          <div className="w-10 h-10 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-sleek-text-secondary">
-                            <Layers className="w-5 h-5 opacity-40" />
+                  {/* View 1: GLOBAL TRADE LOGS */}
+                  {logViewMode === 'GLOBAL' ? (
+                    <div className="flex flex-col flex-1 min-h-0">
+                      {/* Filter Bar */}
+                      <div className="flex items-center gap-1 mb-2.5 shrink-0 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => setLogFilterType('ALL')}
+                          className={cn(
+                            "px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono transition-all cursor-pointer",
+                            logFilterType === 'ALL' ? "bg-white/20 text-white" : "text-sleek-text-secondary hover:bg-white/5"
+                          )}
+                        >
+                          전체 ({tradeLogs.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLogFilterType('TRADE')}
+                          className={cn(
+                            "px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono transition-all cursor-pointer",
+                            logFilterType === 'TRADE' ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30" : "text-sleek-text-secondary hover:bg-white/5"
+                          )}
+                        >
+                          체결/주문
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLogFilterType('SENSOR')}
+                          className={cn(
+                            "px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono transition-all cursor-pointer",
+                            logFilterType === 'SENSOR' ? "bg-amber-500/20 text-amber-300 border border-amber-500/30" : "text-sleek-text-secondary hover:bg-white/5"
+                          )}
+                        >
+                          전략 센서
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setLogFilterType('SYSTEM')}
+                          className={cn(
+                            "px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono transition-all cursor-pointer",
+                            logFilterType === 'SYSTEM' ? "bg-purple-500/20 text-purple-300 border border-purple-500/30" : "text-sleek-text-secondary hover:bg-white/5"
+                          )}
+                        >
+                          시스템
+                        </button>
+                      </div>
+
+                      {/* Log Stream */}
+                      <div className="flex-1 overflow-y-auto space-y-1.5 pr-1 custom-scrollbar min-h-0 font-mono text-[11px]">
+                        {filteredGlobalLogs.length === 0 ? (
+                          <div className="bg-black/20 border border-dashed border-white/10 rounded-2xl p-6 flex flex-col items-center justify-center text-center gap-2 my-auto">
+                            <Layers className="w-6 h-6 text-sleek-text-secondary opacity-40" />
+                            <span className="text-xs font-bold text-white">기록된 글로벌 로그가 없습니다.</span>
+                            <span className="text-[10px] text-sleek-text-secondary">
+                              스캘퍼 엔진을 가동하면 실시간 주문, 체결, 센서 이벤트가 기록됩니다.
+                            </span>
                           </div>
+                        ) : (
+                          filteredGlobalLogs.map((log, idx) => {
+                            const isSystem = log.symbol === 'SYSTEM' || log.type === 'SYSTEM';
+                            const isBuy = log.type === 'BUY' || log.type === '매수' || log.type === 'BUY_FILLED' || log.type === 'BUY ORDER' || (typeof log.type === 'string' && log.type.includes('BUY'));
+                            const isSell = log.type === 'SELL' || log.type === '매도' || log.type === 'SELL_FILLED' || log.type === 'SELL ORDER' || (typeof log.type === 'string' && log.type.includes('SELL'));
+                            const isSensor = log.type === 'SENSOR' || log.reason?.includes('센서') || log.reason?.includes('감지');
+                            const stockName = isSystem ? 'SYSTEM' : getResolvedStockName(log.symbol);
+
+                            return (
+                              <motion.div
+                                key={log.id || `global-log-${idx}`}
+                                initial={{ opacity: 0, y: -2 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                className={cn(
+                                  "p-2 rounded-xl border flex items-start justify-between gap-2 leading-relaxed transition-all",
+                                  isSystem
+                                    ? "bg-purple-950/20 border-purple-500/20 text-purple-200"
+                                    : isBuy
+                                    ? "bg-emerald-950/20 border-emerald-500/25 text-emerald-200"
+                                    : isSell
+                                    ? "bg-sky-950/20 border-sky-500/25 text-sky-200"
+                                    : isSensor
+                                    ? "bg-amber-950/20 border-amber-500/20 text-amber-200"
+                                    : "bg-black/30 border-white/5 text-slate-300"
+                                )}
+                              >
+                                <div className="flex items-start gap-1.5 min-w-0 flex-1">
+                                  <span className="text-[10px] text-sleek-text-secondary shrink-0 pt-0.5">
+                                    {log.time}
+                                  </span>
+
+                                  <span className={cn(
+                                    "px-1.5 py-0.2 rounded text-[10px] font-black shrink-0",
+                                    isSystem ? "bg-purple-500/30 text-purple-300 border border-purple-500/40" : "bg-blue-500/20 text-blue-300 border border-blue-500/30"
+                                  )}>
+                                    [{stockName}]
+                                  </span>
+
+                                  <span className="text-white font-medium text-[11px] break-words">
+                                    {log.reason || `${log.type} ${log.price ? formatCurrency(log.price) : ''}`}
+                                  </span>
+                                </div>
+
+                                {log.price > 0 && (
+                                  <span className={cn(
+                                    "text-[10px] font-bold shrink-0 ml-1",
+                                    isBuy ? "text-emerald-400" : isSell ? "text-rose-400" : "text-slate-400"
+                                  )}>
+                                    {formatCurrency(log.price)}
+                                  </span>
+                                )}
+                              </motion.div>
+                            );
+                          })
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    /* View 2: SELECTED STOCK INVENTORY & LOG */
+                    <div className="flex flex-col flex-1 min-h-0 space-y-3 overflow-y-auto pr-1 custom-scrollbar">
+                      {/* Stock Header & Lifecycle Status */}
+                      <div className="bg-black/40 border border-white/10 rounded-2xl p-3 space-y-2">
+                        <div className="flex items-center justify-between">
                           <div>
-                            <span className="text-xs font-bold text-white block">[{currentStock?.name || '종목'}] 통합 대기 중</span>
-                            <span className="text-[11px] text-sleek-text-secondary mt-1 block">
-                              매수가 체결되면 수량 및 통합 평단가가 자동 업데이트됩니다
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-black text-white">{currentStock?.name || '종목'}</span>
+                              <span className="text-xs font-mono text-sleek-text-secondary">({currentStock?.symbol || '-'})</span>
+                              <span className="text-[10px] font-bold text-slate-400 bg-white/5 px-1.5 py-0.5 rounded">
+                                {currentStock?.market || marketType}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-2 mt-0.5 text-xs font-mono">
+                              <span className="text-white font-black">{formatCurrency(currentStock?.price || 0)}</span>
+                              <span className={cn(
+                                "font-bold",
+                                (currentStock?.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400"
+                              )}>
+                                {(currentStock?.changePercent || 0) >= 0 ? '+' : ''}{(currentStock?.changePercent || 0).toFixed(2)}%
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Lifecycle Status Badge */}
+                          <div className="text-right">
+                            <span className={cn(
+                              "px-2.5 py-1 rounded-xl text-[11px] font-black font-mono border inline-block",
+                              invItem?.lifecycleStatus === 'HOLDING' || holdingCount > 0
+                                ? "bg-emerald-500/20 text-emerald-400 border-emerald-500/30 shadow-[0_0_10px_rgba(16,185,129,0.2)]"
+                                : invItem?.lifecycleStatus === 'BUY_READY' || invItem?.lifecycleStatus === 'BUYING'
+                                ? "bg-amber-500/20 text-amber-300 border-amber-500/30"
+                                : invItem?.lifecycleStatus === 'SELL_READY' || invItem?.lifecycleStatus === 'SELLING'
+                                ? "bg-rose-500/20 text-rose-300 border-rose-500/30"
+                                : "bg-slate-800 text-slate-400 border-slate-700"
+                            )}>
+                              {invItem?.lifecycleStatus || (holdingCount > 0 ? 'HOLDING' : (isGapBotActive ? 'WATCHING' : 'READY'))}
                             </span>
                           </div>
                         </div>
-                      ) : (() => {
-                        const totalCost = currentInventory.reduce((acc, s) => acc + (typeof s === 'number' ? s : s.price) * (typeof s === 'number' ? 1 : s.quantity), 0);
-                        const totalQty = currentInventory.reduce((acc, s) => acc + (typeof s === 'number' ? 1 : s.quantity), 0);
-                        const avgPrice = totalQty > 0 ? Math.round(totalCost / totalQty) : 0;
-                        const avgProfitPct = (avgPrice > 0 && currentStock?.price) ? calculateNetProfitPercent(avgPrice, currentStock.price, marketType) : 0;
-                        const targetSellPrice = calculateTargetSellPrice(avgPrice, scalpingTargetProfit);
 
-                        return (
-                          <motion.div 
-                            initial={{ opacity: 0, scale: 0.98 }}
-                            animate={{ opacity: 1, scale: 1 }}
-                            className="bg-gradient-to-r from-sleek-blue/20 via-indigo-950/40 to-slate-900/80 border border-sleek-blue/40 rounded-2xl p-4.5 space-y-3 shadow-xl"
-                          >
-                            <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                              <div className="flex items-center gap-2">
-                                <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#10B981] animate-pulse"></span>
-                                <span className="text-sm font-black text-white">{currentStock?.name || '종목'}</span>
-                                <span className="text-xs font-mono text-sleek-text-secondary">({currentStock?.symbol || '-'})</span>
+                        {/* Holding & Orderable Quantity Grid */}
+                        <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-black/60 p-2.5 rounded-xl border border-white/5">
+                          <div>
+                            <span className="text-[10px] text-sleek-text-secondary block">보유 수량</span>
+                            <span className="text-sm font-black text-amber-300">
+                              {formatQuantity(holdingCount)}주
+                            </span>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-sleek-text-secondary block">주문가능 수량</span>
+                            <span className="text-sm font-black text-emerald-400">
+                              {formatQuantity(orderableCount)}주
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* 4 Strategy Sensors Indicator Lamps */}
+                      <div className="bg-black/30 border border-white/5 rounded-2xl p-3 space-y-2">
+                        <div className="flex items-center justify-between text-[11px] font-black text-sleek-text-secondary uppercase">
+                          <span>전략 센서 모니터 (4 Sensors)</span>
+                          <span className="text-[9px] font-mono text-slate-400">
+                            {sensors.lastUpdated ? new Date(sensors.lastUpdated).toLocaleTimeString('ko-KR', { hour12: false }) : '-'}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-1.5 text-xs font-mono">
+                          {/* Pullback */}
+                          <div className={cn(
+                            "flex items-center justify-between px-2.5 py-1.5 rounded-xl border",
+                            sensors.pullback ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300" : "bg-white/5 border-white/5 text-slate-400"
+                          )}>
+                            <span>PULLBACK (눌림목)</span>
+                            <span className={cn("text-xs", sensors.pullback ? "text-emerald-400 font-black animate-pulse" : "text-slate-600")}>
+                              {sensors.pullback ? "● ON" : "○ OFF"}
+                            </span>
+                          </div>
+
+                          {/* Breakout */}
+                          <div className={cn(
+                            "flex items-center justify-between px-2.5 py-1.5 rounded-xl border",
+                            sensors.breakout ? "bg-emerald-500/15 border-emerald-500/40 text-emerald-300" : "bg-white/5 border-white/5 text-slate-400"
+                          )}>
+                            <span>BREAKOUT (돌파)</span>
+                            <span className={cn("text-xs", sensors.breakout ? "text-emerald-400 font-black animate-pulse" : "text-slate-600")}>
+                              {sensors.breakout ? "● ON" : "○ OFF"}
+                            </span>
+                          </div>
+
+                          {/* VWAP */}
+                          <div className={cn(
+                            "flex items-center justify-between px-2.5 py-1.5 rounded-xl border",
+                            sensors.vwap ? "bg-teal-500/15 border-teal-500/40 text-teal-300" : "bg-white/5 border-white/5 text-slate-400"
+                          )}>
+                            <span>VWAP SUPPORT</span>
+                            <span className={cn("text-xs", sensors.vwap ? "text-teal-400 font-black animate-pulse" : "text-slate-600")}>
+                              {sensors.vwap ? "● ON" : "○ OFF"}
+                            </span>
+                          </div>
+
+                          {/* CVD */}
+                          <div className={cn(
+                            "flex items-center justify-between px-2.5 py-1.5 rounded-xl border",
+                            sensors.cvd ? "bg-blue-500/15 border-blue-500/40 text-blue-300" : "bg-white/5 border-white/5 text-slate-400"
+                          )}>
+                            <span>CVD 수급강도</span>
+                            <span className={cn("text-xs", sensors.cvd ? "text-blue-400 font-black animate-pulse" : "text-slate-600")}>
+                              {sensors.cvd ? "● ON" : "○ OFF"}
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Selected Stock Logs */}
+                      <div className="space-y-1.5 font-mono text-[11px]">
+                        <div className="text-[11px] font-black text-sleek-text-secondary uppercase px-1">
+                          [{currentStock?.name}] 개별 이벤트 로그
+                        </div>
+
+                        {stockLogs.length === 0 ? (
+                          <div className="bg-black/20 border border-dashed border-white/5 rounded-xl p-4 text-center text-slate-500 text-xs">
+                            해당 종목의 이벤트 로그가 없습니다.
+                          </div>
+                        ) : (
+                          stockLogs.map((log, idx) => (
+                            <div
+                              key={`stock-log-${idx}`}
+                              className="bg-black/30 border border-white/5 p-2 rounded-xl flex items-center justify-between gap-2"
+                            >
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                <span className="text-[10px] text-sleek-text-secondary">{log.time}</span>
+                                <span className="text-white truncate">{log.reason || log.type}</span>
                               </div>
-                              <span className="bg-sleek-blue/20 text-sleek-blue border border-sleek-blue/30 px-2 py-0.5 rounded text-[10px] font-bold">
-                                통합 (보유 중)
-                              </span>
+                              {log.price > 0 && (
+                                <span className="text-sleek-blue font-bold shrink-0">{formatCurrency(log.price)}</span>
+                              )}
                             </div>
-
-                            <div className="grid grid-cols-2 gap-2 text-xs font-mono bg-black/40 p-2.5 rounded-xl border border-white/5">
-                              <div>
-                                <span className="text-[10px] text-sleek-text-secondary block uppercase">체결 매수 수량</span>
-                                <span className="text-base font-black text-amber-300">{formatQuantity(totalQty)}</span>
-                              </div>
-                              <div className="text-right">
-                                <span className="text-[10px] text-sleek-text-secondary block uppercase">통합 매수 평단가</span>
-                                <span className="text-sm font-bold text-white">{formatCurrency(avgPrice)}</span>
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-2 text-xs font-mono">
-                              <div>
-                                <span className="text-[10px] text-sleek-text-secondary block font-bold">매도예상가 (순익 +{scalpingTargetProfit}%)</span>
-                                <span className="text-sm font-bold text-rose-400">{formatCurrency(targetSellPrice)}</span>
-                              </div>
-                              <div className="text-right">
-                                <span className="text-[10px] text-sleek-text-secondary block font-bold">평단 대비 순손익률</span>
-                                <span className={cn("text-sm font-black", avgProfitPct >= 0 ? "text-rose-400" : "text-sky-400")}>
-                                  {avgProfitPct >= 0 ? "+" : ""}{avgProfitPct.toFixed(2)}%
-                                </span>
-                                <span className="text-[9px] text-slate-400 block font-sans">제세금(0.2%)·수수료 공제</span>
-                              </div>
-                            </div>
-                          </motion.div>
-                        );
-                      })()
-                    ) : (
-                      /* Individual Slot Mode (개별 모드 - 매수진입/체결 및 매도싸인만 표시) */
-                      (() => {
-                        const stockPendingBuys = pendingBuyOrders.filter(p => p.symbol === currentStock?.symbol);
-                        const stockPendingSells = pendingSellOrders.filter(p => p.symbol === currentStock?.symbol);
-                        
-                        const allLogItems: React.ReactNode[] = [];
-                        let slotCounter = 1;
-
-                        stockPendingBuys.forEach((pb, idx) => {
-                          allLogItems.push(
-                            <div key={`pb-${pb.id || idx}`} className="text-[11px] font-mono text-white mb-2.5 leading-relaxed bg-black/20 p-2 rounded border border-white/5">
-                              <div className="font-bold opacity-90">{currentStock?.name}(매수주문 #{slotCounter++})</div>
-                              <div className="text-amber-400 mt-0.5">매수주문가 {formatCurrency(pb.orderPrice)}</div>
-                            </div>
-                          );
-                        });
-
-                        currentInventory.forEach((inv, idx) => {
-                          const buyPrice = typeof inv === 'number' ? inv : (inv.price || 0);
-                          const pSell = stockPendingSells.find(s => s.slotId === (inv as any).id);
-                          if (pSell) {
-                            allLogItems.push(
-                              <div key={`inv-${idx}`} className="text-[11px] font-mono text-white mb-2.5 leading-relaxed bg-black/20 p-2 rounded border border-white/5">
-                                <div className="font-bold opacity-90">{currentStock?.name}(매도주문 #{slotCounter++})</div>
-                                <div className="text-rose-400 mt-0.5">목표가 {formatCurrency(pSell.orderPrice)}</div>
-                              </div>
-                            );
-                          } else {
-                            allLogItems.push(
-                              <div key={`inv-${idx}`} className="text-[11px] font-mono text-white mb-2.5 leading-relaxed bg-black/20 p-2 rounded border border-white/5">
-                                <div className="font-bold opacity-90">{currentStock?.name}(매수 #{slotCounter++})</div>
-                                <div className="text-emerald-400 mt-0.5">매수가 {formatCurrency(buyPrice)}</div>
-                              </div>
-                            );
-                          }
-                        });
-
-                        const recentSellFills = tradeLogs.filter(log => log.symbol === currentStock?.symbol && (log.type === 'SELL' || log.type === '매도') && (log.reason?.includes('체결') || log.reason?.includes('익절'))).slice(0, 5);
-
-                        recentSellFills.forEach((log, idx) => {
-                          let profitDisplay = "";
-                          const pnlMatch = log.reason.match(/순익\s*([+-]?[\d.,]+(?:원|%))/);
-                          if (pnlMatch) profitDisplay = ` 순익 ${pnlMatch[1]}`;
-                          else if (log.reason.includes('익절')) profitDisplay = ` (익절)`;
-                          else if (log.reason.includes('손절')) profitDisplay = ` (손절)`;
-                          
-                          allLogItems.push(
-                            <div key={`sell-${idx}`} className="text-[11px] font-mono text-white mb-2.5 leading-relaxed bg-black/20 p-2 rounded border border-white/5 opacity-80">
-                              <div className="font-bold opacity-90">{currentStock?.name}(매도 #{slotCounter++})</div>
-                              <div className="text-sky-400 mt-0.5">
-                                매도가 {formatCurrency(log.price)} <span className="text-emerald-400 ml-1">{profitDisplay}</span>
-                              </div>
-                            </div>
-                          );
-                        });
-
-                        if (allLogItems.length === 0) {
-                          return (
-                            <div className="text-[10px] text-gray-500 text-center py-2 font-mono">
-                              {currentStock?.name || '선택'} 종목의 매수/매도 진행 로그가 없습니다.
-                            </div>
-                          );
-                        }
-                        return <div>{allLogItems}</div>;
-                      })()
-                    )}
-                  </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
               );
             })()}
