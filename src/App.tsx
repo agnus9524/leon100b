@@ -4473,21 +4473,59 @@ setGapInventory(nextInv);
   }, []);
 
   // ============================================================
-  // 🔄 추천종목 목록 로딩 — 실시간 전략센서 분석을 실제로 사용한다
+  // 🔄 추천종목 목록 로딩 — 실제 코스피 시장을 거래량 기준으로 스캔한다
   // ------------------------------------------------------------
-  // 이전에는 kisService.getScalperRecommendations()만 호출했는데, 이 함수는
-  // 백엔드 API가 실패하면 곧바로 "고정된 fallback 데이터"로 넘어가도록 되어 있었다.
-  // 로컬에 detectStockStrategies 기반 실시간 분석 엔진(generateRealtimeRecommendations)이
-  // 이미 만들어져 있었는데도 실제로는 어디서도 호출되지 않고 있었다 — 이게 "왜 항상
-  // 똑같은 종목만 나오는지"의 진짜 원인이다. 여기서 그 엔진을 1순위로 사용하고,
-  // 결과가 부족할 때만 백엔드/기본 목록으로 보강한다.
+  // 이전에는 앱이 미리 추적 중인 "예시 등록 종목"(INITIAL_STOCKS_KR, 25개)만 후보로 썼기 때문에
+  // 실제 시장과 무관하게 항상 같은 종목군에서만 추천이 나왔다. 이제는 KIS 거래량순위 API로
+  // 지금 이 순간 실제로 거래량이 많은 종목들을 먼저 가져오고, 그 위에서 전략센서 분석을 돌린다.
   // ============================================================
   const loadScalperRecommendations = useCallback(async (): Promise<ScalperRecommendation[]> => {
-    const candidatePool = stocksRef.current.filter(s => !/^[A-Za-z]/.test(s.symbol) && s.market !== 'US' && s.price > 0);
-    let list: ScalperRecommendation[] = candidatePool.length > 0
-      ? kisService.generateRealtimeRecommendations(candidatePool, detectStockStrategies)
-      : [];
+    let list: ScalperRecommendation[] = [];
 
+    // 1순위: 실제 코스피 거래량 순위 스캔 — 지금 시장에서 진짜 거래량이 많은 종목들
+    if (kisConfig.isConnected) {
+      try {
+        const volumeLeaders = await kisService.getVolumeRanking('J', 40);
+        if (volumeLeaders.length > 0) {
+          const candidateStocks: Stock[] = volumeLeaders.map(v => {
+            // 실시간 분봉 이력 없이도 detectStockStrategies가 의미 있는 판단을 할 수 있도록,
+            // 등락률(changePercent)을 반영해 추세가 있는 근사 이력을 만든다(완전 평탄한 값보다 낫다).
+            const prevPrice = v.changePercent !== 0 ? v.price / (1 + v.changePercent / 100) : v.price;
+            const history = Array.from({ length: 20 }, (_, i) => ({
+              time: `${i}:00`,
+              price: prevPrice + (v.price - prevPrice) * (i / 19)
+            }));
+            return {
+              symbol: v.symbol,
+              name: v.name,
+              price: v.price,
+              change: Number((v.price - prevPrice).toFixed(0)),
+              changePercent: v.changePercent,
+              volume: v.volume,
+              history,
+              market: 'KR' as const,
+              isAI: false
+            };
+          });
+          list = kisService.generateRealtimeRecommendations(candidateStocks, detectStockStrategies);
+        }
+      } catch (err) {
+        console.warn('[거래량 순위 기반 추천 실패]', err);
+      }
+    }
+
+    // 2순위: 거래량 순위 스캔이 안 되면(KIS 미연동 등), 현재 추적 중인 종목 풀로 분석
+    if (list.length < MAX_SCALPER_RECOMMENDATIONS) {
+      const candidatePool = stocksRef.current.filter(s => !/^[A-Za-z]/.test(s.symbol) && s.market !== 'US' && s.price > 0);
+      if (candidatePool.length > 0) {
+        const existingSymbols = new Set(list.map(r => r.symbol));
+        const supplement = kisService.generateRealtimeRecommendations(candidatePool, detectStockStrategies)
+          .filter(r => !existingSymbols.has(r.symbol));
+        list = [...list, ...supplement];
+      }
+    }
+
+    // 3순위: 그래도 부족하면 백엔드/기본 목록으로 보강
     if (list.length < MAX_SCALPER_RECOMMENDATIONS) {
       try {
         const fallback = await kisService.getScalperRecommendations();
@@ -4504,8 +4542,11 @@ setGapInventory(nextInv);
       }
     }
 
-    return list.slice(0, MAX_SCALPER_RECOMMENDATIONS);
-  }, [detectStockStrategies]);
+    return list
+      .sort((a, b) => b.scalpingScore - a.scalpingScore)
+      .slice(0, MAX_SCALPER_RECOMMENDATIONS)
+      .map((item, idx) => ({ ...item, rank: idx + 1 }));
+  }, [detectStockStrategies, kisConfig.isConnected]);
 
   const handleOpenScalperRecommendations = useCallback(async () => {
     setShowScalperRecModal(true);
@@ -8696,7 +8737,20 @@ const isProfitTarget = sellSignal;
   return (
     <div className="min-h-screen bg-sleek-bg text-slate-200 flex flex-col font-sans select-none overflow-x-hidden">
       <header className="h-auto md:h-[60px] border-b border-sleek-border glass-header flex flex-col md:grid md:grid-cols-[1fr_auto_1fr] items-center px-6 py-4 md:py-0 sticky top-0 z-50 gap-4 md:gap-2">
-        <div className="flex items-center gap-4 md:justify-self-start">
+        {/* 프로그램 이름 — 모바일에서는 맨 위, 데스크톱에서는 헤더 정중앙(2번째 grid 컬럼)에 배치 */}
+        <div className="flex items-center gap-2 order-1 md:order-2 md:justify-self-center md:col-start-2">
+          <div className="w-6 h-6 bg-sleek-blue rounded-md flex items-center justify-center">
+            <Bot className="w-4 h-4 text-white" />
+          </div>
+          <h1 className="text-[16px] md:text-[18px] font-extrabold tracking-tighter uppercase relative whitespace-nowrap">
+            <span className="text-sleek-blue">LEO</span> SCALPER BOT <span className="text-white/40 font-normal ml-2 text-xl tracking-widest">PRO</span>
+          {currentUser?.email === "agnus9524@gmail.com" && (
+            <span className="absolute -top-1 -right-8 bg-sleek-blue text-[white] text-[7px] px-1 rounded-sm font-black tracking-widest leading-normal">SUPER</span>
+          )}
+        </h1>
+      </div>
+
+        <div className="flex items-center gap-4 order-2 md:order-1 md:justify-self-start md:col-start-1">
           <div className="flex bg-black/40 px-3 py-1.5 rounded-xl border border-white/10 items-center gap-2">
             <SouthKoreaFlag />
             <span className="text-[11px] font-black text-white">국내주식 (KRX)</span>
@@ -8709,21 +8763,8 @@ const isProfitTarget = sellSignal;
           )}
         </div>
 
-        {/* 프로그램 이름 — 화면(헤더) 정중앙에 배치 */}
-        <div className="flex items-center gap-2 md:justify-self-center">
-          <div className="w-6 h-6 bg-sleek-blue rounded-md flex items-center justify-center">
-            <Bot className="w-4 h-4 text-white" />
-          </div>
-          <h1 className="text-[16px] md:text-[18px] font-extrabold tracking-tighter uppercase relative whitespace-nowrap">
-            <span className="text-sleek-blue">LEO</span> SCALPER BOT <span className="text-white/40 font-normal ml-2 text-xl tracking-widest">PRO</span>
-          {currentUser?.email === "agnus9524@gmail.com" && (
-            <span className="absolute -top-1 -right-8 bg-sleek-blue text-[white] text-[7px] px-1 rounded-sm font-black tracking-widest leading-normal">SUPER</span>
-          )}
-        </h1>
-      </div>
-
-        {/* KIS 토큰/연동설정/Admin/로그인/로그아웃 — 모바일에서는 중앙 정렬로 차례대로 배치 */}
-        <div className="flex items-center justify-center md:justify-self-end gap-2.5 flex-wrap">
+        {/* KIS 토큰/연동설정/Admin/로그인/로그아웃 — 모바일에서는 제목 다음, 중앙 정렬로 차례대로 배치 */}
+        <div className="flex items-center justify-center order-3 md:justify-self-end md:col-start-3 gap-2.5 flex-wrap">
           {/* KIS OAuth Token Validity Status Card */}
           <div 
             onClick={() => setShowKisModal(true)}

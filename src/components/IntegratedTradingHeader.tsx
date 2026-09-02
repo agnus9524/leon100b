@@ -73,11 +73,11 @@ const TickFeed: React.FC<{ symbol: string; price: number; formatCurrency: (n: nu
   }, [symbol, price]);
 
   return (
-    <div className="w-[104px] shrink-0 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col min-w-0 shadow-inner">
+    <div className="w-full lg:w-[104px] shrink-0 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col min-w-0 shadow-inner">
       <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
         <span className="text-[9.5px] font-black text-slate-300 uppercase tracking-wider">체결가</span>
       </div>
-      <div className="flex-1 overflow-y-auto custom-scrollbar space-y-0.5 max-h-[220px]">
+      <div className="flex-1 overflow-hidden space-y-0.5 max-h-[220px]">
         {ticks.length === 0 ? (
           <div className="text-[9px] text-slate-500 text-center py-4">체결 대기중</div>
         ) : (
@@ -1169,11 +1169,11 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
       </div>
 
       {/* 2열: 실시간 체결 내역(왼쪽) + 실시간 잔량 호가창(4호가, 오른쪽) */}
-        <div className="lg:col-start-2 flex items-stretch gap-2 min-w-0" style={{ order: 2, gridRowStart: 2 }}>
+        <div className="lg:col-start-2 flex flex-col lg:flex-row items-stretch gap-2 min-w-0" style={{ order: 2, gridRowStart: 2 }}>
         {selectedStock && (
           <TickFeed symbol={selectedStock.symbol} price={price} formatCurrency={formatCurrency} />
         )}
-        <div className="flex-1 max-w-[300px] bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
+        <div className="flex-1 lg:max-w-[300px] bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
           <div>
             <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
               <span className="text-[10.5px] font-black text-slate-300 uppercase tracking-wider flex items-center gap-1">
