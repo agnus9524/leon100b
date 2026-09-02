@@ -2305,6 +2305,42 @@ setGapInventory(nextInv);
   const autoSellInFlightRef = React.useRef<Set<string>>(new Set());
   const isExecutingRef = React.useRef<boolean>(false);
   const pendingTradeKeysRef = React.useRef<Set<string>>(new Set());
+
+  // ============================================================
+  // 🛑 네트워크/API 과부하 시 자동 정지 안전장치
+  // ------------------------------------------------------------
+  // 목적은 단순하다 — 최고의 수익을 내는 것. 그러려면 시세/체결 데이터가
+  // 신뢰할 수 없는 상태(네트워크 지연, API 실패 급증)에서는 매매를 계속하면
+  // 안 된다. kisService가 최근 30초간의 API 호출 결과를 추적하고 있으므로,
+  // 여기서는 그 상태를 주기적으로 확인해서 문제가 있으면 전체 봇을 즉시
+  // 정지시킨다.
+  // ============================================================
+  const emergencyStoppedRef = React.useRef(false);
+  useEffect(() => {
+    const checkInterval = setInterval(() => {
+      const anyBotActive = isGapBotActiveRef.current || scalperTabsRef.current.some(t => t.isBotActive);
+      if (!anyBotActive) {
+        emergencyStoppedRef.current = false; // 봇이 꺼져있으면 상태 플래그 초기화
+        return;
+      }
+
+      const health = kisService.getNetworkHealth();
+      if (!health.healthy) {
+        if (!emergencyStoppedRef.current) {
+          emergencyStoppedRef.current = true;
+          setIsGapBotActive(false);
+          setScalperInventory(prev => prev.map(item => ({ ...item, strategy: { ...item.strategy, isBotActive: false } })));
+          addLog('SYSTEM', '매도', 0, 0, `[긴급 정지] 네트워크/API 상태 불안정으로 전체 스캘퍼를 자동 정지했습니다 — ${health.reason || '알 수 없는 원인'}`);
+          showNotification(`⚠️ [긴급 정지] 네트워크/API 상태가 불안정하여 전체 스캘퍼를 자동 정지했습니다. (${health.reason || '알 수 없는 원인'})`, "error");
+        }
+      } else {
+        emergencyStoppedRef.current = false;
+      }
+    }, 5000); // 5초마다 상태 점검
+
+    return () => clearInterval(checkInterval);
+  }, []);
+
   useEffect(() => {
     pendingBuyOrdersRef.current = pendingBuyOrders;
   }, [pendingBuyOrders]);

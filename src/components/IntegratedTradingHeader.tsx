@@ -33,6 +33,72 @@ interface TradeMarker {
   type: 'BUY' | 'SELL';
 }
 
+// ============================================================
+// 📋 실시간 체결 내역 (Time & Sales)
+// ------------------------------------------------------------
+// KIS REST API는 틱 단위 실시간 체결 스트림을 제공하지 않으므로(웹소켓 필요),
+// 폴링으로 들어오는 가격 변화를 감지해서 "체결"로 간주하고 표시한다.
+// 완벽한 실제 틱 데이터는 아니지만, 가격이 실제로 바뀔 때마다 기록되므로
+// 스캘핑 중 흐름을 파악하는 용도로는 충분하다.
+// ============================================================
+interface TickEntry { time: string; price: number; direction: 'UP' | 'DOWN' | 'FLAT'; }
+
+const TickFeed: React.FC<{ symbol: string; price: number; formatCurrency: (n: number) => string }> = ({ symbol, price, formatCurrency }) => {
+  const [ticks, setTicks] = React.useState<TickEntry[]>([]);
+  const lastPriceRef = React.useRef<number>(0);
+  const lastSymbolRef = React.useRef<string>('');
+
+  React.useEffect(() => {
+    if (lastSymbolRef.current !== symbol) {
+      // 종목이 바뀌면 이전 종목의 체결 내역은 지운다
+      lastSymbolRef.current = symbol;
+      lastPriceRef.current = 0;
+      setTicks([]);
+      return;
+    }
+    if (!price || price <= 0) return;
+    if (lastPriceRef.current === 0) {
+      lastPriceRef.current = price;
+      return;
+    }
+    if (price === lastPriceRef.current) return; // 가격 변화가 없으면 새 틱으로 기록하지 않음
+
+    const direction: TickEntry['direction'] = price > lastPriceRef.current ? 'UP' : 'DOWN';
+    lastPriceRef.current = price;
+    setTicks(prev => [{
+      time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
+      price,
+      direction
+    }, ...prev].slice(0, 30));
+  }, [symbol, price]);
+
+  return (
+    <div className="w-[104px] shrink-0 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col min-w-0 shadow-inner">
+      <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
+        <span className="text-[9.5px] font-black text-slate-300 uppercase tracking-wider">체결가</span>
+      </div>
+      <div className="flex-1 overflow-y-auto custom-scrollbar space-y-0.5 max-h-[220px]">
+        {ticks.length === 0 ? (
+          <div className="text-[9px] text-slate-500 text-center py-4">체결 대기중</div>
+        ) : (
+          ticks.map((t, idx) => (
+            <div
+              key={idx}
+              className={cn(
+                "flex items-center justify-between text-[9.5px] font-mono font-bold px-1 py-0.5 rounded",
+                t.direction === 'UP' ? "text-rose-400 bg-rose-500/10" : t.direction === 'DOWN' ? "text-sky-400 bg-sky-500/10" : "text-slate-400"
+              )}
+            >
+              <span className="opacity-70">{t.time.slice(0, 5)}</span>
+              <span>{formatCurrency(t.price)}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+};
+
 const CandlestickChart: React.FC<{
   symbol: string;
   name: string;
@@ -642,11 +708,6 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                           e.stopPropagation();
                           handleAddStock(s.symbol, s as any, s.name);
                         }}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          handleAddStock(s.symbol, s as any, s.name);
-                        }}
                         className={cn(
                           "w-full flex items-center justify-between p-3 transition-colors text-left cursor-pointer group",
                           isHighlighted ? "bg-sleek-blue/25" : "hover:bg-sleek-blue/20 active:bg-sleek-blue/30"
@@ -1110,8 +1171,12 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         {/* 3. 실시간 잔량 호가창 (4호가) (col-span-3) */}
       </div>
 
-      {/* 2열: 실시간 잔량 호가창 (4호가) */}
-        <div className="lg:col-start-2 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner" style={{ order: 2 }}>
+      {/* 2열: 실시간 체결 내역(왼쪽) + 실시간 잔량 호가창(4호가, 오른쪽) */}
+        <div className="lg:col-start-2 flex items-stretch gap-2 min-w-0" style={{ order: 2 }}>
+        {selectedStock && (
+          <TickFeed symbol={selectedStock.symbol} price={price} formatCurrency={formatCurrency} />
+        )}
+        <div className="flex-1 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
           <div>
             <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
               <span className="text-[10.5px] font-black text-slate-300 uppercase tracking-wider flex items-center gap-1">
@@ -1207,6 +1272,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
               </div>
             </div>
           )}
+        </div>
         </div>
 
         {/* 4. 스캘퍼 등록 종목 & 추천종목 찾기 (col-span-3) */}

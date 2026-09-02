@@ -35,6 +35,40 @@ class KISService {
   private pendingTokenPromise: Promise<string> | null = null;
   private onTokenUpdate: ((token: string, expiresAt: number, issuedAt: number) => void) | null = null;
 
+  // 🩺 네트워크/API 상태 모니터링 — 스캘핑 중 API 실패/지연이 계속되면 매매를 멈추기 위한 최근 호출 기록
+  private recentCallResults: { timestamp: number; success: boolean; latencyMs: number }[] = [];
+  private readonly HEALTH_WINDOW_MS = 30000;
+  private readonly HEALTH_MIN_SAMPLES = 4;
+  private readonly HEALTH_FAILURE_RATE_THRESHOLD = 0.5;
+  private readonly HEALTH_LATENCY_THRESHOLD_MS = 4000;
+
+  private recordCallResult(success: boolean, latencyMs: number) {
+    const now = Date.now();
+    this.recentCallResults.push({ timestamp: now, success, latencyMs });
+    if (this.recentCallResults.length > 200) {
+      this.recentCallResults = this.recentCallResults.slice(-200);
+    }
+  }
+
+  public getNetworkHealth(): { healthy: boolean; failureRate: number; avgLatencyMs: number; sampleCount: number; reason?: string } {
+    const now = Date.now();
+    const recent = this.recentCallResults.filter(r => now - r.timestamp <= this.HEALTH_WINDOW_MS);
+    if (recent.length < this.HEALTH_MIN_SAMPLES) {
+      return { healthy: true, failureRate: 0, avgLatencyMs: 0, sampleCount: recent.length };
+    }
+    const failures = recent.filter(r => !r.success).length;
+    const failureRate = failures / recent.length;
+    const avgLatencyMs = recent.reduce((a, r) => a + r.latencyMs, 0) / recent.length;
+    const healthy = failureRate < this.HEALTH_FAILURE_RATE_THRESHOLD && avgLatencyMs < this.HEALTH_LATENCY_THRESHOLD_MS;
+    let reason: string | undefined;
+    if (!healthy) {
+      reason = failureRate >= this.HEALTH_FAILURE_RATE_THRESHOLD
+        ? `최근 API 호출 실패율 ${(failureRate * 100).toFixed(0)}% (${failures}/${recent.length}건 실패)`
+        : `평균 응답 지연 ${(avgLatencyMs / 1000).toFixed(1)}초`;
+    }
+    return { healthy, failureRate, avgLatencyMs, sampleCount: recent.length, reason };
+  }
+
   private get baseUrl() {
     return '/api/kis';
   }
@@ -490,10 +524,12 @@ strat.hasVolumeMomentum
   private async _getPriceInternal(symbol: string): Promise<NormalizedPrice | null> {
     // Determine if KR or US (approximate)
     const isKR = /^\d{6}$/.test(symbol);
+    const callStartedAt = Date.now();
     try {
      const data =
 await this.getDomesticPrice(symbol);
           if (data && data.stck_prpr) {
+            this.recordCallResult(true, Date.now() - callStartedAt);
             const isFalling = data.prdy_vrss_sign === '4' || data.prdy_vrss_sign === '5';
             const rawChange = Math.abs(Number(data.prdy_vrss || 0));
             const change = isFalling ? -rawChange : rawChange;
@@ -511,8 +547,9 @@ await this.getDomesticPrice(symbol);
               name: data.hts_kor_isnm || undefined
             };
           }
-       
+          this.recordCallResult(false, Date.now() - callStartedAt);
     } catch (e) {
+      this.recordCallResult(false, Date.now() - callStartedAt);
       console.warn(`[KIS Service] Failed to fetch price for ${symbol}:`, e);
     }
     return null;
