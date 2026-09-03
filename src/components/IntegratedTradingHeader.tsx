@@ -596,7 +596,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         <div className="flex flex-col gap-2.5 min-w-0 lg:col-start-1" style={{ order: 1, gridRowStart: 1 }}>
           
           {/* 종목 검색 & 추가 인풋 (기존 대비 2배 폭) */}
-          <div ref={searchRef} className="relative z-[100] w-full sm:w-[22rem] md:w-96">
+          <div ref={searchRef} className="relative z-[100] w-full lg:max-w-[22rem]">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
             <input 
               ref={searchInputRef}

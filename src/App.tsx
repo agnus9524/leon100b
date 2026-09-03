@@ -9120,7 +9120,7 @@ const isProfitTarget = sellSignal;
         </section>
 
         {/* Right Aside: Real-time Status Window & Trade Logs */}
-        <aside className="border-t lg:border-t-0 lg:border-l border-white/5 bg-black/30 flex flex-col p-4 sm:p-5 lg:p-6 gap-4 sm:gap-6 overflow-hidden">
+        <aside className="border-t lg:border-t-0 lg:border-l border-white/5 bg-black/30 flex flex-col lg:justify-end p-4 sm:p-5 lg:p-6 gap-4 sm:gap-6 overflow-hidden">
             
             {/* 1. Trade Logs / Active Slot Monitor (Top Right) */}
             {(() => {
@@ -9134,7 +9134,7 @@ const isProfitTarget = sellSignal;
               });
 
               return (
-                <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-0 overflow-hidden shadow-2xl">
+                <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col h-[220px] shrink-0 overflow-hidden shadow-2xl">
                   <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
                     <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
                       <Layers className="w-4 h-4 text-sleek-blue" /> 선택 종목 슬롯 현황
@@ -9286,7 +9286,7 @@ const isProfitTarget = sellSignal;
             })()}
 
             {/* 1.5 GLOBAL TRADE LOGS — 선택된 종목과 무관하게 등록된 모든 종목의 이벤트가 시간순으로 표시된다 */}
-            <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col flex-1 min-h-0 overflow-hidden shadow-2xl">
+            <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col h-[220px] shrink-0 overflow-hidden shadow-2xl">
               <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
                 <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
                   <Layers className="w-4 h-4 text-emerald-400" /> GLOBAL TRADE LOGS
@@ -9338,7 +9338,9 @@ const isProfitTarget = sellSignal;
                       </div>
                     );
                   }
-                  return filteredLogs.map((log, idx) => {
+                  // 패널이 작아졌으니(220px) 실제로 화면에 보일 수 있는 만큼만 렌더링한다.
+                  // 나머지는 굳이 DOM에 그리지 않아도 되므로(overflow-hidden으로 어차피 안 보임) 가볍게 유지한다.
+                  return filteredLogs.slice(0, 12).map((log, idx) => {
                     const isBuy = log.type === 'BUY' || log.type === '매수';
                     return (
                       <div
