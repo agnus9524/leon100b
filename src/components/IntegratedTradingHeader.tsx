@@ -73,7 +73,7 @@ const TickFeed: React.FC<{ symbol: string; price: number; formatCurrency: (n: nu
   }, [symbol, price]);
 
   return (
-    <div className="w-full lg:w-[104px] shrink-0 bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col min-w-0 shadow-inner">
+    <div className="w-full bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col min-w-0 shadow-inner">
       <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
         <span className="text-[9.5px] font-black text-slate-300 uppercase tracking-wider">체결가</span>
       </div>
@@ -590,13 +590,15 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
       {/* ─────────────────────────────────────────────────────────────
           1행: 종목 검색/추가, 종목명/체결가, 그리고 6대 전략 센서 버튼
           ───────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 pb-2.5 border-b border-white/10">
+      <div className="flex flex-col gap-3 pb-2.5 border-b border-white/10">
 
-        {/* 1열: 종목 검색창 → 종목명 → 현재체결가 → 4/4 올-그린 센서 → 상태메시지 */}
-        <div className="flex flex-col gap-2.5 min-w-0 lg:col-start-1" style={{ order: 1, gridRowStart: 1 }}>
-          
-          {/* 종목 검색 & 추가 인풋 (기존 대비 2배 폭) */}
-          <div ref={searchRef} className="relative z-[100] w-full lg:max-w-[22rem]">
+      {/* 1번째 반응형 창 — SCALPER INVENTORY (종목명 검색창 포함) */}
+        {/* 4. 스캘퍼 등록 종목 & 추천종목 찾기 (col-span-3) */}
+        <div className="bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0 shadow-inner">
+          <div className="flex items-center justify-between border-b border-white/10 pb-1.5 gap-1.5 flex-wrap">
+            <div className="flex items-center gap-1.5 min-w-0">
+              
+          <div ref={searchRef} className="relative z-[100] flex-1 min-w-[130px] max-w-[220px]">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
             <input 
               ref={searchInputRef}
@@ -740,56 +742,279 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
               )}
             </AnimatePresence>
           </div>
+              {/* 추천종목 찾기 버튼 */}
+              <button
+                type="button"
+                onClick={handleOpenScalperRecommendations}
+                disabled={isScalperRecLoading || isRefreshingTop3}
+                className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-600/90 to-teal-600/90 hover:from-emerald-500 hover:to-teal-500 text-white border border-emerald-400/40 text-[11px] font-black font-mono flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.3)] active:scale-95 shrink-0 disabled:opacity-50"
+                title="한국투자증권 실시간 수급 및 거래량 데이터를 분석하여 스캘퍼 최적 추천종목 8선을 확인합니다."
+              >
+                {(isScalperRecLoading || isRefreshingTop3) ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-200" />
+                ) : (
+                  <Flame className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-pulse" />
+                )}
+                <span>{(isScalperRecLoading || isRefreshingTop3) ? "추천 분석중..." : "추천종목 찾기"}</span>
+              </button>
 
-          {/* 선택된 종목 기본 정보 */}
-          {selectedStock && (
-            <div className="flex flex-col gap-2.5 min-w-0">
-              
-              {/* 종목명 & 종목코드 & 보유/주문가능수량 */}
-              <div className="w-full flex flex-col justify-center overflow-hidden">
-                <div className="flex items-center gap-1.5 min-w-0">
-                  <h2 className="text-base sm:text-lg font-black text-white tracking-tight leading-none truncate" title={selectedStock.name}>
-                    {selectedStock.name}
-                  </h2>
-                  <span className="text-[10px] font-mono font-bold text-slate-400 bg-black/40 px-1.5 py-0.5 rounded border border-white/10 shrink-0">
-                    {selectedStock.symbol}
+            </div>
+
+            <div className="flex items-center gap-1.5 shrink-0">
+              <span className="text-[10px] font-mono font-bold text-sleek-blue bg-sleek-blue/10 px-1.5 py-0.5 rounded border border-sleek-blue/20">
+                {scalperTabs.filter(tab => {
+                  const isUS = /^[A-Z]/.test(tab.symbol);
+                  return marketType === 'US' ? isUS : !isUS;
+                }).length}/{maxInventoryPerMarket}
+              </span>
+            </div>
+          </div>
+
+          <div className="space-y-1 max-h-[175px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
+            {scalperTabs.filter(tab => {
+              const isUS = /^[A-Z]/.test(tab.symbol);
+              return marketType === 'US' ? isUS : !isUS;
+            }).map(tab => {
+              const isSelected = tab.id === activeTabId;
+              const tabStock = stocks.find(s => s.symbol === tab.symbol) || 
+                               stocksCache.KR?.find(s => s.symbol === tab.symbol) ||
+                               stocksCache.US?.find(s => s.symbol === tab.symbol) ||
+                               (marketType === 'KR' 
+                                 ? INITIAL_STOCKS_KR.find(s => s.symbol === tab.symbol) 
+                                 : INITIAL_STOCKS.find(s => s.symbol === tab.symbol));
+              const tabName = (tab.name && tab.name !== tab.symbol) ? tab.name : getResolvedStockName(tab.symbol, tabStock);
+              // 가격은 반드시 symbol 기준 단일 출처(scalperInventory.market.currentPrice = tab.price)를 우선한다.
+              // stocks 배열 조회(tabStock)는 아직 market 동기화가 반영되기 전 순간을 위한 보조 수단일 뿐이다.
+              const tabPrice = (tab.price && tab.price > 0) ? tab.price : (tabStock?.price || 0);
+              const isPriceLoading = tab.priceStatus === 'LOADING' && tabPrice <= 0;
+
+              return (
+                <div
+                  key={tab.id}
+                  onClick={() => handleSwitchTab(tab.id)}
+                  className={cn(
+                    "px-2 py-1.5 rounded-xl border flex items-center justify-between gap-1.5 cursor-pointer transition-all w-full text-left min-w-0 font-mono select-none group",
+                    isSelected
+                      ? "bg-sleek-blue/25 border-sleek-blue text-white shadow-md font-black ring-1 ring-sleek-blue/60"
+                      : "bg-black/50 border-white/10 hover:bg-white/10 text-slate-300 hover:text-white"
+                  )}
+                  title={`${tabName} (${tab.symbol}) 탭으로 전환`}
+                >
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
+                    <span className={cn(
+                      "w-1.5 h-1.5 rounded-full shrink-0",
+                      tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" : "bg-slate-500"
+                    )} />
+                    <span className="font-bold text-xs truncate text-white">{tabName}</span>
+                    <span className="text-[9.5px] text-slate-400 shrink-0">
+                      보유 <strong className="text-slate-200">{(tab.holdingQty || 0).toLocaleString()}</strong>
+                    </span>
+                    <span className="text-[9.5px] text-slate-400 shrink-0">
+                      주문가능 <strong className="text-sleek-blue">{(tab.orderableQty || 0).toLocaleString()}</strong>
+                    </span>
+                    <span className={cn(
+                      "text-[9.5px] font-bold shrink-0",
+                      (tab.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400"
+                    )}>
+                      {(tab.changePercent || 0) >= 0 ? '+' : ''}{(tab.changePercent || 0).toFixed(2)}%
+                    </span>
+                  </div>
+
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {isPriceLoading ? (
+                      <span className="text-[10px] font-bold text-slate-500 animate-pulse">연결 중...</span>
+                    ) : (
+                      <span className="flex items-center gap-1 text-xs font-black font-mono text-rose-500 tabular-nums">
+                        <span className="text-[9px] font-bold text-slate-400">현재 체결가</span>
+                        {formatCurrency(tabPrice)}
+                      </span>
+                    )}
+
+                    {tab.isBotActive && (
+                      <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/30 shrink-0">
+                        ON
+                      </span>
+                    )}
+
+                    <select
+                      value={tab.tradeQuantity}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        e.stopPropagation();
+                        updateTab(tab.symbol, { tradeQuantity: Number(e.target.value) });
+                      }}
+                      className="shrink-0 bg-black/60 border border-white/10 rounded-md text-[10px] font-bold text-slate-300 outline-none cursor-pointer appearance-none px-1 py-0.5 hover:border-sleek-blue/50"
+                      title={`${tabName} 1회 거래수량 (종목별 개별 설정)`}
+                    >
+                      {[1, 2, 3, 5, 10, 15, 20, 30, 50, 100].map(val => (
+                        <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
+                      ))}
+                    </select>
+
+                    <button
+                      type="button"
+                      onClick={(e) => closeScalperTab(tab.id, e)}
+                      className="p-1 rounded-md text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 transition-all opacity-70 group-hover:opacity-100 cursor-pointer"
+                      title={`${tabName} 탭 닫기`}
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+      {/* 종목코드/명 검색창 대신 새로 배치: 2번째 반응형 창 — 실시간 체결 내역(체결가창), 가로폭을 넓힘 */}
+        {selectedStock && (
+          <TickFeed symbol={selectedStock.symbol} price={price} formatCurrency={formatCurrency} />
+        )}
+
+      {/* 3번째 반응형 창 — 실시간 잔량 호가창 (4호가) */}
+
+        <div className="w-full bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
+          <div>
+            <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
+              <span className="text-[10.5px] font-black text-slate-300 uppercase tracking-wider flex items-center gap-1">
+                <Activity className="w-3 h-3 text-sleek-blue" />
+                실시간 잔량 호가창 (4호가)
+                {orderBookData?.isRealData && (
+                  <span className="text-[8.5px] px-1 rounded bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 font-mono">
+                    LIVE
+                  </span>
+                )}
+              </span>
+              {selectedStock && (
+                <span className="text-[9.5px] font-mono text-slate-400 truncate max-w-[80px]">
+                  {selectedStock.symbol}
+                </span>
+              )}
+            </div>
+
+            {orderBookData && selectedStock ? (
+              <>
+                {/* Ask Levels (매도 4~1호가) */}
+                <div className="space-y-0.5">
+                  {orderBookData.askLevels.map((lvlPrice, idx) => {
+                    const vol = orderBookData.askVolumes[idx];
+                    const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
+                    const barPct = Math.min(100, Math.round((vol / orderBookData.maxLevelVol) * 100));
+                    return (
+                      <div key={`top-ask-${idx}`} className="flex items-center justify-between h-3.5 px-1 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
+                        <div className="absolute right-0 top-0 bottom-0 bg-sky-500/30 border-l border-sky-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
+                        <span className="w-11 shrink-0 text-[8.5px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}</span>
+                        <span className={cn(
+                          "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[9.5px] whitespace-nowrap px-0.5",
+                          isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-200"
+                        )}>
+                          {formatCurrency(lvlPrice)}
+                        </span>
+                        <span className="w-12 shrink-0 text-right text-sky-100 font-bold font-mono tabular-nums text-[8.5px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Spread Line (현재 체결가) */}
+                <div className="my-0.5 h-4 px-1 bg-white/5 border-y border-white/10 flex items-center justify-between rounded font-mono tabular-nums">
+                  <span className="text-[8.5px] font-black text-slate-400 uppercase shrink-0">체결가</span>
+                  <span className={cn("font-black text-[10.5px] font-mono tabular-nums animate-pulse", (selectedStock.change || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
+                    {formatCurrency(selectedStock.price)}
+                  </span>
+                  <span className={cn("text-[8.5px] font-mono tabular-nums font-bold shrink-0", (selectedStock.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
+                    {(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%
                   </span>
                 </div>
-                <div className="text-[11px] text-slate-400 mt-0.5 flex items-center gap-2 font-mono leading-tight">
-                  <div>보유: <strong className="text-white font-bold">{heldQty.toLocaleString()}주</strong></div>
-                  <div>주문가능: <strong className="text-sleek-blue font-bold">{displayBuyableQty.toLocaleString()}주</strong></div>
+
+                {/* Bid Levels (매수 1~4호가) */}
+                <div className="space-y-0.5">
+                  {orderBookData.bidLevels.map((lvlPrice, idx) => {
+                    const vol = orderBookData.bidVolumes[idx];
+                    const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
+                    const barPct = Math.min(100, Math.round((vol / orderBookData.maxLevelVol) * 100));
+                    return (
+                      <div key={`top-bid-${idx}`} className="flex items-center justify-between h-3.5 px-1 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
+                        <div className="absolute right-0 top-0 bottom-0 bg-rose-500/30 border-l border-rose-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
+                        <span className="w-11 shrink-0 text-[8.5px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}</span>
+                        <span className={cn(
+                          "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[9.5px] whitespace-nowrap px-0.5",
+                          isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-200"
+                        )}>
+                          {formatCurrency(lvlPrice)}
+                        </span>
+                        <span className="w-12 shrink-0 text-right text-rose-100 font-bold font-mono tabular-nums text-[8.5px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
+                      </div>
+                    );
+                  })}
                 </div>
+              </>
+            ) : (
+              <div className="py-8 text-center text-slate-500 text-xs font-mono">
+                종목 선택 대기 중
               </div>
+            )}
+          </div>
 
-              {/* 현재 체결가 및 전일 대비 */}
-              <div className="w-full bg-black/70 px-3 py-1.5 rounded-2xl border border-white/20 shadow-xl flex items-center gap-3 backdrop-blur-md">
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-black text-amber-300 flex items-center gap-1">
-                    <Activity className="w-3 h-3 text-amber-400" /> 현재 체결가
-                  </span>
-                  <span className="text-base sm:text-lg font-black text-white font-mono tracking-tight drop-shadow-md">
-                    {formatCurrency(price, false, isUS ? 'US' : 'KR')}
-                  </span>
-                </div>
-                <div className="h-6 w-px bg-white/15" />
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-black text-slate-400">전일 대비</span>
-                  <span className={cn(
-                    "text-xs font-black font-mono flex items-center gap-0.5 px-1.5 py-0.2 rounded border",
-                    isUp ? "text-rose-400 bg-rose-500/15 border-rose-500/30" : "text-sky-400 bg-sky-500/15 border-sky-500/30"
-                  )}>
-                    {isUp ? <TrendingUp className="w-3 h-3 shrink-0" /> : <TrendingDown className="w-3 h-3 shrink-0" />}
-                    <span>{isUp ? '+' : ''}{changePct.toFixed(2)}%</span>
-                  </span>
-                </div>
+          {/* Order Book Pressure Gauge */}
+          {orderBookData && selectedStock && (
+            <div className="pt-0.5 border-t border-white/5 space-y-0.5">
+              <div className="flex justify-between text-[8px] text-slate-400 font-bold font-sans">
+                <span className="text-sky-400">매도 {formatQuantity(orderBookData.totalAskVolume)} ({orderBookData.askPctVal}%)</span>
+                <span className="text-rose-400">매수 {formatQuantity(orderBookData.totalBidVolume)} ({orderBookData.bidPctVal}%)</span>
               </div>
-
+              <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex">
+                <div className="h-full bg-sky-400 transition-all duration-300" style={{ width: `${orderBookData.askPctVal}%` }} />
+                <div className="h-full bg-rose-400 transition-all duration-300" style={{ width: `${orderBookData.bidPctVal}%` }} />
+              </div>
             </div>
           )}
         </div>
 
+      {/* 4번째 반응형 창 — START AI SCALPER */}
+        {/* 5-1. START AI SCALPER 버튼 (왼쪽) */}
+        <div className="w-full">
+          <button 
+            type="button"
+            onClick={() => {
+              if (!isGapBotActive) {
+                if (gapBuyPrice <= 0 || gapSellPrice <= 0) {
+                  alert("금액 구간(하한선과 상한선)을 정확하게 설정해주세요.");
+                  return;
+                }
+                if (gapBuyPrice >= gapSellPrice) {
+                  alert("상한가는 하한가보다 높은 금액이어야 합니다.");
+                  return;
+                }
+                setLastTradeType(null);
+              }
+              setIsGapBotActive(!isGapBotActive);
+            }}
+            title="현재 선택된 종목의 개별 스캘퍼 시작/정지"
+            className={cn(
+              "w-full py-2 px-3 rounded-xl font-black text-xs italic tracking-tight uppercase shadow-lg transition-all flex items-center justify-center gap-1.5 border cursor-pointer",
+              isGapBotActive 
+                ? "bg-gradient-to-br from-rose-600 to-red-800 text-white border-rose-500/50 hover:scale-[1.02] active:scale-95" 
+                : "bg-gradient-to-br from-sleek-blue to-indigo-700 text-white border-sleek-blue/50 hover:scale-[1.02] active:scale-95"
+            )}
+          >
+            {isGapBotActive ? (
+              <>
+                <Square className="w-3.5 h-3.5 fill-current animate-pulse text-white" />
+                <span>SCALPER STOP</span>
+              </>
+            ) : (
+              <>
+                <Play className="w-3.5 h-3.5 fill-current text-white" />
+                <span>START AI SCALPER</span>
+              </>
+            )}
+          </button>
+        </div>
+
+      {/* 5번째 반응형 창 — 4/4 올-그린 + 개별 센서 버튼 */}
         {/* 1열: 4/4 올-그린 + 4대 개별 전략 센서 버튼 (눌림목/돌파/VWAP/CVD) — 왼쪽 */}
-        <div className="flex items-center gap-1.5 flex-wrap lg:col-start-1" style={{ order: 3, gridRowStart: 3 }}>
+        <div className="flex items-center gap-1.5 flex-wrap">
 
           {/* 🎯 4/4 올-그린 (4대 핵심전략 일괄 선택 토글) — 눌림목 버튼 바로 왼쪽 */}
           <button
@@ -980,8 +1205,9 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
 
         </div>
 
+      {/* 6번째 반응형 창 — 실시간 상태 메시지 */}
         {/* 2열: 실시간 상태 메시지창 — 오른쪽 */}
-        <div className="text-xs sm:text-sm font-mono flex items-center bg-black/40 px-3.5 py-2 rounded-2xl border border-sleek-blue/30 shadow-inner lg:col-start-2" style={{ order: 3, gridRowStart: 3 }}>
+        <div className="text-xs sm:text-sm font-mono flex items-center bg-black/40 px-3.5 py-2 rounded-2xl border border-sleek-blue/30 shadow-inner">
           <div className="flex items-center gap-2.5 w-full overflow-hidden">
             <span className="text-xs font-black text-slate-300 uppercase shrink-0 flex items-center gap-1.5">
               <Activity className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
@@ -997,11 +1223,63 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           3행: 핵심 스캘퍼 5열 종합 제어 대시보드
           (1회거래수량/슬롯/순익, SMART SCALPER, 호가창, 종목관리/추천, START 버튼)
           ───────────────────────────────────────────────────────────── */}
-      <div className="lg:col-span-2 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-stretch text-xs" style={{ order: 10 }}>
+      {/* 7번째 반응형 창 — 탭 순환 컨트롤 */}
+        {/* 5-2. 탭 순환 컨트롤 (오른쪽) */}
+        <div className="w-full">
+          <div className={cn(
+            "flex items-center justify-between rounded-xl border p-1 transition-all shadow-inner",
+            isAutoRotateTabs 
+              ? "bg-purple-500/15 border-purple-500/40 shadow-[0_0_12px_rgba(168,85,247,0.2)]" 
+              : "bg-black/40 border-white/10"
+          )}>
+            <button
+              type="button"
+              onClick={() => setIsAutoRotateTabs(prev => !prev)}
+              className={cn(
+                "flex items-center gap-1 px-2 py-1 text-xs font-mono font-bold transition-all cursor-pointer grow",
+                isAutoRotateTabs ? "text-purple-300 hover:text-purple-200" : "text-gray-400 hover:text-white"
+              )}
+              title={`스캘핑 종목 탭 ${tabRotationInterval}초 간격 자동 순환 ON/OFF`}
+            >
+              <RefreshCw className={cn("w-3.5 h-3.5 text-purple-400", isAutoRotateTabs && "animate-spin-slow")} />
+              <span>탭 순환 {isAutoRotateTabs ? "ON" : "OFF"}</span>
+            </button>
 
-        {/* 고급 설정(1회거래수량/최대슬롯/목표순익/손절/추가매수간격/진입호가/실행속도) 토글.
-            기본값은 숨김이며, 숨긴 자리에는 일/주/월/년 가격 차트가 대신 표시된다. */}
-        <div className="lg:col-span-12 order-0 flex justify-end -mb-1">
+            <div className="h-4 w-px bg-white/15 mx-1" />
+
+            <div className="relative flex items-center pr-1">
+              <select
+                id="scalper-config-tab-rotation-interval-select"
+                aria-label="종목 탭 자동 순환 주기 선택"
+                value={tabRotationInterval}
+                onChange={(e) => {
+                  const val = Number(e.target.value);
+                  setTabRotationInterval(val);
+                  try {
+                    localStorage.setItem('sleek_tab_rotation_interval', String(val));
+                  } catch (err) {
+                    console.error(err);
+                  }
+                }}
+                className={cn(
+                  "bg-transparent text-xs font-mono font-bold focus:outline-none cursor-pointer py-0.5 px-1 rounded transition-all",
+                  isAutoRotateTabs ? "text-purple-300 hover:text-purple-100" : "text-gray-400 hover:text-gray-200",
+                  "[&>option]:bg-slate-900 [&>option]:text-white"
+                )}
+                title="종목 탭 자동 순환 주기 선택 (1초~10초)"
+              >
+                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(sec => (
+                  <option key={sec} value={sec}>
+                    {sec}초
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+      {/* 8번째 반응형 창 — 고급 설정 토글 버튼 */}
+        <div className="flex justify-end -mb-1">
           <button
             type="button"
             onClick={() => setShowAdvancedSettings(v => !v)}
@@ -1011,6 +1289,9 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
             {showAdvancedSettings ? '차트 보기' : '고급 설정 (거래수량/슬롯/순익/손절 등)'}
           </button>
         </div>
+
+      {/* 9번째 반응형 창 — 가격 차트 (또는 고급 설정 패널) */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-stretch text-xs">
 
         {showAdvancedSettings ? (
           <>
@@ -1168,321 +1449,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         {/* 3. 실시간 잔량 호가창 (4호가) (col-span-3) */}
       </div>
 
-      {/* 2열: 실시간 체결 내역(왼쪽) + 실시간 잔량 호가창(4호가, 오른쪽) */}
-        <div className="lg:col-start-2 flex flex-col lg:flex-row items-stretch gap-2 min-w-0" style={{ order: 2, gridRowStart: 2 }}>
-        {selectedStock && (
-          <TickFeed symbol={selectedStock.symbol} price={price} formatCurrency={formatCurrency} />
-        )}
-        <div className="flex-1 lg:max-w-[300px] bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
-          <div>
-            <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
-              <span className="text-[10.5px] font-black text-slate-300 uppercase tracking-wider flex items-center gap-1">
-                <Activity className="w-3 h-3 text-sleek-blue" />
-                실시간 잔량 호가창 (4호가)
-                {orderBookData?.isRealData && (
-                  <span className="text-[8.5px] px-1 rounded bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 font-mono">
-                    LIVE
-                  </span>
-                )}
-              </span>
-              {selectedStock && (
-                <span className="text-[9.5px] font-mono text-slate-400 truncate max-w-[80px]">
-                  {selectedStock.symbol}
-                </span>
-              )}
-            </div>
-
-            {orderBookData && selectedStock ? (
-              <>
-                {/* Ask Levels (매도 4~1호가) */}
-                <div className="space-y-0.5">
-                  {orderBookData.askLevels.map((lvlPrice, idx) => {
-                    const vol = orderBookData.askVolumes[idx];
-                    const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
-                    const barPct = Math.min(100, Math.round((vol / orderBookData.maxLevelVol) * 100));
-                    return (
-                      <div key={`top-ask-${idx}`} className="flex items-center justify-between h-3.5 px-1 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
-                        <div className="absolute right-0 top-0 bottom-0 bg-sky-500/30 border-l border-sky-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
-                        <span className="w-11 shrink-0 text-[8.5px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}</span>
-                        <span className={cn(
-                          "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[9.5px] whitespace-nowrap px-0.5",
-                          isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-200"
-                        )}>
-                          {formatCurrency(lvlPrice)}
-                        </span>
-                        <span className="w-12 shrink-0 text-right text-sky-100 font-bold font-mono tabular-nums text-[8.5px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Spread Line (현재 체결가) */}
-                <div className="my-0.5 h-4 px-1 bg-white/5 border-y border-white/10 flex items-center justify-between rounded font-mono tabular-nums">
-                  <span className="text-[8.5px] font-black text-slate-400 uppercase shrink-0">체결가</span>
-                  <span className={cn("font-black text-[10.5px] font-mono tabular-nums animate-pulse", (selectedStock.change || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
-                    {formatCurrency(selectedStock.price)}
-                  </span>
-                  <span className={cn("text-[8.5px] font-mono tabular-nums font-bold shrink-0", (selectedStock.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
-                    {(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%
-                  </span>
-                </div>
-
-                {/* Bid Levels (매수 1~4호가) */}
-                <div className="space-y-0.5">
-                  {orderBookData.bidLevels.map((lvlPrice, idx) => {
-                    const vol = orderBookData.bidVolumes[idx];
-                    const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
-                    const barPct = Math.min(100, Math.round((vol / orderBookData.maxLevelVol) * 100));
-                    return (
-                      <div key={`top-bid-${idx}`} className="flex items-center justify-between h-3.5 px-1 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
-                        <div className="absolute right-0 top-0 bottom-0 bg-rose-500/30 border-l border-rose-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
-                        <span className="w-11 shrink-0 text-[8.5px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}</span>
-                        <span className={cn(
-                          "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[9.5px] whitespace-nowrap px-0.5",
-                          isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-200"
-                        )}>
-                          {formatCurrency(lvlPrice)}
-                        </span>
-                        <span className="w-12 shrink-0 text-right text-rose-100 font-bold font-mono tabular-nums text-[8.5px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            ) : (
-              <div className="py-8 text-center text-slate-500 text-xs font-mono">
-                종목 선택 대기 중
-              </div>
-            )}
-          </div>
-
-          {/* Order Book Pressure Gauge */}
-          {orderBookData && selectedStock && (
-            <div className="pt-0.5 border-t border-white/5 space-y-0.5">
-              <div className="flex justify-between text-[8px] text-slate-400 font-bold font-sans">
-                <span className="text-sky-400">매도 {formatQuantity(orderBookData.totalAskVolume)} ({orderBookData.askPctVal}%)</span>
-                <span className="text-rose-400">매수 {formatQuantity(orderBookData.totalBidVolume)} ({orderBookData.bidPctVal}%)</span>
-              </div>
-              <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex">
-                <div className="h-full bg-sky-400 transition-all duration-300" style={{ width: `${orderBookData.askPctVal}%` }} />
-                <div className="h-full bg-rose-400 transition-all duration-300" style={{ width: `${orderBookData.bidPctVal}%` }} />
-              </div>
-            </div>
-          )}
-        </div>
-        </div>
-
-        {/* 4. 스캘퍼 등록 종목 & 추천종목 찾기 (col-span-3) */}
-        <div className="lg:col-start-2 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0 shadow-inner" style={{ order: 1, gridRowStart: 1 }}>
-          <div className="flex items-center justify-between border-b border-white/10 pb-1.5 gap-1.5 flex-wrap">
-            <div className="flex items-center gap-1.5 min-w-0">
-              
-              {/* 추천종목 찾기 버튼 */}
-              <button
-                type="button"
-                onClick={handleOpenScalperRecommendations}
-                disabled={isScalperRecLoading || isRefreshingTop3}
-                className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-600/90 to-teal-600/90 hover:from-emerald-500 hover:to-teal-500 text-white border border-emerald-400/40 text-[11px] font-black font-mono flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.3)] active:scale-95 shrink-0 disabled:opacity-50"
-                title="한국투자증권 실시간 수급 및 거래량 데이터를 분석하여 스캘퍼 최적 추천종목 8선을 확인합니다."
-              >
-                {(isScalperRecLoading || isRefreshingTop3) ? (
-                  <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-200" />
-                ) : (
-                  <Flame className="w-3.5 h-3.5 text-amber-300 fill-amber-300 animate-pulse" />
-                )}
-                <span>{(isScalperRecLoading || isRefreshingTop3) ? "추천 분석중..." : "추천종목 찾기"}</span>
-              </button>
-
-            </div>
-
-            <div className="flex items-center gap-1.5 shrink-0">
-              <span className="text-[10px] font-mono font-bold text-sleek-blue bg-sleek-blue/10 px-1.5 py-0.5 rounded border border-sleek-blue/20">
-                {scalperTabs.filter(tab => {
-                  const isUS = /^[A-Z]/.test(tab.symbol);
-                  return marketType === 'US' ? isUS : !isUS;
-                }).length}/{maxInventoryPerMarket}
-              </span>
-            </div>
-          </div>
-
-          <div className="space-y-1 max-h-[175px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
-            {scalperTabs.filter(tab => {
-              const isUS = /^[A-Z]/.test(tab.symbol);
-              return marketType === 'US' ? isUS : !isUS;
-            }).map(tab => {
-              const isSelected = tab.id === activeTabId;
-              const tabStock = stocks.find(s => s.symbol === tab.symbol) || 
-                               stocksCache.KR?.find(s => s.symbol === tab.symbol) ||
-                               stocksCache.US?.find(s => s.symbol === tab.symbol) ||
-                               (marketType === 'KR' 
-                                 ? INITIAL_STOCKS_KR.find(s => s.symbol === tab.symbol) 
-                                 : INITIAL_STOCKS.find(s => s.symbol === tab.symbol));
-              const tabName = (tab.name && tab.name !== tab.symbol) ? tab.name : getResolvedStockName(tab.symbol, tabStock);
-              // 가격은 반드시 symbol 기준 단일 출처(scalperInventory.market.currentPrice = tab.price)를 우선한다.
-              // stocks 배열 조회(tabStock)는 아직 market 동기화가 반영되기 전 순간을 위한 보조 수단일 뿐이다.
-              const tabPrice = (tab.price && tab.price > 0) ? tab.price : (tabStock?.price || 0);
-              const isPriceLoading = tab.priceStatus === 'LOADING' && tabPrice <= 0;
-
-              return (
-                <div
-                  key={tab.id}
-                  onClick={() => handleSwitchTab(tab.id)}
-                  className={cn(
-                    "px-2 py-1.5 rounded-xl border flex items-center justify-between gap-1.5 cursor-pointer transition-all w-full text-left min-w-0 font-mono select-none group",
-                    isSelected
-                      ? "bg-sleek-blue/25 border-sleek-blue text-white shadow-md font-black ring-1 ring-sleek-blue/60"
-                      : "bg-black/50 border-white/10 hover:bg-white/10 text-slate-300 hover:text-white"
-                  )}
-                  title={`${tabName} (${tab.symbol}) 탭으로 전환`}
-                >
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
-                    <span className={cn(
-                      "w-1.5 h-1.5 rounded-full shrink-0",
-                      tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" : "bg-slate-500"
-                    )} />
-                    <span className="font-bold text-xs truncate text-white">{tabName}</span>
-                  </div>
-
-                  <div className="flex items-center gap-1.5 shrink-0">
-                    {isPriceLoading ? (
-                      <span className="text-[10px] font-bold text-slate-500 animate-pulse">연결 중...</span>
-                    ) : (
-                      <span className="text-xs font-black font-mono text-rose-500 tabular-nums">
-                        {formatCurrency(tabPrice)}
-                      </span>
-                    )}
-
-                    {tab.isBotActive && (
-                      <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/30 shrink-0">
-                        ON
-                      </span>
-                    )}
-
-                    <select
-                      value={tab.tradeQuantity}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        updateTab(tab.symbol, { tradeQuantity: Number(e.target.value) });
-                      }}
-                      className="shrink-0 bg-black/60 border border-white/10 rounded-md text-[10px] font-bold text-slate-300 outline-none cursor-pointer appearance-none px-1 py-0.5 hover:border-sleek-blue/50"
-                      title={`${tabName} 1회 거래수량 (종목별 개별 설정)`}
-                    >
-                      {[1, 2, 3, 5, 10, 15, 20, 30, 50, 100].map(val => (
-                        <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
-                      ))}
-                    </select>
-
-                    <button
-                      type="button"
-                      onClick={(e) => closeScalperTab(tab.id, e)}
-                      className="p-1 rounded-md text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 transition-all opacity-70 group-hover:opacity-100 cursor-pointer"
-                      title={`${tabName} 탭 닫기`}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* 5-1. START AI SCALPER 버튼 (왼쪽) */}
-        <div className="lg:col-start-1" style={{ order: 4, gridRowStart: 4 }}>
-          <button 
-            type="button"
-            onClick={() => {
-              if (!isGapBotActive) {
-                if (gapBuyPrice <= 0 || gapSellPrice <= 0) {
-                  alert("금액 구간(하한선과 상한선)을 정확하게 설정해주세요.");
-                  return;
-                }
-                if (gapBuyPrice >= gapSellPrice) {
-                  alert("상한가는 하한가보다 높은 금액이어야 합니다.");
-                  return;
-                }
-                setLastTradeType(null);
-              }
-              setIsGapBotActive(!isGapBotActive);
-            }}
-            title="현재 선택된 종목의 개별 스캘퍼 시작/정지"
-            className={cn(
-              "w-full py-2 px-3 rounded-xl font-black text-xs italic tracking-tight uppercase shadow-lg transition-all flex items-center justify-center gap-1.5 border cursor-pointer",
-              isGapBotActive 
-                ? "bg-gradient-to-br from-rose-600 to-red-800 text-white border-rose-500/50 hover:scale-[1.02] active:scale-95" 
-                : "bg-gradient-to-br from-sleek-blue to-indigo-700 text-white border-sleek-blue/50 hover:scale-[1.02] active:scale-95"
-            )}
-          >
-            {isGapBotActive ? (
-              <>
-                <Square className="w-3.5 h-3.5 fill-current animate-pulse text-white" />
-                <span>SCALPER STOP</span>
-              </>
-            ) : (
-              <>
-                <Play className="w-3.5 h-3.5 fill-current text-white" />
-                <span>START AI SCALPER</span>
-              </>
-            )}
-          </button>
-        </div>
-
-        {/* 5-2. 탭 순환 컨트롤 (오른쪽) */}
-        <div className="lg:col-start-2" style={{ order: 4, gridRowStart: 4 }}>
-          <div className={cn(
-            "flex items-center justify-between rounded-xl border p-1 transition-all shadow-inner",
-            isAutoRotateTabs 
-              ? "bg-purple-500/15 border-purple-500/40 shadow-[0_0_12px_rgba(168,85,247,0.2)]" 
-              : "bg-black/40 border-white/10"
-          )}>
-            <button
-              type="button"
-              onClick={() => setIsAutoRotateTabs(prev => !prev)}
-              className={cn(
-                "flex items-center gap-1 px-2 py-1 text-xs font-mono font-bold transition-all cursor-pointer grow",
-                isAutoRotateTabs ? "text-purple-300 hover:text-purple-200" : "text-gray-400 hover:text-white"
-              )}
-              title={`스캘핑 종목 탭 ${tabRotationInterval}초 간격 자동 순환 ON/OFF`}
-            >
-              <RefreshCw className={cn("w-3.5 h-3.5 text-purple-400", isAutoRotateTabs && "animate-spin-slow")} />
-              <span>탭 순환 {isAutoRotateTabs ? "ON" : "OFF"}</span>
-            </button>
-
-            <div className="h-4 w-px bg-white/15 mx-1" />
-
-            <div className="relative flex items-center pr-1">
-              <select
-                id="scalper-config-tab-rotation-interval-select"
-                aria-label="종목 탭 자동 순환 주기 선택"
-                value={tabRotationInterval}
-                onChange={(e) => {
-                  const val = Number(e.target.value);
-                  setTabRotationInterval(val);
-                  try {
-                    localStorage.setItem('sleek_tab_rotation_interval', String(val));
-                  } catch (err) {
-                    console.error(err);
-                  }
-                }}
-                className={cn(
-                  "bg-transparent text-xs font-mono font-bold focus:outline-none cursor-pointer py-0.5 px-1 rounded transition-all",
-                  isAutoRotateTabs ? "text-purple-300 hover:text-purple-100" : "text-gray-400 hover:text-gray-200",
-                  "[&>option]:bg-slate-900 [&>option]:text-white"
-                )}
-                title="종목 탭 자동 순환 주기 선택 (1초~10초)"
-              >
-                {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(sec => (
-                  <option key={sec} value={sec}>
-                    {sec}초
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
       </div>
-
       {/* ─────────────────────────────────────────────────────────────
           4행: 보유 주식 현황창 (Real-time Holdings Portfolio Status)
           ───────────────────────────────────────────────────────────── */}

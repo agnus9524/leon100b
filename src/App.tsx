@@ -170,6 +170,9 @@ export interface ScalperTab {
   tradeLogs?: TradeLog[];
   lifecycleStatus?: ScalperLifecycleStatus;
   priceStatus?: 'LOADING' | 'LIVE';
+  holdingQty?: number;
+  orderableQty?: number;
+  changePercent?: number;
 }
 
 // ============================================================
@@ -1798,7 +1801,10 @@ kisConfig.isConnected
       scalperMessage: item.status.message,
       tradeLogs: item.tradeLogs,
       lifecycleStatus: item.status.state,
-      priceStatus: item.market.priceStatus
+      priceStatus: item.market.priceStatus,
+      holdingQty: item.account.holdingQty,
+      orderableQty: item.account.orderableQty,
+      changePercent: item.market.changePercent
     }));
   }, [scalperInventory]);
 

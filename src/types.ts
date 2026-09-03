@@ -2,6 +2,7 @@ export interface ScalperTab {
   id: string; // symbol e.g., '073240' or '001520'
   symbol: string;
   name: string;
+  price?: number;
   isBotActive: boolean;
   gapBuyPrice: number;
   gapSellPrice: number;
@@ -15,6 +16,11 @@ export interface ScalperTab {
   entryPriceMode: 'CURRENT' | 'BID1' | 'BID2' | 'BID4';
   autoCancelThreshold: number;
   tradeLogs?: TradeLog[];
+  lifecycleStatus?: string;
+  priceStatus?: 'LOADING' | 'LIVE';
+  holdingQty?: number;
+  orderableQty?: number;
+  changePercent?: number;
 }
 
 export interface Stock {
