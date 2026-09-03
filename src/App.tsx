@@ -8917,7 +8917,7 @@ const isProfitTarget = sellSignal;
 
       <main className="flex-1 grid grid-cols-1 lg:grid-cols-[1fr_340px] xl:grid-cols-[1fr_360px] gap-px bg-sleek-border overflow-y-auto lg:overflow-hidden">
         {/* Main Terminal (Full Width Center & Left) */}
-        <section className="bg-sleek-bg overflow-y-auto custom-scrollbar p-3 sm:p-4 md:p-5 space-y-4">
+        <section className="bg-sleek-bg overflow-y-auto custom-scrollbar p-3 sm:p-4 md:p-5 space-y-4 lg:col-start-1 lg:row-start-1">
         
           {/* 0. 스캘퍼 종합 일체형 통합 헤더 바 (종목명, 현재체결가, VP/CVD, 실시간메시지, 5개 제어창, 보유현황) */}
           {(() => {
@@ -9014,119 +9014,9 @@ const isProfitTarget = sellSignal;
             );
           })()}
 
-          {/* 4. Real-time Account Status Card (Single Row Dark Theme Layout) */}
-          <div className="bg-slate-900/90 border border-white/10 rounded-3xl p-5 shadow-2xl space-y-4 relative overflow-visible text-white backdrop-blur-md">
-            {/* Header: Account Tag & Time */}
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="text-xl font-black text-white tracking-tight">{selectedAccountType}</span>
-                <div className="relative">
-                  <button
-                    type="button"
-                    onClick={() => setShowAccountDropdown(!showAccountDropdown)}
-                    className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/20 text-blue-400 font-bold text-xs hover:bg-blue-500/30 transition-all border border-blue-500/30 cursor-pointer"
-                  >
-                    <span>
-                      {kisConfig.isConnected && kisConfig.accountNo 
-                        ? `${kisConfig.accountNo.slice(0, 8)}-${kisConfig.accountNo.slice(8) || '01'}` 
-                        : '계좌 미연결'}
-                    </span>
-                    <ChevronDown className={cn("w-3.5 h-3.5 text-blue-400 transition-transform duration-200", showAccountDropdown && "rotate-180")} />
-                  </button>
-
-                  {showAccountDropdown && (
-                    <div className="absolute left-0 top-full mt-1.5 w-56 bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl z-50 p-2 space-y-1 animate-in fade-in zoom-in-95 duration-150 text-white">
-                      <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">계좌 선택</div>
-                      <button
-                        onClick={() => { setSelectedAccountType('위탁'); setShowAccountDropdown(false); }}
-                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-left hover:bg-blue-500/20 text-blue-400 cursor-pointer"
-                      >
-                        <span>위탁 {kisConfig.accountNo ? `${kisConfig.accountNo.slice(0, 8)}-01` : '계좌 미연결'}</span>
-                        <span className="text-[10px] bg-blue-500/20 px-1.5 py-0.5 rounded text-blue-300">기본</span>
-                      </button>
-                      <button
-                        onClick={() => { setSelectedAccountType('ISA'); setShowAccountDropdown(false); }}
-                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-left hover:bg-slate-700/50 text-slate-300 cursor-pointer"
-                      >
-                        <span>ISA 중개형</span>
-                        <span className="text-[10px] bg-slate-700 px-1.5 py-0.5 rounded text-slate-400">연동예정</span>
-                      </button>
-                    </div>
-                  )}
-                </div>
-              </div>
-              <div className="text-xs font-medium text-slate-400 tracking-tight">
-                {accountStatusFormattedTime} 기준
-              </div>
-            </div>
-
-            {/* Single Row 3-Column Grid: 주문가능원화, 총자산, 실현손익 */}
-            {(() => {
-              const displayOrderableKrw = kisConfig.isConnected
-                ? (orderableKrw > 0 ? orderableKrw : balance)
-                : (orderableKrw > 0 ? orderableKrw : (balance > 0 ? balance : 5000000));
-
-              return (
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-stretch">
-                  {/* 1. 주문가능원화 */}
-                  <div className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 flex flex-col justify-center transition-all">
-                    <div className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight font-mono truncate">
-                      {Math.round(displayOrderableKrw).toLocaleString()}원
-                    </div>
-                    <div className="text-xs font-bold text-slate-400 mt-1 flex items-center justify-between">
-                      <span>주문가능원화</span>
-                      {kisConfig.isConnected && (
-                        <span className="text-[10px] text-emerald-400 font-mono font-bold">API 실시간</span>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* 2. 총자산 버튼 */}
-                  <button
-                    type="button"
-                    onClick={() => setIsAssetAnalysisModalOpen(true)}
-                    className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 hover:border-emerald-500/50 flex flex-col items-center justify-center gap-1.5 transition-all group cursor-pointer"
-                    title="클릭 시 총자산 상세 산출 내역 팝업 보기"
-                  >
-                    <div className="w-10 h-10 rounded-full bg-emerald-500 text-white flex items-center justify-center font-mono font-black text-lg shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-transform">
-                      ₩
-                    </div>
-                    <span className="text-xs font-bold text-slate-300 group-hover:text-emerald-400 transition-colors">
-                      총자산
-                    </span>
-                  </button>
-
-                  {/* 3. 실현손익 버튼 */}
-                  <button
-                    type="button"
-                    onClick={() => setShowPnlDetailsModal(true)}
-                    className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 hover:border-rose-500/50 flex flex-col items-center justify-center gap-1.5 transition-all group cursor-pointer"
-                    title="클릭 시 실현손익 및 세부리포트 보기"
-                  >
-                    <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shadow-md group-hover:scale-105 transition-transform border border-rose-500/30">
-                      <TrendingUp className="w-5 h-5 text-rose-400" />
-                    </div>
-                    <div className="flex flex-col items-center">
-                      <span className="text-xs font-bold text-slate-300 group-hover:text-rose-400 transition-colors">
-                        실현손익
-                      </span>
-                      <span className={cn(
-                        "text-[11px] font-mono font-black mt-0.5",
-                        (kisTotalRealizedPnL ?? gapTradingProfit) >= 0 ? "text-rose-400" : "text-sky-400"
-                      )}>
-                        {(kisTotalRealizedPnL ?? gapTradingProfit) >= 0 ? '+' : ''}
-                        {formatCurrency(kisTotalRealizedPnL ?? gapTradingProfit)}
-                      </span>
-                    </div>
-                  </button>
-                </div>
-              );
-            })()}
-          </div>
         </section>
 
-        {/* Right Aside: Real-time Status Window & Trade Logs */}
-        <aside className="border-t lg:border-t-0 lg:border-l border-white/5 bg-black/30 flex flex-col lg:justify-end p-4 sm:p-5 lg:p-6 gap-4 sm:gap-6 overflow-hidden">
+        <aside className="border-t lg:border-t-0 lg:border-l border-white/5 bg-black/30 flex flex-col p-4 sm:p-5 lg:p-6 gap-4 sm:gap-6 overflow-hidden lg:col-start-2 lg:row-start-1 lg:row-span-2">
             
             {/* 1. Trade Logs / Active Slot Monitor (Top Right) */}
             {(() => {
@@ -9153,7 +9043,7 @@ const isProfitTarget = sellSignal;
                     </span>
                   </div>
                   
-                  <div className="flex-1 overflow-hidden space-y-3 pr-1">
+                  <div className="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-1">
                     {enableCombinedAvgProfitExit ? (
                       /* Combined Average Profit Exit Mode (통합평단가 익절) */
                       currentInventory.length === 0 ? (
@@ -9283,7 +9173,7 @@ const isProfitTarget = sellSignal;
                             </div>
                           );
                         }
-                        return <div>{allLogItems}</div>;
+                        return <div>{allLogItems.slice(0, 20)}</div>;
                       })()
                     )}
                   </div>
@@ -9414,33 +9304,119 @@ const isProfitTarget = sellSignal;
                 </div>
               </div>
             )}
+                  </aside>
 
-            {/* 3. System Diagnostics */}
-            <div className="bg-sleek-blue/5 border border-sleek-blue/20 rounded-3xl p-5 space-y-4 shrink-0">
-              <h3 className="text-xs font-black text-sleek-blue uppercase tracking-widest flex items-center gap-2">
-                <Bot className="w-3.5 h-3.5" /> System Diagnostics
-              </h3>
-              <div className="space-y-3">
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-sleek-text-secondary uppercase">Loop Interval</span>
-                  <span className="text-xs font-bold text-emerald-400">1,500ms (High Speed)</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-xs text-sleek-text-secondary uppercase">Server Status</span>
-                  <span className="text-xs font-bold text-emerald-400">ACTIVE</span>
-                </div>
-                <div className="pt-2">
-                  <div className="w-full h-1 bg-white/5 rounded-full overflow-hidden">
-                    <motion.div 
-                      animate={{ x: ["-100%", "100%"] }} 
-                      transition={{ duration: 1.5, repeat: Infinity, ease: "linear" }}
-                      className="w-1/2 h-full bg-sleek-blue/30"
-                    />
-                  </div>
+        <section className="bg-sleek-bg overflow-y-auto custom-scrollbar p-3 sm:p-4 md:p-5 space-y-4 lg:col-start-1 lg:row-start-2">          {/* 4. Real-time Account Status Card (Single Row Dark Theme Layout) */}
+          <div className="bg-slate-900/90 border border-white/10 rounded-3xl p-5 shadow-2xl space-y-4 relative overflow-visible text-white backdrop-blur-md">
+            {/* Header: Account Tag & Time */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-xl font-black text-white tracking-tight">{selectedAccountType}</span>
+                <div className="relative">
+                  <button
+                    type="button"
+                    onClick={() => setShowAccountDropdown(!showAccountDropdown)}
+                    className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-500/20 text-blue-400 font-bold text-xs hover:bg-blue-500/30 transition-all border border-blue-500/30 cursor-pointer"
+                  >
+                    <span>
+                      {kisConfig.isConnected && kisConfig.accountNo 
+                        ? `${kisConfig.accountNo.slice(0, 8)}-${kisConfig.accountNo.slice(8) || '01'}` 
+                        : '계좌 미연결'}
+                    </span>
+                    <ChevronDown className={cn("w-3.5 h-3.5 text-blue-400 transition-transform duration-200", showAccountDropdown && "rotate-180")} />
+                  </button>
+
+                  {showAccountDropdown && (
+                    <div className="absolute left-0 top-full mt-1.5 w-56 bg-slate-800 border border-slate-700 rounded-2xl shadow-2xl z-50 p-2 space-y-1 animate-in fade-in zoom-in-95 duration-150 text-white">
+                      <div className="px-2.5 py-1 text-[10px] font-bold text-slate-400 uppercase tracking-wider">계좌 선택</div>
+                      <button
+                        onClick={() => { setSelectedAccountType('위탁'); setShowAccountDropdown(false); }}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-left hover:bg-blue-500/20 text-blue-400 cursor-pointer"
+                      >
+                        <span>위탁 {kisConfig.accountNo ? `${kisConfig.accountNo.slice(0, 8)}-01` : '계좌 미연결'}</span>
+                        <span className="text-[10px] bg-blue-500/20 px-1.5 py-0.5 rounded text-blue-300">기본</span>
+                      </button>
+                      <button
+                        onClick={() => { setSelectedAccountType('ISA'); setShowAccountDropdown(false); }}
+                        className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold text-left hover:bg-slate-700/50 text-slate-300 cursor-pointer"
+                      >
+                        <span>ISA 중개형</span>
+                        <span className="text-[10px] bg-slate-700 px-1.5 py-0.5 rounded text-slate-400">연동예정</span>
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
+              <div className="text-xs font-medium text-slate-400 tracking-tight">
+                {accountStatusFormattedTime} 기준
+              </div>
             </div>
-          </aside>
+
+            {/* Single Row 3-Column Grid: 주문가능원화, 총자산, 실현손익 */}
+            {(() => {
+              const displayOrderableKrw = kisConfig.isConnected
+                ? (orderableKrw > 0 ? orderableKrw : balance)
+                : (orderableKrw > 0 ? orderableKrw : (balance > 0 ? balance : 5000000));
+
+              return (
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-stretch">
+                  {/* 1. 주문가능원화 */}
+                  <div className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 flex flex-col justify-center transition-all">
+                    <div className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight font-mono truncate">
+                      {Math.round(displayOrderableKrw).toLocaleString()}원
+                    </div>
+                    <div className="text-xs font-bold text-slate-400 mt-1 flex items-center justify-between">
+                      <span>주문가능원화</span>
+                      {kisConfig.isConnected && (
+                        <span className="text-[10px] text-emerald-400 font-mono font-bold">API 실시간</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* 2. 총자산 버튼 */}
+                  <button
+                    type="button"
+                    onClick={() => setIsAssetAnalysisModalOpen(true)}
+                    className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 hover:border-emerald-500/50 flex flex-col items-center justify-center gap-1.5 transition-all group cursor-pointer"
+                    title="클릭 시 총자산 상세 산출 내역 팝업 보기"
+                  >
+                    <div className="w-10 h-10 rounded-full bg-emerald-500 text-white flex items-center justify-center font-mono font-black text-lg shadow-lg shadow-emerald-500/20 group-hover:scale-105 transition-transform">
+                      ₩
+                    </div>
+                    <span className="text-xs font-bold text-slate-300 group-hover:text-emerald-400 transition-colors">
+                      총자산
+                    </span>
+                  </button>
+
+                  {/* 3. 실현손익 버튼 */}
+                  <button
+                    type="button"
+                    onClick={() => setShowPnlDetailsModal(true)}
+                    className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 hover:border-rose-500/50 flex flex-col items-center justify-center gap-1.5 transition-all group cursor-pointer"
+                    title="클릭 시 실현손익 및 세부리포트 보기"
+                  >
+                    <div className="w-10 h-10 rounded-2xl bg-rose-500/20 text-rose-400 flex items-center justify-center shadow-md group-hover:scale-105 transition-transform border border-rose-500/30">
+                      <TrendingUp className="w-5 h-5 text-rose-400" />
+                    </div>
+                    <div className="flex flex-col items-center">
+                      <span className="text-xs font-bold text-slate-300 group-hover:text-rose-400 transition-colors">
+                        실현손익
+                      </span>
+                      <span className={cn(
+                        "text-[11px] font-mono font-black mt-0.5",
+                        (kisTotalRealizedPnL ?? gapTradingProfit) >= 0 ? "text-rose-400" : "text-sky-400"
+                      )}>
+                        {(kisTotalRealizedPnL ?? gapTradingProfit) >= 0 ? '+' : ''}
+                        {formatCurrency(kisTotalRealizedPnL ?? gapTradingProfit)}
+                      </span>
+                    </div>
+                  </button>
+                </div>
+              );
+            })()}
+          </div>
+        </section>
+
         </main>
 
       <footer className="h-8 bg-black border-t border-sleek-border/30 flex items-center overflow-hidden">

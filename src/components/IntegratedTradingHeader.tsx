@@ -596,9 +596,9 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         {/* 4. 스캘퍼 등록 종목 & 추천종목 찾기 (col-span-3) */}
         <div className="bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0 shadow-inner">
           <div className="flex items-center justify-between border-b border-white/10 pb-1.5 gap-1.5 flex-wrap">
-            <div className="flex items-center gap-1.5 min-w-0">
+            <div className="flex items-center gap-1.5 min-w-0 flex-wrap w-full sm:w-auto">
               
-          <div ref={searchRef} className="relative z-[100] flex-1 min-w-[130px] max-w-[220px]">
+          <div ref={searchRef} className="relative z-[100] w-full sm:flex-1 sm:min-w-[130px] sm:max-w-[220px]">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
             <input 
               ref={searchInputRef}
@@ -685,7 +685,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   animate={{ opacity: 1, y: 0, scale: 1 }} 
                   exit={{ opacity: 0, y: -4, scale: 0.98 }}
                   transition={{ duration: 0.15 }}
-                  className="absolute top-full left-0 right-0 mt-2 z-[200] bg-slate-900/98 backdrop-blur-2xl border-2 border-sleek-blue/50 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.95)] ring-2 ring-sleek-blue/30 overflow-hidden"
+                  className="absolute top-full left-0 mt-2 z-[200] w-[92vw] max-w-[384px] bg-slate-900/98 backdrop-blur-2xl border-2 border-sleek-blue/50 rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.95)] ring-2 ring-sleek-blue/30 overflow-hidden"
                 >
                   <div className="px-4 py-2 bg-slate-950/90 border-b border-white/10 flex items-center justify-between text-xs text-slate-400 font-bold uppercase tracking-wider">
                     <span className="flex items-center gap-1.5 text-sleek-blue">
@@ -715,25 +715,14 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                           isHighlighted ? "bg-sleek-blue/25" : "hover:bg-sleek-blue/20 active:bg-sleek-blue/30"
                         )}
                       >
-                        <div className="flex items-center gap-2 min-w-0">
-                          <span className="text-sm font-extrabold text-white group-hover:text-sleek-blue transition-colors truncate">
-                            {s.name} <span className="text-slate-400 font-mono font-semibold">({s.symbol})</span>
+                        <span className="text-sm font-extrabold text-white group-hover:text-sleek-blue transition-colors truncate min-w-0">
+                          {s.name}
+                        </span>
+                        {isAlreadyRegistered && (
+                          <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                            등록됨
                           </span>
-                          {isAlreadyRegistered && (
-                            <span className="shrink-0 text-[9px] font-bold px-1.5 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
-                              등록됨
-                            </span>
-                          )}
-                          {s.price !== undefined && s.price > 0 && (
-                            <span className="shrink-0 text-xs font-mono text-sleek-blue font-bold">
-                              {formatCurrency(s.price)}
-                            </span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-1 text-xs font-bold text-sleek-blue opacity-80 group-hover:opacity-100 group-hover:translate-x-1 transition-all shrink-0">
-                          <span className="hidden sm:inline">{isAlreadyRegistered ? '탭 선택' : '탭 추가'}</span>
-                          <ChevronRight className="w-4 h-4" />
-                        </div>
+                        )}
                       </button>
                       );
                     })}
@@ -800,20 +789,20 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   )}
                   title={`${tabName} (${tab.symbol}) 탭으로 전환`}
                 >
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1 truncate">
+                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
                     <span className={cn(
                       "w-1.5 h-1.5 rounded-full shrink-0",
                       tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" : "bg-slate-500"
                     )} />
-                    <span className="font-bold text-xs truncate text-white">{tabName}</span>
-                    <span className="text-[9.5px] text-slate-400 shrink-0">
+                    <span className="font-bold text-sm truncate text-white shrink min-w-0">{tabName}</span>
+                    <span className="hidden md:inline text-[9.5px] text-slate-400 shrink-0">
                       보유 <strong className="text-slate-200">{(tab.holdingQty || 0).toLocaleString()}</strong>
                     </span>
-                    <span className="text-[9.5px] text-slate-400 shrink-0">
+                    <span className="hidden md:inline text-[9.5px] text-slate-400 shrink-0">
                       주문가능 <strong className="text-sleek-blue">{(tab.orderableQty || 0).toLocaleString()}</strong>
                     </span>
                     <span className={cn(
-                      "text-[9.5px] font-bold shrink-0",
+                      "hidden md:inline text-[9.5px] font-bold shrink-0",
                       (tab.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400"
                     )}>
                       {(tab.changePercent || 0) >= 0 ? '+' : ''}{(tab.changePercent || 0).toFixed(2)}%
@@ -822,9 +811,9 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
 
                   <div className="flex items-center gap-1.5 shrink-0">
                     {isPriceLoading ? (
-                      <span className="text-[10px] font-bold text-slate-500 animate-pulse">연결 중...</span>
+                      <span className="hidden md:inline text-[10px] font-bold text-slate-500 animate-pulse">연결 중...</span>
                     ) : (
-                      <span className="flex items-center gap-1 text-xs font-black font-mono text-rose-500 tabular-nums">
+                      <span className="hidden md:flex items-center gap-1 text-xs font-black font-mono text-rose-500 tabular-nums">
                         <span className="text-[9px] font-bold text-slate-400">현재 체결가</span>
                         {formatCurrency(tabPrice)}
                       </span>
@@ -1279,11 +1268,11 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
         </div>
 
       {/* 8번째 반응형 창 — 고급 설정 토글 버튼 */}
-        <div className="flex justify-end -mb-1">
+        <div className="flex sm:justify-end -mb-1">
           <button
             type="button"
             onClick={() => setShowAdvancedSettings(v => !v)}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-[10px] font-bold border border-white/10 bg-black/30 text-slate-400 hover:text-white hover:border-white/30 transition-all"
+            className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-2.5 py-2 sm:py-1 rounded-lg text-[11px] sm:text-[10px] font-bold border border-white/10 bg-black/30 text-slate-400 hover:text-white hover:border-white/30 transition-all"
           >
             <Zap className="w-3 h-3" />
             {showAdvancedSettings ? '차트 보기' : '고급 설정 (거래수량/슬롯/순익/손절 등)'}
