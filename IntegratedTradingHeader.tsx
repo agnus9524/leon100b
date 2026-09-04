@@ -16,8 +16,9 @@ import { kisService } from '../services/kisService';
 // 고급 설정(1회 거래수량/최대슬롯/목표순익/손절/추가매수간격/진입호가/실행속도)을
 // 기본 화면에서 숨긴 자리에 대신 표시된다.
 // ============================================================
-type ChartPeriod = 'MIN' | 'D' | 'W' | 'M' | 'Y';
+type ChartPeriod = 'TICK' | 'MIN' | 'D' | 'W' | 'M';
 const MINUTE_INTERVALS = [1, 3, 5, 10, 15, 30, 60, 120, 240];
+const TICK_INTERVALS = [10, 30, 50, 100];
 
 interface CandleBar {
   date: string;   // YYYYMMDD (D/W/M/Y) 또는 HHMMSS(MIN)
@@ -81,7 +82,7 @@ const TickFeed: React.FC<{ symbol: string; price: number; formatCurrency: (n: nu
         {ticks.length === 0 ? (
           <div className="text-[9px] text-slate-500 text-center py-4">체결 대기중</div>
         ) : (
-          ticks.map((t, idx) => (
+          ticks.slice(0, 9).map((t, idx) => (
             <div
               key={idx}
               className={cn(
@@ -108,16 +109,24 @@ const CandlestickChart: React.FC<{
   const [period, setPeriod] = React.useState<ChartPeriod>('MIN');
   const [minuteInterval, setMinuteInterval] = React.useState(1);
   const [showMinuteMenu, setShowMinuteMenu] = React.useState(false);
+  const [tickInterval, setTickInterval] = React.useState(30);
+  const [showTickMenu, setShowTickMenu] = React.useState(false);
   const [bars, setBars] = React.useState<CandleBar[]>([]);
   const [isLoading, setIsLoading] = React.useState(false);
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
   const minuteMenuRef = React.useRef<HTMLDivElement>(null);
+  const tickMenuRef = React.useRef<HTMLDivElement>(null);
+  const tickBufferRef = React.useRef<{ time: string; price: number }[]>([]);
+  const lastTickPriceRef = React.useRef<number>(0);
 
-  // 분봉 간격 드롭다운 바깥 클릭 시 닫기
+  // 분봉/틱봉 간격 드롭다운 바깥 클릭 시 닫기
   React.useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (minuteMenuRef.current && !minuteMenuRef.current.contains(e.target as Node)) {
         setShowMinuteMenu(false);
+      }
+      if (tickMenuRef.current && !tickMenuRef.current.contains(e.target as Node)) {
+        setShowTickMenu(false);
       }
     };
     document.addEventListener('mousedown', handler);
@@ -125,12 +134,16 @@ const CandlestickChart: React.FC<{
   }, []);
 
   React.useEffect(() => {
-    if (!symbol) return;
+    if (!symbol || period === 'TICK') return;
     let cancelled = false;
     setIsLoading(true);
     setErrorMsg(null);
 
-    const load = async () => {
+    const load = async (isBackgroundRefresh: boolean) => {
+      if (!isBackgroundRefresh) {
+        setIsLoading(true);
+        setErrorMsg(null);
+      }
       try {
         if (period === 'MIN') {
           const res = await kisService.getDomesticMinuteChart(symbol);
@@ -158,14 +171,13 @@ const CandlestickChart: React.FC<{
               });
             }
             setBars(grouped);
-            if (grouped.length === 0) setErrorMsg('표시할 분봉 데이터가 없습니다.');
-          } else {
+            if (grouped.length === 0 && !isBackgroundRefresh) setErrorMsg('표시할 분봉 데이터가 없습니다.');
+          } else if (!isBackgroundRefresh) {
             setBars([]);
             setErrorMsg('분봉 데이터를 불러오지 못했습니다.');
           }
         } else {
-          const kisCode = period === 'Y' ? 'M' : period; // KIS 기본 API는 연봉 코드가 없어 월봉으로 근사
-          const res = await kisService.getDomesticDailyPrice(symbol, kisCode as 'D' | 'W' | 'M');
+          const res = await kisService.getDomesticDailyPrice(symbol, period as 'D' | 'W' | 'M');
           if (cancelled) return;
           if (res && Array.isArray(res.output) && res.output.length > 0) {
             const parsed: CandleBar[] = [...res.output].reverse().map((b: any) => ({
@@ -176,14 +188,14 @@ const CandlestickChart: React.FC<{
               close: Number(b.stck_clpr || 0)
             })).filter(b => b.close > 0);
             setBars(parsed);
-            if (parsed.length === 0) setErrorMsg('표시할 시세 데이터가 없습니다.');
-          } else {
+            if (parsed.length === 0 && !isBackgroundRefresh) setErrorMsg('표시할 시세 데이터가 없습니다.');
+          } else if (!isBackgroundRefresh) {
             setBars([]);
             setErrorMsg('시세 데이터를 불러오지 못했습니다.');
           }
         }
       } catch {
-        if (!cancelled) {
+        if (!cancelled && !isBackgroundRefresh) {
           setBars([]);
           setErrorMsg('시세 조회 중 오류가 발생했습니다.');
         }
@@ -191,9 +203,72 @@ const CandlestickChart: React.FC<{
         if (!cancelled) setIsLoading(false);
       }
     };
-    load();
-    return () => { cancelled = true; };
+    load(false);
+
+    // 🔄 실시간 갱신: 분봉(MIN) 조회 중일 때는 15초마다, 그 외 기간(일/주/월)은 60초마다 자동 새로고침한다.
+    // 백그라운드 새로고침은 로딩 스피너나 에러 문구로 화면을 깜빡이지 않고 조용히 데이터만 교체한다.
+    const refreshMs = period === 'MIN' ? 15000 : 60000;
+    const intervalId = setInterval(() => load(true), refreshMs);
+
+    return () => { cancelled = true; clearInterval(intervalId); };
   }, [symbol, period, minuteInterval]);
+
+  // ============================================================
+  // 🔄 틱봉(TICK) 모드 — KIS REST API는 진짜 틱 스트림을 제공하지 않으므로(웹소켓 필요),
+  // 실시간 체결 내역(TickFeed)과 같은 방식으로 가격 변화를 폴링해서 "틱"으로 간주하고,
+  // 지정한 틱 개수(예: 30틱)마다 하나의 봉으로 묶어서 그린다.
+  // ============================================================
+  React.useEffect(() => {
+    if (!symbol || period !== 'TICK') return;
+    let cancelled = false;
+    tickBufferRef.current = [];
+    lastTickPriceRef.current = 0;
+    setBars([]);
+    setIsLoading(true);
+    setErrorMsg(null);
+
+    const rebuildBarsFromTicks = () => {
+      const ticks = tickBufferRef.current;
+      const grouped: CandleBar[] = [];
+      for (let i = 0; i < ticks.length; i += tickInterval) {
+        const chunk = ticks.slice(i, i + tickInterval);
+        if (chunk.length === 0) continue;
+        const prices = chunk.map(t => t.price);
+        grouped.push({
+          date: chunk[0].time,
+          open: chunk[0].price,
+          close: chunk[chunk.length - 1].price,
+          high: Math.max(...prices),
+          low: Math.min(...prices)
+        });
+      }
+      setBars(grouped);
+    };
+
+    const pollTick = async () => {
+      try {
+        const priceData = await kisService.getPrice(symbol);
+        if (cancelled || !priceData || priceData.current <= 0) return;
+        if (priceData.current === lastTickPriceRef.current) return; // 가격 변화가 없으면 새 틱으로 기록하지 않음
+        lastTickPriceRef.current = priceData.current;
+        tickBufferRef.current = [
+          ...tickBufferRef.current,
+          { time: new Date().toLocaleTimeString('ko-KR', { hour12: false }).replace(/:/g, ''), price: priceData.current }
+        ].slice(-1000); // 최근 1000틱까지만 보관
+        rebuildBarsFromTicks();
+        setErrorMsg(null);
+      } catch {
+        // 폴링 실패는 조용히 무시하고 다음 주기에 재시도 (에러 문구로 화면을 어지럽히지 않음)
+      } finally {
+        if (!cancelled) setIsLoading(false);
+      }
+    };
+
+    pollTick();
+    const intervalId = setInterval(pollTick, 2000); // 2초마다 가격 확인 (근사 틱 폴링)
+
+    return () => { cancelled = true; clearInterval(intervalId); };
+  }, [symbol, period, tickInterval]);
 
   // 매수(B)/매도(S) 체결 마커 — 해당 종목의 tradeLogs 중 실제 체결 이벤트만 추출해 가장 가까운 캔들에 매칭
   const markers = React.useMemo<TradeMarker[]>(() => {
@@ -224,7 +299,7 @@ const CandlestickChart: React.FC<{
   }, [bars, scalperTabs, symbol]);
 
   const formatDateLabel = (raw: string) => {
-    if (period === 'MIN') {
+    if (period === 'MIN' || period === 'TICK') {
       return raw.length >= 6 ? `${raw.slice(0, 2)}:${raw.slice(2, 4)}` : raw;
     }
     if (raw.length !== 8) return raw;
@@ -318,8 +393,38 @@ const CandlestickChart: React.FC<{
         )}
       </div>
 
-      {/* 하단: 분봉 간격 드롭다운 + 일/주/월/년 */}
+      {/* 하단: 틱봉/분봉 간격 드롭다운 + 일/주/월 */}
       <div className="flex items-center gap-1 mt-2 shrink-0 flex-wrap">
+        <div className="relative" ref={tickMenuRef}>
+          <button
+            type="button"
+            onClick={() => { setShowTickMenu(v => !v); setPeriod('TICK'); }}
+            className={cn(
+              "px-2 py-1 rounded-lg text-[10px] font-bold border flex items-center gap-1 transition-all",
+              period === 'TICK' ? "bg-sleek-blue/10 border-sleek-blue/50 text-sleek-blue" : "bg-slate-100 border-slate-200 text-slate-500 hover:text-slate-900"
+            )}
+            title="틱봉 — KIS REST API 특성상 실제 체결틱이 아닌, 가격 변화 감지 기반 근사 틱입니다"
+          >
+            {tickInterval}틱 ▾
+          </button>
+          {showTickMenu && (
+            <div className="absolute bottom-full mb-1 left-0 bg-white border border-slate-200 rounded-lg shadow-xl z-20 py-1 min-w-[64px]">
+              {TICK_INTERVALS.map(t => (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => { setTickInterval(t); setPeriod('TICK'); setShowTickMenu(false); }}
+                  className={cn(
+                    "block w-full text-left px-3 py-1 text-[11px] font-bold hover:bg-slate-100",
+                    tickInterval === t && period === 'TICK' ? "text-sleek-blue" : "text-slate-600"
+                  )}
+                >
+                  {t}틱
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="relative" ref={minuteMenuRef}>
           <button
             type="button"
@@ -349,7 +454,7 @@ const CandlestickChart: React.FC<{
             </div>
           )}
         </div>
-        {(['D', 'W', 'M', 'Y'] as ChartPeriod[]).map(p => (
+        {(['D', 'W', 'M'] as ChartPeriod[]).map(p => (
           <button
             key={p}
             type="button"
@@ -359,7 +464,7 @@ const CandlestickChart: React.FC<{
               period === p ? "bg-sleek-blue/10 border-sleek-blue/50 text-sleek-blue" : "bg-slate-100 border-slate-200 text-slate-500 hover:text-slate-900"
             )}
           >
-            {p === 'D' ? '일' : p === 'W' ? '주' : p === 'M' ? '월' : '년'}
+            {p === 'D' ? '일' : p === 'W' ? '주' : '월'}
           </button>
         ))}
       </div>
@@ -1401,8 +1506,8 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
               className="w-full bg-black/50 border border-white/10 rounded-xl px-1.5 py-1 text-xs font-bold text-white outline-none cursor-pointer appearance-none"
               title="진입 호가 방식 선택"
             >
-              <option value="BID1" className="bg-sleek-bg text-white">매수1호가</option>
-              <option value="BID2" className="bg-sleek-bg text-emerald-400 font-bold">매수2호가★</option>
+              <option value="BID1" className="bg-sleek-bg text-emerald-400 font-bold">매수1호가★</option>
+              <option value="BID2" className="bg-sleek-bg text-white">매수2호가</option>
               <option value="BID4" className="bg-sleek-bg text-white">매수4호가</option>
               <option value="CURRENT" className="bg-sleek-bg text-white">현재가</option>
             </select>

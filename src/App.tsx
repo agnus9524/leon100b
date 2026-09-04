@@ -326,7 +326,7 @@ const createInventoryItem = (params: {
       gapSellPrice: params.strategy?.gapSellPrice ?? 0,
       tradeQuantity: params.strategy?.tradeQuantity ?? 1,
       maxSlots: params.strategy?.maxSlots ?? 10,
-      entryPriceMode: params.strategy?.entryPriceMode ?? 'BID2',
+      entryPriceMode: params.strategy?.entryPriceMode ?? 'BID1',
       autoCancelThreshold: params.strategy?.autoCancelThreshold ?? 0.2
     },
     status: {
@@ -2082,7 +2082,7 @@ setGapInventory(nextInv);
     setGapTradeCount(targetTab.gapTradeCount || 0);
     setLastTradeType(targetTab.lastTradeType || null);
     setScalperMessage(targetTab.scalperMessage || "대기 중...");
-    setEntryPriceMode(targetTab.entryPriceMode || 'BID2');
+    setEntryPriceMode(targetTab.entryPriceMode || 'BID1');
     setAutoCancelThreshold(targetTab.autoCancelThreshold || 0.2);
     // tradeLogs(전역 GLOBAL TRADE LOGS)는 탭을 전환해도 그대로 유지된다 — 여기서 덮어쓰지 않는다.
     // 선택 종목만의 로그는 화면에서 scalperTabs의 해당 항목(tradeLogs) 또는 GLOBAL 필터로 조회한다.
@@ -2356,7 +2356,7 @@ setGapInventory(nextInv);
 
   const [autoCancelThreshold, setAutoCancelThreshold] = useState<number>(0.2); // 0.2%
   const [immediateEntry, setImmediateEntry] = useState<boolean>(false);
-  const [entryPriceMode, setEntryPriceMode] = useState<'CURRENT' | 'BID1' | 'BID2' | 'BID4'>('BID2'); // 매수 2호가 기본 (최적 체결+안정성)
+  const [entryPriceMode, setEntryPriceMode] = useState<'CURRENT' | 'BID1' | 'BID2' | 'BID4'>('BID1'); // 매수 1호가 기본
   const lowestBidOnlyMode = entryPriceMode === 'BID4'; // Backward compatibility ref
   const [scalperMessage, setScalperMessage] = useState<string>("대기 중...");
   const [selectedTimeframeBar, setSelectedTimeframeBar] = useState<'1m' | '3m' | '5m' | '10m'>('1m');
@@ -7585,7 +7585,7 @@ useEffect(() => {
 
         const itemTradeQty = tabItem.tradeQuantity || (isSelected ? tradeQuantity : 1);
         const itemMaxSlots = tabItem.maxSlots || (isSelected ? maxSlots : 10);
-        const itemEntryMode = tabItem.entryPriceMode || (isSelected ? entryPriceMode : 'BID2');
+        const itemEntryMode = tabItem.entryPriceMode || (isSelected ? entryPriceMode : 'BID1');
 
         const isOverSold = rsi < 35;
         const isOverBought = rsi > 65;
@@ -7824,24 +7824,14 @@ useEffect(() => {
           const isStockUS = stockItem.market === 'US' || /^[A-Za-z]/.test(stockItem.symbol) || marketType === 'US';
           const netProfitPct = calculateNetProfitPercent(weightedAvgPrice, currentPrice, isStockUS ? 'US' : 'KR');
           const overallProfitRatio = netProfitPct / 100;
+          const sellTickSize = getTickSize(currentPrice, isStockUS ? 'US' : 'KR');
+          // 🚀 매도는 "목표가 도달"을 기다리지 않고 시그널 발생 즉시 실행한다. 주문가도 현재가에 걸어두고
+          // 체결을 기다리는 게 아니라, 한 틱 낮춰서(매수 호가를 바로 무는 가격) 즉시 체결되도록 낸다.
+          const marketableSellPrice = isStockUS
+            ? Number((currentPrice - sellTickSize).toFixed(4))
+            : Math.round((currentPrice - sellTickSize) / sellTickSize) * sellTickSize;
 
-          // 1) Combined Profit Exit (기준: 제세금 0.20% 및 수수료 공제 후 순수익률 >= 목표수익률)
-          if (enableCombinedAvgProfitExit && netProfitPct >= scalpingTargetProfit) {
-            transitionLifecycleStatus(stockItem.symbol, 'SELL_READY', `통합 순익 익절 조건 충족 (순익 +${netProfitPct.toFixed(2)}%)`);
-            if (isSelected) setScalperMessage(`[통합 순익 익절] ${stockItem.name} ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (순익 +${netProfitPct.toFixed(2)}%)`);
-            await executeTrade('SELL', stockItem, totalHeldQty, `통합 평단가 일괄 순익 익절 (순익 +${netProfitPct.toFixed(2)}%)`, currentPrice, weightedAvgPrice);
-
-            if (isSelected) {
-              gapInventoryRef.current = [];
-              setGapInventory([]);
-            }
-            setLastTradeType('SELL');
-            setGapTradeCount(prev => prev + 1);
-            playScalpingSound('SELL');
-            continue;
-          }
-
-          // 2) Emergency Stop Loss Intercept
+          // 1) Emergency Stop Loss Intercept (최우선 안전장치 — 손실 확대를 막는 것이 목적이라 시그널 대기 없이 즉시 실행)
           // Only evaluate when user holds stock (totalHeldQty > 0), app is ready, prices are valid, and profit ratio is at or below the stop loss threshold
           const stopLossThreshold = -Math.abs(scalpingStopLoss) / 100; // e.g. -1.5% -> -0.015
           if (
@@ -7869,7 +7859,10 @@ useEffect(() => {
 
             const tickSize = getTickSize(weightedAvgPrice, isStockUS ? 'US' : 'KR');
             let stopLossPrice = weightedAvgPrice * (1 + stopLossThreshold);
-            stopLossPrice = isStockUS ? Number(stopLossPrice.toFixed(4)) : Math.round(stopLossPrice / tickSize) * tickSize;
+            // 손절도 즉시 체결되도록 한 틱 더 낮춰서 낸다 (호가를 확실히 무는 가격)
+            stopLossPrice = isStockUS
+              ? Number((stopLossPrice - tickSize).toFixed(4))
+              : Math.round((stopLossPrice - tickSize) / tickSize) * tickSize;
 
             await executeTrade('SELL', stockItem, totalHeldQty, `스캘핑 기계적 손절 (${(overallProfitRatio * 100).toFixed(2)}%)`, stopLossPrice, weightedAvgPrice);
 
@@ -7883,7 +7876,8 @@ useEffect(() => {
             continue;
           }
 
-          // 3) Trailing Stop & Profit Max for stockItem
+          // 2) 매도 시그널 감지 — "목표가에 도달하면 판다"가 아니라, 아래 시그널 중 하나라도 뜨면
+          // 목표 수익률에 아직 못 미쳤어도 즉시 매도한다. (매수가 시그널 발생 즉시 진입하는 것과 대칭)
           const markKey = `${stockItem.symbol}_${weightedAvgPrice}`;
           const currentHigh = Math.max(highWaterMark[markKey] || weightedAvgPrice, currentPrice);
           if (currentPrice > (highWaterMark[markKey] || weightedAvgPrice)) {
@@ -7898,21 +7892,25 @@ useEffect(() => {
           const isMicroTrailingStop = overallProfitRatio >= microThreshold && dropFromPeak >= 0.0008;
           const isStandardTrailing = overallProfitRatio > 0.002 && dropFromPeak > 0.003;
           const isTrailingStop = isMicroTrailingStop || isStandardTrailing;
-const sellSignal = (strat.rsi >= 75 && strat.isNearUpperBand) || strat.isBearishAbsorption || (strat.sma5 < strat.sma20 && overallProfitRatio > 0);
-const isProfitTarget = sellSignal;
+          // 전략 센서 기반 매도 시그널 (눌림목 진입과 대칭되는 반대쪽 시그널): RSI 과열+상단밴드 근접,
+          // 매도세 흡수, 데드크로스(수익 중), 그리고 "목표수익률 도달"도 이제 이 시그널 묶음의 하나일 뿐이다.
+          const isTargetProfitSignal = enableCombinedAvgProfitExit && netProfitPct >= scalpingTargetProfit;
+          const sellSignal = (strat.rsi >= 75 && strat.isNearUpperBand) || strat.isBearishAbsorption || (strat.sma5 < strat.sma20 && overallProfitRatio > 0) || isTargetProfitSignal;
+          const isProfitTarget = sellSignal;
           const effectiveStopLossRatio = isAiMaxYieldActive ? Math.min(scalpingStopLoss / 100, -0.005) : scalpingStopLoss / 100;
           const isStopLoss = overallProfitRatio <= effectiveStopLossRatio;
           const isSmartExit = (isSmartScalperMode || isAiMaxYieldActive) && (rsi > 70 || overallProfitRatio >= effectiveTargetRatio * 1.2);
 
           if (isTrailingStop || isProfitTarget || isStopLoss || isSmartExit) {
             let sellReason = "";
-            if (isTrailingStop) sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 최고점 추적스탑 (+${(overallProfitRatio * 100).toFixed(2)}%)` : "트레일링 스탑 (수익 보존)";
-            else if (isProfitTarget) sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 동적목표달성 (+${(overallProfitRatio * 100).toFixed(2)}%)` : `목표 수익 달성 (+${(overallProfitRatio * 100).toFixed(2)}%)`;
+            if (isTargetProfitSignal) sellReason = `목표 수익률 도달 시그널 (+${netProfitPct.toFixed(2)}%)`;
+            else if (isTrailingStop) sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 최고점 추적스탑 (+${(overallProfitRatio * 100).toFixed(2)}%)` : "트레일링 스탑 (수익 보존)";
+            else if (isProfitTarget) sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 동적목표달성 (+${(overallProfitRatio * 100).toFixed(2)}%)` : `매도 시그널 감지 (+${(overallProfitRatio * 100).toFixed(2)}%)`;
             else sellReason = "리스크 관리 손절";
 
             transitionLifecycleStatus(stockItem.symbol, 'SELL_READY', sellReason);
-            if (isSelected) setScalperMessage(`[최고수익 AI 매도] ${stockItem.name} ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (${sellReason})`);
-            await executeTrade('SELL', stockItem, totalHeldQty, `Profit Max (${stockItem.name}): ${sellReason}`, currentPrice, weightedAvgPrice);
+            if (isSelected) setScalperMessage(`[매도 시그널] ${stockItem.name} ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (${sellReason})`);
+            await executeTrade('SELL', stockItem, totalHeldQty, `Profit Max (${stockItem.name}): ${sellReason}`, marketableSellPrice, weightedAvgPrice);
 
             setHighWaterMark(prev => {
               const next = { ...prev };
