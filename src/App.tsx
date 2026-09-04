@@ -3920,9 +3920,9 @@ setGapInventory(nextInv);
       if (marketType === 'KR' && isUS) return false;
       if (marketType === 'US' && !isUS) return false;
       
-      // Exclude KODEX 200선물 as requested
-      if (name.includes('kodex 200선물')) return false;
-      if (name.startsWith('kodex')) return false;
+      // 스캘핑 추천에서 KODEX/TIGER 등 ETF 상품은 제외 (개별 종목 스캘핑 목적에 맞지 않음)
+      if (name.includes('kodex')) return false;
+      if (name.includes('tiger')) return false;
       
       return stock.price > 0;
     });
@@ -4504,7 +4504,12 @@ setGapInventory(nextInv);
           const existing = mergedMap.get(v.symbol);
           if (!existing || v.price > 0) mergedMap.set(v.symbol, v);
         });
-        const merged = Array.from(mergedMap.values());
+        // 추천에서 KODEX/TIGER 등 ETF 상품은 제외 (개별 종목 스캘핑 목적에 맞지 않음)
+        const isEtfName = (name: string) => {
+          const lower = (name || '').toLowerCase();
+          return lower.includes('kodex') || lower.includes('tiger') || lower.includes('etf');
+        };
+        const merged = Array.from(mergedMap.values()).filter(v => !isEtfName(v.name));
 
         if (merged.length > 0) {
           const candidateStocks: Stock[] = merged.map(v => {
@@ -4536,7 +4541,11 @@ setGapInventory(nextInv);
 
     // 2순위: 거래량 순위 스캔이 안 되면(KIS 미연동 등), 현재 추적 중인 종목 풀로 분석
     if (list.length < MAX_SCALPER_RECOMMENDATIONS) {
-      const candidatePool = stocksRef.current.filter(s => !/^[A-Za-z]/.test(s.symbol) && s.market !== 'US' && s.price > 0);
+      const candidatePool = stocksRef.current.filter(s => {
+        if (/^[A-Za-z]/.test(s.symbol) || s.market === 'US' || s.price <= 0) return false;
+        const lowerName = (s.name || '').toLowerCase();
+        return !lowerName.includes('kodex') && !lowerName.includes('tiger') && !lowerName.includes('etf');
+      });
       if (candidatePool.length > 0) {
         const existingSymbols = new Set(list.map(r => r.symbol));
         const supplement = kisService.generateRealtimeRecommendations(candidatePool, detectStockStrategies)
