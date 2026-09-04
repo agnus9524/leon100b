@@ -1,3 +1,14 @@
+export interface ScalperSensors {
+  pullback: boolean;
+  breakout: boolean;
+  vwap: boolean;
+  cvd: boolean;
+  volumeMomentum: boolean;
+  rsi: number;
+  activeCount: number;
+  lastUpdatedAt: number;
+}
+
 export interface ScalperTab {
   id: string; // symbol e.g., '073240' or '001520'
   symbol: string;
