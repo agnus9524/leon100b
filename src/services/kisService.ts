@@ -1114,6 +1114,123 @@ console.log(
     return { rt_cd: "0", msg1: "Deleted", output: {} };
   }
 
+  /**
+   * 국내주식 거래량 순위 조회 — 코스피/코스닥 전체 시장에서 지금 거래량이 많은 종목을
+   * 실시간으로 가져온다. "추천종목 찾기"가 미리 등록해둔 예시 종목이 아니라 실제 시장을
+   * 분석하도록 하기 위한 후보군 소스다.
+   */
+  public async getVolumeRanking(marketDivCode: 'J' | 'Q' = 'J', count: number = 40): Promise<{ symbol: string; name: string; price: number; changePercent: number; volume: string }[]> {
+    if (!this.config) return [];
+    const callStartedAt = Date.now();
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/quotations/volume-rank';
+      const trId = 'FHPST01710000';
+
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': trId,
+        'custtype': 'P',
+      };
+
+      const params = {
+        FID_COND_MRKT_DIV_CODE: marketDivCode, // J: 코스피/코스닥 통합(주식) 시장 구분
+        FID_COND_SCR_DIV_CODE: '20171',
+        FID_INPUT_ISCD: '0000',      // 전체 종목 대상
+        FID_DIV_CLS_CODE: '0',       // 0: 전체
+        FID_BLNG_CLS_CODE: '0',      // 0: 평균거래량 기준
+        FID_TRGT_CLS_CODE: '111111111',
+        FID_TRGT_EXLS_CLS_CODE: '000000000',
+        FID_INPUT_PRICE_1: '',
+        FID_INPUT_PRICE_2: '',
+        FID_VOL_CNT: '',
+        FID_INPUT_DATE_1: '',
+      };
+
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+
+      if (res.data && Array.isArray(res.data.output)) {
+        this.recordCallResult(true, Date.now() - callStartedAt);
+        return res.data.output.slice(0, count).map((item: any) => ({
+          symbol: item.mksc_shrn_iscd || item.stck_shrn_iscd || '',
+          name: item.hts_kor_isnm || '',
+          price: Number(item.stck_prpr || 0),
+          changePercent: Number(item.prdy_ctrt || 0) * (item.prdy_vrss_sign === '4' || item.prdy_vrss_sign === '5' ? -1 : 1),
+          volume: Number(item.acml_vol || 0).toLocaleString()
+        })).filter((s: any) => s.symbol && s.price > 0);
+      }
+      this.recordCallResult(false, Date.now() - callStartedAt);
+      return [];
+    } catch (error: any) {
+      this.recordCallResult(false, Date.now() - callStartedAt);
+      console.warn("[KIS Service] Volume Ranking fetch failed:", error?.response?.data || error?.message);
+      return [];
+    }
+  }
+
+  /**
+   * 국내주식 등락률 순위 조회 — 지금 시장에서 가격이 강하게 움직이고 있는(모멘텀이 강한) 종목을
+   * 실시간으로 가져온다. 거래량순위와 결합하면 "거래량도 많고 방향성도 뚜렷한" 스캘핑에 더
+   * 적합한 종목을 골라낼 수 있다.
+   */
+  public async getFluctuationRanking(marketDivCode: 'J' | 'Q' = 'J', direction: 'UP' | 'DOWN' = 'UP', count: number = 40): Promise<{ symbol: string; name: string; price: number; changePercent: number; volume: string }[]> {
+    if (!this.config) return [];
+    const callStartedAt = Date.now();
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/ranking/fluctuation';
+      const trId = 'FHPST01700000';
+
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': trId,
+        'custtype': 'P',
+      };
+
+      const params = {
+        fid_cond_mrkt_div_code: marketDivCode, // J: 코스피/코스닥 통합(주식) 시장 구분
+        fid_cond_scr_div_code: '20170',
+        fid_input_iscd: '0000',       // 전체 종목 대상
+        fid_rank_sort_cls_code: direction === 'UP' ? '0' : '1', // 0: 상승률 순, 1: 하락률 순
+        fid_input_cnt_1: '0',
+        fid_prc_cls_code: '0',
+        fid_input_price_1: '',
+        fid_input_price_2: '',
+        fid_vol_cnt: '',
+        fid_trgt_cls_code: '0',
+        fid_trgt_exls_cls_code: '0',
+        fid_div_cls_code: '0',
+        fid_rsfl_rate1: '',
+        fid_rsfl_rate2: '',
+      };
+
+      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+
+      if (res.data && Array.isArray(res.data.output)) {
+        this.recordCallResult(true, Date.now() - callStartedAt);
+        return res.data.output.slice(0, count).map((item: any) => ({
+          symbol: item.stck_shrn_iscd || item.mksc_shrn_iscd || '',
+          name: item.hts_kor_isnm || '',
+          price: Number(item.stck_prpr || 0),
+          changePercent: Number(item.prdy_ctrt || 0) * (direction === 'DOWN' ? -1 : 1),
+          volume: Number(item.acml_vol || 0).toLocaleString()
+        })).filter((s: any) => s.symbol && s.price > 0);
+      }
+      this.recordCallResult(false, Date.now() - callStartedAt);
+      return [];
+    } catch (error: any) {
+      this.recordCallResult(false, Date.now() - callStartedAt);
+      console.warn("[KIS Service] Fluctuation Ranking fetch failed:", error?.response?.data || error?.message);
+      return [];
+    }
+  }
+
   public async getDomesticDailyPrice(symbol: string, periodCode: 'D' | 'W' | 'M' = 'D') {
     if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output: [] };
     try {

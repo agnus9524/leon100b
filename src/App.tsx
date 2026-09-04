@@ -4488,12 +4488,26 @@ setGapInventory(nextInv);
   const loadScalperRecommendations = useCallback(async (): Promise<ScalperRecommendation[]> => {
     let list: ScalperRecommendation[] = [];
 
-    // 1순위: 실제 코스피 거래량 순위 스캔 — 지금 시장에서 진짜 거래량이 많은 종목들
+    // 1순위: 실제 코스피 거래량순위 + 등락률순위를 함께 조회해서 병합한다.
+    // 거래량만 보는 것보다, "거래량도 많고 방향성(모멘텀)도 뚜렷한" 종목까지 후보군에 넣어야
+    // 스캘핑에 더 적합한 종목을 놓치지 않는다. (비공식 3rd-party 스크래핑 대신 KIS 공식 랭킹 API 조합)
     if (kisConfig.isConnected) {
       try {
-        const volumeLeaders = await kisService.getVolumeRanking('J', 40);
-        if (volumeLeaders.length > 0) {
-          const candidateStocks: Stock[] = volumeLeaders.map(v => {
+        const [volumeLeaders, fluctuationLeaders] = await Promise.all([
+          kisService.getVolumeRanking('J', 40),
+          kisService.getFluctuationRanking('J', 'UP', 30)
+        ]);
+
+        // symbol 기준으로 병합 (중복 제거) — 두 순위에 모두 등장하는 종목이 특히 유의미한 후보
+        const mergedMap = new Map<string, { symbol: string; name: string; price: number; changePercent: number; volume: string }>();
+        [...volumeLeaders, ...fluctuationLeaders].forEach(v => {
+          const existing = mergedMap.get(v.symbol);
+          if (!existing || v.price > 0) mergedMap.set(v.symbol, v);
+        });
+        const merged = Array.from(mergedMap.values());
+
+        if (merged.length > 0) {
+          const candidateStocks: Stock[] = merged.map(v => {
             // 실시간 분봉 이력 없이도 detectStockStrategies가 의미 있는 판단을 할 수 있도록,
             // 등락률(changePercent)을 반영해 추세가 있는 근사 이력을 만든다(완전 평탄한 값보다 낫다).
             const prevPrice = v.changePercent !== 0 ? v.price / (1 + v.changePercent / 100) : v.price;
@@ -4516,7 +4530,7 @@ setGapInventory(nextInv);
           list = kisService.generateRealtimeRecommendations(candidateStocks, detectStockStrategies);
         }
       } catch (err) {
-        console.warn('[거래량 순위 기반 추천 실패]', err);
+        console.warn('[거래량/등락률 순위 기반 추천 실패]', err);
       }
     }
 
