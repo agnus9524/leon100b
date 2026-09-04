@@ -6035,6 +6035,7 @@ data.price
 
     // 1. Sync for all watchlist stocks (every 10 seconds)
     const syncAllPrices = async () => {
+      if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음 (연동 전 에러 스팸 방지)
       try {
         const currentStocks = stocksRef.current;
         if (currentStocks.length === 0) return;
@@ -6076,6 +6077,7 @@ data.price
 
     // 2. Fast sync for the currently selected stock (every 1.5 seconds)
     const syncSelectedPrice = async () => {
+      if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음
       if (!selectedSymbol) return;
       try {
         const priceData = await kisService.getPrice(selectedSymbol);
@@ -6116,6 +6118,8 @@ data.price
    
 
     const syncLiveOrderbook = async () => {
+
+  if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음
 
   const targets =
     scalperTabsRef.current
