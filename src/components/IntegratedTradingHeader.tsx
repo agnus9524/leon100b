@@ -927,17 +927,6 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   })}
                 </div>
 
-                {/* Spread Line (현재 체결가) */}
-                <div className="my-0.5 h-4 px-1 bg-white/5 border-y border-white/10 flex items-center justify-between rounded font-mono tabular-nums">
-                  <span className="text-[8.5px] font-black text-slate-400 uppercase shrink-0">체결가</span>
-                  <span className={cn("font-black text-[10.5px] font-mono tabular-nums animate-pulse", (selectedStock.change || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
-                    {formatCurrency(selectedStock.price)}
-                  </span>
-                  <span className={cn("text-[8.5px] font-mono tabular-nums font-bold shrink-0", (selectedStock.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400")}>
-                    {(selectedStock.changePercent || 0) >= 0 ? '+' : ''}{(selectedStock.changePercent || 0).toFixed(2)}%
-                  </span>
-                </div>
-
                 {/* Bid Levels (매수 1~4호가) */}
                 <div className="space-y-0.5">
                   {orderBookData.bidLevels.map((lvlPrice, idx) => {

@@ -4607,8 +4607,8 @@ setGapInventory(nextInv);
     if (kisConfig.isConnected) {
       try {
         const [volumeLeaders, fluctuationLeaders] = await Promise.all([
-          kisService.getVolumeRanking('J', 40),
-          kisService.getFluctuationRanking('J', 'UP', 30)
+          kisService.getVolumeRanking('J', 60),
+          kisService.getFluctuationRanking('J', 'UP', 50)
         ]);
 
         // symbol 기준으로 병합 (중복 제거) — 두 순위에 모두 등장하는 종목이 특히 유의미한 후보
