@@ -117,22 +117,6 @@ async function generateContentWithRetry(model: any, prompt: any, retries = 4) {
 const apiCache = new Map<string, { data: any; expiresAt: number }>();
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
-function getYahooSymbol(symbol: string): string | null {
-  const stock = ALL_KRX_MASTER_STOCKS.find(
-    s => s.symbol === symbol
-  );
-
-  if (!stock) {
-    return null;
-  }
-
-  if (stock.market !== 'KOSPI') {
-    return null;
-  }
-
-  return `${symbol}.KS`;
-}
-
 function calculateRSI(prices: number[], period = 14): number {
   if (prices.length < period + 1) {
     return 50;
@@ -707,37 +691,11 @@ async function startServer() {
   });
 
   
-// Helper: Fetch Real-time Stock Quote (Supports KR stocks via Naver Finance Mobile API and US/KR via Yahoo Finance)
+// Helper: 과거에는 여기서 야후 파이낸스로 가격 이력을 가져왔으나, 야후 파이낸스를 더 이상 쓰지 않기로
+// 하면서 제거했다. 호출부(추천 후보 스캔)는 이미 빈 배열을 안전하게 처리하도록 되어 있어서,
+// 대체 API로 바꾸기보다 호출 자체를 없애 API 호출 횟수를 줄인다.
 async function fetchPriceHistory(symbol: string): Promise<number[]> {
-  try {
-    const yfSymbol = getYahooSymbol(symbol);
-if (!yfSymbol) {
-return [];
-}
-
-    const resp = await axios.get(
-      `https://query1.finance.yahoo.com/v8/finance/chart/${yfSymbol}`,
-      {
-        params: {
-          interval: '5m',
-          range: '5d'
-        },
-        timeout: 3000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0'
-        }
-      }
-    );
-
-    const closes =
-      resp.data?.chart?.result?.[0]?.indicators?.quote?.[0]?.close || [];
-
-    return closes.filter(
-      (v: any) => typeof v === 'number'
-    );
-  } catch {
-    return [];
-  }
+  return [];
 }
 
 
@@ -852,65 +810,11 @@ async function fetchRealtimeQuote(symbol: string): Promise<{
       // ignore and try fallback
     }
 
-    // 2. Secondary: Yahoo Finance (.KS for KOSPI)
-    try {
-       const yfSymbol = getYahooSymbol(symbol);
-if (!yfSymbol) {
-return null;
-}
-      const yfResp = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${yfSymbol}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-        timeout: 2500
-      });
-      const meta = yfResp.data?.chart?.result?.[0]?.meta;
-      if (meta && meta.regularMarketPrice) {
-        const price = meta.regularMarketPrice;
-        const prevClose = meta.chartPreviousClose || meta.previousClose || price;
-        const change = Number((price - prevClose).toFixed(0));
-        const changePercent = prevClose > 0 ? Number(((change / prevClose) * 100).toFixed(2)) : 0;
-        return {
-          symbol,
-          name: meta.shortName || symbol,
-          price,
-          prevClose,
-          change,
-          changePercent,
-          volume: meta.regularMarketVolume ? meta.regularMarketVolume.toLocaleString() : '0',
-          rawVolume: meta.regularMarketVolume || 0,
-          market: 'KR'
-        };
-      }
-    } catch (e) {
-      // ignore
-    }
+    // (이전에는 여기서 야후 파이낸스로 KR 종목을 3차 보강 조회했으나, 야후 파이낸스를 더 이상
+    // 쓰지 않기로 하면서 제거했다. 네이버 2단계(폴링 + 모바일 기본시세)로 충분히 커버된다.)
   } else {
-    // US Stock via Yahoo Finance
-    try {
-      const yfResp = await axios.get(`https://query1.finance.yahoo.com/v8/finance/chart/${symbol}`, {
-        headers: { 'User-Agent': 'Mozilla/5.0' },
-        timeout: 3000
-      });
-      const meta = yfResp.data?.chart?.result?.[0]?.meta;
-      if (meta && meta.regularMarketPrice) {
-        const price = meta.regularMarketPrice;
-        const prevClose = meta.chartPreviousClose || meta.previousClose || price;
-        const change = Number((price - prevClose).toFixed(2));
-        const changePercent = prevClose > 0 ? Number(((change / prevClose) * 100).toFixed(2)) : 0;
-        return {
-          symbol,
-          name: meta.shortName || symbol,
-          price,
-          prevClose,
-          change,
-          changePercent,
-          volume: meta.regularMarketVolume ? meta.regularMarketVolume.toLocaleString() : '0',
-          rawVolume: meta.regularMarketVolume || 0,
-          market: 'US'
-        };
-      }
-    } catch (e) {
-      // ignore
-    }
+    // (이전에는 여기서 야후 파이낸스로 해외 종목 시세를 조회했으나, 야후 파이낸스가 유일한
+    // 소스였던 이 브랜치는 제거했다. 해외 종목 시세는 이 함수로는 더 이상 조회되지 않는다.)
   }
   return null;
 }
@@ -1512,7 +1416,7 @@ req.body?.appsecret?.length
     }
   });
 
-  // Hybrid Stock Search API (Local KRX Cache for KR + Yahoo Finance for US) with Edge Revalidation
+  // Stock Search API (Local KRX Cache for KR) with Edge Revalidation — 야후 파이낸스 제거됨, 해외 종목 검색은 결과 없음
   app.get('/api/stocks/search', async (req, res) => {
     const { keyword, marketType } = req.query;
     
@@ -1588,28 +1492,8 @@ req.body?.appsecret?.length
           }
         });
 
-        // If few results and keyword has English/alphanumeric, enhance with Yahoo KS/KQ query
-        if (matchedKR.length < 8) {
-          try {
-            const yfRes = await axios.get('https://query1.finance.yahoo.com/v1/finance/search', {
-              params: { q: cleanKeyword + '.KS' }, 
-              headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-              timeout: 1500
-            });
-            if (yfRes.data && Array.isArray(yfRes.data.quotes)) {
-              yfRes.data.quotes.forEach((q: any) => {
-                if (q.quoteType === 'EQUITY' || q.quoteType === 'ETF') {
-                  let sym = q.symbol || '';
-                  if (sym.includes('.')) sym = sym.split('.')[0];
-                  if (/^\d{6}$/.test(sym) && !seenSymbols.has(sym)) {
-                    seenSymbols.add(sym);
-                    matchedKR.push({ symbol: sym, name: q.longname || q.shortname || sym, market: 'KR' as const, marketCategory: 'KOSPI' });
-                  }
-                }
-              });
-            }
-          } catch (e) {}
-        }
+        // (이전에는 결과가 적을 때 야후 파이낸스로 보강 검색을 했으나, 야후 파이낸스를 더 이상
+        // 쓰지 않기로 하면서 제거했다. KRX 마스터 데이터 + 캐시로 이미 충분히 커버된다.)
 
         // Smart sorting: exact matches first, then KOSPI priority, then prefix matches, then alphabetical
         matchedKR.sort((a, b) => {
@@ -1639,61 +1523,10 @@ req.body?.appsecret?.length
       }
 
       // 2. US Stock Search Strategy
-      if (isUSMode || (!isKRMode && results.length < 5)) {
-        try {
-          const response = await axios.get('https://query1.finance.yahoo.com/v1/finance/search', {
-            params: { q: cleanKeyword },
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-            },
-            timeout: 3000
-          });
-
-          if (response.data && Array.isArray(response.data.quotes)) {
-            const mappedUS = response.data.quotes
-              .filter((q: any) => q.quoteType === 'EQUITY' || q.quoteType === 'ETF')
-              .map((q: any) => {
-                let sym = q.symbol || '';
-                if (sym.includes('.')) {
-                  sym = sym.split('.')[0];
-                }
-                return {
-                  symbol: sym.toUpperCase(),
-                  name: q.longname || q.shortname || sym,
-                  market: 'US' as const,
-                  price: q.regularMarketPrice
-                };
-              });
-
-            // Sort US matches so exact symbol or prefix match is top
-            mappedUS.sort((a: any, b: any) => {
-              const aSym = a.symbol.toUpperCase();
-              const bSym = b.symbol.toUpperCase();
-              const aName = a.name.toLowerCase();
-              const bName = b.name.toLowerCase();
-
-              if (aSym === upperKeyword && bSym !== upperKeyword) return -1;
-              if (bSym === upperKeyword && aSym !== upperKeyword) return 1;
-
-              if (aSym.startsWith(upperKeyword) && !bSym.startsWith(upperKeyword)) return -1;
-              if (bSym.startsWith(upperKeyword) && !aSym.startsWith(upperKeyword)) return 1;
-
-              if (aName.startsWith(lowerKeyword) && !bName.startsWith(lowerKeyword)) return -1;
-              if (bName.startsWith(lowerKeyword) && !aName.startsWith(lowerKeyword)) return 1;
-
-              return 0;
-            });
-
-            mappedUS.forEach((item: any) => {
-              if (!results.some(r => r.symbol.toLowerCase() === item.symbol.toLowerCase() && r.market === item.market)) {
-                results.push(item);
-              }
-            });
-          }
-        } catch (err: any) {
-          console.error('[US Stock Search Error]:', err.message);
-        }
-      }
+      // (이전에는 야후 파이낸스 검색 API로 해외 종목을 찾았으나, 야후 파이낸스를 더 이상 쓰지 않기로
+      // 하면서 이 호출을 제거했다. 대체 데이터 소스가 없어서 해외 종목 검색은 결과를 반환하지 않는다 —
+      // 이 앱이 국내 스캘핑 위주로 쓰이고 있다면 영향이 적지만, 해외 종목 검색이 필요하면 별도로
+      // KIS 해외주식 시세 API 등 대체 소스를 연결해야 한다.)
 
       // De-duplicate results based on market + lowercase symbol
       const seen = new Set();

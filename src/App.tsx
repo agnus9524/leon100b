@@ -122,7 +122,6 @@ import {
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
 import { onSnapshot, doc, deleteDoc } from 'firebase/firestore';
 import { StrategyPanel } from './components/StrategyPanel';
-import { XTXPredictor } from './components/XTXPredictor';
 import { MarketSignal } from './services/aiTradingService';
 import { POPULAR_STOCKS, type StockSuggestion } from './constants/stockList';
 import { KOSPI_STOCKS, ALL_KRX_MASTER_STOCKS, searchKrMasterStocks, type MasterStock } from './constants/kospiMaster';
@@ -352,6 +351,7 @@ interface Stock {
   momentum?: number; // 0-100 score
   sentiment?: number; // -1 to 1 score
   pattern?: string; // e.g. "Double Bottom", "Cup and Handle"
+  executionStrength?: number; // 실제 체결강도(KIS cttr) — 매수체결량/매도체결량 기반. 호가잔량 비율이 아님
 }
 
 // Utility function to get tick size by market and price
@@ -492,6 +492,7 @@ interface PendingSellOrder {
   createdAt: number;
   type?: 'LIMIT_SELL' | 'TARGET_WATCH' | 'SCALPER_EXIT';
   reason?: string;
+  exitReason?: ExitReason; // 매도 사유(구조화) — 미체결 상태로 대기하다 나중에 체결될 때도 사유를 잃지 않도록 저장
   buyPrice?: number; // Added to calculate profit upon fill
   slotId?: string; // Track which slot this order is for
   ordDvsn?: string;
@@ -785,6 +786,16 @@ const INITIAL_STOCKS: Stock[] = [
   }
 ];
 
+// 매도 사유를 구조화된 값으로 남겨서 GLOBAL TRADE LOGS에서 "왜 팔았는지"를 정확히 필터링/확인할 수 있게 한다.
+export type ExitReason =
+  | 'TAKE_PROFIT'      // 목표 수익률 도달
+  | 'STOP_LOSS'        // 기계적 손절
+  | 'TRAILING_STOP'    // 고점 대비 하락(트레일링 스탑)
+  | 'AI_SELL'          // 최고수익 AI / 스마트 매도
+  | 'SIGNAL_REVERSAL'  // 전략 센서 반전 시그널 (RSI 과열, 매도세 흡수, 데드크로스 등)
+  | 'TIME_EXIT'        // 보유시간 초과 등 시간 기반 청산
+  | 'MANUAL';          // 사용자 수동 매도
+
 interface TradeLog {
   time: string;
   symbol: string;
@@ -795,6 +806,9 @@ interface TradeLog {
   id?: string;          // GLOBAL TRADE LOGS 필터 UI의 React key 용도
   timestamp?: number;   // 정렬/필터링용 원본 타임스탬프
   symbolName?: string;  // 종목명 (필터 버튼 라벨 등에 사용)
+  exitReason?: ExitReason; // 매도 사유 (구조화된 값 — SELL 로그에만 존재)
+  entryReason?: string;    // 매수 진입 시그널 요약 (BUY 로그에만 존재)
+  pnlPercent?: number;     // 매도 시점의 손익률(%) — SELL 로그에만 존재
 }
 
 interface NewsItem {
@@ -1482,7 +1496,6 @@ kisConfig.isConnected
   };
 
   const [liveOrderbook, setLiveOrderbook] = useState<any>(null);
-  const [liveOrderbooks, setLiveOrderbooks] = useState<Record<string, any>>({});
   const [isLiveOrderbookLoading, setIsLiveOrderbookLoading] = useState<boolean>(false);
   const [showKisModal, setShowKisModal] = useState(false);
   const [showKisPassword, setShowKisPassword] = useState(false);
@@ -1854,6 +1867,7 @@ kisConfig.isConnected
             change: priceData.change,
             changePercent: priceData.changePercent,
             volume: priceData.volume,
+            executionStrength: priceData.executionStrength,
             isRealTime: true,
             lastUpdated: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
           } : s));
@@ -2527,8 +2541,80 @@ setGapInventory(nextInv);
 
     const activeCount = (isPullback ? 1 : 0) + (isBreakout ? 1 : 0) + (isVwapSupport ? 1 : 0) + (isVolumeProfile ? 1 : 0);
 
-    return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd, isBullishAbsorption, isBearishAbsorption, bb, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice, hasVolumeMomentum };
+    return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd, isBullishAbsorption, isBearishAbsorption, bb, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice, hasVolumeMomentum, recentPeak, hasRecentPriceMovement };
   }, [marketType]);
+
+  // ============================================================
+  // 🎯 매수 점수제 (Buy Scoring System)
+  // ------------------------------------------------------------
+  // 기존에는 "선택한 센서가 전부 동시에 켜져야만" 매수하는 엄격한 AND 조건이었다. 이건 스캘핑처럼
+  // 빠른 진입이 중요한 전략에서 기회를 자주 놓치게 만든다. 대신 각 신호에 가중치를 매겨 점수를
+  // 합산하고, 일정 점수 이상이면 매수하는 방식으로 바꾼다 — 모든 조건이 완벽히 겹치지 않아도
+  // 신호가 충분히 강하면 진입할 수 있다.
+  //
+  // 배점 (총 120점 만점):
+  //   현재가 VWAP 위        +15   VWAP 돌파(하단→상단 교차)  +20
+  //   매수 체결강도 130+    +15   체결강도 급증(전대비+30)   +10
+  //   실제 거래량 2배 이상  +15   RSI 45~65                  +10
+  //   단기 이동평균 상승    +10   매도호가 소진(호가 데이터 있을 때만) +10
+  //   전고점 돌파           +15
+  // ============================================================
+  const BUY_SCORE_THRESHOLD = 65; // 120점 만점 중 65점 이상이면 매수 (약 54% — 4~5개 신호의 확실한 겹침)
+  const prevVwapAboveRef = React.useRef<Record<string, boolean>>({});
+  const prevExecutionStrengthRef = React.useRef<Record<string, number>>({});
+  const volumeHistoryRef = React.useRef<Record<string, number[]>>({});
+
+  const calculateBuyScore = React.useCallback((
+    stock: Stock,
+    strat: ReturnType<typeof detectStockStrategies>,
+    askDepletion?: boolean // 매도호가 소진 — 실시간 호가 데이터가 있는 종목(주로 선택된 종목)에서만 전달됨
+  ): { score: number; breakdown: string[] } => {
+    let score = 0;
+    const breakdown: string[] = [];
+    const sym = stock.symbol;
+    const currentPrice = stock.price || 0;
+
+    if (!strat.hasRecentPriceMovement || currentPrice <= 0) return { score: 0, breakdown: [] };
+
+    // 1. 현재가 VWAP 위 (+15)
+    const isAboveVwap = strat.vwap > 0 && currentPrice >= strat.vwap;
+    if (isAboveVwap) { score += 15; breakdown.push('VWAP 위(+15)'); }
+
+    // 2. VWAP 돌파 — 직전엔 VWAP 아래였다가 지금 막 위로 올라온 경우 (+20)
+    const wasAboveVwap = prevVwapAboveRef.current[sym];
+    if (isAboveVwap && wasAboveVwap === false) { score += 20; breakdown.push('VWAP 돌파(+20)'); }
+    prevVwapAboveRef.current[sym] = isAboveVwap;
+
+    // 3. 매수 체결강도 130 이상 (+15) — KIS 실제 체결강도(cttr) 기준
+    const execStrength = stock.executionStrength || 0;
+    if (execStrength >= 130) { score += 15; breakdown.push('체결강도130+(+15)'); }
+
+    // 4. 체결강도 급증 — 직전 대비 30 이상 상승 (+10)
+    const prevExec = prevExecutionStrengthRef.current[sym];
+    if (prevExec !== undefined && execStrength - prevExec >= 30) { score += 10; breakdown.push('체결강도급증(+10)'); }
+    if (execStrength > 0) prevExecutionStrengthRef.current[sym] = execStrength;
+
+    // 5. 실제 거래량 2배 이상 — 최근 평균 거래량 대비 (+15)
+    const rawVol = Number(String(stock.volume || '0').replace(/,/g, '')) || 0;
+    const volHist = volumeHistoryRef.current[sym] || [];
+    const avgVol = volHist.length >= 3 ? volHist.reduce((a, b) => a + b, 0) / volHist.length : 0;
+    if (avgVol > 0 && rawVol >= avgVol * 2) { score += 15; breakdown.push('거래량2배+(+15)'); }
+    volumeHistoryRef.current[sym] = [...volHist, rawVol].slice(-20);
+
+    // 6. RSI 45~65 — 과열도 과매도도 아닌 안정적 구간 (+10)
+    if (strat.rsi >= 45 && strat.rsi <= 65) { score += 10; breakdown.push('RSI45~65(+10)'); }
+
+    // 7. 단기 이동평균 상승 — SMA5 >= SMA20 (+10)
+    if (strat.momentumPositive) { score += 10; breakdown.push('단기이평상승(+10)'); }
+
+    // 8. 매도호가 소진 (+10) — 실시간 호가 데이터가 있는 종목(주로 선택된 종목)에서만 반영
+    if (askDepletion) { score += 10; breakdown.push('매도호가소진(+10)'); }
+
+    // 9. 전고점 돌파 (+15)
+    if (strat.recentPeak > 0 && currentPrice > strat.recentPeak) { score += 15; breakdown.push('전고점돌파(+15)'); }
+
+    return { score, breakdown };
+  }, []);
 
   const selectedStock = useMemo(() => {
     const isCurrentUS = marketType === 'US';
@@ -3797,8 +3883,9 @@ setGapInventory(nextInv);
       currentPrice: number;
       investedAmount: number;
       evaluatedAmount: number;
-      pnlAmount: number;
-      pnlPercent: number;
+      pnlAmount: number | null;
+      pnlPercent: number | null;
+      hasAvgPriceData: boolean; // 평단가를 실제로 알고 있는지 여부 — false면 "0%"가 아니라 "데이터 없음"으로 표시해야 함
       portfolioShare: number;
     }> = [];
 
@@ -3825,13 +3912,18 @@ setGapInventory(nextInv);
         const totalQty = gapInventory.reduce((acc, slot) => acc + slot.quantity, 0);
         avgP = totalQty > 0 ? Math.floor(totalCost / totalQty) : 0;
       }
+      // 평단가를 실제로 구했는지(avgPrices 또는 gapInventory에서) 여부를 여기서 확정한다 —
+      // 아래에서 currentPrice로 대체하기 "직전"의 값으로 판단해야 진짜 데이터 유무를 알 수 있다.
+      const hasAvgPriceData = avgP > 0;
       if (avgP <= 0) avgP = st.price || 0;
       const avgPriceKRW = isStockUS ? Math.floor(avgP * exchangeRate) : Math.floor(avgP);
 
       const invested = qty * avgPriceKRW;
       const evaluated = qty * currentPriceKRW;
-      const pnlAmt = evaluated - invested;
-      const pnlPct = invested > 0 ? (pnlAmt / invested) * 100 : 0;
+      // 평단가 데이터가 없으면(현재가로 대체된 상태) 손익을 "0%"로 단정하지 않고 null로 남겨서
+      // "진짜 무손익"과 "평단가를 몰라서 계산 불가"를 구분한다.
+      const pnlAmt = hasAvgPriceData ? (evaluated - invested) : null;
+      const pnlPct = hasAvgPriceData ? (invested > 0 ? (pnlAmt! / invested) * 100 : 0) : null;
 
       totalStockValue += evaluated;
       totalStockInvested += invested;
@@ -3844,8 +3936,9 @@ setGapInventory(nextInv);
         currentPrice: conv(currentPriceKRW),
         investedAmount: conv(invested),
         evaluatedAmount: conv(evaluated),
-        pnlAmount: conv(pnlAmt),
+        pnlAmount: pnlAmt !== null ? conv(pnlAmt) : null,
         pnlPercent: pnlPct,
+        hasAvgPriceData,
         portfolioShare: 0
       });
     });
@@ -5040,31 +5133,30 @@ const newStock: Stock = {
       openOrSwitchScalperTab(symbolToUse, customName, newStock.price);
       setSelectedSymbol(symbolToUse);
       
-      // Load real name and price asynchronously from Gemini without blocking UI transition
+      // 🔄 신규 종목의 실제 이름/가격은 AI에게 "추측"시키지 않고 KIS 실시세로 직접 보정한다.
+      // (LLM은 실시간 시세에 접근할 수 없어 이 방식은 부정확했고, 불필요하게 느리고 비쌌다)
       setTimeout(async () => {
         try {
-          const prompt = `${marketType === 'KR' ? '한국 KOSPI/KOSDAQ' : '미국 NYSE/NASDAQ'} 주식 종목 ${symbolToUse}의 현재 가격을 분석해주세요. 반드시 다음 JSON 형식으로 응답하세요: {"name": "기업명", "price": 숫자}`;
-          const response = await axios.post('/api/ai/bot-decision', { prompt });
-          const data = JSON.parse(response.data.text);
-          if (data.price) {
+          const priceData = await kisService.getPrice(symbolToUse);
+          if (priceData && priceData.current > 0) {
             setStocks(prev => prev.map(s => {
               if (s.symbol === symbolToUse) {
                 return {
                   ...s,
-                  name: data.name || s.name,
-                  price: data.price,
-                  history: Array.from({ length: 40 }, (_, i) => ({ 
-                    time: `${i}:00`, 
-                    price: data.price * (0.98 + Math.random() * 0.04) 
-                  }))
+                  name: priceData.name || s.name,
+                  price: priceData.current,
+                  change: priceData.change,
+                  changePercent: priceData.changePercent,
+                  volume: priceData.volume,
+                  executionStrength: priceData.executionStrength
                 };
               }
               return s;
             }));
-            addLog('SYSTEM', '매수', 0, 0, `[종목 정보 동기화] ${data.name || customName}(${symbolToUse})의 주가가 ${formatCurrency(data.price)}으로 업데이트되었습니다.`);
+            addLog('SYSTEM', '매수', 0, 0, `[종목 정보 동기화] ${priceData.name || customName}(${symbolToUse})의 주가가 ${formatCurrency(priceData.current)}으로 업데이트되었습니다.`);
           }
         } catch (err) {
-          console.error("Background search update error:", err);
+          console.error("Background price sync error:", err);
         }
       }, 0);
       return;
@@ -5074,24 +5166,21 @@ const newStock: Stock = {
     setSearchError(null);
 
     try {
-      const prompt = `${marketType === 'KR' ? '한국 KOSPI/KOSDAQ' : '미국 NYSE/NASDAQ'} 주식 종목 ${symbolToUse}의 기업명과 현재 가격을 분석해주세요. 
-      기업명은 반드시 토스증권 어플에서 표기되는 한글 이름(예: Apple -> 애플, Tesla -> 테슬라, NVIDIA -> 엔비디아)을 기준으로 작성해주세요.
-      반드시 다음 JSON 형식으로 응답하세요: {"name": "기업명", "price": 숫자}`;
-
-      const response = await axios.post('/api/ai/bot-decision', { prompt });
-      const data = JSON.parse(response.data.text);
-      if (!data.name || !data.price) throw new Error("Invalid response");
+      // 🔄 종목명/현재가를 AI에게 추측시키지 않고 실제 KIS 시세로 직접 조회한다.
+      const priceData = await kisService.getPrice(symbolToUse);
+      if (!priceData || priceData.current <= 0) throw new Error("종목을 찾을 수 없습니다");
 
       const newStock: Stock = {
         symbol: symbolToUse,
-        name: data.name,
-        price: data.price,
-        change: 0,
-        changePercent: 0,
-        volume: '0',
-        history: Array.from({ length: 40 }, (_, i) => ({ 
-          time: `${i}:00`, 
-          price: data.price * (0.98 + Math.random() * 0.04) 
+        name: priceData.name || symbolToUse,
+        price: priceData.current,
+        change: priceData.change,
+        changePercent: priceData.changePercent,
+        volume: priceData.volume,
+        executionStrength: priceData.executionStrength,
+        history: Array.from({ length: 40 }, (_, i) => ({
+          time: `${i}:00`,
+          price: priceData.current
         })),
         market: marketType,
         isAI: false
@@ -5100,15 +5189,21 @@ const newStock: Stock = {
       setStocks(prev => [newStock, ...prev]);
       openOrSwitchScalperTab(
 symbolToUse,
-data.name,
-data.price
+newStock.name,
+priceData.current
 );
       setSelectedSymbol(symbolToUse);
       setSearchSymbol("");
-      addLog('SYSTEM', '매수', 0, 0, `[종목 추가] ${data.name}(${symbolToUse}) 종목이 분석 리스트에 추가되었습니다.`);
+      addLog('SYSTEM', '매수', 0, 0, `[종목 추가] ${newStock.name}(${symbolToUse}) 종목이 분석 리스트에 추가되었습니다.`);
+      // 실제 분봉 이력으로 즉시 보정 (합성 seed 대신)
+      seedRealHistory(symbolToUse).then(realHistory => {
+        if (realHistory && realHistory.length > 0) {
+          setStocks(prev => prev.map(s => s.symbol === symbolToUse ? { ...s, history: realHistory } : s));
+        }
+      });
     } catch (err: any) {
       console.error("Search error:", err);
-      const errorMsg = err.message || "종목을 찾을 수 없거나 AI 분석 한도 초과입니다.";
+      const errorMsg = err.message || "종목을 찾을 수 없습니다.";
       setSearchError(errorMsg);
       showNotification(errorMsg, "error");
     } finally {
@@ -5395,6 +5490,7 @@ data.price
           change: priceData.change,
           changePercent: priceData.changePercent,
           volume: priceData.volume,
+          executionStrength: priceData.executionStrength,
           isRealTime: true,
           lastUpdated: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
         };
@@ -6062,6 +6158,7 @@ data.price
                 change: priceData.change,
                 changePercent: priceData.changePercent,
                 volume: priceData.volume,
+                executionStrength: priceData.executionStrength,
                 isRealTime: true,
                 lastUpdated: new Date().toLocaleTimeString(),
                 history: safeHist.length > 0 
@@ -6112,6 +6209,7 @@ data.price
               change: priceData.change,
               changePercent: priceData.changePercent,
               volume: priceData.volume,
+              executionStrength: priceData.executionStrength,
               isRealTime: true,
               lastUpdated: new Date().toLocaleTimeString(),
               history: newHistory
@@ -6129,45 +6227,20 @@ data.price
     const syncLiveOrderbook = async () => {
 
   if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음
+  if (!selectedSymbol) return;
 
-  const targets =
-    scalperTabsRef.current
-      .filter(tab => tab.symbol);
-
-  for (const tab of targets) {
-
-    try {
-
-      const ob =
-        await kisService.fetchLiveOrderbook(
-          tab.symbol
-        );
-
-      if (ob) {
-
-        setLiveOrderbooks(prev => ({
-          ...prev,
-          [tab.symbol]: ob
-        }));
-
-// 현재 선택 종목 UI 유지
-if (tab.symbol === selectedSymbol) {
-setLiveOrderbook(ob);
-}
-
-      }
-
-    } catch (e) {
-
-      console.warn(
-        `Live orderbook fetch failed for ${tab.symbol}`,
-        e
-      );
-
+  // 🔄 호가창 UI는 "현재 선택된 종목" 하나만 화면에 보여준다. 예전에는 등록된 종목 전체(예: 8개)를
+  // 5초마다 전부 조회하고 있었는데, 선택되지 않은 종목들의 호가 데이터(liveOrderbooks, 복수형)는
+  // 실제로 어디서도 읽히지 않는 완전한 낭비 호출이었다. 선택된 종목 하나만 조회하도록 좁혀서
+  // 호출 횟수를 최대 (등록 종목 수)배 줄인다.
+  try {
+    const ob = await kisService.fetchLiveOrderbook(selectedSymbol);
+    if (ob) {
+      setLiveOrderbook(ob);
     }
-
+  } catch (e) {
+    console.warn(`Live orderbook fetch failed for ${selectedSymbol}`, e);
   }
-
 };
 
     // Immediate initial sync
@@ -6176,7 +6249,7 @@ setLiveOrderbook(ob);
     syncLiveOrderbook();
 
     slowInterval = setInterval(syncAllPrices, 10000);
-    fastInterval = setInterval(syncSelectedPrice, 1500);
+    fastInterval = setInterval(syncSelectedPrice, 2000);
     orderbookInterval = setInterval(syncLiveOrderbook, 5000);
 
     if (kisConfig.isConnected) {
@@ -7317,7 +7390,11 @@ useEffect(() => {
             const status = await kisService.checkOrderExecution(order.id);
             if (status.isFullyFilled) {
               updated = true;
-              addLog(order.symbol, '매도', status.price || order.orderPrice, status.ordQty || order.quantity, `[KIS 지정가 매도 체결] 전량 체결 완료`);
+              const fillPrice = status.price || order.orderPrice;
+              const pendingPnlPercent = (order.buyPrice && order.buyPrice > 0)
+                ? Number((((fillPrice - order.buyPrice) / order.buyPrice) * 100).toFixed(2))
+                : undefined;
+              addLog(order.symbol, '매도', fillPrice, status.ordQty || order.quantity, `[KIS 지정가 매도 체결] 전량 체결 완료`, { exitReason: order.exitReason, pnlPercent: pendingPnlPercent });
               showNotification(`${currentStock.name} KIS 매도 주문 체결 완료!`, "success");
               transitionLifecycleStatus(order.symbol, 'COMPLETED', `매도 체결 확인 (${formatCurrency(status.price || order.orderPrice)} x ${status.ordQty || order.quantity})`);
               
@@ -7487,7 +7564,7 @@ useEffect(() => {
             await new Promise(r => setTimeout(r, 400));
             
             transitionLifecycleStatus(symbol, 'SELL_READY', `평단가 정정에 따른 재매도 (목표가 ${formatCurrency(targetSellPrice)})`);
-            await executeTrade('SELL', stockObj, numQty, `[자동 매도 정정] 평단가(${formatCurrency(avgP)}) 기준 +${scalpingTargetProfit}% 익절가(${formatCurrency(targetSellPrice)}) 정정 매도`, targetSellPrice, avgP);
+            await executeTrade('SELL', stockObj, numQty, `[자동 매도 정정] 평단가(${formatCurrency(avgP)}) 기준 +${scalpingTargetProfit}% 익절가(${formatCurrency(targetSellPrice)}) 정정 매도`, targetSellPrice, avgP, undefined, 'TAKE_PROFIT');
             showNotification(`[평단가 정정] ${stockObj.name} 평단가 하락으로 전체 매도 주문이 ${formatCurrency(targetSellPrice)}원으로 재접수되었습니다.`, "success");
           } catch (err) {
             console.error("Auto-sell cancel/replace error:", err);
@@ -7499,7 +7576,7 @@ useEffect(() => {
           autoSellInFlightRef.current.add(symbol);
           try {
             transitionLifecycleStatus(symbol, 'SELL_READY', `평단가 대비 +${scalpingTargetProfit}% 익절 조건 도달 (목표가 ${formatCurrency(targetSellPrice)})`);
-            await executeTrade('SELL', stockObj, missingQty, `[자동 매도] 평단가 대비 +${scalpingTargetProfit}% 익절 지정가 매도`, targetSellPrice, avgP);
+            await executeTrade('SELL', stockObj, missingQty, `[자동 매도] 평단가 대비 +${scalpingTargetProfit}% 익절 지정가 매도`, targetSellPrice, avgP, undefined, 'TAKE_PROFIT');
           } catch (err) {
             console.error("Auto-sell executeTrade error:", err);
           } finally {
@@ -7660,16 +7737,18 @@ useEffect(() => {
               strategyLabel = "🏆 [최고수익 AI] 눌림목+VWAP+CVD";
             }
           } else {
-            const areAllSelectedMet = currentSelectedStrats.length > 0 && currentSelectedStrats.every(k => conditionsMap[k]);
-            meetsBuyCriteria = areAllSelectedMet;
-            const names = currentSelectedStrats.map(k => {
-              if (k === 'PULLBACK') return '눌림목';
-              if (k === 'BREAKOUT') return '돌파';
-              if (k === 'VWAP_SUPPORT') return 'VWAP';
-              if (k === 'VOLUME_PROFILE_CVD') return 'CVD';
-              return k;
-            });
-            strategyLabel = `🎯 [${names.join('+')}] 다중전략 진입`;
+            // 🎯 점수제: 선택한 센서들이 전부 동시에 켜져야 하는 엄격한 방식 대신, 여러 매수 신호에
+            // 가중치를 매겨 합산한 점수가 기준(65점/120점 만점) 이상이면 진입한다.
+            const askDepletion = (
+              liveOrderbook &&
+              liveOrderbook.symbol === stockItem.symbol &&
+              Number(liveOrderbook.totalBidVolume || 0) > 0 &&
+              Number(liveOrderbook.totalAskVolume || 0) > 0 &&
+              (Number(liveOrderbook.totalBidVolume) / Number(liveOrderbook.totalAskVolume)) >= 3
+            );
+            const { score: buyScore, breakdown: buyScoreBreakdown } = calculateBuyScore(stockItem, strat, askDepletion);
+            meetsBuyCriteria = buyScore >= BUY_SCORE_THRESHOLD;
+            strategyLabel = `🎯 [점수제 ${buyScore}/120점] ${buyScoreBreakdown.join(', ') || '신호 부족'}`;
           }
 
           const isUSStock = stockItem.market === 'US' || /^[A-Za-z]/.test(stockItem.symbol) || marketType === 'US';
@@ -7796,7 +7875,7 @@ useEffect(() => {
     strategy: strategyLabel
   }
 );
-                  const executedQty = await executeTrade('BUY', stockItem, scaledQuantity, `Scalper Slot #${currentStep}/${itemMaxSlots} (${strategyLabel}): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId);
+                  const executedQty = await executeTrade('BUY', stockItem, scaledQuantity, `Scalper Slot #${currentStep}/${itemMaxSlots} (${strategyLabel}): ${formatCurrency(targetBuyPrice)} 진입`, targetBuyPrice, undefined, currentSlotId, undefined, 'ENTRY_SIGNAL');
 
                   if (executedQty > 0) {
                     transitionLifecycleStatus(stockItem.symbol, 'HOLDING', `매수 체결 완료 (${formatCurrency(targetBuyPrice)} x ${executedQty})`);
@@ -7891,7 +7970,7 @@ useEffect(() => {
               ? Number((stopLossPrice - tickSize).toFixed(4))
               : Math.round((stopLossPrice - tickSize) / tickSize) * tickSize;
 
-            await executeTrade('SELL', stockItem, totalHeldQty, `스캘핑 기계적 손절 (${(overallProfitRatio * 100).toFixed(2)}%)`, stopLossPrice, weightedAvgPrice);
+            await executeTrade('SELL', stockItem, totalHeldQty, `스캘핑 기계적 손절 (${(overallProfitRatio * 100).toFixed(2)}%)`, stopLossPrice, weightedAvgPrice, undefined, 'STOP_LOSS');
 
             if (isSelected) {
               gapInventoryRef.current = [];
@@ -7930,14 +8009,15 @@ useEffect(() => {
 
           if (isTrailingStop || isProfitTarget || isStopLoss || isSmartExit) {
             let sellReason = "";
-            if (isTargetProfitSignal) sellReason = `목표 수익률 도달 시그널 (+${netProfitPct.toFixed(2)}%)`;
-            else if (isTrailingStop) sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 최고점 추적스탑 (+${(overallProfitRatio * 100).toFixed(2)}%)` : "트레일링 스탑 (수익 보존)";
-            else if (isProfitTarget) sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 동적목표달성 (+${(overallProfitRatio * 100).toFixed(2)}%)` : `매도 시그널 감지 (+${(overallProfitRatio * 100).toFixed(2)}%)`;
-            else sellReason = "리스크 관리 손절";
+            let exitReason: ExitReason;
+            if (isTargetProfitSignal) { sellReason = `목표 수익률 도달 시그널 (+${netProfitPct.toFixed(2)}%)`; exitReason = 'TAKE_PROFIT'; }
+            else if (isTrailingStop) { sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 최고점 추적스탑 (+${(overallProfitRatio * 100).toFixed(2)}%)` : "트레일링 스탑 (수익 보존)"; exitReason = isAiMaxYieldActive ? 'AI_SELL' : 'TRAILING_STOP'; }
+            else if (isProfitTarget) { sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 동적목표달성 (+${(overallProfitRatio * 100).toFixed(2)}%)` : `매도 시그널 감지 (+${(overallProfitRatio * 100).toFixed(2)}%)`; exitReason = isAiMaxYieldActive ? 'AI_SELL' : 'SIGNAL_REVERSAL'; }
+            else { sellReason = "리스크 관리 손절"; exitReason = 'STOP_LOSS'; }
 
             transitionLifecycleStatus(stockItem.symbol, 'SELL_READY', sellReason);
             if (isSelected) setScalperMessage(`[매도 시그널] ${stockItem.name} ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (${sellReason})`);
-            await executeTrade('SELL', stockItem, totalHeldQty, `Profit Max (${stockItem.name}): ${sellReason}`, marketableSellPrice, weightedAvgPrice);
+            await executeTrade('SELL', stockItem, totalHeldQty, `Profit Max (${stockItem.name}): ${sellReason}`, marketableSellPrice, weightedAvgPrice, undefined, exitReason);
 
             setHighWaterMark(prev => {
               const next = { ...prev };
@@ -7957,7 +8037,7 @@ useEffect(() => {
     return () => clearInterval(gapInterval);
   }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, entryPriceMode, lowestBidOnlyMode, maxSlots, allowSamePriceEntry, enableCombinedAvgProfitExit, detectStockStrategies]);
 
-  const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number, buyPrice?: number, slotId?: string): Promise<number> => {
+  const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number, buyPrice?: number, slotId?: string, exitReason?: ExitReason, entryReason?: string): Promise<number> => {
     if (action === 'HOLD' || amount <= 0) return 0;
 
     const tradeLockKey = `${stock.symbol}_${action}`;
@@ -8129,7 +8209,11 @@ useEffect(() => {
                    
                    if (filled) {
                        setBotStatus(`[체결 완료] 주문 번호(${odno})가 전량 체결되었습니다.`);
-                       addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', filledPrice, filledQty, `[실제체결 완료] ${reason}`);
+                       const pnlPercent = (action === 'SELL' && buyPrice && buyPrice > 0)
+                         ? Number((((filledPrice - buyPrice) / buyPrice) * 100).toFixed(2))
+                         : undefined;
+                       addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', filledPrice, filledQty, `[실제체결 완료] ${reason}`,
+                         action === 'SELL' ? { exitReason, pnlPercent } : { entryReason });
                        showNotification(`${stock.name} ${action === 'BUY' ? '매수' : '매도'} 주문이 전량 체결되었습니다. (가격: ${formatCurrency(filledPrice)})`, "success");
                        transitionLifecycleStatus(stock.symbol, action === 'BUY' ? 'HOLDING' : 'COMPLETED', `${action === 'BUY' ? '매수' : '매도'} 체결 확인 (${formatCurrency(filledPrice)} x ${filledQty})`);
                        finalAmount = filledQty;
@@ -8146,7 +8230,11 @@ useEffect(() => {
                         }
                    } else if (filledQty > 0) {
                        setBotStatus(`[일부 체결] 주문 번호(${odno})가 일부 체결되었습니다 (${filledQty}주).`);
-                       addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', filledPrice, filledQty, `[일부체결] ${reason}`);
+                       const partialPnlPercent = (action === 'SELL' && buyPrice && buyPrice > 0)
+                         ? Number((((filledPrice - buyPrice) / buyPrice) * 100).toFixed(2))
+                         : undefined;
+                       addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', filledPrice, filledQty, `[일부체결] ${reason}`,
+                         action === 'SELL' ? { exitReason, pnlPercent: partialPnlPercent } : { entryReason });
                        showNotification(`${stock.name} ${action === 'BUY' ? '매수' : '매도'} 주문이 일부 체결되었습니다 (${filledQty}주).`, "info");
                        finalAmount = filledQty;
                         if (action === "SELL" && slotId) {
@@ -8193,7 +8281,7 @@ useEffect(() => {
                            quantity: finalAmount,
                            createdAt: Date.now(),
                            type: 'LIMIT_SELL',
-                           reason, buyPrice: buyPrice, slotId: slotId,
+                           reason, buyPrice: buyPrice, slotId: slotId, exitReason,
                            ordDvsn: kisConfig.domesticOrderType || '00'
                          };
                          setPendingSellOrders(prev => [...prev, newPendingSell]);
@@ -8448,7 +8536,14 @@ useEffect(() => {
     setShowScalperRecModal(false);
   }, [handleSelectRecommendationStock, executeTrade]);
 
-  const addLog = (symbol: string, type: 'BUY' | 'SELL' | '매수' | '매도', price: number, amount: number, reason: string) => {
+  const addLog = (
+    symbol: string,
+    type: 'BUY' | 'SELL' | '매수' | '매도',
+    price: number,
+    amount: number,
+    reason: string,
+    meta?: { exitReason?: ExitReason; entryReason?: string; pnlPercent?: number }
+  ) => {
     const symbolName = symbol === 'SYSTEM'
       ? 'SYSTEM'
       : (scalperTabsRef.current.find(t => t.symbol === symbol)?.name || stocksRef.current.find(s => s.symbol === symbol)?.name || symbol);
@@ -8458,7 +8553,10 @@ useEffect(() => {
       symbol, type, price, amount, reason,
       id: `LOG-${Date.now()}-${Math.floor(Math.random() * 10000)}`,
       timestamp: Date.now(),
-      symbolName
+      symbolName,
+      exitReason: meta?.exitReason,
+      entryReason: meta?.entryReason,
+      pnlPercent: meta?.pnlPercent
     };
 
     // 🌐 GLOBAL TRADE LOGS: 현재 선택된 탭이 무엇이든 상관없이, 등록된 모든 종목의 이벤트가 전부 쌓인다.
@@ -8511,7 +8609,7 @@ useEffect(() => {
       setIsSubmittingManualSell(true);
       showNotification(`${targetStock.name} ${formatCurrency(manualSellPrice)} 지정가 매도 주문 전송 중...`, "info");
       transitionLifecycleStatus(targetStock.symbol, 'SELL_READY', `수동 지정가 매도 (희망가 ${formatCurrency(manualSellPrice)})`);
-      await executeTrade('SELL', targetStock, manualSellQty, `[수동 지정가 매도] 희망가 ${formatCurrency(manualSellPrice)}`, manualSellPrice, avgPrices[targetStock.symbol]);
+      await executeTrade('SELL', targetStock, manualSellQty, `[수동 지정가 매도] 희망가 ${formatCurrency(manualSellPrice)}`, manualSellPrice, avgPrices[targetStock.symbol], undefined, 'MANUAL');
       showNotification(`${targetStock.name} ${formatCurrency(manualSellPrice)} 지정가 매도 주문이 접수되었습니다.`, "success");
       playScalpingSound('SELL');
       setManualSellModalOpen(false);
@@ -9271,20 +9369,29 @@ useEffect(() => {
                         <div className="flex items-center gap-1.5">
                           <span className={cn("shrink-0 w-1.5 h-1.5 rounded-full", isBuy ? "bg-rose-400" : "bg-sky-400")} />
                           <span className="text-slate-500 tabular-nums">{log.time}</span>
+                          {log.symbol !== 'SYSTEM' && (
+                            <span className="text-slate-300 font-bold">{log.symbolName || log.symbol}</span>
+                          )}
+                          <span className={cn("font-black", isBuy ? "text-rose-400" : "text-sky-400")}>{isBuy ? 'BUY' : 'SELL'}</span>
                         </div>
-                        {log.symbol !== 'SYSTEM' && (
-                          <span className="text-slate-300 font-bold">
-                            {log.symbolName || log.symbol}
+                        {log.price > 0 && (
+                          <span className="text-slate-400">
+                            가격: {formatCurrency(log.price)}{log.amount > 0 ? ` x ${log.amount}` : ''}
+                          </span>
+                        )}
+                        {(log.exitReason || log.entryReason) && (
+                          <span className="text-amber-400 font-bold">
+                            사유: {log.exitReason || log.entryReason}
+                          </span>
+                        )}
+                        {log.pnlPercent !== undefined && (
+                          <span className={cn("font-bold", log.pnlPercent >= 0 ? "text-rose-400" : "text-sky-400")}>
+                            손익: {log.pnlPercent >= 0 ? '+' : ''}{log.pnlPercent.toFixed(2)}%
                           </span>
                         )}
                         <span className="text-slate-200 leading-relaxed break-words">
                           {log.reason}
                         </span>
-                        {log.price > 0 && (
-                          <span className="text-slate-400">
-                            {formatCurrency(log.price)}{log.amount > 0 ? ` x ${log.amount}` : ''}
-                          </span>
-                        )}
                       </div>
                     );
                   });
@@ -9947,11 +10054,16 @@ useEffect(() => {
                             </div>
                             <div className={cn(
                               "font-mono font-black text-xs md:text-sm px-2.5 py-1 rounded-lg border",
-                              item.pnlAmount >= 0 
+                              !item.hasAvgPriceData
+                                ? "text-slate-400 bg-white/5 border-white/10"
+                                : (item.pnlAmount || 0) >= 0 
                                 ? "text-rose-400 bg-rose-500/10 border-rose-500/30" 
                                 : "text-sky-400 bg-sky-500/10 border-sky-500/30"
                             )}>
-                              {item.pnlAmount >= 0 ? '+' : ''}{formatCurrency(item.pnlAmount)} ({item.pnlPercent >= 0 ? '+' : ''}{(item.pnlPercent || 0).toFixed(2)}%)
+                              {!item.hasAvgPriceData
+                                ? '평단가 데이터 없음'
+                                : `${(item.pnlAmount || 0) >= 0 ? '+' : ''}${formatCurrency(item.pnlAmount || 0)} (${(item.pnlPercent || 0) >= 0 ? '+' : ''}${(item.pnlPercent || 0).toFixed(2)}%)`
+                              }
                             </div>
                           </div>
 

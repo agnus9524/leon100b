@@ -103,9 +103,10 @@ const TickFeed: React.FC<{ symbol: string; price: number; formatCurrency: (n: nu
 const CandlestickChart: React.FC<{
   symbol: string;
   name: string;
+  price: number;
   scalperTabs: ScalperTab[];
   formatCurrency: (n: number) => string;
-}> = ({ symbol, name, scalperTabs, formatCurrency }) => {
+}> = ({ symbol, name, price, scalperTabs, formatCurrency }) => {
   const [period, setPeriod] = React.useState<ChartPeriod>('MIN');
   const [minuteInterval, setMinuteInterval] = React.useState(1);
   const [showMinuteMenu, setShowMinuteMenu] = React.useState(false);
@@ -215,60 +216,51 @@ const CandlestickChart: React.FC<{
 
   // ============================================================
   // 🔄 틱봉(TICK) 모드 — KIS REST API는 진짜 틱 스트림을 제공하지 않으므로(웹소켓 필요),
-  // 실시간 체결 내역(TickFeed)과 같은 방식으로 가격 변화를 폴링해서 "틱"으로 간주하고,
-  // 지정한 틱 개수(예: 30틱)마다 하나의 봉으로 묶어서 그린다.
+  // 실시간 체결 내역(TickFeed)과 같은 방식으로 가격 변화를 "틱"으로 간주하고, 지정한 틱
+  // 개수(예: 30틱)마다 하나의 봉으로 묶어서 그린다.
+  // ------------------------------------------------------------
+  // 이전에는 이 컴포넌트가 2초마다 자체적으로 kisService.getPrice()를 또 호출했는데, 이 함수는
+  // 앱 전체가 공유하는 큐(호출당 최소 600ms 강제 지연)를 거치기 때문에, syncAllPrices(10초마다
+  // 등록된 전 종목) 같은 다른 폴링과 겹치면 큐가 밀려서 몇 초~몇십 초씩 응답이 늦어질 수 있었다.
+  // 그게 "조회 중"에서 멈춰 있는 것처럼 보이던 원인이다. 이제는 별도로 조회하지 않고, 상위(App.tsx)가
+  // 이미 동기화해둔 실시간 가격(price prop)이 바뀔 때마다 그걸 그대로 새 틱으로 기록한다 — 추가
+  // API 호출이 전혀 없고, 가격이 바뀌는 즉시 반영된다.
   // ============================================================
   React.useEffect(() => {
     if (!symbol || period !== 'TICK') return;
-    let cancelled = false;
     tickBufferRef.current = [];
     lastTickPriceRef.current = 0;
     setBars([]);
-    setIsLoading(true);
+    setIsLoading(false);
     setErrorMsg(null);
-
-    const rebuildBarsFromTicks = () => {
-      const ticks = tickBufferRef.current;
-      const grouped: CandleBar[] = [];
-      for (let i = 0; i < ticks.length; i += tickInterval) {
-        const chunk = ticks.slice(i, i + tickInterval);
-        if (chunk.length === 0) continue;
-        const prices = chunk.map(t => t.price);
-        grouped.push({
-          date: chunk[0].time,
-          open: chunk[0].price,
-          close: chunk[chunk.length - 1].price,
-          high: Math.max(...prices),
-          low: Math.min(...prices)
-        });
-      }
-      setBars(grouped);
-    };
-
-    const pollTick = async () => {
-      try {
-        const priceData = await kisService.getPrice(symbol);
-        if (cancelled || !priceData || priceData.current <= 0) return;
-        if (priceData.current === lastTickPriceRef.current) return; // 가격 변화가 없으면 새 틱으로 기록하지 않음
-        lastTickPriceRef.current = priceData.current;
-        tickBufferRef.current = [
-          ...tickBufferRef.current,
-          { time: new Date().toLocaleTimeString('ko-KR', { hour12: false }).replace(/:/g, ''), price: priceData.current }
-        ].slice(-1000); // 최근 1000틱까지만 보관
-        rebuildBarsFromTicks();
-        setErrorMsg(null);
-      } catch {
-        // 폴링 실패는 조용히 무시하고 다음 주기에 재시도 (에러 문구로 화면을 어지럽히지 않음)
-      } finally {
-        if (!cancelled) setIsLoading(false);
-      }
-    };
-
-    pollTick();
-    const intervalId = setInterval(pollTick, 2000); // 2초마다 가격 확인 (근사 틱 폴링)
-
-    return () => { cancelled = true; clearInterval(intervalId); };
   }, [symbol, period, tickInterval]);
+
+  React.useEffect(() => {
+    if (!symbol || period !== 'TICK') return;
+    if (!price || price <= 0) return;
+    if (price === lastTickPriceRef.current) return; // 가격 변화가 없으면 새 틱으로 기록하지 않음
+    lastTickPriceRef.current = price;
+    tickBufferRef.current = [
+      ...tickBufferRef.current,
+      { time: new Date().toLocaleTimeString('ko-KR', { hour12: false }).replace(/:/g, ''), price }
+    ].slice(-1000); // 최근 1000틱까지만 보관
+
+    const ticks = tickBufferRef.current;
+    const grouped: CandleBar[] = [];
+    for (let i = 0; i < ticks.length; i += tickInterval) {
+      const chunk = ticks.slice(i, i + tickInterval);
+      if (chunk.length === 0) continue;
+      const prices = chunk.map(t => t.price);
+      grouped.push({
+        date: chunk[0].time,
+        open: chunk[0].price,
+        close: chunk[chunk.length - 1].price,
+        high: Math.max(...prices),
+        low: Math.min(...prices)
+      });
+    }
+    setBars(grouped);
+  }, [symbol, period, tickInterval, price]);
 
   // 매수(B)/매도(S) 체결 마커 — 해당 종목의 tradeLogs 중 실제 체결 이벤트만 추출해 가장 가까운 캔들에 매칭
   const markers = React.useMemo<TradeMarker[]>(() => {
@@ -1536,7 +1528,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           </>
         ) : (
           selectedStock && (
-            <CandlestickChart symbol={selectedStock.symbol} name={selectedStock.name} scalperTabs={scalperTabs} formatCurrency={formatCurrency} />
+            <CandlestickChart symbol={selectedStock.symbol} name={selectedStock.name} price={price} scalperTabs={scalperTabs} formatCurrency={formatCurrency} />
           )
         )}
 

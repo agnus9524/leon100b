@@ -25,6 +25,7 @@ export interface NormalizedPrice {
   changePercent: number;
   volume: string;
   name?: string;
+  executionStrength?: number; // KIS가 직접 계산해서 제공하는 실제 체결강도(cttr) — 매수체결량/매도체결량 기반, 호가잔량 비율이 아님
 }
 
 class KISService {
@@ -149,7 +150,12 @@ return strat.activeCount >= 1;
             : 100,
 
         volumeIntensity:
-          100 + strat.activeCount * 20,
+          // 실제 체결강도(KIS가 계산해서 제공하는 cttr = 매수체결량/매도체결량 기반)가 있으면 그걸 쓰고,
+          // 없으면 센서 개수로 인위적으로 부풀리지 않고 중립값(100)을 보여준다.
+          // (이전에는 "100 + 센서개수*20"이라는 가짜 값을 체결강도인 것처럼 표시하고 있었다)
+          stock.executionStrength !== undefined && stock.executionStrength > 0
+            ? Math.round(stock.executionStrength)
+            : 100,
 
         scalpingScore: score,
 
@@ -543,7 +549,8 @@ await this.getDomesticPrice(symbol);
               change,
               changePercent,
               volume: Number(data.acml_vol || 0).toLocaleString(),
-              name: data.hts_kor_isnm || undefined
+              name: data.hts_kor_isnm || undefined,
+              executionStrength: data.cttr !== undefined ? Number(data.cttr) : undefined
             };
           }
           this.recordCallResult(false, Date.now() - callStartedAt);
