@@ -1602,15 +1602,6 @@ public async getWebsocketApprovalKey() {
   if (!this.config)
     throw new Error("KIS Config not initialized");
 
-  console.log(
-    "[APPROVAL CONFIG]",
-    {
-      appKeyLength: this.config.appKey?.length,
-      appSecretLength: this.config.appSecret?.length,
-      accountNo: this.config.accountNo
-    }
-  );
-
   const endpoint = '/oauth2/Approval';
 
   const payload = {
@@ -1618,21 +1609,6 @@ public async getWebsocketApprovalKey() {
     appkey: this.config.appKey,
     secretkey: this.config.appSecret
   };
-
-  console.log(
-    "[APPROVAL REQUEST]",
-    payload
-  );
-
-  console.log(
-    "[APPKEY VALUE]",
-    this.config.appKey
-  );
-
-  console.log(
-    "[APPSECRET LENGTH]",
-    this.config.appSecret.length
-  );
 
   const res = await axios.post(
     `${this.baseUrl}${endpoint}`,
@@ -1644,120 +1620,112 @@ public async getWebsocketApprovalKey() {
     }
   );
 
-  console.log(
-    "[APPROVAL RAW]",
-    res.data
-  );
-
   return res.data.approval_key;
 }
 
+/**
+ * KIS 실시간 체결(H0STCNT0) 웹소켓 연결.
+ * ------------------------------------------------------------
+ * onTick으로 전달되는 값은 아래 형태로 정규화된다(원본이 JSON이든 KIS 표준 파이프구분(|) 텍스트든
+ * 동일하게 처리):
+ *   { symbol, price, change, changePercent, volume, executionStrength?, time }
+ * 파싱에 실패한 메시지는 조용히 무시한다(트레이딩 로직에 잘못된 값이 들어가는 것을 막기 위함).
+ * 연결이 끊기면 최대 5회까지 지수 백오프로 자동 재연결을 시도한다.
+ */
 public async connectWebSocket(
   symbols: string[],
-  onTick: (data: any) => void
+  onTick: (data: { symbol: string; price: number; change: number; changePercent: number; volume: string; executionStrength?: number; time: string }) => void,
+  onStatusChange?: (status: 'connecting' | 'open' | 'closed' | 'error') => void
 ): Promise<WebSocket> {
   const wsUrl = "wss://service-100-221699414173.us-west1.run.app/ws/kis";
-  
-  console.log(
-"[WS URL]",
-wsUrl
-);
+  const approvalKey = await this.getWebsocketApprovalKey();
 
-  const approvalKey =
-    await this.getWebsocketApprovalKey();
-console.log(
+  let reconnectAttempts = 0;
+  const MAX_RECONNECT_ATTEMPTS = 5;
 
-"[APPROVAL KEY]",
-approvalKey
-);
- const ws = new WebSocket(wsUrl);
+  const parseTick = (raw: string): { symbol: string; price: number; change: number; changePercent: number; volume: string; executionStrength?: number; time: string } | null => {
+    try {
+      // 1) JSON 형식 시도 (프록시가 이미 가공해서 보내는 경우)
+      if (raw.trim().startsWith('{') || raw.trim().startsWith('[')) {
+        const obj = JSON.parse(raw);
+        const symbol = obj.symbol || obj.mksc_shrn_iscd || obj.MKSC_SHRN_ISCD;
+        const price = Number(obj.price ?? obj.stck_prpr ?? obj.STCK_PRPR ?? 0);
+        if (!symbol || price <= 0) return null;
+        return {
+          symbol,
+          price,
+          change: Number(obj.change ?? obj.prdy_vrss ?? obj.PRDY_VRSS ?? 0),
+          changePercent: Number(obj.changePercent ?? obj.prdy_ctrt ?? obj.PRDY_CTRT ?? 0),
+          volume: String(obj.volume ?? obj.acml_vol ?? obj.ACML_VOL ?? '0'),
+          executionStrength: obj.cttr !== undefined ? Number(obj.cttr) : (obj.CTTR !== undefined ? Number(obj.CTTR) : undefined),
+          time: String(obj.time ?? obj.stck_cntg_hour ?? obj.STCK_CNTG_HOUR ?? '')
+        };
+      }
 
- console.log(
-  "[USER AGENT]",
-  navigator.userAgent
-);
-
-console.log(
-  "[ORIGIN]",
-  window.location.origin
-);
-
-console.log(
-  "[WS CREATED]",
-  wsUrl
-);
-
-ws.onopen = () => {
-
-  console.log("[KIS WS OPEN]");
-
-  console.log("[CLOUD RUN WS OPEN]");
-
-  console.log(
-    "[WS SUBSCRIBE SYMBOLS]",
-    symbols
-  );
-
-  for (const symbol of symbols) {
-
-    ws.send(
-      JSON.stringify({
-        type: "subscribe",
-        symbol
-      })
-    );
-
-  }
-
-};
-``
-  ws.onmessage = (event) => {
-
-  console.log(
-    "[RAW WS]",
-    event.data
-  );
-  onTick(event.data);
-
-};
-
-ws.onerror = (err) => {
-
-  console.error(
-    "[WS ERROR EVENT]",
-    err
-  );
-
-  console.log(
-    "[APPROVAL USED]",
-    approvalKey
-  );
-
-  console.log(
-    "[WS URL USED]",
-    wsUrl
-  );
-
-};
-ws.onclose = (event) => {
-
-  console.warn(
-    "[WS CLOSED]",
-    {
-      code: event.code,
-      reason: event.reason,
-      wasClean: event.wasClean
+      // 2) KIS 표준 실시간 텍스트 형식: "0|H0STCNT0|001|종목코드^체결시간^현재가^..." (필드는 ^로 구분)
+      if (raw.includes('|')) {
+        const parts = raw.split('|');
+        if (parts.length < 4 || parts[1] !== 'H0STCNT0') return null;
+        const fields = parts[3].split('^');
+        // KIS H0STCNT0 표준 필드 순서(0-index): 0=종목코드 1=체결시간 2=현재가 3=전일대비부호 4=전일대비
+        // 5=전일대비율 ... 12=누적거래량 ... 18=체결강도(cttr, 문서상 index — 실측 시 어긋나면 undefined 처리됨)
+        const symbol = fields[0];
+        const price = Number(fields[2] || 0);
+        if (!symbol || price <= 0) return null;
+        const cttrRaw = Number(fields[18]);
+        return {
+          symbol,
+          price,
+          change: Number(fields[4] || 0),
+          changePercent: Number(fields[5] || 0),
+          volume: fields[12] || '0',
+          executionStrength: !isNaN(cttrRaw) && cttrRaw > 0 && cttrRaw < 1000 ? cttrRaw : undefined,
+          time: fields[1] || ''
+        };
+      }
+    } catch {
+      // 파싱 실패는 조용히 무시 — 이 틱 하나만 건너뛴다
     }
-  );
+    return null;
+  };
 
-  console.log(
-    "[READY STATE]",
-    ws.readyState
-  );
+  const connect = (): WebSocket => {
+    onStatusChange?.('connecting');
+    const ws = new WebSocket(wsUrl);
 
-};
+    ws.onopen = () => {
+      reconnectAttempts = 0;
+      onStatusChange?.('open');
+      ws.send(JSON.stringify({ type: 'approval', approval_key: approvalKey }));
+      for (const symbol of symbols) {
+        ws.send(JSON.stringify({ type: 'subscribe', symbol }));
+      }
+    };
 
-  return ws;
+    ws.onmessage = (event) => {
+      const tick = parseTick(String(event.data));
+      if (tick) onTick(tick);
+    };
+
+    ws.onerror = () => {
+      onStatusChange?.('error');
+    };
+
+    ws.onclose = () => {
+      onStatusChange?.('closed');
+      // 🔄 자동 재연결 (지수 백오프, 최대 5회) — 실거래 중 연결이 끊겨도 스스로 복구를 시도한다.
+      // REST 폴링이 항상 백업으로 동작하고 있으므로, 재연결이 전부 실패해도 매매 자체는 계속된다.
+      if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+        const delay = Math.min(30000, 1000 * Math.pow(2, reconnectAttempts));
+        reconnectAttempts++;
+        setTimeout(() => connect(), delay);
+      }
+    };
+
+    return ws;
+  };
+
+  return connect();
 }
 
 

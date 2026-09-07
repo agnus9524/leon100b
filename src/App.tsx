@@ -1427,49 +1427,6 @@ export default function App() {
     domesticOrderType: '00', // '00' (지정가 - Limit), '01' (시장가 - Market)
   });
 
-useEffect(() => {
-
-console.log(
-"[KIS WS START]",
-kisConfig.isConnected
-);
-  if (!kisConfig.isConnected) {
-    return;
-  }
-
-  const symbols =
-    scalperTabsRef.current
-      .map(t => t.symbol)
-      .filter(Boolean);
-
-  if (symbols.length === 0) {
-    return;
-  }
-
-  let socket: WebSocket | null = null;
-
-  kisService
-    .connectWebSocket(
-      symbols,
-      tick => {
-        console.log("[TICK]", tick);
-      }
-    )
-    .then(ws => {
-      socket = ws;
-    })
-    .catch(err => {
-      console.error(
-        "[KIS WS ERROR]",
-        err
-      );
-    });
-
-  return () => {
-    socket?.close();
-  };
-
-}, [kisConfig.isConnected]);
 
   // Helper to get active config
   const getActiveKisConfig = (config: any) => {
@@ -1820,6 +1777,61 @@ kisConfig.isConnected
       changePercent: item.market.changePercent
     }));
   }, [scalperInventory]);
+  const [wsConnectionStatus, setWsConnectionStatus] = useState<'connecting' | 'open' | 'closed' | 'error' | 'idle'>('idle');
+  const registeredSymbolsKey = scalperTabs.map(t => t.symbol).sort().join(',');
+
+  useEffect(() => {
+    if (!kisConfig.isConnected) {
+      setWsConnectionStatus('idle');
+      return;
+    }
+
+    const symbols = scalperTabsRef.current.map(t => t.symbol).filter(Boolean);
+    if (symbols.length === 0) {
+      setWsConnectionStatus('idle');
+      return;
+    }
+
+    let socket: WebSocket | null = null;
+    let cancelled = false;
+
+    kisService
+      .connectWebSocket(
+        symbols,
+        tick => {
+          // 🔄 웹소켓 실시간 체결 틱을 REST 폴링과 동일한 필드에 반영한다.
+          // REST 폴링(syncAllPrices/syncSelectedPrice)은 그대로 계속 동작하는 백업이고,
+          // 웹소켓이 연결되어 있을 때는 이 틱이 훨씬 더 빠르게(초 단위가 아니라 체결 즉시) 값을
+          // 갱신해준다 — 매매 판단(점수제, RSI 복합조건 등)이 참조하는 값이 바로 이 stocks이므로,
+          // 추가 배선 없이 기존 엔진 전체가 자동으로 더 실시간에 가까워진다.
+          setStocks(prev => prev.map(s => s.symbol === tick.symbol ? {
+            ...s,
+            price: tick.price,
+            change: tick.change,
+            changePercent: tick.changePercent,
+            volume: tick.volume,
+            executionStrength: tick.executionStrength !== undefined ? tick.executionStrength : s.executionStrength,
+            isRealTime: true
+          } : s));
+        },
+        status => {
+          if (!cancelled) setWsConnectionStatus(status);
+        }
+      )
+      .then(ws => {
+        if (cancelled) { ws.close(); return; }
+        socket = ws;
+      })
+      .catch(err => {
+        console.error("[KIS WS ERROR]", err);
+        setWsConnectionStatus('error');
+      });
+
+    return () => {
+      cancelled = true;
+      socket?.close();
+    };
+  }, [kisConfig.isConnected, registeredSymbolsKey]);
 
   // ============================================================
   // 🔄 인벤토리에 등록된 "모든" 종목이 stocks 배열에 존재하도록 보장한다.
@@ -2322,6 +2334,8 @@ setGapInventory(nextInv);
   const [pendingSellOrders, setPendingSellOrders] = useState<PendingSellOrder[]>([]);
   const pendingSellOrdersRef = React.useRef<PendingSellOrder[]>([]);
   const buyingLockPricesRef = React.useRef<{ symbol: string; price: number }[]>([]);
+  const lastBuyEventTimeRef = React.useRef<Record<string, number>>({}); // 🛡️ 종목별 마지막 매수 시각 — 진입 쿨다운 판단용
+  const ENTRY_COOLDOWN_MS = 5000; // 같은 종목에 새 매수 이벤트를 시작하기 전 최소 대기시간 (한 이벤트 안에서 여러 슬롯을 한번에 채우는 것은 예외)
   const autoSellInFlightRef = React.useRef<Set<string>>(new Set());
   const isExecutingRef = React.useRef<boolean>(false);
   const pendingTradeKeysRef = React.useRef<Set<string>>(new Set());
@@ -2388,7 +2402,7 @@ setGapInventory(nextInv);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
   const [maxSlots, setMaxSlots] = useState<number>(10);
-  const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(true); // Default true: 중복/동일가 매수 차단 해제
+  const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(false); // 🛡️ 기본값을 안전한 쪽(차단)으로 변경 — 이전 기본값(true=차단 해제)은 "1주씩 연속 매수" 위험의 핵심 원인이었다
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
   const [scalperStrategyMode, setScalperStrategyMode] = useState<'AUTO' | 'AI_MAX_YIELD' | 'ALL_SENSORS_4' | 'PULLBACK' | 'BREAKOUT' | 'VWAP_SUPPORT' | 'VOLUME_PROFILE_CVD'>('ALL_SENSORS_4');
@@ -2562,6 +2576,7 @@ setGapInventory(nextInv);
   const BUY_SCORE_THRESHOLD = 65; // 120점 만점 중 65점 이상이면 매수 (약 54% — 4~5개 신호의 확실한 겹침)
   const prevVwapAboveRef = React.useRef<Record<string, boolean>>({});
   const prevExecutionStrengthRef = React.useRef<Record<string, number>>({});
+  const sellExecStrengthRef = React.useRef<Record<string, number>>({}); // RSI 극단 반전 판단용 — 매도 로직 전용 체결강도 추적 (매수 점수제와 독립)
   const volumeHistoryRef = React.useRef<Record<string, number[]>>({});
 
   const calculateBuyScore = React.useCallback((
@@ -7691,8 +7706,8 @@ useEffect(() => {
         const itemMaxSlots = tabItem.maxSlots || (isSelected ? maxSlots : 10);
         const itemEntryMode = tabItem.entryPriceMode || (isSelected ? entryPriceMode : 'BID1');
 
-        const isOverSold = rsi < 35;
-        const isOverBought = rsi > 65;
+        // RSI 단독 임계값(과매도/과매수) 판단은 더 이상 쓰지 않는다 — 매수는 점수제(RSI 45~65 구간
+        // 가점)로, 매도는 RSI 80+ 복합조건(체결강도 하락 + VWAP 이탈)으로 대체되었다.
 
         // A. PROFIT MAX BUY Condition: Check buys inside min ~ max range
         if (currentPrice >= minPrice && currentPrice <= maxPrice && lastPrice > 0) {
@@ -7795,6 +7810,13 @@ useEffect(() => {
           );
 
           const isLockActive = inFlightBuyCount > 0;
+
+          // 🛡️ 진입 쿨다운: 같은 종목에 방금 매수 이벤트가 있었다면, 그로부터 일정 시간이 지나기 전엔
+          // 새 매수 이벤트를 시작하지 않는다. (한 이벤트 안에서 4/4 올그린으로 여러 슬롯을 한번에
+          // 채우는 것은 이 쿨다운의 대상이 아니다 — 그건 하나의 판단으로 여러 슬롯을 채우는 의도된
+          // 동작이고, 쿨다운이 막아야 하는 것은 "매 틱마다 같은 신호로 반복 진입"하는 것이다.)
+          const lastBuyEventTime = lastBuyEventTimeRef.current[stockItem.symbol] || 0;
+          const isEntryCooldownActive = (Date.now() - lastBuyEventTime) < ENTRY_COOLDOWN_MS;
           const priceInKrw = marketType === 'US' ? targetBuyPrice * exchangeRate : targetBuyPrice;
 
           const lastSlot = currentInventory.length > 0 ? currentInventory[currentInventory.length - 1] : null;
@@ -7814,6 +7836,8 @@ useEffect(() => {
             transitionLifecycleStatus(stockItem.symbol, 'BUY_READY', `전략센서 조건 충족 (${strategyLabel})`);
             if (isSamePriceBlocked) {
               if (isSelected) setScalperMessage(`[중복 차단] ${formatCurrency(targetBuyPrice)} 보유/주문 중`);
+            } else if (isEntryCooldownActive) {
+              if (isSelected) setScalperMessage(`[쿨다운] 최근 매수 후 대기 중 (${Math.ceil((ENTRY_COOLDOWN_MS - (Date.now() - lastBuyEventTime)) / 1000)}초 남음)`);
             } else if (totalOccupied >= itemMaxSlots) {
               if (isSelected) setScalperMessage(`[슬롯 가득 참] ${totalOccupied}/${itemMaxSlots} (매도 대기)`);
             } else if (isLockActive) {
@@ -7834,6 +7858,7 @@ useEffect(() => {
 );
 
               const slotsToBuy = isAll4SensorsFullEntry ? Math.max(1, itemMaxSlots - totalOccupied) : 1;
+              lastBuyEventTimeRef.current[stockItem.symbol] = Date.now(); // 🛡️ 이 매수 이벤트 시작 시각 기록 — 다음 이벤트는 쿨다운 이후에만 시작 가능
 
               for (let i = 0; i < slotsToBuy; i++) {
                 const inFlightNow = buyingLockPricesRef.current.filter(p => p.symbol === stockItem.symbol).length;
@@ -7998,14 +8023,26 @@ useEffect(() => {
           const isMicroTrailingStop = overallProfitRatio >= microThreshold && dropFromPeak >= 0.0008;
           const isStandardTrailing = overallProfitRatio > 0.002 && dropFromPeak > 0.003;
           const isTrailingStop = isMicroTrailingStop || isStandardTrailing;
-          // 전략 센서 기반 매도 시그널 (눌림목 진입과 대칭되는 반대쪽 시그널): RSI 과열+상단밴드 근접,
-          // 매도세 흡수, 데드크로스(수익 중), 그리고 "목표수익률 도달"도 이제 이 시그널 묶음의 하나일 뿐이다.
+
+          // 🩺 RSI 과매수 판단 재설계 — 강한 상승주는 RSI 70을 넘어 75, 80, 85까지도 계속 오르며
+          // 상승을 이어갈 수 있다. "RSI 70/75 이상이면 무조건 매도 후보"는 상승장에서 너무 일찍
+          // 팔아버리는 원인이 된다. 이제는:
+          //   - RSI 65~80 구간은 그 자체로는 매도 시그널이 아니다 (보유 유지)
+          //   - RSI 80 이상 + 체결강도 하락(매수세 약화) + 현재가 VWAP 이탈(추세 전환 확인)
+          //     이 셋이 전부 함께 확인될 때만 "진짜 과열 반전"으로 간주해 매도한다
+          const currentExecStrength = stockItem.executionStrength || 0;
+          const prevExecStrength = sellExecStrengthRef.current[stockItem.symbol];
+          const isExecutionStrengthDeclining = prevExecStrength !== undefined && currentExecStrength > 0 && currentExecStrength < prevExecStrength - 10;
+          if (currentExecStrength > 0) sellExecStrengthRef.current[stockItem.symbol] = currentExecStrength;
+          const isBelowVwap = strat.vwap > 0 && currentPrice < strat.vwap;
+          const isRsiExtremeReversal = strat.rsi >= 80 && isExecutionStrengthDeclining && isBelowVwap;
+
           const isTargetProfitSignal = enableCombinedAvgProfitExit && netProfitPct >= scalpingTargetProfit;
-          const sellSignal = (strat.rsi >= 75 && strat.isNearUpperBand) || strat.isBearishAbsorption || (strat.sma5 < strat.sma20 && overallProfitRatio > 0) || isTargetProfitSignal;
+          const sellSignal = isRsiExtremeReversal || strat.isBearishAbsorption || (strat.sma5 < strat.sma20 && overallProfitRatio > 0) || isTargetProfitSignal;
           const isProfitTarget = sellSignal;
           const effectiveStopLossRatio = isAiMaxYieldActive ? Math.min(scalpingStopLoss / 100, -0.005) : scalpingStopLoss / 100;
           const isStopLoss = overallProfitRatio <= effectiveStopLossRatio;
-          const isSmartExit = (isSmartScalperMode || isAiMaxYieldActive) && (rsi > 70 || overallProfitRatio >= effectiveTargetRatio * 1.2);
+          const isSmartExit = (isSmartScalperMode || isAiMaxYieldActive) && (isRsiExtremeReversal || overallProfitRatio >= effectiveTargetRatio * 1.2);
 
           if (isTrailingStop || isProfitTarget || isStopLoss || isSmartExit) {
             let sellReason = "";
