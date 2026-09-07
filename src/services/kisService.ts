@@ -1157,7 +1157,7 @@ console.log(
         FID_INPUT_DATE_1: '',
       };
 
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
 
       if (res.data && Array.isArray(res.data.output)) {
         this.recordCallResult(true, Date.now() - callStartedAt);
@@ -1217,7 +1217,7 @@ console.log(
         fid_rsfl_rate2: '',
       };
 
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
 
       if (res.data && Array.isArray(res.data.output)) {
         this.recordCallResult(true, Date.now() - callStartedAt);
@@ -1262,7 +1262,7 @@ console.log(
         FID_ORG_ADJ_PRC: '0000000001',
       };
 
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Domestic Daily Price Exception safely caught:", error?.response?.data || error?.message);
@@ -1428,7 +1428,7 @@ console.log(
         FID_INPUT_HOUR_1: time // e.g. "153000" or empty for current
       };
 
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Domestic Minute Chart Exception safely caught:", error?.response?.data || error?.message);

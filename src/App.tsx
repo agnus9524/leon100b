@@ -822,7 +822,14 @@ interface NewsItem {
 // 스캘퍼 인벤토리에 시장(KR/US)별로 등록 가능한 최대 종목 수.
 // kisService.MAX_SCALPER_RECOMMENDATIONS(추천종목 표시 개수)와는 서로 다른 목적의 값이므로
 // 의도적으로 별도 상수로 관리한다 — 두 값을 억지로 같은 숫자로 맞추지 않는다.
-const MAX_INVENTORY_PER_MARKET = 8;
+// ------------------------------------------------------------------
+// 20종목 기준 계산: getPrice()는 앱 전체가 공유하는 큐를 쓰고 호출당 최소 600ms가 걸린다.
+// syncAllPrices(등록종목 전체, 주기 T) + syncSelectedPrice(2초마다 1건) + syncLiveOrderbook(5초마다 1건)이
+// 전부 같은 큐를 나눠 쓰므로, 한 주기(T) 안에 처리해야 할 호출 수는:
+//   20(전체종목) + T/2000(선택종목) + T/5000(호가) 건
+// 이걸 600ms×건수로 처리하는 시간이 T보다 작아야 밀리지 않는다: (20 + 0.3T/1000 + 0.12T/1000)×600 ≤ T
+// → T ≥ 약 20.7초. 여유를 두어 25초로 설정했다 (아래 syncAllPrices 주기 참고).
+const MAX_INVENTORY_PER_MARKET = 20;
 
 const INITIAL_STOCKS_KR: Stock[] = [
   {
@@ -6275,7 +6282,12 @@ priceData.current
     syncSelectedPrice();
     syncLiveOrderbook();
 
-    slowInterval = setInterval(syncAllPrices, 10000);
+    // 🩺 인벤토리 상한을 25종목으로 늘리면서 syncAllPrices 주기도 함께 재계산했다.
+    // getPrice()는 호출당 최소 600ms가 강제되는 공유 큐를 쓰고, 여기에 syncSelectedPrice(2초마다)와
+    // syncLiveOrderbook(5초마다)도 같은 큐를 나눠 쓴다. 한 주기(T초) 안에 처리해야 하는 총 호출 수는
+    // 대략 N(등록종목) + T/2 + T/5 이고, 이게 600ms×호출수 ≤ T초를 만족해야 다음 주기와 안 겹친다.
+    // N=25일 때 필요한 최소 주기는 약 26초(N×0.6/0.58) — 여유를 두고 30초로 설정한다.
+    slowInterval = setInterval(syncAllPrices, 25000); // 20종목 기준 안전 주기 — 계산 근거는 MAX_INVENTORY_PER_MARKET 선언부 주석 참고
     fastInterval = setInterval(syncSelectedPrice, 2000);
     orderbookInterval = setInterval(syncLiveOrderbook, 5000);
 
