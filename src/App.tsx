@@ -4028,9 +4028,14 @@ setGapInventory(nextInv);
       if (marketType === 'KR' && isUS) return false;
       if (marketType === 'US' && !isUS) return false;
       
-      // 스캘핑 추천에서 KODEX/TIGER 등 ETF 상품은 제외 (개별 종목 스캘핑 목적에 맞지 않음)
+      // 스캘핑 추천에서 KODEX/TIGER 등 ETF 상품, 인버스/레버리지/선물 파생상품은 제외
+      // (개별 종목 스캘핑 목적에 맞지 않고, 인버스는 방향성 해석이 반대라 전략센서와 안 맞음)
       if (name.includes('kodex')) return false;
       if (name.includes('tiger')) return false;
+      if (name.includes('인버스')) return false;
+      if (name.includes('레버리지')) return false;
+      if (name.includes('선물')) return false;
+      if (rawName.trim() === stock.symbol) return false; // 종목명을 못 찾아 코드가 이름 대신 쓰인 경우 제외
       
       return stock.price > 0;
     });
@@ -4612,12 +4617,16 @@ setGapInventory(nextInv);
           const existing = mergedMap.get(v.symbol);
           if (!existing || v.price > 0) mergedMap.set(v.symbol, v);
         });
-        // 추천에서 KODEX/TIGER 등 ETF 상품은 제외 (개별 종목 스캘핑 목적에 맞지 않음)
+        // 추천에서 KODEX/TIGER 등 ETF 상품, 인버스/레버리지/선물 파생상품은 제외.
+        // 종목명 자체를 알 수 없는(빈 이름) 종목도 제외한다 — 대부분 로컬 마스터 데이터에 없는
+        // ETN/ETF류이고, 이름을 못 찾으면 화면에 "종목코드(종목코드)"처럼 코드가 이름 대신 표시되는
+        // 원인이 되므로 아예 추천하지 않는 게 안전하다.
         const isEtfName = (name: string) => {
           const lower = (name || '').toLowerCase();
-          return lower.includes('kodex') || lower.includes('tiger') || lower.includes('etf');
+          return lower.includes('kodex') || lower.includes('tiger') || lower.includes('etf')
+            || (name || '').includes('인버스') || (name || '').includes('레버리지') || (name || '').includes('선물');
         };
-        const merged = Array.from(mergedMap.values()).filter(v => !isEtfName(v.name));
+        const merged = Array.from(mergedMap.values()).filter(v => v.name && v.name.trim().length > 0 && !isEtfName(v.name));
 
         if (merged.length > 0) {
           const candidateStocks: Stock[] = merged.map(v => {
@@ -4651,8 +4660,11 @@ setGapInventory(nextInv);
     if (list.length < MAX_SCALPER_RECOMMENDATIONS) {
       const candidatePool = stocksRef.current.filter(s => {
         if (/^[A-Za-z]/.test(s.symbol) || s.market === 'US' || s.price <= 0) return false;
+        if (!s.name || s.name.trim().length === 0 || s.name === s.symbol) return false;
         const lowerName = (s.name || '').toLowerCase();
-        return !lowerName.includes('kodex') && !lowerName.includes('tiger') && !lowerName.includes('etf');
+        if (lowerName.includes('kodex') || lowerName.includes('tiger') || lowerName.includes('etf')) return false;
+        if ((s.name || '').includes('인버스') || (s.name || '').includes('레버리지') || (s.name || '').includes('선물')) return false;
+        return true;
       });
       if (candidatePool.length > 0) {
         const existingSymbols = new Set(list.map(r => r.symbol));
