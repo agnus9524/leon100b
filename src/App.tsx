@@ -2396,7 +2396,7 @@ setGapInventory(nextInv);
 
   // Automated Scalping Configuration States
   const [scalpingTargetProfit, setScalpingTargetProfit] = useState<number>(0.2); // Scalping net target profit (+0.2% default)
-  const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-0.5); // Scalping stop loss (-0.5% default)
+  const [scalpingStopLoss, setScalpingStopLoss] = useState<number>(-1); // Scalping stop loss (-1% default)
   const [scalpingSpeed, setScalpingSpeed] = useState<number>(300); // 300ms (0.3s) fast execution speed
   const [scalpingSoundEnabled, setScalpingSoundEnabled] = useState<boolean>(false);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
@@ -7839,12 +7839,14 @@ useEffect(() => {
             currentWeightedAvg = totalQty > 0 ? (isUSStock ? Number((totalCost / totalQty).toFixed(4)) : Math.round(totalCost / totalQty)) : 0;
           }
           const isPositionInProfit = currentWeightedAvg > 0 && currentPrice >= currentWeightedAvg;
-          
-          // [수정] 무분별한 추가 매수 방지: 평단가 대비 설정된 갭(예: -0.3%) 이상 하락했을 때만 추가 매수 허용
-          const isGapSatisfied = !isPositionInProfit && 
-            (currentWeightedAvg === 0 || currentPrice <= currentWeightedAvg * (1 - (minGapBetweenSlots / 100)));
 
-          if ((isGapSatisfied || isAll4SensorsFullEntry) && (meetsBuyCriteria || (immediateEntry && totalOccupied < itemMaxSlots))) {
+          // [변경] 추가 매수를 "평단가 대비 가격이 일정 % 떨어졌는지(갭)"로 제한하지 않고,
+          // 최초 진입과 동일하게 전략 센서/점수제 신호(meetsBuyCriteria)만으로 판단한다.
+          // (기존에는 isGapSatisfied가 별도로 있어야 추가 매수가 허용됐는데, 이제는 신호가
+          // 뜨면 이미 보유 중이어도 그대로 추가 진입한다 — 슬롯 한도/쿨다운/동일가 차단 등
+          // 다른 안전장치는 그대로 유지된다.)
+
+          if (meetsBuyCriteria || (immediateEntry && totalOccupied < itemMaxSlots)) {
             transitionLifecycleStatus(stockItem.symbol, 'BUY_READY', `전략센서 조건 충족 (${strategyLabel})`);
             if (isSamePriceBlocked) {
               if (isSelected) setScalperMessage(`[중복 차단] ${formatCurrency(targetBuyPrice)} 보유/주문 중`);
@@ -9354,7 +9356,7 @@ useEffect(() => {
             })()}
 
             {/* 1.5 GLOBAL TRADE LOGS — 선택된 종목과 무관하게 등록된 모든 종목의 이벤트가 시간순으로 표시된다 */}
-            <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col h-[220px] shrink-0 overflow-hidden shadow-2xl">
+            <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col h-[320px] shrink-0 overflow-hidden shadow-2xl">
               <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
                 <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
                   <Layers className="w-4 h-4 text-emerald-400" /> GLOBAL TRADE LOGS
@@ -9362,6 +9364,18 @@ useEffect(() => {
                 <span className="text-[11px] font-mono text-sleek-text-secondary bg-white/5 px-2.5 py-0.5 rounded-full border border-white/5">
                   {(logFilterSymbol === 'ALL' ? tradeLogs : tradeLogs.filter(l => l.symbol === logFilterSymbol)).length}건
                 </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (!window.confirm('GLOBAL TRADE LOGS 내역을 전부 지울까요? 이 작업은 되돌릴 수 없습니다.')) return;
+                    setTradeLogs([]);
+                    setScalperInventory(prev => prev.map(item => ({ ...item, tradeLogs: [] })));
+                  }}
+                  className="ml-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border border-white/10 text-slate-400 hover:text-rose-400 hover:border-rose-500/40 transition-all shrink-0"
+                  title="로그 내역 전체 초기화"
+                >
+                  초기화
+                </button>
               </div>
 
               {/* 종목 필터 버튼: [ALL] [종목1] [종목2] ... */}
@@ -9396,7 +9410,7 @@ useEffect(() => {
                 ))}
               </div>
 
-              <div className="flex-1 overflow-hidden space-y-1.5 pr-1">
+              <div className="flex-1 overflow-y-auto custom-scrollbar space-y-1.5 pr-1">
                 {(() => {
                   const filteredLogs = logFilterSymbol === 'ALL' ? tradeLogs : tradeLogs.filter(l => l.symbol === logFilterSymbol);
                   if (filteredLogs.length === 0) {
@@ -9406,14 +9420,13 @@ useEffect(() => {
                       </div>
                     );
                   }
-                  // 패널이 작아졌으니(220px) 실제로 화면에 보일 수 있는 만큼만 렌더링한다.
-                  // 나머지는 굳이 DOM에 그리지 않아도 되므로(overflow-hidden으로 어차피 안 보임) 가볍게 유지한다.
-                  return filteredLogs.slice(0, 12).map((log, idx) => {
+                  // 스크롤 가능하므로 조금 더 넉넉히 렌더링해도 괜찮다 (최근 30건까지)
+                  return filteredLogs.slice(0, 30).map((log, idx) => {
                     const isBuy = log.type === 'BUY' || log.type === '매수';
                     return (
                       <div
                         key={log.id || `${log.time}-${idx}`}
-                        className="flex flex-col gap-0.5 text-[11px] font-mono bg-black/20 hover:bg-black/30 transition-colors p-2 rounded-lg border border-white/5"
+                        className="flex flex-col gap-0.5 text-[11px] font-mono bg-black/20 hover:bg-black/30 transition-colors p-2 pb-3 rounded-lg border border-white/5"
                       >
                         <div className="flex items-center gap-1.5">
                           <span className={cn("shrink-0 w-1.5 h-1.5 rounded-full", isBuy ? "bg-rose-400" : "bg-sky-400")} />

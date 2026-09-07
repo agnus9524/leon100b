@@ -34,72 +34,6 @@ interface TradeMarker {
   type: 'BUY' | 'SELL';
 }
 
-// ============================================================
-// 📋 실시간 체결 내역 (Time & Sales)
-// ------------------------------------------------------------
-// KIS REST API는 틱 단위 실시간 체결 스트림을 제공하지 않으므로(웹소켓 필요),
-// 폴링으로 들어오는 가격 변화를 감지해서 "체결"로 간주하고 표시한다.
-// 완벽한 실제 틱 데이터는 아니지만, 가격이 실제로 바뀔 때마다 기록되므로
-// 스캘핑 중 흐름을 파악하는 용도로는 충분하다.
-// ============================================================
-interface TickEntry { time: string; price: number; direction: 'UP' | 'DOWN' | 'FLAT'; }
-
-const TickFeed: React.FC<{ symbol: string; price: number; formatCurrency: (n: number) => string }> = ({ symbol, price, formatCurrency }) => {
-  const [ticks, setTicks] = React.useState<TickEntry[]>([]);
-  const lastPriceRef = React.useRef<number>(0);
-  const lastSymbolRef = React.useRef<string>('');
-
-  React.useEffect(() => {
-    if (lastSymbolRef.current !== symbol) {
-      // 종목이 바뀌면 이전 종목의 체결 내역은 지운다
-      lastSymbolRef.current = symbol;
-      lastPriceRef.current = 0;
-      setTicks([]);
-      return;
-    }
-    if (!price || price <= 0) return;
-    if (lastPriceRef.current === 0) {
-      lastPriceRef.current = price;
-      return;
-    }
-    if (price === lastPriceRef.current) return; // 가격 변화가 없으면 새 틱으로 기록하지 않음
-
-    const direction: TickEntry['direction'] = price > lastPriceRef.current ? 'UP' : 'DOWN';
-    lastPriceRef.current = price;
-    setTicks(prev => [{
-      time: new Date().toLocaleTimeString('ko-KR', { hour12: false }),
-      price,
-      direction
-    }, ...prev].slice(0, 30));
-  }, [symbol, price]);
-
-  return (
-    <div className="w-full bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col min-w-0 shadow-inner">
-      <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
-        <span className="text-[9.5px] font-black text-slate-300 uppercase tracking-wider">체결가</span>
-      </div>
-      <div className="flex-1 overflow-hidden space-y-0.5 max-h-[220px]">
-        {ticks.length === 0 ? (
-          <div className="text-[9px] text-slate-500 text-center py-4">체결 대기중</div>
-        ) : (
-          ticks.slice(0, 9).map((t, idx) => (
-            <div
-              key={idx}
-              className={cn(
-                "flex items-center justify-between text-[9.5px] font-mono font-bold px-1 py-0.5 rounded",
-                t.direction === 'UP' ? "text-rose-400 bg-rose-500/10" : t.direction === 'DOWN' ? "text-sky-400 bg-sky-500/10" : "text-slate-400"
-              )}
-            >
-              <span className="opacity-70">{t.time.slice(0, 5)}</span>
-              <span>{formatCurrency(t.price)}</span>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
-};
-
 const CandlestickChart: React.FC<{
   symbol: string;
   name: string;
@@ -216,8 +150,7 @@ const CandlestickChart: React.FC<{
 
   // ============================================================
   // 🔄 틱봉(TICK) 모드 — KIS REST API는 진짜 틱 스트림을 제공하지 않으므로(웹소켓 필요),
-  // 실시간 체결 내역(TickFeed)과 같은 방식으로 가격 변화를 "틱"으로 간주하고, 지정한 틱
-  // 개수(예: 30틱)마다 하나의 봉으로 묶어서 그린다.
+  // 가격 변화를 "틱"으로 간주하고, 지정한 틱 개수(예: 30틱)마다 하나의 봉으로 묶어서 그린다.
   // ------------------------------------------------------------
   // 이전에는 이 컴포넌트가 2초마다 자체적으로 kisService.getPrice()를 또 호출했는데, 이 함수는
   // 앱 전체가 공유하는 큐(호출당 최소 600ms 강제 지연)를 거치기 때문에, syncAllPrices(10초마다
@@ -643,9 +576,6 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
 }) => {
   // 검색 드롭다운 키보드(↑↓ + Enter) 네비게이션용 로컬 상태
   const [highlightedIndex, setHighlightedIndex] = React.useState(-1);
-  // 1회거래수량/최대슬롯/목표순익/손절/추가매수간격/진입호가/실행속도 — 기본적으로 숨기고, 필요할 때만 펼친다.
-  // 숨겨진 자리에는 대신 일/주/월/년 가격 차트가 표시된다.
-  const [showAdvancedSettings, setShowAdvancedSettings] = React.useState(false);
   const suggestionItemRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
 
   React.useEffect(() => {
@@ -952,12 +882,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           </div>
         </div>
 
-      {/* 종목코드/명 검색창 대신 새로 배치: 2번째 반응형 창 — 실시간 체결 내역(체결가창), 가로폭을 넓힘 */}
-        {selectedStock && (
-          <TickFeed symbol={selectedStock.symbol} price={price} formatCurrency={formatCurrency} />
-        )}
-
-      {/* 3번째 반응형 창 — 실시간 잔량 호가창 (4호가) */}
+      {/* 2번째 반응형 창 — 실시간 잔량 호가창 (4호가) */}
 
         <div className="w-full bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
           <div>
@@ -1364,172 +1289,11 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           </div>
         </div>
 
-      {/* 8번째 반응형 창 — 고급 설정 토글 버튼 */}
-        <div className="flex sm:justify-end -mb-1">
-          <button
-            type="button"
-            onClick={() => setShowAdvancedSettings(v => !v)}
-            className="w-full sm:w-auto flex items-center justify-center gap-1.5 px-2.5 py-2 sm:py-1 rounded-lg text-[11px] sm:text-[10px] font-bold border border-white/10 bg-black/30 text-slate-400 hover:text-white hover:border-white/30 transition-all"
-          >
-            <Zap className="w-3 h-3" />
-            {showAdvancedSettings ? '차트 보기' : '고급 설정 (거래수량/슬롯/순익/손절 등)'}
-          </button>
-        </div>
-
-      {/* 9번째 반응형 창 — 가격 차트 (또는 고급 설정 패널) */}
+      {/* 8번째 반응형 창 — 가격 차트 */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-12 gap-2.5 items-stretch text-xs">
 
-        {showAdvancedSettings ? (
-          <>
-        {/* 1. 1회 거래수량, 최대 분할 슬롯, 목표순익 & 손절 (col-span-2) */}
-        <div className="lg:col-span-6 order-3 bg-black/30 p-2.5 rounded-2xl border border-sleek-border flex flex-col justify-between space-y-1.5 min-w-0">
-          <div>
-            <div className="flex items-center justify-between mb-0.5">
-              <label className="text-[11px] font-black text-slate-300 uppercase flex items-center gap-1">
-                <Layers className="w-3 h-3 text-sleek-blue" /> 1회 거래수량
-              </label>
-              <span className="text-xs font-bold text-white font-mono">{tradeQuantity}주</span>
-            </div>
-            <select 
-              value={tradeQuantity}
-              onChange={(e) => setTradeQuantity(Number(e.target.value))}
-              className="w-full bg-black/50 border border-sleek-border rounded-xl p-1 text-center text-xs font-bold outline-none text-white font-mono appearance-none cursor-pointer"
-            >
-              {Array.from({ length: 100 }, (_, i) => i + 1).map(val => (
-                <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="pt-1 border-t border-white/10">
-            <div className="flex items-center justify-between mb-0.5">
-              <label className="text-[11px] font-black text-slate-300 uppercase flex items-center gap-1">
-                <Layers className="w-3 h-3 text-emerald-400" /> 최대 분할 슬롯
-              </label>
-              <span className="text-[11px] font-bold text-emerald-400 font-mono">10개★</span>
-            </div>
-            <select 
-              value={maxSlots}
-              onChange={(e) => setMaxSlots(Number(e.target.value))}
-              className="w-full bg-black/50 border border-emerald-500/30 rounded-xl p-1 text-center text-xs font-bold outline-none text-emerald-300 font-mono appearance-none cursor-pointer"
-              title="최대 분할 매수 개수 (기본: 10개)"
-            >
-              {[1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20].map(val => (
-                <option key={val} value={val} className="bg-sleek-bg text-white">
-                  {val === 10 ? '10개★' : `${val}개`}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div className="pt-1 border-t border-white/10">
-            <div className="text-[10.5px] font-black uppercase leading-tight space-y-0.5 mb-1">
-              <div className="text-emerald-400 flex items-center justify-between">
-                <span>목표 순익 +{scalpingTargetProfit}%</span>
-                <span className="text-[8.5px] font-normal text-emerald-400/80 font-sans">세후</span>
-              </div>
-              <div className="text-rose-400">손절 {scalpingStopLoss}%</div>
-            </div>
-            <div className="grid grid-cols-2 gap-1">
-              <select 
-                value={scalpingTargetProfit}
-                onChange={(e) => setScalpingTargetProfit(Number(e.target.value))}
-                className="bg-black/50 border border-emerald-500/40 rounded-xl p-1 text-xs font-mono outline-none text-emerald-400 text-center font-bold appearance-none cursor-pointer"
-                title="목표 순수익률 (기본 +0.2%)"
-              >
-                {[0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.5, 1.0].map(val => (
-                  <option key={val} value={val} className="bg-sleek-bg text-emerald-400">
-                    +{val}%{val === 0.2 ? '★' : ''}
-                  </option>
-                ))}
-              </select>
-              <select 
-                value={scalpingStopLoss}
-                onChange={(e) => setScalpingStopLoss(Number(e.target.value))}
-                className="bg-black/50 border border-rose-500/40 rounded-xl p-1 text-xs font-mono outline-none text-rose-400 text-center font-bold appearance-none cursor-pointer"
-                title="손절 기준률 (기본 -0.5%)"
-              >
-                {[-0.3, -0.4, -0.5, -0.6, -0.7, -0.8, -0.9, -1.0].map(val => (
-                  <option key={val} value={val} className="bg-sleek-bg text-rose-400">
-                    {val}%{val === -0.5 ? '★' : ''}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* 2. SMART SCALPER 세부 설정 (col-span-2) */}
-        <div className="lg:col-span-6 order-4 bg-sleek-blue/5 border border-sleek-blue/20 p-2.5 rounded-2xl flex flex-col justify-between space-y-1.5 min-w-0">
-          <div className="flex items-center justify-between">
-            <span className="text-[11px] font-black text-sleek-blue uppercase tracking-wider flex items-center gap-1">
-              <Zap className="w-3 h-3 text-amber-400" /> SMART SCALPER
-            </span>
-            <span className="text-[9px] font-mono font-bold text-sleek-blue bg-sleek-blue/20 px-1.5 py-0.5 rounded border border-sleek-blue/30">
-              AI ACTIVE
-            </span>
-          </div>
-
-          <div>
-            <div className="flex items-center justify-between mb-0.5">
-              <label className="text-[10px] font-black text-slate-300 uppercase">추가 매수 간격 (Gap %)</label>
-            </div>
-            <select 
-              value={minGapBetweenSlots}
-              onChange={(e) => setMinGapBetweenSlots(Number(e.target.value))}
-              className="w-full bg-black/50 border border-white/10 rounded-xl px-1.5 py-1 text-xs font-mono font-bold text-white outline-none cursor-pointer appearance-none"
-            >
-              {[0.1, 0.2, 0.3, 0.4, 0.5, 0.8, 1.0, 1.5, 2.0, 3.0, 5.0].map(gap => (
-                <option key={gap} value={gap} className="bg-sleek-bg text-white">{gap}%</option>
-              ))}
-            </select>
-          </div>
-
-          {/* 진입 호가 방식 드롭다운 */}
-          <div className="pt-1 border-t border-white/10">
-            <div className="flex items-center justify-between mb-0.5">
-              <span className="text-[10px] font-bold text-white flex items-center gap-1">
-                <TrendingDown className="w-3 h-3 text-amber-400" /> 진입 호가 방식
-              </span>
-            </div>
-            <select
-              value={entryPriceMode}
-              onChange={(e) => setEntryPriceMode(e.target.value as any)}
-              className="w-full bg-black/50 border border-white/10 rounded-xl px-1.5 py-1 text-xs font-bold text-white outline-none cursor-pointer appearance-none"
-              title="진입 호가 방식 선택"
-            >
-              <option value="BID1" className="bg-sleek-bg text-emerald-400 font-bold">매수1호가★</option>
-              <option value="BID2" className="bg-sleek-bg text-white">매수2호가</option>
-              <option value="BID4" className="bg-sleek-bg text-white">매수4호가</option>
-              <option value="CURRENT" className="bg-sleek-bg text-white">현재가</option>
-            </select>
-          </div>
-
-          {/* 실행 속도 드롭다운 */}
-          <div className="pt-1 border-t border-white/10">
-            <div className="flex items-center justify-between mb-0.5">
-              <span className="text-[10px] font-bold text-slate-300 uppercase flex items-center gap-1">
-                <Activity className="w-3 h-3 text-amber-400" /> 실행 속도
-              </span>
-            </div>
-            <select
-              value={scalpingSpeed}
-              onChange={(e) => setScalpingSpeed(Number(e.target.value))}
-              className="w-full bg-black/50 border border-white/10 rounded-xl px-1.5 py-1 text-xs font-mono font-bold text-amber-300 outline-none cursor-pointer appearance-none"
-              title="스캘핑 실행 주기 (체결 속도)"
-            >
-              <option value={100} className="bg-sleek-bg text-white">0.1s</option>
-              <option value={200} className="bg-sleek-bg text-white">0.2s</option>
-              <option value={300} className="bg-sleek-bg text-amber-300 font-bold">0.3s★</option>
-              <option value={500} className="bg-sleek-bg text-white">0.5s</option>
-            </select>
-          </div>
-        </div>
-          </>
-        ) : (
-          selectedStock && (
-            <CandlestickChart symbol={selectedStock.symbol} name={selectedStock.name} price={price} scalperTabs={scalperTabs} formatCurrency={formatCurrency} />
-          )
+        {selectedStock && (
+          <CandlestickChart symbol={selectedStock.symbol} name={selectedStock.name} price={price} scalperTabs={scalperTabs} formatCurrency={formatCurrency} />
         )}
 
         {/* 3. 실시간 잔량 호가창 (4호가) (col-span-3) */}
