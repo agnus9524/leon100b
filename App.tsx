@@ -5570,14 +5570,25 @@ priceData.current
       if (priceData && priceData.current > 0) {
         // ① KIS 수집: 최신 시세로 stocks를 갱신하면서, 전략 분석에 바로 넘길 최신 Stock 스냅샷도 함께 구성
         const prevStock = stocksRef.current.find(s => s.symbol === symbol);
+        // 🛡️ history를 절대 그대로 두지 않는다 — 이전엔 이 함수가 price/change 등만 갱신하고
+        // history는 등록 당시 값(부족하거나 인위적인 가짜 데이터일 수 있음) 그대로 고정해버려서,
+        // RSI/이동평균 등 전략센서가 영원히 실제 추세를 반영하지 못하는 원인이 되었다. 매 호출마다
+        // 새 가격을 실제 이력에 한 칸씩 누적해서, 시간이 지날수록 진짜 데이터로 자연스럽게 채워지게 한다.
+        const prevHistory = Array.isArray(prevStock?.history) ? prevStock!.history : [];
+        const nowLabel = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const newHistory = prevHistory.length > 0
+          ? [...prevHistory.slice(-59), { time: nowLabel, price: priceData.current }]
+          : [{ time: nowLabel, price: priceData.current }];
+
         const updatedStock: Stock = {
-          ...(prevStock || { symbol, name: symbol, history: [], market: /^[A-Za-z]/.test(symbol) ? 'US' : 'KR', isAI: false } as Stock),
+          ...(prevStock || { symbol, name: symbol, market: /^[A-Za-z]/.test(symbol) ? 'US' : 'KR', isAI: false } as Stock),
           price: priceData.current,
           change: priceData.change,
           changePercent: priceData.changePercent,
           volume: priceData.volume,
           executionStrength: priceData.executionStrength,
           isRealTime: true,
+          history: newHistory,
           lastUpdated: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
         };
         setStocks(prev => prev.map(s => s.symbol === symbol ? updatedStock : s));
@@ -6361,6 +6372,67 @@ priceData.current
       if (kisSyncInterval) clearInterval(kisSyncInterval);
     };
   }, [kisConfig.isConnected, marketType, selectedSymbol, isGapBotActive]);
+
+  // ============================================================
+  // 🛡️ 등록된 전체 종목의 전략센서(RSI 포함) 계산 전용 갱신 — API 호출 없음
+  // ------------------------------------------------------------
+  // 기존에는 "봇이 시작된 종목"(메인 엔진 루프)과 "현재 선택된 종목"(refreshInventoryItem)만
+  // 센서가 갱신되고 있었다. 그 결과 인벤토리에 등록만 해두고 아직 시작하지 않았거나 선택해서
+  // 보지 않은 종목들은 registration 시점의 기본값(RSI=50 등)에 영원히 고정되어, 실제로는 신호가
+  // 떠도 화면에는 "분석 중"처럼 보였다. 이 effect는 새 API 호출을 만들지 않고(웹소켓이든 REST든
+  // 이미 stocks에 반영된 최신 가격/이력으로) 등록된 종목 전체의 센서를 순수 계산만으로 다시
+  // 채워 넣는다.
+  // ============================================================
+  useEffect(() => {
+    if (!isAppInitialized) return;
+
+    const refreshAllInventorySensors = () => {
+      const currentStocks = stocksRef.current;
+      const registeredSymbols = scalperTabsRef.current.map(t => t.symbol);
+      if (registeredSymbols.length === 0) return;
+
+      setScalperInventory(prev => {
+        let changed = false;
+        const next = prev.map(item => {
+          const stockItem = currentStocks.find(s => s.symbol === item.symbol);
+          if (!stockItem || !stockItem.price || stockItem.price <= 0) return item;
+
+          const strat = detectStockStrategies(stockItem);
+          const roundedRsi = Math.round(strat.rsi);
+          const cur = item.sensors;
+          if (
+            cur.pullback === strat.isPullback &&
+            cur.breakout === strat.isBreakout &&
+            cur.vwap === strat.isVwapSupport &&
+            cur.cvd === strat.isVolumeProfile &&
+            cur.volumeMomentum === strat.hasVolumeMomentum &&
+            cur.rsi === roundedRsi &&
+            cur.activeCount === strat.activeCount
+          ) return item; // 변화 없으면 그대로
+
+          changed = true;
+          return {
+            ...item,
+            sensors: {
+              pullback: strat.isPullback,
+              breakout: strat.isBreakout,
+              vwap: strat.isVwapSupport,
+              cvd: strat.isVolumeProfile,
+              volumeMomentum: strat.hasVolumeMomentum,
+              rsi: roundedRsi,
+              activeCount: strat.activeCount,
+              lastUpdatedAt: Date.now()
+            }
+          };
+        });
+        return changed ? next : prev;
+      });
+    };
+
+    refreshAllInventorySensors();
+    const sensorInterval = setInterval(refreshAllInventorySensors, 3000);
+    return () => clearInterval(sensorInterval);
+  }, [isAppInitialized, detectStockStrategies]);
 
   // Auto KIS initial sync on connection
   const initialKisSyncTriggeredRef = React.useRef(false);
