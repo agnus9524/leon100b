@@ -4859,6 +4859,14 @@ setGapInventory(nextInv);
       openOrSwitchScalperTab(rec.symbol, rec.name, resolvedPrice, rec);
       showNotification(`[스캘퍼 타겟 등록] ${rec.name}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (현재 체결가 ${resolvedPrice.toLocaleString()}원, 추천가 ${rec.recommendedPrice.toLocaleString()}원, 스캘핑 점수 ${rec.scalpingScore}점)`, "success");
       setShowScalperRecModal(false);
+
+      // 🔄 인위적 반복 패턴(가짜 이력) 대신 실제 분봉 이력으로 보정 — RSI/이동평균 등 전략센서가
+      // 실제 추세를 반영하도록 한다 (그대로 두면 RSI가 항상 50 근처로 계산되어 신호가 안 뜬다)
+      seedRealHistory(rec.symbol).then(realHistory => {
+        if (realHistory && realHistory.length > 0) {
+          setStocks(prev => prev.map(s => s.symbol === rec.symbol ? { ...s, history: realHistory } : s));
+        }
+      }).catch(() => {});
     } catch (err: any) {
       console.error('[스캘퍼 등록 실패] 예외 발생:', err);
       showNotification(`[스캘퍼 등록 실패] ${err?.message || '알 수 없는 오류가 발생했습니다.'}`, 'error');
@@ -5088,6 +5096,16 @@ const newStock: Stock = {
           } : s));
         }
       }).catch(err => console.warn('[등록 후 시세 보정 실패]', err));
+
+      // 🔄 등록 직후엔 실제 가격 변동을 반영하지 못하는 인위적 반복 패턴(가짜 이력)이 들어가 있다.
+      // 이걸 그대로 두면 RSI/이동평균/VWAP 등 모든 전략센서가 실제 추세와 무관한 값을 계산하게 되어,
+      // "신호감지가 전혀 안 뜨고 계속 분석 중"인 것처럼 보이는 원인이 된다. 실제 분봉 이력이 확보되는
+      // 즉시 교체한다.
+      seedRealHistory(newStock.symbol).then(realHistory => {
+        if (realHistory && realHistory.length > 0) {
+          setStocks(prev => prev.map(s => s.symbol === newStock.symbol ? { ...s, history: realHistory } : s));
+        }
+      }).catch(() => {});
       return;
     }
 
@@ -5153,6 +5171,13 @@ const newStock: Stock = {
           setSearchSymbol("");
           addLog('SYSTEM', '매수', 0, 0, `[KIS 종목 추가] ${liveName}(${symbolToUse}) 종목이 실시간 연동 등록되었습니다 (현재가: ${formatCurrency(livePriceData.current)}).`);
           setIsSearchingStock(false);
+
+          // 🔄 인위적 반복 패턴(가짜 이력) 대신 실제 분봉 이력으로 보정
+          seedRealHistory(symbolToUse).then(realHistory => {
+            if (realHistory && realHistory.length > 0) {
+              setStocks(prev => prev.map(s => s.symbol === symbolToUse ? { ...s, history: realHistory } : s));
+            }
+          }).catch(() => {});
           return;
         }
       } catch (err: any) {
@@ -5527,7 +5552,10 @@ priceData.current
             price: Number(b.stck_prpr || b.stck_prc || 0)
           }))
           .filter(b => b.price > 0);
-        if (bars.length >= 5) return bars.slice(-40);
+        // RSI(14)·SMA20·볼린저(20) 계산이 전부 의미를 가지려면 최소 21개는 있어야 한다.
+        // (5개처럼 너무 낮은 기준은 "성공"으로 처리되어도 실제로는 대부분의 전략센서가
+        // 계산 불가/무의미한 값(RSI=50 fallback 등)으로 빠지는 원인이었다)
+        if (bars.length >= 21) return bars.slice(-40);
       }
     } catch (err) {
       console.warn(`[실제 이력 시딩 실패] ${symbol}`, err);
