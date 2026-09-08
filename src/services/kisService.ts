@@ -507,22 +507,56 @@ return strat.activeCount >= 1;
   }
 
   private static priceQueue: Promise<void> = Promise.resolve();
+  private static inFlightPriceRequests: Map<string, Promise<NormalizedPrice | null>> = new Map();
+  private static priceCache: Map<string, { data: NormalizedPrice | null; timestamp: number }> = new Map();
+  private static readonly PRICE_CACHE_TTL_MS = 800; // 이 시간 안의 재요청은 API를 다시 부르지 않고 캐시값을 준다
 
   public async getPrice(symbol: string): Promise<NormalizedPrice | null> {
-    // Serialize and throttle requests to prevent 429
-    const delay = () => new Promise(r => setTimeout(r, 600));
-    const release = await new Promise<() => void>(resolve => {
-      const next = () => resolve(() => {});
-      KISService.priceQueue = KISService.priceQueue.then(async () => {
-        next();
-        await delay();
-      });
-    });
+    // 1) 캐시: 방금 전에 조회한 값이면 그걸 그대로 반환 (API 호출 없음)
+    const cached = KISService.priceCache.get(symbol);
+    if (cached && Date.now() - cached.timestamp < KISService.PRICE_CACHE_TTL_MS) {
+      return cached.data;
+    }
 
+    // 2) 같은 종목에 대한 요청이 이미 진행 중이면, 새로 큐에 넣지 않고 그 결과를 같이 기다린다.
+    //    (예: 스캘퍼 엔진 + 선택종목 폴링 + UI가 거의 동시에 같은 종목 가격을 원하는 경우)
+    const inFlight = KISService.inFlightPriceRequests.get(symbol);
+    if (inFlight) {
+      return inFlight;
+    }
+
+    const requestPromise = (async (): Promise<NormalizedPrice | null> => {
+      // Serialize and throttle requests to prevent 429
+      const delay = async () => {
+        // 🛡️ 전역 429 쿨다운 중이면(다른 종목 조회에서 이미 429를 만난 직후) 그 시각까지 같이 기다린다
+        const cooldownRemaining = this.globalRateLimitCooldownUntil - Date.now();
+        if (cooldownRemaining > 0) {
+          await new Promise(r => setTimeout(r, cooldownRemaining));
+        }
+        await new Promise(r => setTimeout(r, 600));
+      };
+      const release = await new Promise<() => void>(resolve => {
+        const next = () => resolve(() => {});
+        KISService.priceQueue = KISService.priceQueue.then(async () => {
+          next();
+          await delay();
+        });
+      });
+
+      try {
+        const result = await this._getPriceInternal(symbol);
+        KISService.priceCache.set(symbol, { data: result, timestamp: Date.now() });
+        return result;
+      } finally {
+        release();
+      }
+    })();
+
+    KISService.inFlightPriceRequests.set(symbol, requestPromise);
     try {
-      return await this._getPriceInternal(symbol);
+      return await requestPromise;
     } finally {
-      release();
+      KISService.inFlightPriceRequests.delete(symbol);
     }
   }
 
@@ -1272,10 +1306,22 @@ console.log(
 
   private lastRequestTime = 0;
   private minRequestInterval = 500; // Minimum 500ms interval between API calls to prevent Rate Limit (EGW00201 / 429)
+  private globalRateLimitCooldownUntil = 0; // 🛡️ 429가 뜨면 이 시각까지 전체 가격 조회를 잠시 미룬다 (한 종목만 재시도해서는 부족함)
+
+  /** 지수 백오프 지연시간 계산: 1차 2초, 2차 4초, 3차 8초, 4차 15초, 5차 30초 (상한 고정) */
+  private getBackoffDelay(attempt: number): number {
+    const delays = [2000, 4000, 8000, 15000, 30000];
+    return delays[Math.min(attempt - 1, delays.length - 1)];
+  }
   private requestQueueChain: Promise<any> = Promise.resolve();
 
   public async queueRequest<T>(fn: () => Promise<T>): Promise<T> {
     const nextInQueue = this.requestQueueChain.then(async () => {
+      // 🛡️ 다른 경로(getPrice 등)에서 이미 429를 만나 전역 쿨다운 중이면 같이 기다린다
+      const cooldownRemaining = this.globalRateLimitCooldownUntil - Date.now();
+      if (cooldownRemaining > 0) {
+        await new Promise(resolve => setTimeout(resolve, cooldownRemaining));
+      }
       const now = Date.now();
       const timeSinceLast = now - this.lastRequestTime;
       if (timeSinceLast < this.minRequestInterval) {
@@ -1308,8 +1354,9 @@ console.log(
           dataStr.includes('Protection triggered');
 
         if (isRateLimit && attempt < maxRetries) {
-          const backoffMs = Math.min(8000, 1000 * Math.pow(2, attempt - 1)); // 1s, 2s, 4s, 8s
-          console.warn(`[KIS Edge Rate Limit 429] Retrying attempt ${attempt}/${maxRetries} after ${backoffMs}ms backoff...`);
+          const backoffMs = this.getBackoffDelay(attempt); // 2s, 4s, 8s, 15s, 30s로 통일
+          this.globalRateLimitCooldownUntil = Date.now() + backoffMs; // getPrice 큐도 이 쿨다운을 같이 존중하게 됨
+          console.warn(`[KIS Edge Rate Limit 429] Retrying attempt ${attempt}/${maxRetries} after ${backoffMs}ms backoff... (전체 쿨다운 적용)`);
           await new Promise(resolve => setTimeout(resolve, backoffMs));
         } else {
           throw error;
@@ -1337,6 +1384,12 @@ console.log(
     let lastError = null;
 
     for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      // 🛡️ 전역 429 쿨다운 중이면 이 종목 재시도도 그 시각까지 같이 기다린다
+      const cooldownRemaining = this.globalRateLimitCooldownUntil - Date.now();
+      if (cooldownRemaining > 0) {
+        await new Promise(resolve => setTimeout(resolve, cooldownRemaining));
+      }
+
       // Throttle minimum interval between consecutive API requests
       const now = Date.now();
       const timeSinceLast = now - this.lastRequestTime;
@@ -1381,8 +1434,9 @@ console.log(
           );
 
         if (isRateLimitOrServerError && attempt < maxRetries) {
-          const backoff = attempt * 600; // 600ms, 1200ms, 1800ms, 2400ms...
-          console.warn(`[KIS Retry] ${symbol} (시도 ${attempt}/${maxRetries}): ${lastError}. ${backoff}ms 대기 후 자동 재시도...`);
+          const backoff = this.getBackoffDelay(attempt);
+          this.globalRateLimitCooldownUntil = Date.now() + backoff; // 이 종목뿐 아니라 전체 가격 조회를 같이 늦춤
+          console.warn(`[KIS Retry] ${symbol} (시도 ${attempt}/${maxRetries}): ${lastError}. ${backoff}ms 대기 후 자동 재시도... (전체 쿨다운 적용)`);
           await new Promise(resolve => setTimeout(resolve, backoff));
           continue;
         }
@@ -1393,8 +1447,9 @@ console.log(
         lastError = error.response?.data?.msg1 || error.message;
         const status = error.response?.status;
         if ((status === 500 || status === 429 || (typeof lastError === 'string' && (lastError.includes('초당') || lastError.includes('초과') || lastError.includes('500') || lastError.includes('status code 500')))) && attempt < maxRetries) {
-          const backoff = attempt * 600;
-          console.warn(`[KIS HTTP ${status || 'Error'} Retry] ${symbol} (시도 ${attempt}/${maxRetries}): ${lastError}. ${backoff}ms 대기 후 자동 재시도...`);
+          const backoff = this.getBackoffDelay(attempt);
+          this.globalRateLimitCooldownUntil = Date.now() + backoff; // 이 종목뿐 아니라 전체 가격 조회를 같이 늦춤
+          console.warn(`[KIS HTTP ${status || 'Error'} Retry] ${symbol} (시도 ${attempt}/${maxRetries}): ${lastError}. ${backoff}ms 대기 후 자동 재시도... (전체 쿨다운 적용)`);
           await new Promise(resolve => setTimeout(resolve, backoff));
           continue;
         }
