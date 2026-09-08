@@ -1549,7 +1549,7 @@ export default function App() {
   const [gapTradingProfit, setGapTradingProfit] = useState<number>(0);
   const [gapTradeCount, setGapTradeCount] = useState<number>(0);
   const [lastTradeType, setLastTradeType] = useState<'BUY' | 'SELL' | null>(null);
-  const [gapInventory, setGapInventory] = useState<{id: string, price: number, quantity: number}[]>([]);
+  const [gapInventory, setGapInventory] = useState<{id: string, price: number, quantity: number, symbol?: string}[]>([]);
 
   // Multi-Tab Scalper Trading State
   const buildInitialScalperTabs = (): ScalperTab[] => {
@@ -2046,23 +2046,22 @@ export default function App() {
     if (tabId === activeTabIdRef.current) return;
     const targetTab = scalperTabsRef.current.find(t => t.id === tabId);
     if (!targetTab) return;
- console.log(
-  '[TAB INVENTORY RAW]',
-  targetTab.symbol,
-  targetTab.gapInventory
-);
-
 
     // 1. Save current active tab's properties into scalperInventory/monitors before switching
     const prevTabId = activeTabIdRef.current;
     if (prevTabId) {
+      const prevTabSymbol = scalperTabsRef.current.find(t => t.id === prevTabId)?.symbol;
       updateTab(prevTabId, {
         isBotActive: isGapBotActiveRef.current,
         gapBuyPrice: gapBuyPriceRef.current,
         gapSellPrice: gapSellPriceRef.current,
         tradeQuantity: tradeQuantityRef.current,
         maxSlots: maxSlotsRef.current || 3,
-        gapInventory: (gapInventoryRef.current || []).filter(s => !s.symbol || s.symbol === prevTabId),
+        // 🛡️ 종목코드(symbol)는 탭ID(prevTabId)와 비교 대상이 다르다 — 실제 이 탭이 나타내는
+        // 종목코드(prevTabSymbol)와 비교해야 한다. 이게 어긋나 있으면 다른 종목의 슬롯이 이
+        // 탭에 잘못 저장되고, 다음 탭 전환 때 그 슬롯의 symbol이 새 탭 것으로 덮어써지면서
+        // "엉뚱한 종목 이름 아래 다른 종목의 매수가"가 표시되는 원인이 된다.
+        gapInventory: (gapInventoryRef.current || []).filter(s => !s.symbol || s.symbol === prevTabSymbol),
         gapTradingProfit: gapTradingProfitRef.current,
         gapTradeCount: gapTradeCountRef.current,
         lastTradeType: lastTradeTypeRef.current,
@@ -2419,7 +2418,7 @@ setGapInventory(nextInv);
   const lowestBidOnlyMode = entryPriceMode === 'BID4'; // Backward compatibility ref
   const [scalperMessage, setScalperMessage] = useState<string>("대기 중...");
   const [selectedTimeframeBar, setSelectedTimeframeBar] = useState<'1m' | '3m' | '5m' | '10m'>('1m');
-  const gapInventoryRef = React.useRef<{id: string, price: number, quantity: number}[]>([]);
+  const gapInventoryRef = React.useRef<{id: string, price: number, quantity: number, symbol?: string}[]>([]);
   const processedFilledQtyRef = React.useRef<Record<string, number>>({});
   useEffect(() => {
     gapInventoryRef.current = gapInventory;
@@ -6037,7 +6036,7 @@ priceData.current
             const missing = actualQty - totalSlotQty;
             const avgP = newAvgPrices[symbol] || avgPrices[symbol] || (stocksRef.current.find(s => s.symbol === symbol)?.price || 0);
             if (avgP > 0) {
-              newInv.push({ id: `RECOVERED-${Date.now()}-${Math.floor(Math.random() * 1000)}`, price: avgP, quantity: missing });
+              newInv.push({ id: `RECOVERED-${Date.now()}-${Math.floor(Math.random() * 1000)}`, price: avgP, quantity: missing, symbol });
             }
           }
 
@@ -7002,7 +7001,8 @@ useEffect(() => {
                   const newSlot = {
                     id: slotId,
                     price: filledPrice,
-                    quantity: newlyFilledQty
+                    quantity: newlyFilledQty,
+                    symbol: order.symbol
                   };
 
                   setGapInventory(prev => {
@@ -7302,7 +7302,8 @@ useEffect(() => {
               const newSlot = {
                 id: slotId,
                 price: filledPrice,
-                quantity: newlyFilledQty
+                quantity: newlyFilledQty,
+                symbol: order.symbol
               };
 
               setGapInventory(prev => {
@@ -9376,10 +9377,14 @@ useEffect(() => {
               const currentStock = selectedStock;
               const currentInventory = gapInventory.filter(s => {
                 if (!s) return false;
-                if (typeof s === 'object' && s.symbol && currentStock?.symbol) {
+                if (!currentStock?.symbol) return false;
+                // 🛡️ symbol 정보가 없는 슬롯(과거 버전에서 만들어져 저장된 것)은 어느 종목 것인지
+                // 확인할 수 없으므로, 안전하게 "포함시키지 않는다" — 예전엔 반대로 무조건 포함시켜서
+                // 다른 종목의 매수가가 엉뚱하게 표시되는 원인이 되었다.
+                if (typeof s === 'object' && s.symbol) {
                   return s.symbol === currentStock.symbol;
                 }
-                return true;
+                return false;
               });
 
               return (
