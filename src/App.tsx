@@ -9345,6 +9345,7 @@ useEffect(() => {
                 setManualSellModalOpen={setManualSellModalOpen}
                 INITIAL_STOCKS_KR={INITIAL_STOCKS_KR}
                 maxInventoryPerMarket={MAX_INVENTORY_PER_MARKET}
+                wsConnectionStatus={wsConnectionStatus}
                 handleClearAllInventory={handleClearAllInventory}
                 updateTab={updateTab}
                 INITIAL_STOCKS={INITIAL_STOCKS}
