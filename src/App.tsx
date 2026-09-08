@@ -4637,9 +4637,18 @@ setGapInventory(nextInv);
     // 스캘핑에 더 적합한 종목을 놓치지 않는다. (비공식 3rd-party 스크래핑 대신 KIS 공식 랭킹 API 조합)
     if (kisConfig.isConnected) {
       try {
-        const [volumeLeaders, fluctuationLeaders] = await Promise.all([
-          kisService.getVolumeRanking('J', 60),
-          kisService.getFluctuationRanking('J', 'UP', 50)
+        // 🛡️ 두 호출이 같은 요청 큐를 공유하기 때문에, 429가 겹치면 지수 백오프 재시도가 쌓여서
+        // 30~60초 이상 걸릴 수 있다. 그대로 두면 "추천 분석 중" 스피너가 무한정 도는 것처럼
+        // 보이므로, 12초 안에 안 끝나면 타임아웃시키고 2순위(추적 종목 풀) 경로로 넘어간다.
+        const rankingTimeout = new Promise<[any[], any[]]>((_, reject) =>
+          setTimeout(() => reject(new Error('ranking_timeout')), 12000)
+        );
+        const [volumeLeaders, fluctuationLeaders] = await Promise.race([
+          Promise.all([
+            kisService.getVolumeRanking('J', 60),
+            kisService.getFluctuationRanking('J', 'UP', 50)
+          ]),
+          rankingTimeout
         ]);
 
         // symbol 기준으로 병합 (중복 제거) — 두 순위에 모두 등장하는 종목이 특히 유의미한 후보
@@ -4764,7 +4773,7 @@ setGapInventory(nextInv);
           isAI: true,
           market: 'KR'
         })));
-        showNotification("[스캘퍼 최적 종목 8선 포착] 실시간 거래량 및 체결강도 기반 추천 목록이 로드되었습니다.", "success");
+        showNotification("[스캘퍼 최적 종목 25선 포착] 실시간 거래량 및 체결강도 기반 추천 목록이 로드되었습니다.", "success");
       }
     } catch (err: any) {
       console.error("Failed to load scalper recommendations:", err);
@@ -8212,10 +8221,15 @@ useEffect(() => {
           const isExecutionStrengthDeclining = prevExecStrength !== undefined && currentExecStrength > 0 && currentExecStrength < prevExecStrength - 10;
           if (currentExecStrength > 0) sellExecStrengthRef.current[stockItem.symbol] = currentExecStrength;
           const isBelowVwap = strat.vwap > 0 && currentPrice < strat.vwap;
-          const isRsiExtremeReversal = strat.rsi >= 80 && isExecutionStrengthDeclining && isBelowVwap;
+          // 🛡️ 손실 중일 때는 반전 신호(RSI 극단반전/매도세 흡수)로 조기 매도하지 않는다.
+          // -0.5% 같은 일시적 하락은 다시 회복되는 경우가 많으므로, 손실 포지션은 오직 실제
+          // 손절선(-1.0%)에 도달했을 때만 정리한다. 신호 기반 조기 청산은 "이익 중일 때"만 적용된다
+          // (수익을 지키기 위해 먼저 빠져나오는 것은 여전히 유효하다).
+          const isRsiExtremeReversal = strat.rsi >= 80 && isExecutionStrengthDeclining && isBelowVwap && overallProfitRatio >= 0;
+          const isBearishAbsorptionExit = strat.isBearishAbsorption && overallProfitRatio >= 0;
 
           const isTargetProfitSignal = enableCombinedAvgProfitExit && netProfitPct >= scalpingTargetProfit;
-          const sellSignal = isRsiExtremeReversal || strat.isBearishAbsorption || (strat.sma5 < strat.sma20 && overallProfitRatio > 0) || isTargetProfitSignal;
+          const sellSignal = isRsiExtremeReversal || isBearishAbsorptionExit || (strat.sma5 < strat.sma20 && overallProfitRatio > 0) || isTargetProfitSignal;
           const isProfitTarget = sellSignal;
           const effectiveStopLossRatio = isAiMaxYieldActive ? Math.min(scalpingStopLoss / 100, -0.005) : scalpingStopLoss / 100;
           const isStopLoss = overallProfitRatio <= effectiveStopLossRatio;
@@ -8224,9 +8238,9 @@ useEffect(() => {
           if (isTrailingStop || isProfitTarget || isStopLoss || isSmartExit) {
             let sellReason = "";
             let exitReason: ExitReason;
-            if (isTargetProfitSignal) { sellReason = `목표 수익률 도달 시그널 (+${netProfitPct.toFixed(2)}%)`; exitReason = 'TAKE_PROFIT'; }
-            else if (isTrailingStop) { sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 최고점 추적스탑 (+${(overallProfitRatio * 100).toFixed(2)}%)` : "트레일링 스탑 (수익 보존)"; exitReason = isAiMaxYieldActive ? 'AI_SELL' : 'TRAILING_STOP'; }
-            else if (isProfitTarget) { sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 동적목표달성 (+${(overallProfitRatio * 100).toFixed(2)}%)` : `매도 시그널 감지 (+${(overallProfitRatio * 100).toFixed(2)}%)`; exitReason = isAiMaxYieldActive ? 'AI_SELL' : 'SIGNAL_REVERSAL'; }
+            if (isTargetProfitSignal) { sellReason = `목표 수익률 도달 시그널 (${netProfitPct >= 0 ? '+' : ''}${netProfitPct.toFixed(2)}%)`; exitReason = 'TAKE_PROFIT'; }
+            else if (isTrailingStop) { sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 최고점 추적스탑 (${(overallProfitRatio * 100) >= 0 ? '+' : ''}${(overallProfitRatio * 100).toFixed(2)}%)` : "트레일링 스탑 (수익 보존)"; exitReason = isAiMaxYieldActive ? 'AI_SELL' : 'TRAILING_STOP'; }
+            else if (isProfitTarget) { sellReason = isAiMaxYieldActive ? `⚡ 최고수익 AI 동적목표달성 (${(overallProfitRatio * 100) >= 0 ? '+' : ''}${(overallProfitRatio * 100).toFixed(2)}%)` : `매도 시그널 감지 (${(overallProfitRatio * 100) >= 0 ? '+' : ''}${(overallProfitRatio * 100).toFixed(2)}%)`; exitReason = isAiMaxYieldActive ? 'AI_SELL' : 'SIGNAL_REVERSAL'; }
             else { sellReason = "리스크 관리 손절"; exitReason = 'STOP_LOSS'; }
 
             transitionLifecycleStatus(stockItem.symbol, 'SELL_READY', sellReason);
