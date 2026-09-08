@@ -6238,10 +6238,10 @@ priceData.current
   // Real-time Stock Price & Orderbook Sync Interval
   useEffect(() => {
     if (!isAppInitialized) return;
-    let slowInterval: NodeJS.Timeout;
-    let fastInterval: NodeJS.Timeout;
-    let orderbookInterval: NodeJS.Timeout;
-    let kisSyncInterval: NodeJS.Timeout;
+    let slowInterval: ReturnType<typeof setInterval>;
+    let fastInterval: ReturnType<typeof setInterval>;
+    let orderbookInterval: ReturnType<typeof setInterval>;
+    let kisSyncInterval: ReturnType<typeof setInterval>;
 
     // 1. Sync for all watchlist stocks (every 10 seconds)
     const syncAllPrices = async () => {

@@ -1,19 +1,7 @@
-export interface ScalperSensors {
-  pullback: boolean;
-  breakout: boolean;
-  vwap: boolean;
-  cvd: boolean;
-  volumeMomentum: boolean;
-  rsi: number;
-  activeCount: number;
-  lastUpdatedAt: number;
-}
-
 export interface ScalperTab {
   id: string; // symbol e.g., '073240' or '001520'
   symbol: string;
   name: string;
-  price?: number;
   isBotActive: boolean;
   gapBuyPrice: number;
   gapSellPrice: number;
@@ -27,11 +15,6 @@ export interface ScalperTab {
   entryPriceMode: 'CURRENT' | 'BID1' | 'BID2' | 'BID4';
   autoCancelThreshold: number;
   tradeLogs?: TradeLog[];
-  lifecycleStatus?: string;
-  priceStatus?: 'LOADING' | 'LIVE';
-  holdingQty?: number;
-  orderableQty?: number;
-  changePercent?: number;
 }
 
 export interface Stock {
@@ -50,16 +33,15 @@ export interface Stock {
   pattern?: string;
   isRealTime?: boolean;
   lastUpdated?: string;
+  executionStrength?: number; // 실제 체결강도(KIS cttr) — kisService.ts의 generateRealtimeRecommendations 등에서 사용
 }
 
 export interface TradeLog {
-  id?: string;
+  id: string;
   time: string;
-  timestamp?: number;
-  symbol: string;
-  symbolName?: string;
-  type: 'BUY' | 'SELL' | '매수' | '매도';
+  type: 'BUY' | 'SELL';
   price: number;
-  amount: number;
-  reason: string;
+  quantity: number;
+  profit?: number;
+  message?: string;
 }
