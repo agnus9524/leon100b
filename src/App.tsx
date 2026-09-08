@@ -354,6 +354,31 @@ interface Stock {
   executionStrength?: number; // 실제 체결강도(KIS cttr) — 매수체결량/매도체결량 기반. 호가잔량 비율이 아님
 }
 
+// 🕘 한국 정규장(평일 09:00~15:30 KST) 여부 판단.
+// 서버/브라우저가 어느 타임존에서 돌아가든 항상 정확한 한국시간 기준으로 판단하기 위해
+// Intl.DateTimeFormat으로 KST 요일/시/분을 직접 계산한다 (new Date().getHours() 등은 로컬
+// 타임존에 좌우되어 배포 환경에 따라 틀릴 수 있다).
+const isKoreanMarketOpen = (): boolean => {
+  const kstFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    weekday: 'short',
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23'
+  });
+  const parts = kstFormatter.formatToParts(new Date());
+  const weekday = parts.find(p => p.type === 'weekday')?.value || '';
+  const hour = Number(parts.find(p => p.type === 'hour')?.value || 0);
+  const minute = Number(parts.find(p => p.type === 'minute')?.value || 0);
+
+  if (weekday === 'Sat' || weekday === 'Sun') return false; // 주말은 휴장 (공휴일까지는 별도 캘린더가 없어 반영하지 못함)
+
+  const minutesNow = hour * 60 + minute;
+  const marketOpen = 9 * 60;        // 09:00
+  const marketClose = 15 * 60 + 30; // 15:30
+  return minutesNow >= marketOpen && minutesNow <= marketClose;
+};
+
 // Utility function to get tick size by market and price
 const getTickSize = (price: number, market: 'KR' | 'US' = 'KR'): number => {
   if (market === 'US') return 0.01;
@@ -6246,6 +6271,7 @@ priceData.current
     // 1. Sync for all watchlist stocks (every 10 seconds)
     const syncAllPrices = async () => {
       if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음 (연동 전 에러 스팸 방지)
+      if (!isKoreanMarketOpen()) return; // 🕘 정규장(평일 09:00~15:30) 외 시간에는 가격이 안 움직이므로 호출하지 않음
       // 🔄 웹소켓이 정상 연결되어 실시간 체결을 받고 있으면, 같은 데이터를 REST로 또 조회하지 않는다.
       // (웹소켓 tick 핸들러가 이미 stocks의 price/change/volume/executionStrength를 실시간으로
       // 갱신하고 있으므로, 이 REST 폴링은 웹소켓이 끊겼을 때만 필요한 백업이다.)
@@ -6293,6 +6319,7 @@ priceData.current
     // 2. Fast sync for the currently selected stock (every 1.5 seconds)
     const syncSelectedPrice = async () => {
       if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음
+      if (!isKoreanMarketOpen()) return; // 🕘 정규장 외 시간에는 조회하지 않음
       if (wsConnectionStatusRef.current === 'open') return; // 웹소켓이 이미 실시간으로 갱신 중이면 REST 중단
       if (!selectedSymbol) return;
       try {
@@ -6337,6 +6364,7 @@ priceData.current
     const syncLiveOrderbook = async () => {
 
   if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음
+  if (!isKoreanMarketOpen()) return; // 🕘 정규장 외 시간에는 호가가 안 움직이므로 조회하지 않음
   if (!selectedSymbol) return;
 
   // 🔄 호가창 UI는 "현재 선택된 종목" 하나만 화면에 보여준다. 예전에는 등록된 종목 전체(예: 8개)를
@@ -6395,6 +6423,7 @@ priceData.current
     if (!isAppInitialized) return;
 
     const refreshAllInventorySensors = () => {
+      if (!isKoreanMarketOpen()) return; // 🕘 정규장(평일 09:00~15:30 KST) 외에는 가격이 움직이지 않으므로 재계산 자체를 하지 않는다
       const currentStocks = stocksRef.current;
       const registeredSymbols = scalperTabsRef.current.map(t => t.symbol);
       if (registeredSymbols.length === 0) return;
@@ -7807,6 +7836,10 @@ useEffect(() => {
 
     const gapInterval = setInterval(async () => {
       if (isExecutingRef.current) return;
+      if (!isKoreanMarketOpen()) {
+        setScalperMessage("장 마감 (정규장 09:00~15:30 KST 외 — 감시 대기 중)");
+        return;
+      }
       isExecutingRef.current = true;
       try {
         // 내가 '스타트'한 종목(스캘핑 탭에서 isBotActive가 true이거나 현재 활성 탭이 시작된 종목)만 선별
