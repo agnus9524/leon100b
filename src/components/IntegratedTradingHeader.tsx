@@ -21,11 +21,12 @@ const MINUTE_INTERVALS = [1, 3, 5, 10, 15, 30, 60, 120, 240];
 const TICK_INTERVALS = [10, 30, 50, 100];
 
 interface CandleBar {
-  date: string;   // YYYYMMDD (D/W/M/Y) 또는 HHMMSS(MIN)
+  date: string;   // YYYYMMDD (D/W/M) 또는 HHMMSS(MIN/TICK)
   open: number;
   high: number;
   low: number;
   close: number;
+  volume?: number; // 해당 봉의 거래량 — 하단 거래량 막대그래프용
 }
 
 interface TradeMarker {
@@ -89,7 +90,8 @@ const CandlestickChart: React.FC<{
               open: Number(b.stck_oprc || b.stck_prpr || 0),
               high: Number(b.stck_hgpr || b.stck_prpr || 0),
               low: Number(b.stck_lwpr || b.stck_prpr || 0),
-              close: Number(b.stck_prpr || b.stck_clpr || 0)
+              close: Number(b.stck_prpr || b.stck_clpr || 0),
+              volume: Number(b.cntg_vol || b.acml_vol || 0)
             })).filter(b => b.close > 0);
 
             // 1분봉을 요청한 분봉 간격만큼 묶어서 집계 (KIS는 1분 단위로만 내려주므로 클라이언트에서 합산)
@@ -102,7 +104,8 @@ const CandlestickChart: React.FC<{
                 open: chunk[0].open,
                 close: chunk[chunk.length - 1].close,
                 high: Math.max(...chunk.map(c => c.high)),
-                low: Math.min(...chunk.filter(c => c.low > 0).map(c => c.low))
+                low: Math.min(...chunk.filter(c => c.low > 0).map(c => c.low)),
+                volume: chunk.reduce((sum, c) => sum + (c.volume || 0), 0)
               });
             }
             setBars(grouped);
@@ -120,7 +123,8 @@ const CandlestickChart: React.FC<{
               open: Number(b.stck_oprc || 0),
               high: Number(b.stck_hgpr || 0),
               low: Number(b.stck_lwpr || 0),
-              close: Number(b.stck_clpr || 0)
+              close: Number(b.stck_clpr || 0),
+              volume: Number(b.acml_vol || 0)
             })).filter(b => b.close > 0);
             setBars(parsed);
             if (parsed.length === 0 && !isBackgroundRefresh) setErrorMsg('표시할 시세 데이터가 없습니다.');
@@ -237,8 +241,11 @@ const CandlestickChart: React.FC<{
   const PADDING_TOP = 16;
   const PADDING_BOTTOM = 22;
   const PADDING_RIGHT = 58;
+  const VOLUME_H = 64; // 하단 거래량 막대그래프 전용 높이 (네이버증권 스타일)
+  const VOLUME_GAP = 10; // 가격 영역과 거래량 영역 사이 여백
   const plotW = CHART_W - PADDING_RIGHT;
-  const plotH = CHART_H - PADDING_TOP - PADDING_BOTTOM;
+  const plotH = CHART_H - PADDING_TOP - PADDING_BOTTOM - VOLUME_H - VOLUME_GAP;
+  const volumeTop = PADDING_TOP + plotH + VOLUME_GAP;
 
   const allHighs = bars.map(b => b.high).filter(v => v > 0);
   const allLows = bars.map(b => b.low).filter(v => v > 0);
@@ -253,6 +260,10 @@ const CandlestickChart: React.FC<{
 
   const priceGridLines = 5;
   const priceTicks = Array.from({ length: priceGridLines + 1 }, (_, i) => minPrice + (priceRange * i) / priceGridLines);
+
+  // 거래량 막대그래프용 스케일 계산
+  const maxVolume = Math.max(1, ...bars.map(b => b.volume || 0));
+  const volumeToHeight = (vol: number) => (Math.max(0, vol) / maxVolume) * VOLUME_H;
 
   return (
     <div className="lg:col-span-12 order-3 bg-white border border-slate-200 rounded-2xl p-4 flex flex-col min-w-0 shadow-lg">
@@ -307,6 +318,28 @@ const CandlestickChart: React.FC<{
                 </g>
               );
             })}
+
+            {/* 거래량 막대그래프 (네이버증권 스타일) — 상승봉은 빨강, 하락봉은 파랑 */}
+            <line x1={0} y1={volumeTop - 1} x2={plotW} y2={volumeTop - 1} stroke="#e2e8f0" />
+            {bars.map((bar, idx) => {
+              if (!bar.volume || bar.volume <= 0) return null;
+              const isUp = bar.close >= bar.open;
+              const color = isUp ? '#f43f5e' : '#3b82f6';
+              const cx = barCenterX(idx);
+              const h = volumeToHeight(bar.volume);
+              return (
+                <rect
+                  key={idx}
+                  x={cx - candleWidth / 2}
+                  y={volumeTop + (VOLUME_H - h)}
+                  width={candleWidth}
+                  height={h}
+                  fill={color}
+                  opacity={0.55}
+                />
+              );
+            })}
+            <text x={plotW + 6} y={volumeTop + 8} fontSize={9} fill="#94a3b8">거래량</text>
 
             {/* x축 시간 라벨 (양 끝 + 중간) */}
             {bars.length > 0 && [0, Math.floor(bars.length / 2), bars.length - 1].map((idx, i) => (
