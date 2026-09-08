@@ -1774,6 +1774,11 @@ export default function App() {
     }));
   }, [scalperInventory]);
   const [wsConnectionStatus, setWsConnectionStatus] = useState<'connecting' | 'open' | 'closed' | 'error' | 'idle'>('idle');
+  // 🔄 REST 폴링 effect(syncAllPrices/syncSelectedPrice)는 이 상태를 의존성 배열에 넣지 않고
+  // ref로만 읽는다 — state를 의존성에 넣으면 웹소켓 상태가 바뀔 때마다(연결/재연결/끊김) 그
+  // effect 전체가 재시작되면서 "즉시 전체조회"가 다시 실행되어 오히려 순간 폭주를 만들 수 있다.
+  const wsConnectionStatusRef = React.useRef(wsConnectionStatus);
+  useEffect(() => { wsConnectionStatusRef.current = wsConnectionStatus; }, [wsConnectionStatus]);
   const registeredSymbolsKey = scalperTabs.map(t => t.symbol).sort().join(',');
 
   useEffect(() => {
@@ -1815,7 +1820,17 @@ export default function App() {
         }
       )
       .then(ws => {
-        if (cancelled) { ws.close(); return; }
+        if (cancelled) {
+          // 🛡️ 소켓이 아직 연결 중(CONNECTING)인 상태에서 바로 close()하면 브라우저가
+          // "WebSocket is closed before the connection is established" 경고를 띄운다.
+          // 이미 열려있으면(OPEN) 바로 닫고, 아직 연결 중이면 열릴 때까지 기다렸다가 닫는다.
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.close();
+          } else if (ws.readyState === WebSocket.CONNECTING) {
+            ws.addEventListener('open', () => ws.close(), { once: true });
+          }
+          return;
+        }
         socket = ws;
       })
       .catch(err => {
@@ -1825,7 +1840,13 @@ export default function App() {
 
     return () => {
       cancelled = true;
-      socket?.close();
+      if (socket) {
+        if (socket.readyState === WebSocket.OPEN) {
+          socket.close();
+        } else if (socket.readyState === WebSocket.CONNECTING) {
+          socket.addEventListener('open', () => socket?.close(), { once: true });
+        }
+      }
     };
   }, [kisConfig.isConnected, registeredSymbolsKey]);
 
@@ -6178,6 +6199,10 @@ priceData.current
     // 1. Sync for all watchlist stocks (every 10 seconds)
     const syncAllPrices = async () => {
       if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음 (연동 전 에러 스팸 방지)
+      // 🔄 웹소켓이 정상 연결되어 실시간 체결을 받고 있으면, 같은 데이터를 REST로 또 조회하지 않는다.
+      // (웹소켓 tick 핸들러가 이미 stocks의 price/change/volume/executionStrength를 실시간으로
+      // 갱신하고 있으므로, 이 REST 폴링은 웹소켓이 끊겼을 때만 필요한 백업이다.)
+      if (wsConnectionStatusRef.current === 'open') return;
       try {
         const currentStocks = stocksRef.current;
         if (currentStocks.length === 0) return;
@@ -6221,6 +6246,7 @@ priceData.current
     // 2. Fast sync for the currently selected stock (every 1.5 seconds)
     const syncSelectedPrice = async () => {
       if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음
+      if (wsConnectionStatusRef.current === 'open') return; // 웹소켓이 이미 실시간으로 갱신 중이면 REST 중단
       if (!selectedSymbol) return;
       try {
         const priceData = await kisService.getPrice(selectedSymbol);
