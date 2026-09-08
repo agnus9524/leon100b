@@ -6391,6 +6391,8 @@ priceData.current
       const registeredSymbols = scalperTabsRef.current.map(t => t.symbol);
       if (registeredSymbols.length === 0) return;
 
+      const pendingLogs: { symbol: string; price: number; msg: string }[] = [];
+
       setScalperInventory(prev => {
         let changed = false;
         const next = prev.map(item => {
@@ -6410,6 +6412,12 @@ priceData.current
             cur.activeCount === strat.activeCount
           ) return item; // 변화 없으면 그대로
 
+          // 🔔 마우스로 선택하지 않은 종목이라도, 센서가 새로 켜지면 GLOBAL TRADE LOGS에 남긴다.
+          if (!cur.pullback && strat.isPullback) pendingLogs.push({ symbol: item.symbol, price: stockItem.price, msg: 'PULLBACK(눌림목) 감지' });
+          if (!cur.breakout && strat.isBreakout) pendingLogs.push({ symbol: item.symbol, price: stockItem.price, msg: 'BREAKOUT(돌파) 감지' });
+          if (!cur.vwap && strat.isVwapSupport) pendingLogs.push({ symbol: item.symbol, price: stockItem.price, msg: 'VWAP SUPPORT 감지' });
+          if (!cur.cvd && strat.isVolumeProfile) pendingLogs.push({ symbol: item.symbol, price: stockItem.price, msg: 'CVD(거래량 프로파일) 감지' });
+
           changed = true;
           return {
             ...item,
@@ -6427,6 +6435,12 @@ priceData.current
         });
         return changed ? next : prev;
       });
+
+      if (pendingLogs.length > 0) {
+        setTimeout(() => {
+          pendingLogs.forEach(({ symbol, price, msg }) => addLog(symbol, '매수', price, 0, `[전략센서] ${msg}`));
+        }, 0);
+      }
     };
 
     refreshAllInventorySensors();
