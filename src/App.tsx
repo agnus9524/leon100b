@@ -9551,12 +9551,23 @@ useEffect(() => {
                 <button
                   type="button"
                   onClick={() => {
-                    if (!window.confirm('GLOBAL TRADE LOGS 내역을 전부 지울까요? 이 작업은 되돌릴 수 없습니다.')) return;
+                    if (!window.confirm('GLOBAL TRADE LOGS 내역을 전부 지우고, 인버스/레버리지/선물 등 부적절한 종목을 인벤토리에서 함께 정리할까요? 이 작업은 되돌릴 수 없습니다.')) return;
                     setTradeLogs([]);
-                    setScalperInventory(prev => prev.map(item => ({ ...item, tradeLogs: [] })));
+                    // 🛡️ 필터 탭은 실제 등록된 인벤토리에서 그대로 나오기 때문에, 로그만 지워서는
+                    // "삼성 인버스" 같은 부적절한 종목의 필터 탭이 사라지지 않는다(등록 자체가
+                    // 남아있으므로). 로그 초기화와 함께 이런 종목들을 인벤토리에서도 제거한다.
+                    const isInappropriateStock = (name: string) => {
+                      const lower = (name || '').toLowerCase();
+                      return lower.includes('kodex') || lower.includes('tiger') || lower.includes('etf')
+                        || (name || '').includes('인버스') || (name || '').includes('레버리지') || (name || '').includes('선물');
+                    };
+                    setScalperInventory(prev => prev
+                      .filter(item => !isInappropriateStock(item.name))
+                      .map(item => ({ ...item, tradeLogs: [] }))
+                    );
                   }}
                   className="ml-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border border-white/10 text-slate-400 hover:text-rose-400 hover:border-rose-500/40 transition-all shrink-0"
-                  title="로그 내역 전체 초기화"
+                  title="로그 내역 초기화 + 인버스/레버리지/선물 등 부적절한 종목 인벤토리 정리"
                 >
                   초기화
                 </button>
