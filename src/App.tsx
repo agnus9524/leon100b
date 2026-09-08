@@ -833,17 +833,6 @@ const MAX_INVENTORY_PER_MARKET = 20;
 
 const INITIAL_STOCKS_KR: Stock[] = [
   {
-    symbol: '025820',
-    name: '이구산업',
-    price: 2850,
-    change: 115,
-    changePercent: 4.20,
-    volume: '14.8M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2400 + Math.round((i / 40) * 450) + Math.floor(Math.random() * 30) })),
-    market: 'KR',
-    isAI: true
-  },
-  {
     symbol: '001520',
     name: '동양',
     price: 1240,
@@ -2285,7 +2274,10 @@ setGapInventory(nextInv);
 
   const closeScalperTab = (tabId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (scalperTabs.length <= 1) return;
+    // 🛡️ 예전에는 "마지막 남은 종목 1개는 삭제 금지" 제한이 있었는데, 이것 때문에 사용자가
+    // 특정 종목을 지우려 해도 그게 마지막 하나면 X 버튼이 조용히 아무 반응도 안 하는 문제가
+    // 있었다. 빈 인벤토리 상태는 이미 안전하게 처리되므로(자동으로 다른 종목을 채워 넣지 않음)
+    // 이 제한을 없애고 몇 개가 남아있든 항상 삭제되도록 한다.
 
     const targetTab = scalperTabs.find(t => t.id === tabId);
     const targetIsUS = targetTab ? /^[A-Z]/.test(targetTab.symbol) : marketType === 'US';
@@ -2317,6 +2309,17 @@ setGapInventory(nextInv);
         setSelectedSymbol('');
       }
     }
+  };
+
+  // 🛡️ 인벤토리 전체 초기화 — 개별 종목 삭제가 어떤 이유로든 안 될 때를 위한 확실한 대안.
+  // scalperInventory를 통째로 비우고, 선택 상태도 함께 초기화한다.
+  const handleClearAllInventory = () => {
+    setScalperInventory([]);
+    activeTabIdRef.current = '';
+    setActiveTabId('');
+    setSelectedSymbol('');
+    try { localStorage.setItem('sleek_scalper_tabs', JSON.stringify([])); } catch (e) {}
+    showNotification('인벤토리를 전체 초기화했습니다.', 'info');
   };
 
   const handleToggleAllScalping = () => {
@@ -7551,7 +7554,15 @@ useEffect(() => {
   }, [pendingSellOrders, stocks, marketType, exchangeRate, holdings, currentUser, playScalpingSound]);
 
   // Auto-Sell Order Enforcer & Average Down Target Price Sync
+  // ------------------------------------------------------------
+  // 🛑 비활성화됨: 이 effect는 보유 포지션이 생기는 즉시(매수 체결 직후) 목표가에 지정가 매도
+  // 주문을 자동으로 걸어두는 "옛날 방식"이었다. 이제 매도는 신호 기반(RSI 극단 반전 + 체결강도
+  // 하락 + VWAP 이탈, 매도세 흡수, 데드크로스, 트레일링 스탑 등)으로만 이루어져야 하는데, 이
+  // effect가 그와 무관하게 목표가 도달 시 자동 체결되는 수동 주문을 항상 시장에 깔아두고 있어서
+  // "매수하자마자 목표가에 매도주문이 걸린다"는 문제의 원인이었다. 메인 엔진 루프가 이미 신호
+  // 기반 매도를 전담하고 있으므로, 이 보조 effect는 완전히 끈다.
   useEffect(() => {
+    return; // 의도적으로 아무 것도 하지 않음 — 아래는 참고용으로만 남겨둔 이전 로직
     const hasAnyActiveBot = isGapBotActive || scalperTabsRef.current.some(t => t.isBotActive);
     if (!hasAnyActiveBot || scalpingTargetProfit <= 0) return;
 
@@ -9194,6 +9205,7 @@ useEffect(() => {
                 setManualSellModalOpen={setManualSellModalOpen}
                 INITIAL_STOCKS_KR={INITIAL_STOCKS_KR}
                 maxInventoryPerMarket={MAX_INVENTORY_PER_MARKET}
+                handleClearAllInventory={handleClearAllInventory}
                 updateTab={updateTab}
                 INITIAL_STOCKS={INITIAL_STOCKS}
               />

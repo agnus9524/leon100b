@@ -491,6 +491,7 @@ export interface IntegratedTradingHeaderProps {
   setManualSellModalOpen: (open: boolean) => void;
   INITIAL_STOCKS_KR: Stock[];
   maxInventoryPerMarket: number;
+  handleClearAllInventory: () => void;
   updateTab: (symbol: string, updates: Partial<ScalperTab>) => void;
   INITIAL_STOCKS: Stock[];
 }
@@ -572,6 +573,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
   INITIAL_STOCKS_KR,
   INITIAL_STOCKS,
   maxInventoryPerMarket,
+  handleClearAllInventory,
   updateTab,
 }) => {
   // 검색 드롭다운 키보드(↑↓ + Enter) 네비게이션용 로컬 상태
@@ -783,10 +785,21 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   return marketType === 'US' ? isUS : !isUS;
                 }).length}/{maxInventoryPerMarket}
               </span>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!window.confirm('인벤토리에 등록된 종목을 전부 삭제할까요? 개별 삭제가 안 될 때 쓰는 확실한 초기화입니다.')) return;
+                  handleClearAllInventory();
+                }}
+                className="text-[10px] font-bold px-2 py-0.5 rounded-full border border-white/10 text-slate-400 hover:text-rose-400 hover:border-rose-500/40 transition-all shrink-0"
+                title="인벤토리 전체 초기화 (개별 삭제가 안 될 때 사용)"
+              >
+                전체초기화
+              </button>
             </div>
           </div>
 
-          <div className="space-y-1 max-h-[175px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-1 max-h-[280px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
             {scalperTabs.filter(tab => {
               const isUS = /^[A-Z]/.test(tab.symbol);
               return marketType === 'US' ? isUS : !isUS;
