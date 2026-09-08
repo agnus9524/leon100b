@@ -491,9 +491,9 @@ return strat.activeCount >= 1;
   private async getHashKey(body: any) {
     if (!this.config) throw new Error("KIS Config not initialized");
     try {
-      const res = await axios.post(`${this.baseUrl}/uapi/hashkey`, body, {
-        headers: { 'content-type': 'application/json', 'appkey': this.config.appKey, 'appsecret': this.config.appSecret }
-      });
+      const res = await this.queueRequest<any>(() => axios.post(`${this.baseUrl}/uapi/hashkey`, body, {
+        headers: { 'content-type': 'application/json', 'appkey': this.config!.appKey, 'appsecret': this.config!.appSecret }
+      }));
       return res.data.HASH || '';
     } catch { return ''; }
   }
@@ -973,7 +973,7 @@ Date.now()
         CANO_PWD: this.config.accountPw || ''
       };
 
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Domestic Order Executions Exception safely caught:", error?.response?.data || error?.message);
@@ -1144,7 +1144,7 @@ console.log(
       'custtype': 'P',
     };
 
-    const res = await axios.post(`${this.baseUrl}${endpoint}`, body, { headers });
+    const res = await this.queueRequest<any>(() => axios.post(`${this.baseUrl}${endpoint}`, body, { headers }));
     if (res.data.rt_cd && res.data.rt_cd !== '0') {
       console.warn(`[KIS Service] Revise/Cancel Order Result (${res.data.rt_cd}): ${res.data.msg1} (${res.data.msg_cd})`);
     }
