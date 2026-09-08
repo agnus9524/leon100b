@@ -623,65 +623,68 @@ await this.getDomesticPrice(symbol);
   // --- Domestic (Korean) Stock ---
 
   public async getInvestmentAssetStatus() {
-    if (!this.config) throw new Error("KIS Config not initialized");
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output1: [], output2: [] };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/trading/inquire-account-balance';
+      
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': 'CTRP6548R',
+        'custtype': 'P',
+      };
 
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/domestic-stock/v1/trading/inquire-account-balance';
-    
-    const headers = {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': 'CTRP6548R',
-      'custtype': 'P',
-    };
+      const params = {
+        CANO: this.config.accountNo,
+        ACNT_PRDT_CD: this.config.accountCode,
+        INQR_DVSN_1: '',
+        BSPR_BF_DT_APLY_YN: '',
+        CANO_PWD: this.config.accountPw || ''
+      };
 
-    const params = {
-      CANO: this.config.accountNo,
-      ACNT_PRDT_CD: this.config.accountCode,
-      INQR_DVSN_1: '',
-      BSPR_BF_DT_APLY_YN: '',
-      CANO_PWD: this.config.accountPw || ''
-    };
-
-    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-    return res.data;
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Investment Asset Status Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '1', msg1: error?.response?.data?.msg1 || error?.message || 'Investment asset status exception', output1: [], output2: [] };
+    }
   }
 
   public async getIntegratedMarginStatus() {
-    if (!this.config) throw new Error("KIS Config not initialized");
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output1: [], output2: [] };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/trading/intgr-margin';
+      
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': 'TTTC0869R',
+        'custtype': 'P',
+      };
 
-    const token = await this.getAccessToken();
-    const endpoint = '/uapi/domestic-stock/v1/trading/intgr-margin';
-    
-    const headers = {
-      'content-type': 'application/json',
-      'authorization': `Bearer ${token}`,
-      'appkey': this.config.appKey,
-      'appsecret': this.config.appSecret,
-      'tr-id': 'TTTC0869R',
-      'custtype': 'P',
-    };
+      const params = {
+        CANO: this.config.accountNo,
+        ACNT_PRDT_CD: this.config.accountCode,
+        CMA_EVLU_AMT_ICLD_YN: 'N',
+        WCRC_FRCR_DVSN_CD: '01',
+        FWEX_CTRT_FRCR_DVSN_CD: '01'
+      };
 
-    const params = {
-      CANO: this.config.accountNo,
-      ACNT_PRDT_CD: this.config.accountCode,
-      CMA_EVLU_AMT_ICLD_YN: 'N',
-      WCRC_FRCR_DVSN_CD: '01',
-      FWEX_CTRT_FRCR_DVSN_CD: '01'
-    };
-
-    const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-    return res.data;
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Integrated Margin Status Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '1', msg1: error?.response?.data?.msg1 || error?.message || 'Integrated margin status exception', output1: [], output2: [] };
+    }
   }
 
   public async getDomesticBalance() {
-    console.log(
-"[BALANCE CALL]",
-Date.now()
-);
-    await this.throttleRequest();
     if (!this.config) throw new Error("KIS Config not initialized");
     const token = await this.getAccessToken();
     const endpoint = '/uapi/domestic-stock/v1/trading/inquire-balance';
@@ -714,12 +717,12 @@ Date.now()
     };
 
     try {
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
       if (res.data.rt_cd && res.data.rt_cd !== '0') {
         const isTrIdError = res.data.msg_cd === 'EGW00310' || res.data.msg1?.includes('EGW00310');
         if (isTrIdError) {
            headers['tr-id'] = 'TTTC8432R';
-           const retryRes = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+           const retryRes = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
            if (retryRes.data.rt_cd === '0') return retryRes.data;
         }
         console.warn(`[KIS Service] Domestic Balance Error: ${res.data.msg1} (${res.data.msg_cd})`);
@@ -765,7 +768,7 @@ Date.now()
         CANO_PWD: this.config.accountPw || ''
       };
 
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
       if (res.data.rt_cd && res.data.rt_cd !== '0') {
         console.warn(`[KIS Service] Domestic Buyable Amount Error: ${res.data.msg1} (${res.data.msg_cd})`);
         return { rt_cd: res.data.rt_cd || '1', msg1: res.data.msg1 || 'Domestic buyable error', output: { max_ord_psbl_qty: '0', ord_psbl_cash: '0', ord_psbl_amt: '0', nrcy_ord_psbl_amt: '0', nrcy_buy_qty: '0', ord_psbl_qty: '0' } };
@@ -840,7 +843,7 @@ Date.now()
         CANO_PWD: this.config.accountPw || ''
       };
 
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Domestic Sellable Quantity Exception safely caught:", error?.response?.data || error?.message);
@@ -884,7 +887,7 @@ Date.now()
         CTX_AREA_FK100: ''
       };
 
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params, timeout: 8000 });
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params, timeout: 8000 }));
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Period Trade Profit Exception safely caught:", error?.response?.data || error?.message);
@@ -931,7 +934,7 @@ Date.now()
         CANO_PWD: this.config.accountPw || ''
       };
 
-      const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params, timeout: 8000 });
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params, timeout: 8000 }));
       return res.data;
     } catch (error: any) {
       console.warn("[KIS Service] Period Realized PnL Exception safely caught:", error?.response?.data || error?.message);
