@@ -959,11 +959,13 @@ const INITIAL_STOCKS_KR: Stock[] = [
   {
     symbol: '005930',
     name: '삼성전자',
-    price: 77600,
-    change: 1800,
-    changePercent: 2.37,
-    volume: '15.2M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 75000 + Math.round((i / 40) * 2600) + Math.floor(Math.random() * 200) })),
+    price: 0, // 🛡️ 실제 가격을 하드코딩하면 시간이 지나며 반드시 틀어진다. 0은 이 코드베이스 전반에서
+              // "아직 실시간 데이터가 로딩되지 않음"을 뜻하는 관례값이라, 실제 시세가 동기화되기 전까지는
+              // 추천종목 모달 등에서 이 값이 "진짜 현재가"인 것처럼 잘못 병합되어 표시되는 일이 없다.
+    change: 0,
+    changePercent: 0,
+    volume: '0',
+    history: [],
     market: 'KR',
     isAI: true
   },
@@ -2135,6 +2137,11 @@ export default function App() {
       typeof slot === 'object' &&
       'id' in slot
   )
+  // 🛡️ 여기서 symbol을 검증 없이 targetTab.symbol로 덮어쓰면, 저장 단계 필터를 어떻게든
+  // 통과해 섞여 들어온 다른 종목의 슬롯까지 "이 종목 것"으로 재라벨링해버려서 문제가
+  // 사라지지 않고 계속 반복된다. 자기 자신의 심볼이거나(정상) 심볼이 아예 없는(구버전 데이터)
+  // 슬롯만 통과시키고, 명백히 다른 종목 것이면 여기서 제외한다.
+  .filter(slot => !slot.symbol || slot.symbol === targetTab.symbol)
   .map(slot => ({
     id: String(slot.id),
     price: Number(slot.price || 0),
@@ -2161,6 +2168,14 @@ setGapInventory(nextInv);
     customPrice?: number,
     recommendationSource?: ScalperRecommendation
   ) => {
+    // 🛡️ 해외 종목 등록 원천 차단 — 이 앱은 국내(KOSPI/KOSDAQ) 스캘핑 전용이다. 검색/추천/직접입력 등
+    // 어느 경로로 들어오든, 종목코드가 국내 표준 형식(숫자 6자리)이 아니면 여기서 무조건 막는다.
+    // (엔비디아 같은 해외 종목이 인벤토리에 등록되는 것 자체가 설계상 있어서는 안 되는 오류)
+    if (!/^\d{6}$/.test(symbol)) {
+      showNotification(`[등록 차단] ${customName || symbol}은(는) 해외 종목이라 등록할 수 없습니다. 이 앱은 국내 종목 전용입니다.`, 'error');
+      return;
+    }
+
     const existing = scalperTabsRef.current.find(t => t.symbol === symbol || t.id === symbol);
     if (existing) {
       handleSwitchTab(existing.id);
@@ -2170,13 +2185,15 @@ setGapInventory(nextInv);
     // Save current active tab's properties before creating new tab
     const prevTabId = activeTabIdRef.current;
     if (prevTabId) {
+      const prevTabSymbol = scalperTabsRef.current.find(t => t.id === prevTabId)?.symbol;
       updateTab(prevTabId, {
         isBotActive: isGapBotActiveRef.current,
         gapBuyPrice: gapBuyPriceRef.current,
         gapSellPrice: gapSellPriceRef.current,
         tradeQuantity: tradeQuantityRef.current,
         maxSlots: maxSlotsRef.current || 3,
-        gapInventory: (gapInventoryRef.current || []).filter(s => !s.symbol || s.symbol === prevTabId),
+        // 🛡️ 종목코드는 탭ID(prevTabId)가 아니라 실제 이 탭의 종목코드(prevTabSymbol)와 비교해야 한다
+        gapInventory: (gapInventoryRef.current || []).filter(s => !s.symbol || s.symbol === prevTabSymbol),
         gapTradingProfit: gapTradingProfitRef.current,
         gapTradeCount: gapTradeCountRef.current,
         lastTradeType: lastTradeTypeRef.current,
@@ -2192,7 +2209,11 @@ setGapInventory(nextInv);
                   INITIAL_STOCKS.find(s => s.symbol === symbol);
     const isUS = stock?.market === 'US' || /^[A-Za-z]/.test(symbol) || marketType === 'US';
 
-    const name = customName || stock?.name || getResolvedStockName(symbol) || symbol;
+    // 🛡️ customName이 비어있거나 종목코드와 똑같으면(호출부에서 이름 해석에 실패했다는 뜻) 그대로
+    // 믿지 않고 재보정한다 — 여러 등록 경로 중 어디서 들어오든 "코드가 이름으로 표시"되는 걸 막는
+    // 마지막 안전망이다.
+    const safeCustomName = (customName && customName.trim().length > 0 && customName !== symbol) ? customName : undefined;
+    const name = safeCustomName || stock?.name || getResolvedStockName(symbol) || symbol;
     const price =
   customPrice && customPrice > 0
     ? customPrice
@@ -4866,11 +4887,17 @@ setGapInventory(nextInv);
       const resolvedChangePercent = (existingStock && existingStock.changePercent !== undefined) ? existingStock.changePercent : rec.changePercent;
       const resolvedVolume = (existingStock && existingStock.volume) ? existingStock.volume : rec.volume;
 
+      // 🛡️ 추천 데이터의 이름이 비어있거나 종목코드와 똑같으면(이름 해석 실패) 한 번 더 보정 시도.
+      // 이걸 안 하면 386380처럼 "종목명" 자리에 종목코드가 그대로 나오는 문제가 생긴다.
+      const resolvedName = (rec.name && rec.name.trim().length > 0 && rec.name !== rec.symbol)
+        ? rec.name
+        : getResolvedStockName(rec.symbol);
+
       setStocks(prev => {
         if (!prev.some(s => s.symbol === rec.symbol)) {
           return [...prev, {
             symbol: rec.symbol,
-            name: rec.name,
+            name: resolvedName,
             price: resolvedPrice,
             change: resolvedChange,
             changePercent: resolvedChangePercent,
@@ -4889,9 +4916,10 @@ setGapInventory(nextInv);
         } : s);
       });
 
-      openOrSwitchScalperTab(rec.symbol, rec.name, resolvedPrice, rec);
-      showNotification(`[스캘퍼 타겟 등록] ${rec.name}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (현재 체결가 ${resolvedPrice.toLocaleString()}원, 추천가 ${rec.recommendedPrice.toLocaleString()}원, 스캘핑 점수 ${rec.scalpingScore}점)`, "success");
-      setShowScalperRecModal(false);
+      openOrSwitchScalperTab(rec.symbol, resolvedName, resolvedPrice, rec);
+      showNotification(`[스캘퍼 타겟 등록] ${resolvedName}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (현재 체결가 ${resolvedPrice.toLocaleString()}원, 추천가 ${rec.recommendedPrice.toLocaleString()}원, 스캘핑 점수 ${rec.scalpingScore}점)`, "success");
+      // 🛡️ 등록해도 모달을 닫지 않는다 — 여러 종목을 연속으로 등록할 수 있게, 닫는 건 사용자가
+      // 직접 닫기 버튼을 눌렀을 때만 하도록 한다.
 
       // 🔄 인위적 반복 패턴(가짜 이력) 대신 실제 분봉 이력으로 보정 — RSI/이동평균 등 전략센서가
       // 실제 추세를 반영하도록 한다 (그대로 두면 RSI가 항상 50 근처로 계산되어 신호가 안 뜬다)
@@ -6484,6 +6512,32 @@ priceData.current
     const sensorInterval = setInterval(refreshAllInventorySensors, 3000);
     return () => clearInterval(sensorInterval);
   }, [isAppInitialized, detectStockStrategies]);
+
+  // ============================================================
+  // 🛡️ 이미 등록되어 있는 종목 중 이름이 종목코드로 잘못 표시된 것을 자동 교정.
+  // ------------------------------------------------------------
+  // 등록 시점의 버그로 이름 해석이 실패해서 "386380(386380)"처럼 코드가 이름 자리에 남아있는
+  // 기존 항목들을, 등록을 다시 하지 않아도 자동으로 고쳐준다. 이름 조회는 가격과 무관하므로
+  // 정규장 시간과 상관없이 동작한다. 같은 종목을 반복해서 재시도하지 않도록 한 번 시도한
+  // 심볼은 결과와 무관하게 기록해 둔다.
+  // ============================================================
+  const nameFixAttemptedRef = React.useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!isAppInitialized) return;
+    const brokenItems = scalperTabsRef.current.filter(t =>
+      (!t.name || t.name.trim().length === 0 || t.name === t.symbol) && !nameFixAttemptedRef.current.has(t.symbol)
+    );
+    if (brokenItems.length === 0) return;
+
+    brokenItems.forEach(item => {
+      nameFixAttemptedRef.current.add(item.symbol);
+      const resolved = getResolvedStockName(item.symbol);
+      if (resolved && resolved !== item.symbol) {
+        setScalperInventory(prev => prev.map(inv => inv.symbol === item.symbol ? { ...inv, name: resolved } : inv));
+        setStocks(prev => prev.map(s => s.symbol === item.symbol ? { ...s, name: resolved } : s));
+      }
+    });
+  }, [isAppInitialized, scalperTabs, getResolvedStockName]);
 
   // Auto KIS initial sync on connection
   const initialKisSyncTriggeredRef = React.useRef(false);
@@ -9584,23 +9638,25 @@ useEffect(() => {
                 <button
                   type="button"
                   onClick={() => {
-                    if (!window.confirm('GLOBAL TRADE LOGS 내역을 전부 지우고, 인버스/레버리지/선물 등 부적절한 종목을 인벤토리에서 함께 정리할까요? 이 작업은 되돌릴 수 없습니다.')) return;
+                    if (!window.confirm('GLOBAL TRADE LOGS 내역을 전부 지우고, 해외 종목/인버스/레버리지/선물 등 이 앱에 맞지 않는 종목을 인벤토리에서 함께 정리할까요? 이 작업은 되돌릴 수 없습니다.')) return;
                     setTradeLogs([]);
                     // 🛡️ 필터 탭은 실제 등록된 인벤토리에서 그대로 나오기 때문에, 로그만 지워서는
-                    // "삼성 인버스" 같은 부적절한 종목의 필터 탭이 사라지지 않는다(등록 자체가
-                    // 남아있으므로). 로그 초기화와 함께 이런 종목들을 인벤토리에서도 제거한다.
-                    const isInappropriateStock = (name: string) => {
-                      const lower = (name || '').toLowerCase();
-                      return lower.includes('kodex') || lower.includes('tiger') || lower.includes('etf')
-                        || (name || '').includes('인버스') || (name || '').includes('레버리지') || (name || '').includes('선물');
+                    // "삼성 인버스"나 "엔비디아" 같은 부적절한 종목의 필터 탭이 사라지지 않는다
+                    // (등록 자체가 남아있으므로). 로그 초기화와 함께 이런 종목들을 인벤토리에서도 제거한다.
+                    const isInappropriateStock = (item: { symbol: string; name: string }) => {
+                      const lower = (item.name || '').toLowerCase();
+                      const isEtfLike = lower.includes('kodex') || lower.includes('tiger') || lower.includes('etf')
+                        || (item.name || '').includes('인버스') || (item.name || '').includes('레버리지') || (item.name || '').includes('선물');
+                      const isForeign = !/^\d{6}$/.test(item.symbol); // 국내 표준 6자리 숫자 코드가 아니면 해외 종목
+                      return isEtfLike || isForeign;
                     };
                     setScalperInventory(prev => prev
-                      .filter(item => !isInappropriateStock(item.name))
+                      .filter(item => !isInappropriateStock(item))
                       .map(item => ({ ...item, tradeLogs: [] }))
                     );
                   }}
                   className="ml-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border border-white/10 text-slate-400 hover:text-rose-400 hover:border-rose-500/40 transition-all shrink-0"
-                  title="로그 내역 초기화 + 인버스/레버리지/선물 등 부적절한 종목 인벤토리 정리"
+                  title="로그 내역 초기화 + 해외 종목/인버스/레버리지/선물 등 부적절한 종목 인벤토리 정리"
                 >
                   초기화
                 </button>
