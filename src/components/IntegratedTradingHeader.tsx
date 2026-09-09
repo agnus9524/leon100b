@@ -82,7 +82,12 @@ const CandlestickChart: React.FC<{
       }
       try {
         if (period === 'MIN') {
-          const res = await kisService.getDomesticMinuteChart(symbol);
+          // 🛡️ 큐가 다른 요청의 429 백오프로 밀려 있으면 30초 이상 걸릴 수 있어 "불러오는 중..."이
+          // 무한정 도는 것처럼 보일 수 있다. 10초 안에 안 끝나면 타임아웃시키고 에러 문구로 전환한다.
+          const res = await Promise.race([
+            kisService.getDomesticMinuteChart(symbol),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('chart_timeout')), 10000))
+          ]);
           if (cancelled) return;
           if (res && Array.isArray(res.output2) && res.output2.length > 0) {
             const raw: CandleBar[] = [...res.output2].reverse().map((b: any) => ({
@@ -115,7 +120,10 @@ const CandlestickChart: React.FC<{
             setErrorMsg('분봉 데이터를 불러오지 못했습니다.');
           }
         } else {
-          const res = await kisService.getDomesticDailyPrice(symbol, period as 'D' | 'W' | 'M');
+          const res = await Promise.race([
+            kisService.getDomesticDailyPrice(symbol, period as 'D' | 'W' | 'M'),
+            new Promise<never>((_, reject) => setTimeout(() => reject(new Error('chart_timeout')), 10000))
+          ]);
           if (cancelled) return;
           if (res && Array.isArray(res.output) && res.output.length > 0) {
             const parsed: CandleBar[] = [...res.output].reverse().map((b: any) => ({
