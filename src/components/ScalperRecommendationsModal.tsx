@@ -96,9 +96,16 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
         const stopLoss = Math.round(livePrice * 0.985);
         const expectedReturn = Number((((targetPrice - livePrice) / livePrice) * 100).toFixed(2));
         
+        // 🛡️ liveStock.name을 무조건 우선시하지 않는다 — stocks 상태에 예전에 잘못 등록됐던
+        // 종목명(코드=이름인 경우)이 남아있으면, 이게 추천 자체는 정상적으로 이름을 갖고 있는데도
+        // 그 위에 덮어써서 "386380"처럼 코드가 이름 자리에 표시되는 원인이 된다. liveStock.name이
+        // 진짜 이름처럼 보일 때만(비어있지 않고 종목코드와 다를 때) 우선 사용한다.
+        const isRealName = (n?: string) => !!n && n.trim().length > 0 && n !== rec.symbol;
+        const resolvedRecName = isRealName(liveStock.name) ? liveStock.name : (isRealName(rec.name) ? rec.name : rec.symbol);
+
         return {
           ...rec,
-          name: liveStock.name || rec.name,
+          name: resolvedRecName,
           price: livePrice,
           change,
           changePercent,

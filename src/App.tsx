@@ -6524,20 +6524,31 @@ priceData.current
   const nameFixAttemptedRef = React.useRef<Set<string>>(new Set());
   useEffect(() => {
     if (!isAppInitialized) return;
-    const brokenItems = scalperTabsRef.current.filter(t =>
-      (!t.name || t.name.trim().length === 0 || t.name === t.symbol) && !nameFixAttemptedRef.current.has(t.symbol)
-    );
-    if (brokenItems.length === 0) return;
-
-    brokenItems.forEach(item => {
-      nameFixAttemptedRef.current.add(item.symbol);
-      const resolved = getResolvedStockName(item.symbol);
-      if (resolved && resolved !== item.symbol) {
-        setScalperInventory(prev => prev.map(inv => inv.symbol === item.symbol ? { ...inv, name: resolved } : inv));
-        setStocks(prev => prev.map(s => s.symbol === item.symbol ? { ...s, name: resolved } : s));
+    // 🛡️ 인벤토리에 등록된 것뿐 아니라, stocks 배열 전체(추천 모달이 실제로 참조하는 데이터)에서도
+    // 이름이 깨진 항목을 찾는다 — 한 번 잘못 등록됐다가 인벤토리에서 삭제된 종목이라도 stocks에는
+    // 나쁜 이름이 그대로 남아있을 수 있고, 이게 추천 카드에 "코드=이름"으로 계속 노출되는 원인이다.
+    const brokenSymbols = new Set<string>();
+    scalperTabsRef.current.forEach(t => {
+      if ((!t.name || t.name.trim().length === 0 || t.name === t.symbol) && !nameFixAttemptedRef.current.has(t.symbol)) {
+        brokenSymbols.add(t.symbol);
       }
     });
-  }, [isAppInitialized, scalperTabs, getResolvedStockName]);
+    stocksRef.current.forEach(s => {
+      if ((!s.name || s.name.trim().length === 0 || s.name === s.symbol) && /^\d{6}$/.test(s.symbol) && !nameFixAttemptedRef.current.has(s.symbol)) {
+        brokenSymbols.add(s.symbol);
+      }
+    });
+    if (brokenSymbols.size === 0) return;
+
+    brokenSymbols.forEach(symbol => {
+      nameFixAttemptedRef.current.add(symbol);
+      const resolved = getResolvedStockName(symbol);
+      if (resolved && resolved !== symbol) {
+        setScalperInventory(prev => prev.map(inv => inv.symbol === symbol ? { ...inv, name: resolved } : inv));
+        setStocks(prev => prev.map(s => s.symbol === symbol ? { ...s, name: resolved } : s));
+      }
+    });
+  }, [isAppInitialized, scalperTabs, stocks, getResolvedStockName]);
 
   // Auto KIS initial sync on connection
   const initialKisSyncTriggeredRef = React.useRef(false);

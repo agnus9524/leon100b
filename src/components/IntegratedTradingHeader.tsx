@@ -1014,6 +1014,17 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   })}
                 </div>
 
+                {/* 현재 체결가 — 매도호가와 매수호가 사이 중앙에 크게 표시 */}
+                <div className="my-1 py-1.5 px-2 bg-white/5 border-y border-white/10 flex items-center justify-center gap-2 rounded">
+                  <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">현재 체결가</span>
+                  <span className={cn(
+                    "font-black text-lg font-mono tabular-nums",
+                    (selectedStock?.change || 0) >= 0 ? "text-rose-400" : "text-sky-400"
+                  )}>
+                    {formatCurrency(selectedStock?.price || 0)}
+                  </span>
+                </div>
+
                 {/* Bid Levels (매수 1~4호가) */}
                 <div className="space-y-0.5">
                   {orderBookData.bidLevels.map((lvlPrice, idx) => {
@@ -1292,13 +1303,13 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
 
       {/* 6번째 반응형 창 — 실시간 상태 메시지 */}
         {/* 2열: 실시간 상태 메시지창 — 오른쪽 */}
-        <div className="text-xs sm:text-sm font-mono flex items-center bg-black/40 px-3.5 py-2 rounded-2xl border border-sleek-blue/30 shadow-inner">
-          <div className="flex items-center gap-2.5 w-full overflow-hidden">
-            <span className="text-xs font-black text-slate-300 uppercase shrink-0 flex items-center gap-1.5">
-              <Activity className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-              실시간 상태 메시지:
-            </span>
-            <span className="font-bold text-sleek-blue text-xs sm:text-sm leading-snug truncate">
+        <div className="flex flex-col gap-1">
+          <span className="text-xs font-black text-slate-300 uppercase flex items-center gap-1.5 px-0.5">
+            <Activity className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
+            실시간 상태 메시지
+          </span>
+          <div className="text-xs sm:text-sm font-mono flex items-center bg-black/40 px-3.5 py-2 rounded-2xl border border-sleek-blue/30 shadow-inner">
+            <span className="font-bold text-sleek-blue text-xs sm:text-sm leading-snug truncate w-full">
               {displayScalperMessage}
             </span>
           </div>
