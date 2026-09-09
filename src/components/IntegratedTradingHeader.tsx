@@ -1064,15 +1064,13 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           <button 
             type="button"
             onClick={() => {
+              // 🛡️ 예전에는 여기서 gapBuyPrice/gapSellPrice(하한가/상한가)가 0이면 시작을 막았는데,
+              // 이 값들을 수동으로 설정하는 UI가 이미 없어졌고(고급설정 패널 삭제), 실제 매매
+              // 엔진은 이 값이 없으면 calculateStockLimits()로 당일 상/하한가를 자동 계산하는
+              // 폴백을 이미 갖고 있다. 그런데도 이 검증이 남아있어서, 값이 아직 채워지기 전
+              // 타이밍에 START를 누르면 조용히 막히면서 "수량이 되돌아가고 비활성화되는" 것처럼
+              // 보이는 원인이 되었다. 더 이상 필요 없는 검증이라 제거한다.
               if (!isGapBotActive) {
-                if (gapBuyPrice <= 0 || gapSellPrice <= 0) {
-                  alert("금액 구간(하한선과 상한선)을 정확하게 설정해주세요.");
-                  return;
-                }
-                if (gapBuyPrice >= gapSellPrice) {
-                  alert("상한가는 하한가보다 높은 금액이어야 합니다.");
-                  return;
-                }
                 setLastTradeType(null);
               }
               setIsGapBotActive(!isGapBotActive);
