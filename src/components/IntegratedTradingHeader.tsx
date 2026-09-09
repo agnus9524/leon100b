@@ -809,7 +809,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                 onClick={handleOpenScalperRecommendations}
                 disabled={isScalperRecLoading || isRefreshingTop3}
                 className="px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-600/90 to-teal-600/90 hover:from-emerald-500 hover:to-teal-500 text-white border border-emerald-400/40 text-[11px] font-black font-mono flex items-center gap-1.5 transition-all cursor-pointer shadow-[0_0_12px_rgba(16,185,129,0.3)] active:scale-95 shrink-0 disabled:opacity-50"
-                title="한국투자증권 실시간 수급 및 거래량 데이터를 분석하여 스캘퍼 최적 추천종목 25선을 확인합니다."
+                title="한국투자증권 실시간 수급 및 거래량 데이터를 분석하여 스캘퍼 최적 추천종목 70선을 확인합니다."
               >
                 {(isScalperRecLoading || isRefreshingTop3) ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-200" />

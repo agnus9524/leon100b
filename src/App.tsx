@@ -4690,8 +4690,8 @@ setGapInventory(nextInv);
         );
         const [volumeLeaders, fluctuationLeaders] = await Promise.race([
           Promise.all([
-            kisService.getVolumeRanking('J', 60),
-            kisService.getFluctuationRanking('J', 'UP', 50)
+            kisService.getVolumeRanking('J', 80),
+            kisService.getFluctuationRanking('J', 'UP', 70)
           ]),
           rankingTimeout
         ]);
@@ -4818,7 +4818,7 @@ setGapInventory(nextInv);
           isAI: true,
           market: 'KR'
         })));
-        showNotification("[스캘퍼 최적 종목 25선 포착] 실시간 거래량 및 체결강도 기반 추천 목록이 로드되었습니다.", "success");
+        showNotification("[스캘퍼 최적 종목 70선 포착] 실시간 거래량 및 체결강도 기반 추천 목록이 로드되었습니다.", "success");
       }
     } catch (err: any) {
       console.error("Failed to load scalper recommendations:", err);

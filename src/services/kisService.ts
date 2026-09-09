@@ -7,7 +7,7 @@ import { Stock } from '../types';
 
 // 스캘퍼 추천종목 개수 제한 — UI 라벨("실시간 초단타 스캘핑 최적 추천 10선")과 실제 반환 개수를
 // 이 상수 하나로 통일한다. 실시간 계산 추천, 기본(fallback) 추천, 백엔드 API 응답 전부 이 값으로 캡.
-export const MAX_SCALPER_RECOMMENDATIONS = 25;
+export const MAX_SCALPER_RECOMMENDATIONS = 70;
 
 interface KISConfig {
   appKey: string;
