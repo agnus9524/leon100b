@@ -20,6 +20,14 @@ type ChartPeriod = 'TICK' | 'MIN' | 'D' | 'W' | 'M';
 const MINUTE_INTERVALS = [1, 3, 5, 10, 15, 30, 60, 120, 240];
 const TICK_INTERVALS = [10, 30, 50, 100];
 
+// 🚀 차트 데이터 캐시 — 종목+기간+간격 조합별로 최근 결과를 잠깐 저장해둔다.
+// 매번 KIS 원본 서버를 다시 부르지 않고, TTL 안에서는 캐시를 즉시 돌려줘서 체감 로딩을 빠르게 한다.
+// (네이버증권처럼 서버 자체 캐시는 없지만, 같은 화면을 반복해서 왔다갔다 하거나 탭을 오갈 때
+// 매번 새로 조회하던 것만큼은 확실히 줄어든다.)
+const chartDataCache = new Map<string, { bars: CandleBar[]; timestamp: number }>();
+const CHART_CACHE_TTL_MIN = 4000;   // 분봉은 자주 바뀌므로 짧게
+const CHART_CACHE_TTL_DAILY = 45000; // 일/주/월봉은 장중에도 잘 안 바뀌므로 길게
+
 interface CandleBar {
   date: string;   // YYYYMMDD (D/W/M) 또는 HHMMSS(MIN/TICK)
   open: number;
@@ -76,6 +84,17 @@ const CandlestickChart: React.FC<{
     setErrorMsg(null);
 
     const load = async (isBackgroundRefresh: boolean) => {
+      // 🚀 캐시 확인 — TTL 안이면 KIS를 다시 부르지 않고 즉시 반환한다 (체감 로딩 속도 개선)
+      const cacheKey = `${symbol}:${period}:${period === 'MIN' ? minuteInterval : ''}`;
+      const cached = chartDataCache.get(cacheKey);
+      const cacheTtl = period === 'MIN' ? CHART_CACHE_TTL_MIN : CHART_CACHE_TTL_DAILY;
+      if (cached && Date.now() - cached.timestamp < cacheTtl) {
+        setBars(cached.bars);
+        setIsLoading(false);
+        setErrorMsg(cached.bars.length === 0 ? '표시할 데이터가 없습니다.' : null);
+        if (!isBackgroundRefresh) return; // 최초 로드면 캐시로 즉시 끝내고, 백그라운드 갱신이면 그래도 최신화를 위해 계속 진행
+      }
+
       if (!isBackgroundRefresh) {
         setIsLoading(true);
         setErrorMsg(null);
@@ -114,6 +133,7 @@ const CandlestickChart: React.FC<{
               });
             }
             setBars(grouped);
+            if (grouped.length > 0) chartDataCache.set(cacheKey, { bars: grouped, timestamp: Date.now() });
             if (grouped.length === 0 && !isBackgroundRefresh) setErrorMsg('표시할 분봉 데이터가 없습니다.');
           } else if (!isBackgroundRefresh) {
             setBars([]);
@@ -135,6 +155,7 @@ const CandlestickChart: React.FC<{
               volume: Number(b.acml_vol || 0)
             })).filter(b => b.close > 0);
             setBars(parsed);
+            if (parsed.length > 0) chartDataCache.set(cacheKey, { bars: parsed, timestamp: Date.now() });
             if (parsed.length === 0 && !isBackgroundRefresh) setErrorMsg('표시할 시세 데이터가 없습니다.');
           } else if (!isBackgroundRefresh) {
             setBars([]);
