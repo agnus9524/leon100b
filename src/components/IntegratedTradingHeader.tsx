@@ -929,13 +929,17 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
 
                     <select
                       value={tab.tradeQuantity}
+                      disabled={tab.isBotActive}
                       onClick={(e) => e.stopPropagation()}
                       onChange={(e) => {
                         e.stopPropagation();
                         updateTab(tab.symbol, { tradeQuantity: Number(e.target.value) });
                       }}
-                      className="shrink-0 bg-black/60 border border-white/10 rounded-md text-[10px] font-bold text-slate-300 outline-none cursor-pointer appearance-none px-1 py-0.5 hover:border-sleek-blue/50"
-                      title={`${tabName} 1회 거래수량 (종목별 개별 설정)`}
+                      className={cn(
+                        "shrink-0 bg-black/60 border border-white/10 rounded-md text-[10px] font-bold text-slate-300 outline-none px-1 py-0.5",
+                        tab.isBotActive ? "opacity-40 cursor-not-allowed" : "cursor-pointer appearance-none hover:border-sleek-blue/50"
+                      )}
+                      title={tab.isBotActive ? `${tabName} 봇 실행 중에는 수량을 바꿀 수 없습니다 — 먼저 정지한 뒤 수량을 정하고 다시 시작하세요.` : `${tabName} 1회 거래수량 (종목별 개별 설정)`}
                     >
                       {[1, 2, 3, 5, 10, 15, 20, 30, 50, 100].map(val => (
                         <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
