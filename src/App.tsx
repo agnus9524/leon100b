@@ -2642,14 +2642,14 @@ setGapInventory(nextInv);
   // 합산하고, 일정 점수 이상이면 매수하는 방식으로 바꾼다 — 모든 조건이 완벽히 겹치지 않아도
   // 신호가 충분히 강하면 진입할 수 있다.
   //
-  // 배점 (총 120점 만점):
+  // 배점 (총 130점 만점):
   //   현재가 VWAP 위        +15   VWAP 돌파(하단→상단 교차)  +20
   //   매수 체결강도 130+    +15   체결강도 급증(전대비+30)   +10
   //   실제 거래량 2배 이상  +15   RSI 45~65                  +10
   //   단기 이동평균 상승    +10   매도호가 소진(호가 데이터 있을 때만) +10
-  //   전고점 돌파           +15
+  //   전고점 돌파           +15   매수호가 우세(호가 데이터 있을 때만) +10
   // ============================================================
-  const BUY_SCORE_THRESHOLD = 65; // 120점 만점 중 65점 이상이면 매수 (약 54% — 4~5개 신호의 확실한 겹침)
+  const BUY_SCORE_THRESHOLD = 60; // 130점 만점 중 60점 이상이면 매수 (약 46% — 여러 종목을 훑을 때 기회를 너무 놓치지 않도록 완화)
   const prevVwapAboveRef = React.useRef<Record<string, boolean>>({});
   const prevExecutionStrengthRef = React.useRef<Record<string, number>>({});
   const sellExecStrengthRef = React.useRef<Record<string, number>>({}); // RSI 극단 반전 판단용 — 매도 로직 전용 체결강도 추적 (매수 점수제와 독립)
@@ -2658,7 +2658,8 @@ setGapInventory(nextInv);
   const calculateBuyScore = React.useCallback((
     stock: Stock,
     strat: ReturnType<typeof detectStockStrategies>,
-    askDepletion?: boolean // 매도호가 소진 — 실시간 호가 데이터가 있는 종목(주로 선택된 종목)에서만 전달됨
+    askDepletion?: boolean, // 매도호가 소진 — 실시간 호가 데이터가 있는 종목(주로 선택된 종목)에서만 전달됨
+    bidAskRatio?: number    // 매수호가잔량/매도호가잔량×100 — 100이면 동률, 130이면 매수세가 1.3배 우세
   ): { score: number; breakdown: string[] } => {
     let score = 0;
     const breakdown: string[] = [];
@@ -2703,6 +2704,11 @@ setGapInventory(nextInv);
 
     // 9. 전고점 돌파 (+15)
     if (strat.recentPeak > 0 && currentPrice > strat.recentPeak) { score += 15; breakdown.push('전고점돌파(+15)'); }
+
+    // 10. 매수호가 우세 (+10) — 실시간 호가 데이터가 있는 종목에서만 반영. 매수잔량이 매도잔량의
+    // 1.3배 이상이면 "지금 사려는 사람이 팔려는 사람보다 많다"는 뜻으로 가점 (별도 필수 게이트가
+    // 아니라 다른 조건들과 동등한 보너스 점수 — 이것 하나 없다고 매수 기회 자체가 막히지 않는다)
+    if (bidAskRatio !== undefined && bidAskRatio >= 130) { score += 10; breakdown.push('매수호가우세(+10)'); }
 
     return { score, breakdown };
   }, []);
@@ -3236,23 +3242,55 @@ setGapInventory(nextInv);
     }
   }, [scalpingStopLoss]);
 
-  // 🤖 AI 실시간 추천 종목 팝업 모달 상태 및 트리가 함수
+  // 🤖 AI 실시간 추천 종목 팝업 모달 상태 및 트리거 함수
   const [showAiRecPopup, setShowAiRecPopup] = useState<boolean>(false);
   const [aiRecPopupData, setAiRecPopupData] = useState<any>(null);
 
   const triggerAiRecommendationPopup = useCallback((recStock?: Stock, customReason?: string) => {
     let target = recStock;
+    let realScore = 0;
+    let realBreakdown: string[] = [];
+
     if (!target) {
-      const candidatePool = stocks.filter(s => !(holdings[s.symbol] > 0));
-      target = candidatePool.length > 0 ? candidatePool[Math.floor(Math.random() * candidatePool.length)] : stocks[0];
+      // 🛡️ 예전에는 보유 안 한 종목 중 완전 랜덤으로 하나를 뽑고, 신뢰도/목표가/손절가까지
+      // 전부 Math.random()으로 만들어서 "AI 승률 95%+" 같은 문구를 붙이고 있었다. 이제는
+      // 실제 매매 엔진이 쓰는 것과 동일한 점수제(calculateBuyScore)로 지금 추적 중인 종목들을
+      // 전부 채점해서, 가장 점수가 높은 종목만 추천 후보로 삼는다 — 실제로 매수 신호가 없으면
+      // 팝업 자체를 띄우지 않는다(가짜로 그럴듯한 추천을 지어내지 않음).
+      const candidatePool = stocksRef.current.filter(s => !(holdings[s.symbol] > 0) && /^\d{6}$/.test(s.symbol) && s.price > 0);
+      let bestScore = -1;
+      let bestStock: Stock | null = null;
+      let bestBreakdown: string[] = [];
+      for (const s of candidatePool) {
+        const strat = detectStockStrategies(s);
+        const { score, breakdown } = calculateBuyScore(s, strat);
+        if (score > bestScore) {
+          bestScore = score;
+          bestStock = s;
+          bestBreakdown = breakdown;
+        }
+      }
+      if (!bestStock || bestScore < BUY_SCORE_THRESHOLD) return; // 실제로 괜찮은 후보가 없으면 팝업을 띄우지 않는다
+      target = bestStock;
+      realScore = bestScore;
+      realBreakdown = bestBreakdown;
+    } else {
+      const strat = detectStockStrategies(target);
+      const { score, breakdown } = calculateBuyScore(target, strat);
+      realScore = score;
+      realBreakdown = breakdown;
     }
     if (!target) return;
 
-    const currentP = target.price || 10000;
-    const confidence = Math.floor(92 + Math.random() * 7.8);
-    const targetP = Math.round(currentP * (1.03 + Math.random() * 0.04));
-    const stopL = Math.round(currentP * (0.98 - Math.random() * 0.01));
-    const expReturn = (((targetP - currentP) / currentP) * 100).toFixed(1);
+    const currentP = target.price || 0;
+    if (currentP <= 0) return;
+
+    // 🔄 신뢰도는 실제 점수(130점 만점)를 백분율로 환산 — 더 이상 임의의 숫자가 아니다
+    const confidence = Math.round((realScore / 130) * 100);
+    // 🔄 목표가/손절가는 실제 매매 엔진이 쓰는 설정값(목표순익/손절 %)을 그대로 반영
+    const targetP = Math.round(currentP * (1 + scalpingTargetProfit / 100));
+    const stopL = Math.round(currentP * (1 + scalpingStopLoss / 100));
+    const expReturn = scalpingTargetProfit.toFixed(2);
 
     setAiRecPopupData({
       stock: target,
@@ -3264,11 +3302,11 @@ setGapInventory(nextInv);
       targetPrice: targetP,
       stopLoss: stopL,
       expectedReturn: expReturn,
-      reason: customReason || `AI 알고리즘 실시간 수급 포착: 당일 거래량 급증 및 기관/외인 동시 매수세 유입. 단기 목표가 ${targetP.toLocaleString()}원 (+${expReturn}%) 포착!`,
-      technicalTags: ['5일선 골든크로스', '거래대금 최상위', 'RSI 58 상승탄력', 'AI 승률 95%+']
+      reason: customReason || `실시간 매수 점수제 분석 결과 ${realScore}/130점 (${confidence}%) — ${realBreakdown.join(', ') || '조건 충족'}. 목표순익 +${expReturn}% 설정 기준.`,
+      technicalTags: realBreakdown.length > 0 ? realBreakdown.map(b => b.replace(/\(\+\d+\)/, '')) : ['점수제 조건 충족']
     });
     setShowAiRecPopup(true);
-  }, [stocks, holdings]);
+  }, [stocks, holdings, detectStockStrategies, calculateBuyScore, scalpingTargetProfit, scalpingStopLoss]);
 
   const loadRealizedPnL = useCallback(async () => {
     setPnlLoading(true);
@@ -6514,6 +6552,169 @@ priceData.current
   }, [isAppInitialized, detectStockStrategies]);
 
   // ============================================================
+  // 🤖 강한 매수 신호 자동 감지 → 팝업 자동 표시
+  // ------------------------------------------------------------
+  // 이미 봇을 켜서 자동매매 중인 종목은 어차피 알아서 매수하므로 대상에서 제외하고, 아직 봇을
+  // 안 켜뒀거나 관심종목으로만 지켜보는 중인데 "일반 매수 기준(60점)보다 훨씬 강한" 신호가 뜨면,
+  // 사용자가 직접 확인하고 즉시 선택할 수 있도록 그 종목 하나만 담은 팝업을 자동으로 띄운다.
+  // (여러 종목이 나열되는 추천 목록과는 다른, 방금 신호가 뜬 "그 종목 하나"만 보여주는 알림)
+  // ============================================================
+  const STRONG_SIGNAL_THRESHOLD = 95; // 일반 매수 기준(60점)보다 훨씬 높은, 예외적으로 강한 신호만
+  const strongSignalAlertedRef = React.useRef<Record<string, number>>({});
+  const STRONG_SIGNAL_COOLDOWN_MS = 5 * 60 * 1000; // 같은 종목에 대해 5분 안에는 다시 알리지 않음
+
+  useEffect(() => {
+    if (!isAppInitialized) return;
+
+    const checkStrongSignals = () => {
+      if (!isKoreanMarketOpen()) return; // 정규장 외에는 신호 자체가 의미없음
+      if (showAiRecPopup) return; // 이미 팝업이 떠있으면 또 띄우지 않음
+
+      const candidates = scalperTabsRef.current.filter(t => !t.isBotActive && !(holdings[t.symbol] > 0));
+      let bestStock: Stock | null = null;
+      let bestScore = -1;
+
+      for (const tab of candidates) {
+        const stockItem = stocksRef.current.find(s => s.symbol === tab.symbol);
+        if (!stockItem || !stockItem.price || stockItem.price <= 0) continue;
+
+        const lastAlerted = strongSignalAlertedRef.current[tab.symbol] || 0;
+        if (Date.now() - lastAlerted < STRONG_SIGNAL_COOLDOWN_MS) continue; // 최근에 이미 알렸으면 건너뜀
+
+        const strat = detectStockStrategies(stockItem);
+        const { score } = calculateBuyScore(stockItem, strat);
+        if (score > bestScore) {
+          bestScore = score;
+          bestStock = stockItem;
+        }
+      }
+
+      if (bestStock && bestScore >= STRONG_SIGNAL_THRESHOLD) {
+        strongSignalAlertedRef.current[bestStock.symbol] = Date.now();
+        triggerAiRecommendationPopup(bestStock);
+      }
+    };
+
+    const strongSignalInterval = setInterval(checkStrongSignals, 5000);
+    return () => clearInterval(strongSignalInterval);
+  }, [isAppInitialized, detectStockStrategies, calculateBuyScore, holdings, showAiRecPopup, triggerAiRecommendationPopup]);
+
+  // ============================================================
+  // 🤖 인벤토리 완전 자동 관리 시스템
+  // ------------------------------------------------------------
+  // 사용자가 직접 버튼을 누르지 않아도, 브라우저 탭이 열려있는 동안 다음을 전부 자동으로 한다:
+  //
+  // ① 정규장 시작(09:00 KST)에 등록된 전 종목 봇 자동 시작, 마감(15:30 KST)에 자동 정지.
+  //    (탭이 열려있어야 동작한다 — 자바스크립트 타이머는 브라우저가 켜져 있을 때만 실행되므로,
+  //    컴퓨터/탭을 꺼두면 이 자동화도 함께 멈춘다. 이건 이 앱이 서버가 아니라 브라우저에서
+  //    돌아가는 구조이기 때문에 생기는 근본적인 제약이다.)
+  // ② 15분 동안 매수 점수가 계속 30점 미만("신호가 거의 없음")이면 인벤토리에서 자동 제거한다.
+  //    단, 보유 물량이 있으면 절대 제거하지 않는다 — 매도 신호가 뜰 때까지 계속 기다린다
+  //    (강제 정리매도는 하지 않는다. 신호가 안 뜨면 그냥 계속 보유한 채로 둔다).
+  // ③ 빈 슬롯이 생기면(신호없음으로 빠지거나 처음 시작할 때) 추천종목 목록에서 점수가 가장
+  //    높은 종목부터 자동으로 등록하고 봇을 시작해서 슬롯을 채운다.
+  // ============================================================
+  const DEAD_SIGNAL_SCORE = 30;
+  const DEAD_SIGNAL_DURATION_MS = 15 * 60 * 1000; // 15분
+  const lowScoreSinceRef = React.useRef<Record<string, number>>({});
+  const wasMarketOpenRef = React.useRef<boolean>(false);
+  const isAutoFillingRef = React.useRef<boolean>(false);
+
+  useEffect(() => {
+    if (!isAppInitialized) return;
+
+    const autoManageInventory = async () => {
+      const marketOpen = isKoreanMarketOpen();
+
+      // ① 정규장 시작/종료 순간(엣지)을 감지해서 전 종목 봇을 한 번만 켜고/끈다
+      if (marketOpen && !wasMarketOpenRef.current) {
+        setScalperInventory(prev => prev.map(item => ({ ...item, strategy: { ...item.strategy, isBotActive: true } })));
+        setIsGapBotActive(true);
+        showNotification('[자동 시작] 정규장이 열려 등록된 전 종목의 스캘핑을 자동으로 시작합니다.', 'success');
+      } else if (!marketOpen && wasMarketOpenRef.current) {
+        setScalperInventory(prev => prev.map(item => ({ ...item, strategy: { ...item.strategy, isBotActive: false } })));
+        setIsGapBotActive(false);
+        showNotification('[자동 종료] 정규장이 마감되어 스캘핑을 자동으로 정지합니다.', 'info');
+      }
+      wasMarketOpenRef.current = marketOpen;
+
+      if (!marketOpen) return; // 장 마감 중엔 아래 슬롯 관리도 할 필요 없음
+
+      // ② 신호 없음(15분간 30점 미만) 종목 자동 제거 — 보유 물량 있으면 절대 제외
+      const currentInventory = scalperTabsRef.current;
+      const toRemove: string[] = [];
+      currentInventory.forEach(item => {
+        const stockItem = stocksRef.current.find(s => s.symbol === item.symbol);
+        if (!stockItem || !stockItem.price || stockItem.price <= 0) return;
+
+        const hasHoldings = (holdings[item.symbol] || 0) > 0;
+        if (hasHoldings) {
+          delete lowScoreSinceRef.current[item.symbol]; // 보유 중이면 신호없음 판정 자체를 하지 않는다
+          return;
+        }
+
+        const strat = detectStockStrategies(stockItem);
+        const { score } = calculateBuyScore(stockItem, strat);
+
+        if (score < DEAD_SIGNAL_SCORE) {
+          const since = lowScoreSinceRef.current[item.symbol];
+          if (!since) {
+            lowScoreSinceRef.current[item.symbol] = Date.now();
+          } else if (Date.now() - since >= DEAD_SIGNAL_DURATION_MS) {
+            toRemove.push(item.symbol);
+          }
+        } else {
+          delete lowScoreSinceRef.current[item.symbol]; // 점수가 회복되면 신호없음 타이머 초기화
+        }
+      });
+
+      if (toRemove.length > 0) {
+        setScalperInventory(prev => prev.filter(item => !toRemove.includes(item.symbol)));
+        toRemove.forEach(symbol => {
+          delete lowScoreSinceRef.current[symbol];
+          const name = currentInventory.find(t => t.symbol === symbol)?.name || symbol;
+          addLog(symbol, '매도', 0, 0, `[자동 퇴출] ${name} — 15분간 매수 신호 없음(30점 미만)으로 인벤토리에서 자동 제거`);
+        });
+        showNotification(`[자동 퇴출] ${toRemove.length}개 종목이 신호 없음으로 인벤토리에서 제거되었습니다.`, 'info');
+      }
+
+      // ③ 빈 슬롯을 추천종목 상위 점수 순으로 자동 채우기
+      if (isAutoFillingRef.current) return; // 중복 실행 방지
+      const krSlotsUsed = scalperTabsRef.current.filter(t => !/^[A-Za-z]/.test(t.symbol)).length;
+      const emptySlots = MAX_INVENTORY_PER_MARKET - krSlotsUsed;
+      if (emptySlots <= 0) return;
+
+      isAutoFillingRef.current = true;
+      try {
+        const recommendations = await loadScalperRecommendations();
+        const alreadyRegistered = new Set(scalperTabsRef.current.map(t => t.symbol));
+        const candidates = recommendations
+          .filter(r => !alreadyRegistered.has(r.symbol))
+          .slice(0, emptySlots);
+
+        for (const rec of candidates) {
+          if ((scalperTabsRef.current.filter(t => !/^[A-Za-z]/.test(t.symbol)).length) >= MAX_INVENTORY_PER_MARKET) break;
+          handleSelectRecommendationStock(rec);
+          // 등록 직후 봇도 바로 시작 상태로 (자동 관리 모드이므로)
+          updateTab(rec.symbol, { isBotActive: true });
+          await new Promise(r => setTimeout(r, 300)); // 연속 등록 시 상태 업데이트가 겹치지 않도록 약간의 간격
+        }
+        if (candidates.length > 0) {
+          showNotification(`[자동 채움] 빈 슬롯 ${candidates.length}개를 추천종목으로 자동 등록했습니다.`, 'success');
+        }
+      } catch (err) {
+        console.warn('[자동 슬롯 채움 실패]', err);
+      } finally {
+        isAutoFillingRef.current = false;
+      }
+    };
+
+    autoManageInventory();
+    const autoManageInterval = setInterval(autoManageInventory, 30000); // 30초마다 점검
+    return () => clearInterval(autoManageInterval);
+  }, [isAppInitialized, detectStockStrategies, calculateBuyScore, holdings, loadScalperRecommendations, handleSelectRecommendationStock, showNotification]);
+
+  // ============================================================
   // 🛡️ 이미 등록되어 있는 종목 중 이름이 종목코드로 잘못 표시된 것을 자동 교정.
   // ------------------------------------------------------------
   // 등록 시점의 버그로 이름 해석이 실패해서 "386380(386380)"처럼 코드가 이름 자리에 남아있는
@@ -8044,9 +8245,14 @@ useEffect(() => {
               Number(liveOrderbook.totalAskVolume || 0) > 0 &&
               (Number(liveOrderbook.totalBidVolume) / Number(liveOrderbook.totalAskVolume)) >= 3
             );
-            const { score: buyScore, breakdown: buyScoreBreakdown } = calculateBuyScore(stockItem, strat, askDepletion);
+            const bidAskRatio = (
+              liveOrderbook &&
+              liveOrderbook.symbol === stockItem.symbol &&
+              Number(liveOrderbook.totalAskVolume || 0) > 0
+            ) ? (Number(liveOrderbook.totalBidVolume || 0) / Number(liveOrderbook.totalAskVolume)) * 100 : undefined;
+            const { score: buyScore, breakdown: buyScoreBreakdown } = calculateBuyScore(stockItem, strat, askDepletion, bidAskRatio);
             meetsBuyCriteria = buyScore >= BUY_SCORE_THRESHOLD;
-            strategyLabel = `🎯 [점수제 ${buyScore}/120점] ${buyScoreBreakdown.join(', ') || '신호 부족'}`;
+            strategyLabel = `🎯 [점수제 ${buyScore}/130점] ${buyScoreBreakdown.join(', ') || '신호 부족'}`;
           }
 
           const isUSStock = stockItem.market === 'US' || /^[A-Za-z]/.test(stockItem.symbol) || marketType === 'US';
