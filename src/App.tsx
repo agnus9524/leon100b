@@ -320,7 +320,7 @@ const createInventoryItem = (params: {
       lastUpdatedAt: now
     },
     strategy: {
-      isBotActive: false,
+      isBotActive: params.strategy?.isBotActive ?? true, // 🤖 등록되면 기본적으로 즉시 매매 시작 (완전자동 관리 취지)
       gapBuyPrice: params.strategy?.gapBuyPrice ?? 0,
       gapSellPrice: params.strategy?.gapSellPrice ?? 0,
       tradeQuantity: params.strategy?.tradeQuantity ?? 1,
@@ -2231,17 +2231,6 @@ setGapInventory(nextInv);
   );
   return;
 }
-    console.log(
-  '[TAB OPEN]',
-  {
-    symbol,
-    stockName: stock?.name,
-    stockPrice: stock?.price,
-    customPrice,
-    finalPrice: price,
-    stockFound: !!stock
-  },
-);
     const limits = calculateStockLimits(price, stock?.changePercent || 0, isUS, stock?.basePrice);
 
     if (customName && customName !== symbol) {
@@ -2326,7 +2315,11 @@ setGapInventory(nextInv);
     activeTabIdRef.current = symbol;
     setActiveTabId(symbol);
     setSelectedSymbol(symbol);
-    setIsGapBotActive(false);
+    // 🛡️ 여기서 무조건 false로 고정하면, createInventoryItem이 기본적으로 true로 만들어도
+    // 방금 만든 종목이 "선택된 탭"이 되는 순간 엔진은 이 GLOBAL 값을 참조하므로 실제로는
+    // 시작되지 않는 문제가 있었다. 실제로 생성된 항목의 isBotActive 값과 동기화한다.
+    isGapBotActiveRef.current = newInventoryItem.strategy.isBotActive;
+    setIsGapBotActive(newInventoryItem.strategy.isBotActive);
     setGapBuyPrice(newInventoryItem.strategy.gapBuyPrice);
     setGapSellPrice(newInventoryItem.strategy.gapSellPrice);
     setGapInventory([]);
