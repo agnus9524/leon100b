@@ -4714,6 +4714,7 @@ setGapInventory(nextInv);
   // 실제 시장과 무관하게 항상 같은 종목군에서만 추천이 나왔다. 이제는 KIS 거래량순위 API로
   // 지금 이 순간 실제로 거래량이 많은 종목들을 먼저 가져오고, 그 위에서 전략센서 분석을 돌린다.
   // ============================================================
+  const fallbackSymbolsRef = React.useRef<Set<string>>(new Set());
   const loadScalperRecommendations = useCallback(async (): Promise<ScalperRecommendation[]> => {
     let list: ScalperRecommendation[] = [];
 
@@ -4799,22 +4800,11 @@ setGapInventory(nextInv);
       }
     }
 
-    // 3순위: 그래도 부족하면 백엔드/기본 목록으로 보강
-    if (list.length < MAX_SCALPER_RECOMMENDATIONS) {
-      try {
-        const fallback = await kisService.getScalperRecommendations();
-        const existingSymbols = new Set(list.map(r => r.symbol));
-        for (const r of fallback) {
-          if (list.length >= MAX_SCALPER_RECOMMENDATIONS) break;
-          if (!existingSymbols.has(r.symbol)) {
-            list.push(r);
-            existingSymbols.add(r.symbol);
-          }
-        }
-      } catch (err) {
-        console.warn('[추천 목록 보강 실패]', err);
-      }
-    }
+    // 🛡️ 예전엔 여기서 1/2순위가 부족하면 하드코딩된 예전 데이터(3순위)로 채워 넣었는데,
+    // 이건 실시간 계산이 아닌 가짜/오래된 데이터라 삭제했다. 1/2순위로 구한 만큼만(모자라면
+    // 모자란 대로, 극단적으로는 0개도) 정직하게 반환한다 — 실시간 데이터가 아니면 차라리
+    // 추천이 없는 게 낫다는 원칙.
+    fallbackSymbolsRef.current = new Set();
 
     return list
       .sort((a, b) => b.scalpingScore - a.scalpingScore)
@@ -6644,6 +6634,7 @@ priceData.current
   const lowScoreSinceRef = React.useRef<Record<string, number>>({});
   const wasMarketOpenRef = React.useRef<boolean>(false);
   const isAutoFillingRef = React.useRef<boolean>(false);
+  const lastAutoFillAttemptRef = React.useRef<number>(0);
 
   useEffect(() => {
     if (!isAppInitialized) return;
@@ -6709,12 +6700,23 @@ priceData.current
       const emptySlots = MAX_INVENTORY_PER_MARKET - krSlotsUsed;
       if (emptySlots <= 0) return;
 
+      // 🛡️ 20종목이 이미 실시간 폴링 중인 상태에서 30초마다 추천 랭킹 API(내부적으로 2건)까지
+      // 계속 부르면 요청 큐가 밀려서 타임아웃(ranking_timeout)이 나기 쉽다. 자동 채움 자체는
+      // 급하지 않으므로(빈 슬롯이 몇 분 늦게 채워져도 문제없음), 3분에 한 번만 시도한다.
+      const AUTO_FILL_CHECK_INTERVAL_MS = 3 * 60 * 1000;
+      const now = Date.now();
+      if (now - lastAutoFillAttemptRef.current < AUTO_FILL_CHECK_INTERVAL_MS) return;
+      lastAutoFillAttemptRef.current = now;
+
       isAutoFillingRef.current = true;
       try {
         const recommendations = await loadScalperRecommendations();
         const alreadyRegistered = new Set(scalperTabsRef.current.map(t => t.symbol));
+        // 🛡️ fallback(3순위, 실시간 랭킹 조회 실패 시 쓰는 오래된 하드코딩 데이터)로만 채워진
+        // 종목은 자동 매매 편입 대상에서 제외한다 — "신호 몇 개 잡혔다고 넣지 않고, 실시간
+        // 계산 결과만 믿고 넣는다"는 원칙을 지키기 위함이다.
         const candidates = recommendations
-          .filter(r => !alreadyRegistered.has(r.symbol))
+          .filter(r => !alreadyRegistered.has(r.symbol) && !fallbackSymbolsRef.current.has(r.symbol))
           .slice(0, emptySlots);
 
         for (const rec of candidates) {
@@ -6725,7 +6727,7 @@ priceData.current
           await new Promise(r => setTimeout(r, 300)); // 연속 등록 시 상태 업데이트가 겹치지 않도록 약간의 간격
         }
         if (candidates.length > 0) {
-          showNotification(`[자동 채움] 빈 슬롯 ${candidates.length}개를 추천종목으로 자동 등록했습니다.`, 'success');
+          showNotification(`[자동 채움] 빈 슬롯 ${candidates.length}개를 실시간 데이터 기반 추천종목으로 자동 등록했습니다.`, 'success');
         }
       } catch (err) {
         console.warn('[자동 슬롯 채움 실패]', err);
