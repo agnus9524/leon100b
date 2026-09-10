@@ -6523,7 +6523,23 @@ priceData.current
       setScalperInventory(prev => {
         let changed = false;
         const next = prev.map(item => {
-          const stockItem = currentStocks.find(s => s.symbol === item.symbol);
+          let stockItem = currentStocks.find(s => s.symbol === item.symbol);
+          // 🛡️ stocks 배열에 아직 반영이 안 됐거나(등록 경로에 따라 지연될 수 있음) 가격이
+          // 비어있으면, 인벤토리 자체가 갖고 있는 실시간 시세(market 네임스페이스)를 폴백으로
+          // 쓴다. 이걸 안 하면 그 종목은 계속 조용히 건너뛰어져서 "선택 안 한 종목은 센서 로그가
+          // 전혀 안 남는" 것처럼 보이는 원인이 될 수 있다.
+          if ((!stockItem || !stockItem.price || stockItem.price <= 0) && item.market.currentPrice > 0) {
+            stockItem = {
+              symbol: item.symbol,
+              name: item.name,
+              price: item.market.currentPrice,
+              change: 0,
+              changePercent: item.market.changePercent || 0,
+              volume: '0',
+              history: [],
+              market: 'KR'
+            } as Stock;
+          }
           if (!stockItem || !stockItem.price || stockItem.price <= 0) return item;
 
           const strat = detectStockStrategies(stockItem);
@@ -8152,7 +8168,24 @@ useEffect(() => {
         }
 
         for (const tabItem of startedTabs) {
-        const stockItem = stocksRef.current.find(s => s.symbol === tabItem.symbol || s.symbol === tabItem.id) || (selectedStock?.symbol === tabItem.symbol ? selectedStock : null);
+        let stockItem = stocksRef.current.find(s => s.symbol === tabItem.symbol || s.symbol === tabItem.id) || (selectedStock?.symbol === tabItem.symbol ? selectedStock : null);
+        // 🛡️ 매우 중요한 수정: 예전에는 stocks 배열에서 못 찾고 선택된 종목도 아니면 stockItem이
+        // null이 되어 그 종목의 매수/매도 판단 자체가 완전히 건너뛰어졌다. 이게 "선택한 종목만
+        // 매매/로그가 되고 나머지 등록 종목은 감시조차 안 되는" 것처럼 보이던 진짜 원인이었다.
+        // 인벤토리 자체가 갖고 있는 실시간 시세(market 네임스페이스)를 폴백으로 사용해서, stocks
+        // 배열 동기화 여부와 무관하게 등록된 모든 종목이 항상 평가 대상이 되도록 한다.
+        if (!stockItem && tabItem.price > 0) {
+          stockItem = {
+            symbol: tabItem.symbol,
+            name: tabItem.name,
+            price: tabItem.price,
+            change: 0,
+            changePercent: tabItem.changePercent || 0,
+            volume: '0',
+            history: [],
+            market: /^[A-Za-z]/.test(tabItem.symbol) ? 'US' : 'KR'
+          } as Stock;
+        }
         if (!stockItem) continue;
 
         const isSelected = selectedStock && stockItem.symbol === selectedStock.symbol;
