@@ -1264,6 +1264,8 @@ export default function App() {
     nrcy_ord_psbl_amt: number;
     ord_psbl_amt: number;
     dncl_amt: number;
+    dnca_tot_amt: number;
+    prvs_rcdl_excc_amt: number;
     queriedSymbol: string;
     usedField: string;
   } | null>(null);
@@ -1815,7 +1817,16 @@ export default function App() {
   // effect 전체가 재시작되면서 "즉시 전체조회"가 다시 실행되어 오히려 순간 폭주를 만들 수 있다.
   const wsConnectionStatusRef = React.useRef(wsConnectionStatus);
   useEffect(() => { wsConnectionStatusRef.current = wsConnectionStatus; }, [wsConnectionStatus]);
-  const registeredSymbolsKey = scalperTabs.map(t => t.symbol).sort().join(',');
+  const registeredSymbolsKeyRaw = scalperTabs.map(t => t.symbol).sort().join(',');
+  // 🛡️ 종목이 하나 등록/삭제될 때마다 이 키가 바뀌어서 웹소켓 전체가 끊겼다 재연결되고 있었다.
+  // 특히 자동 슬롯 채움이 여러 종목을 연속으로 등록할 때, 종목마다 웹소켓이 재연결되면서
+  // 그 짧은 순간(재연결 중)에 다른 API 호출이 타임아웃과 겹치면 스캘핑이 흔들리는 원인이 됐다.
+  // 변경이 3초간 잠잠해진 뒤에만 실제로 재연결하도록 디바운스한다.
+  const [registeredSymbolsKey, setRegisteredSymbolsKey] = useState(registeredSymbolsKeyRaw);
+  useEffect(() => {
+    const timer = setTimeout(() => setRegisteredSymbolsKey(registeredSymbolsKeyRaw), 3000);
+    return () => clearTimeout(timer);
+  }, [registeredSymbolsKeyRaw]);
 
   useEffect(() => {
     if (!kisConfig.isConnected) {
@@ -5853,7 +5864,10 @@ priceData.current
           foundAnyData = true;
           domesticSuccess = true;
           const out2 = Array.isArray(domesticBalanceData.output2) ? (domesticBalanceData.output2[0] || {}) : domesticBalanceData.output2;
-          const dnclAmt = Number(out2.dncl_amt || out2.d2_dncl_amt || out2.prsm_dncl_amt || out2.cma_evlu_amt || 0);
+          // 🔍 dncl_amt 계열 필드명이 KIS 공식 문서 기준과 정확히 일치하는지 확신할 수 없어서,
+          // 더 널리 문서화된 필드명(dnca_tot_amt=예수금총금액, prvs_rcdl_excc_amt=가수도정산금액)도
+          // 후보로 추가한다 — 실제 어떤 필드가 맞는지는 아래 진단 툴팁으로 직접 확인 가능하다.
+          const dnclAmt = Number(out2.dnca_tot_amt || out2.prvs_rcdl_excc_amt || out2.dncl_amt || out2.d2_dncl_amt || out2.prsm_dncl_amt || out2.cma_evlu_amt || 0);
           let ordPsblCash = Number(out2.ord_psbl_cash || out2.nrcy_ord_psbl_amt || out2.ord_psbl_amt || 0);
           const domesticPurchase = Number(out2.pchs_amt_smtl_amt || 0);
           const actualPurchaseCost = Math.max(domesticPurchase, totalStockPurchaseCost);
@@ -5891,9 +5905,11 @@ priceData.current
             ord_psbl_cash: debugFields.ord_psbl_cash,
             nrcy_ord_psbl_amt: debugFields.nrcy_ord_psbl_amt,
             ord_psbl_amt: debugFields.ord_psbl_amt,
-            dncl_amt: dnclAmt,
+            dncl_amt: Number(out2.dncl_amt || 0),
+            dnca_tot_amt: Number(out2.dnca_tot_amt || 0),
+            prvs_rcdl_excc_amt: Number(out2.prvs_rcdl_excc_amt || 0),
             queriedSymbol: symForQuery,
-            usedField: dnclAmt > 0 ? 'dncl_amt (예수금, 잔고조회)'
+            usedField: dnclAmt > 0 ? 'dncl_amt 계열 (예수금, 잔고조회)'
               : debugFields.ord_psbl_cash > 0 ? 'ord_psbl_cash (TTTC8908R)'
               : debugFields.nrcy_ord_psbl_amt > 0 ? 'nrcy_ord_psbl_amt (TTTC8908R)'
               : debugFields.ord_psbl_amt > 0 ? 'ord_psbl_amt (TTTC8908R)'
@@ -6696,7 +6712,7 @@ priceData.current
   //    높은 종목부터 자동으로 등록하고 봇을 시작해서 슬롯을 채운다.
   // ============================================================
   const DEAD_SIGNAL_SCORE = 30;
-  const DEAD_SIGNAL_DURATION_MS = 4 * 60 * 1000; // 4분
+  const DEAD_SIGNAL_DURATION_MS = 1 * 60 * 1000; // 1분 — 어차피 다시 좋아지면 자동 채움이 재등록해주므로 오래 붙잡아둘 필요 없음
   const lowScoreSinceRef = React.useRef<Record<string, number>>({});
   const wasMarketOpenRef = React.useRef<boolean>(false);
   const isAutoFillingRef = React.useRef<boolean>(false);
@@ -6755,21 +6771,25 @@ priceData.current
         toRemove.forEach(symbol => {
           delete lowScoreSinceRef.current[symbol];
           const name = currentInventory.find(t => t.symbol === symbol)?.name || symbol;
-          addLog(symbol, '매도', 0, 0, `[자동 퇴출] ${name} — 4분간 매수 신호 없음(30점 미만)으로 인벤토리에서 자동 제거`);
+          addLog(symbol, '매도', 0, 0, `[자동 퇴출] ${name} — 1분간 매수 신호 없음(30점 미만)으로 인벤토리에서 자동 제거`);
         });
         showNotification(`[자동 퇴출] ${toRemove.length}개 종목이 신호 없음으로 인벤토리에서 제거되었습니다.`, 'info');
       }
 
       // ③ 빈 슬롯을 추천종목 상위 점수 순으로 자동 채우기
       if (isAutoFillingRef.current) return; // 중복 실행 방지
-      const krSlotsUsed = scalperTabsRef.current.filter(t => !/^[A-Za-z]/.test(t.symbol)).length;
+      // 🛡️ 방금 위에서 setScalperInventory로 퇴출 처리를 했지만, 이건 비동기 상태 업데이트라서
+      // 이 시점의 scalperTabsRef.current에는 아직 반영되지 않았다. toRemove를 명시적으로 빼줘야
+      // 같은 사이클(같은 1분) 안에서 방금 비운 자리를 곧바로 채울 수 있다 — 안 그러면 다음
+      // 사이클(1분 후)까지 그 자리가 빈 채로 남는다.
+      const krSlotsUsed = scalperTabsRef.current.filter(t => !/^[A-Za-z]/.test(t.symbol) && !toRemove.includes(t.symbol)).length;
       const emptySlots = MAX_INVENTORY_PER_MARKET - krSlotsUsed;
       if (emptySlots <= 0) return;
 
-      // 🛡️ 20종목이 이미 실시간 폴링 중인 상태에서 30초마다 추천 랭킹 API(내부적으로 2건)까지
-      // 계속 부르면 요청 큐가 밀려서 타임아웃(ranking_timeout)이 나기 쉽다. 자동 채움 자체는
-      // 급하지 않으므로(빈 슬롯이 몇 분 늦게 채워져도 문제없음), 3분에 한 번만 시도한다.
-      const AUTO_FILL_CHECK_INTERVAL_MS = 3 * 60 * 1000;
+      // 🛡️ 20종목이 이미 실시간 폴링 중인 상태에서 너무 자주 부르면 요청 큐가 밀려서
+      // 타임아웃(ranking_timeout)이 나기 쉽다. 1분으로 단축했으니, 만약 타임아웃/부하 문제가
+      // 다시 나타나면 이 값을 다시 늘려야 한다.
+      const AUTO_FILL_CHECK_INTERVAL_MS = 1 * 60 * 1000;
       const now = Date.now();
       if (now - lastAutoFillAttemptRef.current < AUTO_FILL_CHECK_INTERVAL_MS) return;
       lastAutoFillAttemptRef.current = now;
@@ -6777,20 +6797,21 @@ priceData.current
       isAutoFillingRef.current = true;
       try {
         const recommendations = await loadScalperRecommendations();
-        const alreadyRegistered = new Set(scalperTabsRef.current.map(t => t.symbol));
+        const alreadyRegistered = new Set(scalperTabsRef.current.filter(t => !toRemove.includes(t.symbol)).map(t => t.symbol));
         // 🛡️ fallback(3순위, 실시간 랭킹 조회 실패 시 쓰는 오래된 하드코딩 데이터)로만 채워진
         // 종목은 자동 매매 편입 대상에서 제외한다 — "신호 몇 개 잡혔다고 넣지 않고, 실시간
         // 계산 결과만 믿고 넣는다"는 원칙을 지키기 위함이다.
+        const MAX_FILL_PER_CYCLE = 5; // 한 사이클에 너무 많이 한꺼번에 등록하지 않고, 나머지는 다음 사이클에서
         const candidates = recommendations
           .filter(r => !alreadyRegistered.has(r.symbol) && !fallbackSymbolsRef.current.has(r.symbol))
-          .slice(0, emptySlots);
+          .slice(0, Math.min(emptySlots, MAX_FILL_PER_CYCLE));
 
         for (const rec of candidates) {
-          if ((scalperTabsRef.current.filter(t => !/^[A-Za-z]/.test(t.symbol)).length) >= MAX_INVENTORY_PER_MARKET) break;
+          if ((scalperTabsRef.current.filter(t => !/^[A-Za-z]/.test(t.symbol) && !toRemove.includes(t.symbol)).length) >= MAX_INVENTORY_PER_MARKET) break;
           handleSelectRecommendationStock(rec);
           // 등록 직후 봇도 바로 시작 상태로 (자동 관리 모드이므로)
           updateTab(rec.symbol, { isBotActive: true });
-          await new Promise(r => setTimeout(r, 300)); // 연속 등록 시 상태 업데이트가 겹치지 않도록 약간의 간격
+          await new Promise(r => setTimeout(r, 800)); // 연속 등록 시 상태 업데이트가 겹치지 않도록 간격 확대
         }
         if (candidates.length > 0) {
           showNotification(`[자동 채움] 빈 슬롯 ${candidates.length}개를 실시간 데이터 기반 추천종목으로 자동 등록했습니다.`, 'success');
@@ -8749,10 +8770,11 @@ useEffect(() => {
                     }
 
                     if (parsedQty <= 0) {
-                        setBotStatus(`[매수 취소] 실제 매수 가능 수량 0주`);
+                        // 🔍 진단 강화: 왜 0주로 계산됐는지 실제 사용된 값들을 로그에 남긴다
+                        setBotStatus(`[매수 취소] 실제 매수 가능 수량 0주 (참고: 예수금 ${availCash.toLocaleString()}원, 주문가 ${formatCurrency(tradePrice)})`);
                         if (stock.symbol === selectedStock?.symbol) setScalperMessage("실제 주문 가능 수량 부족 (0주)으로 진입 건너뜀");
-                        addLog(stock.symbol, '매수', tradePrice, amount, `[주문취소] KIS 매수 가능 수량 부족 (0주)`);
-                        showNotification(`매수 스킵: 실제 계좌의 매수 가능 수량이 0주입니다.`, "error");
+                        addLog(stock.symbol, '매수', tradePrice, amount, `[주문취소] KIS 매수 가능 수량 부족 (0주) — 참고: orderableKrw=${orderableKrw.toLocaleString()}원, balance=${balance.toLocaleString()}원, 주문가=${formatCurrency(tradePrice)}`);
+                        showNotification(`매수 스킵: 실제 계좌의 매수 가능 수량이 0주입니다. (예수금 ${availCash.toLocaleString()}원 기준)`, "error");
                         return 0;
                     }
                     if (parsedQty < finalAmount && availCash < tradePrice * finalAmount) {
@@ -9212,7 +9234,7 @@ useEffect(() => {
 
     // 🌐 GLOBAL TRADE LOGS: 현재 선택된 탭이 무엇이든 상관없이, 등록된 모든 종목의 이벤트가 전부 쌓인다.
     // (과거에는 currentActiveSym과 일치할 때만 반영되어 "선택 안 한 종목의 체결/신호가 안 보이는" 버그가 있었다)
-    setTradeLogs(prev => [newLog, ...prev].slice(0, 200));
+    setTradeLogs(prev => [newLog, ...prev].slice(0, 50));
 
     // 종목별 상세 로그(인벤토리 항목 안의 tradeLogs)도 별도로 유지 — 선택 종목 상세 패널에서 사용
     const currentActiveSym = activeTabIdRef.current;
@@ -10182,9 +10204,11 @@ useEffect(() => {
                           `ord_psbl_cash(주문가능현금): ${orderableKrwDebug.ord_psbl_cash.toLocaleString()}원\n` +
                           `nrcy_ord_psbl_amt(비대면주문가능금액): ${orderableKrwDebug.nrcy_ord_psbl_amt.toLocaleString()}원\n` +
                           `ord_psbl_amt(주문가능금액): ${orderableKrwDebug.ord_psbl_amt.toLocaleString()}원\n` +
-                          `dncl_amt(예수금): ${orderableKrwDebug.dncl_amt.toLocaleString()}원\n` +
+                          `dnca_tot_amt(예수금총금액): ${orderableKrwDebug.dnca_tot_amt.toLocaleString()}원\n` +
+                          `prvs_rcdl_excc_amt(가수도정산금액): ${orderableKrwDebug.prvs_rcdl_excc_amt.toLocaleString()}원\n` +
+                          `dncl_amt(구필드,참고용): ${orderableKrwDebug.dncl_amt.toLocaleString()}원\n` +
                           `→ 실제 사용된 값: ${orderableKrwDebug.usedField}\n\n` +
-                          `KIS 앱에서 보시는 예수금과 다르다면, 위 종목코드 기준으로 "매수가능금액"을 계산한 값이라 다를 수 있습니다.`
+                          `KIS 앱과 다르면, 위 필드들 중 KIS 앱 숫자와 정확히 일치하는 게 있는지 확인해서 알려주세요.`
                         : "KIS 연동 후 계좌 동기화 시 상세 필드값이 여기에 표시됩니다."
                     }
                   >
