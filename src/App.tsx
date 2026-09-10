@@ -4722,20 +4722,26 @@ setGapInventory(nextInv);
     // 거래량만 보는 것보다, "거래량도 많고 방향성(모멘텀)도 뚜렷한" 종목까지 후보군에 넣어야
     // 스캘핑에 더 적합한 종목을 놓치지 않는다. (비공식 3rd-party 스크래핑 대신 KIS 공식 랭킹 API 조합)
     if (kisConfig.isConnected) {
+      // 🛡️ 등록 종목이 많을수록 요청 큐가 붐벼서 429 백오프가 겹치기 쉽다. "추천종목 조회는
+      // 최우선"이라는 원칙에 맞춰, 1차 시도(20초)가 실패해도 곧바로 포기하지 않고 5초 대기 후
+      // 한 번 더 시도한다 — 일시적인 혼잡으로 인한 실패 가능성을 낮추기 위함이다.
+      const fetchRanking = () => Promise.race([
+        Promise.all([
+          kisService.getVolumeRanking('J', 80),
+          kisService.getFluctuationRanking('J', 'UP', 70)
+        ]),
+        new Promise<[any[], any[]]>((_, reject) => setTimeout(() => reject(new Error('ranking_timeout')), 20000))
+      ]);
+
       try {
-        // 🛡️ 두 호출이 같은 요청 큐를 공유하기 때문에, 429가 겹치면 지수 백오프 재시도가 쌓여서
-        // 30~60초 이상 걸릴 수 있다. 그대로 두면 "추천 분석 중" 스피너가 무한정 도는 것처럼
-        // 보이므로, 12초 안에 안 끝나면 타임아웃시키고 2순위(추적 종목 풀) 경로로 넘어간다.
-        const rankingTimeout = new Promise<[any[], any[]]>((_, reject) =>
-          setTimeout(() => reject(new Error('ranking_timeout')), 12000)
-        );
-        const [volumeLeaders, fluctuationLeaders] = await Promise.race([
-          Promise.all([
-            kisService.getVolumeRanking('J', 80),
-            kisService.getFluctuationRanking('J', 'UP', 70)
-          ]),
-          rankingTimeout
-        ]);
+        let volumeLeaders: any[], fluctuationLeaders: any[];
+        try {
+          [volumeLeaders, fluctuationLeaders] = await fetchRanking();
+        } catch (firstErr) {
+          console.warn('[추천 조회 1차 시도 실패, 5초 후 재시도]', firstErr);
+          await new Promise(r => setTimeout(r, 5000));
+          [volumeLeaders, fluctuationLeaders] = await fetchRanking(); // 2차 시도 — 여기서도 실패하면 아래 catch로 빠짐
+        }
 
         // symbol 기준으로 병합 (중복 제거) — 두 순위에 모두 등장하는 종목이 특히 유의미한 후보
         const mergedMap = new Map<string, { symbol: string; name: string; price: number; changePercent: number; volume: string }>();
@@ -6477,9 +6483,12 @@ priceData.current
     orderbookInterval = setInterval(syncLiveOrderbook, 5000);
 
     if (kisConfig.isConnected) {
+      // 🛡️ 20종목이 큐를 붐비게 하는 상황에서는 sync 한 번(잔고+주문가능금액 조회)이 10초를
+      // 넘기기 쉬워서, 다음 10초 주기가 오면 이전 sync가 아직 안 끝나 계속 "SYNC SKIPPED"가
+      // 반복 출력되고 있었다. 20초로 늘려서 sync가 완료될 시간을 넉넉히 준다.
       kisSyncInterval = setInterval(() => {
         handleSyncKIS();
-      }, 10000);
+      }, 20000);
     }
 
     return () => {
@@ -6630,7 +6639,7 @@ priceData.current
   //    높은 종목부터 자동으로 등록하고 봇을 시작해서 슬롯을 채운다.
   // ============================================================
   const DEAD_SIGNAL_SCORE = 30;
-  const DEAD_SIGNAL_DURATION_MS = 15 * 60 * 1000; // 15분
+  const DEAD_SIGNAL_DURATION_MS = 4 * 60 * 1000; // 4분
   const lowScoreSinceRef = React.useRef<Record<string, number>>({});
   const wasMarketOpenRef = React.useRef<boolean>(false);
   const isAutoFillingRef = React.useRef<boolean>(false);
@@ -6689,7 +6698,7 @@ priceData.current
         toRemove.forEach(symbol => {
           delete lowScoreSinceRef.current[symbol];
           const name = currentInventory.find(t => t.symbol === symbol)?.name || symbol;
-          addLog(symbol, '매도', 0, 0, `[자동 퇴출] ${name} — 15분간 매수 신호 없음(30점 미만)으로 인벤토리에서 자동 제거`);
+          addLog(symbol, '매도', 0, 0, `[자동 퇴출] ${name} — 4분간 매수 신호 없음(30점 미만)으로 인벤토리에서 자동 제거`);
         });
         showNotification(`[자동 퇴출] ${toRemove.length}개 종목이 신호 없음으로 인벤토리에서 제거되었습니다.`, 'info');
       }
@@ -8429,6 +8438,14 @@ useEffect(() => {
                     setGapTradeCount(prev => prev + 1);
                     showNotification(`${stockItem.name} ${formatCurrency(targetBuyPrice)} (${strategyLabel}) 매수 완료`, "success");
                     playScalpingSound('BUY');
+                  } else {
+                    // 🛡️ 예전에는 여기가 비어있어서, 주문이 실패하거나(API 오류) 미체결로 대기 상태가
+                    // 되어도 화면엔 아무 표시 없이 "[슬롯 진입]" 메시지만 남아 마치 뭔가 진행 중인
+                    // 것처럼 보였다. 실제로 체결되지 않았다는 걸 명확하게 알려준다. (executeTrade가
+                    // 내부적으로 미체결 대기주문으로 등록했다면 그건 계속 별도로 감시되고, 이 메시지는
+                    // "이번 시도에서 즉시 체결되지는 않았다"는 사실만 알려주는 용도다.)
+                    setBotStatus(`[매수 미체결/실패] ${stockItem.name} ${formatCurrency(targetBuyPrice)} 주문이 즉시 체결되지 않았습니다 — 미체결 대기 중이거나 실패했을 수 있습니다.`);
+                    if (isSelected) setScalperMessage(`[매수 미체결] ${stockItem.name} ${formatCurrency(targetBuyPrice)} 주문 전송됨, 체결 대기 중`);
                   }
                 } finally {
                   buyingLockPricesRef.current = buyingLockPricesRef.current.filter(p => p !== lockEntry);
