@@ -6832,6 +6832,55 @@ priceData.current
   }, [isAppInitialized, detectStockStrategies, calculateBuyScore, holdings, loadScalperRecommendations, handleSelectRecommendationStock, showNotification]);
 
   // ============================================================
+  // 🐕 봇 정지 자동 재개(watchdog)
+  // ------------------------------------------------------------
+  // 정규장 시간 중에 어떤 이유로든(수동 정지, 오류, 예상 못 한 상태변화 등) 봇이 꺼지면,
+  // 몇 초 후 자동으로 다시 켠다. 단, 수량 변경처럼 "의도적으로 잠깐 정지시킨" 경우와 충돌하지
+  // 않도록 꺼지자마자 바로 켜지 않고 8초의 유예시간을 준다 — 그 안에 수량을 바꾸고 사용자가
+  // 직접 다시 시작하면 이 watchdog은 아무 것도 안 하고 넘어간다.
+  // ============================================================
+  const stoppedSinceRef = React.useRef<Record<string, number>>({});
+  const WATCHDOG_GRACE_MS = 8000;
+
+  useEffect(() => {
+    if (!isAppInitialized) return;
+
+    const watchdog = () => {
+      if (!isKoreanMarketOpen()) return; // 장 마감 중엔 꺼져있는 게 정상이므로 재개하지 않음
+
+      const now = Date.now();
+      scalperTabsRef.current.forEach(tab => {
+        const isActive = tab.id === activeTabIdRef.current ? isGapBotActiveRef.current : tab.isBotActive;
+
+        if (isActive) {
+          delete stoppedSinceRef.current[tab.symbol]; // 켜져 있으면 정지 기록 초기화
+          return;
+        }
+
+        const since = stoppedSinceRef.current[tab.symbol];
+        if (!since) {
+          stoppedSinceRef.current[tab.symbol] = now; // 방금 꺼진 걸 처음 감지 — 유예시간 시작
+          return;
+        }
+
+        if (now - since >= WATCHDOG_GRACE_MS) {
+          // 유예시간이 지났는데도 여전히 꺼져있으면 자동으로 재개
+          delete stoppedSinceRef.current[tab.symbol];
+          updateTab(tab.symbol, { isBotActive: true });
+          if (tab.id === activeTabIdRef.current) {
+            isGapBotActiveRef.current = true;
+            setIsGapBotActive(true);
+          }
+          addLog(tab.symbol, '매수', 0, 0, `[자동 재개] ${tab.name} — 정지 상태가 ${WATCHDOG_GRACE_MS / 1000}초 이상 지속되어 자동으로 다시 시작합니다.`);
+        }
+      });
+    };
+
+    const watchdogInterval = setInterval(watchdog, 3000); // 3초마다 점검
+    return () => clearInterval(watchdogInterval);
+  }, [isAppInitialized]);
+
+  // ============================================================
   // 🛡️ 이미 등록되어 있는 종목 중 이름이 종목코드로 잘못 표시된 것을 자동 교정.
   // ------------------------------------------------------------
   // 등록 시점의 버그로 이름 해석이 실패해서 "386380(386380)"처럼 코드가 이름 자리에 남아있는
