@@ -1258,6 +1258,15 @@ export default function App() {
     }
     return saved !== null && !isNaN(Number(saved)) ? Number(saved) : 0;
   });
+  // 🔍 주문가능원화 원본 필드값 진단용 — 어느 필드가 최종값을 결정했는지 화면에서 바로 비교할 수 있게 함
+  const [orderableKrwDebug, setOrderableKrwDebug] = useState<{
+    ord_psbl_cash: number;
+    nrcy_ord_psbl_amt: number;
+    ord_psbl_amt: number;
+    dncl_amt: number;
+    queriedSymbol: string;
+    usedField: string;
+  } | null>(null);
   const [orderableUsd, setOrderableUsd] = useState<number>(() => {
     const saved = localStorage.getItem('sleek_orderable_usd');
     if (saved === '34.68') {
@@ -5838,11 +5847,19 @@ priceData.current
           const actualPurchaseCost = Math.max(domesticPurchase, totalStockPurchaseCost);
 
           // Direct inquiry to KIS TTTC8908R for exact real-time orderable cash (ord_psbl_cash)
+          let symForQuery = (selectedStock?.market === 'KR' && selectedStock.symbol) 
+            ? selectedStock.symbol 
+            : (Object.keys(newHoldings)[0] || '005930');
+          let debugFields = { ord_psbl_cash: 0, nrcy_ord_psbl_amt: 0, ord_psbl_amt: 0 };
           try {
-            const symForQuery = (selectedStock?.market === 'KR' && selectedStock.symbol) 
-              ? selectedStock.symbol 
-              : (Object.keys(newHoldings)[0] || '005930');
             const cashInquiry = await kisService.getDomesticOrderableCash(symForQuery);
+            if (cashInquiry) {
+              debugFields = {
+                ord_psbl_cash: cashInquiry.ord_psbl_cash || 0,
+                nrcy_ord_psbl_amt: cashInquiry.nrcy_ord_psbl_amt || 0,
+                ord_psbl_amt: cashInquiry.ord_psbl_amt || 0
+              };
+            }
             if (cashInquiry && cashInquiry.rt_cd === '0' && cashInquiry.orderableKrw > 0) {
               ordPsblCash = cashInquiry.orderableKrw;
             }
@@ -5851,10 +5868,25 @@ priceData.current
           }
 
           // Exact orderable cash prioritized: ord_psbl_cash > nrcy_ord_psbl_amt > dnclAmt
-          const domesticCash = ordPsblCash > 0 ? ordPsblCash : (dnclAmt > 0 ? dnclAmt : (Number(out2.nass_amt || 0) > actualPurchaseCost ? Number(out2.nass_amt) - actualPurchaseCost : 0));
+          // 🔄 예수금(dncl_amt) 우선 — "매수가능금액" 계산값(ord_psbl_cash)이 특정 종목 기준으로
+          // 계산되어 실제 예수금과 다르게 나오는 문제가 있어서, 이제는 계좌 예수금을 그대로 보여준다.
+          const domesticCash = dnclAmt > 0 ? dnclAmt : (ordPsblCash > 0 ? ordPsblCash : (Number(out2.nass_amt || 0) > actualPurchaseCost ? Number(out2.nass_amt) - actualPurchaseCost : 0));
           if (domesticCash > 0) {
             setOrderableKrw(domesticCash);
           }
+          // 🔍 어느 필드가 최종값을 결정했는지 함께 저장 — 화면에서 KIS 앱과 직접 비교 가능하도록
+          setOrderableKrwDebug({
+            ord_psbl_cash: debugFields.ord_psbl_cash,
+            nrcy_ord_psbl_amt: debugFields.nrcy_ord_psbl_amt,
+            ord_psbl_amt: debugFields.ord_psbl_amt,
+            dncl_amt: dnclAmt,
+            queriedSymbol: symForQuery,
+            usedField: dnclAmt > 0 ? 'dncl_amt (예수금, 잔고조회)'
+              : debugFields.ord_psbl_cash > 0 ? 'ord_psbl_cash (TTTC8908R)'
+              : debugFields.nrcy_ord_psbl_amt > 0 ? 'nrcy_ord_psbl_amt (TTTC8908R)'
+              : debugFields.ord_psbl_amt > 0 ? 'ord_psbl_amt (TTTC8908R)'
+              : 'nass_amt - 매입금액 (순자산 기반 추정)'
+          });
           
           if (marketType === 'KR') {
             totalConvertedBalance += Math.round(domesticCash);
@@ -9837,7 +9869,7 @@ useEffect(() => {
             })()}
 
             {/* 1.5 GLOBAL TRADE LOGS — 선택된 종목과 무관하게 등록된 모든 종목의 이벤트가 시간순으로 표시된다 */}
-            <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col h-[320px] shrink-0 overflow-hidden shadow-2xl">
+            <div className="bg-white/5 border border-white/10 rounded-3xl p-5 flex flex-col h-[640px] shrink-0 overflow-hidden shadow-2xl">
               <div className="flex items-center justify-between mb-3 shrink-0 border-b border-white/5 pb-2.5">
                 <h3 className="text-sm font-black text-white uppercase tracking-widest flex items-center gap-2">
                   <Layers className="w-4 h-4 text-emerald-400" /> GLOBAL TRADE LOGS
@@ -10049,12 +10081,28 @@ useEffect(() => {
               return (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-stretch">
                   {/* 1. 주문가능원화 */}
-                  <div className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 flex flex-col justify-center transition-all">
+                  <div
+                    className="bg-white/5 hover:bg-white/10 p-4 rounded-2xl border border-white/10 flex flex-col justify-center transition-all cursor-help"
+                    title={
+                      orderableKrwDebug
+                        ? `[진단] 조회 기준 종목: ${orderableKrwDebug.queriedSymbol}\n` +
+                          `ord_psbl_cash(주문가능현금): ${orderableKrwDebug.ord_psbl_cash.toLocaleString()}원\n` +
+                          `nrcy_ord_psbl_amt(비대면주문가능금액): ${orderableKrwDebug.nrcy_ord_psbl_amt.toLocaleString()}원\n` +
+                          `ord_psbl_amt(주문가능금액): ${orderableKrwDebug.ord_psbl_amt.toLocaleString()}원\n` +
+                          `dncl_amt(예수금): ${orderableKrwDebug.dncl_amt.toLocaleString()}원\n` +
+                          `→ 실제 사용된 값: ${orderableKrwDebug.usedField}\n\n` +
+                          `KIS 앱에서 보시는 예수금과 다르다면, 위 종목코드 기준으로 "매수가능금액"을 계산한 값이라 다를 수 있습니다.`
+                        : "KIS 연동 후 계좌 동기화 시 상세 필드값이 여기에 표시됩니다."
+                    }
+                  >
                     <div className="text-lg sm:text-xl md:text-2xl font-black text-white tracking-tight font-mono truncate">
                       {Math.round(displayOrderableKrw).toLocaleString()}원
                     </div>
                     <div className="text-xs font-bold text-slate-400 mt-1 flex items-center justify-between">
-                      <span>주문가능원화</span>
+                      <span className="flex items-center gap-1">
+                        주문가능원화
+                        {orderableKrwDebug && <span className="text-slate-500">🔍</span>}
+                      </span>
                       {kisConfig.isConnected && (
                         <span className="text-[10px] text-emerald-400 font-mono font-bold">API 실시간</span>
                       )}
