@@ -1850,6 +1850,22 @@ export default function App() {
             executionStrength: tick.executionStrength !== undefined ? tick.executionStrength : s.executionStrength,
             isRealTime: true
           } : s));
+
+          // 🛡️ syncAllPrices와 동일한 이유로, 웹소켓 틱도 scalperInventory의 market 네임스페이스를
+          // 함께 갱신한다 — 안 그러면 웹소켓이 연결된 동안(syncAllPrices가 스킵되는 상황)에는
+          // 선택 안 한 종목들의 scalperInventory 가격이 전혀 갱신되지 않는다.
+          if (tick.price > 0) {
+            setScalperInventory(prev => prev.map(item => item.symbol === tick.symbol ? {
+              ...item,
+              market: {
+                ...item.market,
+                currentPrice: tick.price,
+                changePercent: tick.changePercent || 0,
+                priceStatus: 'LIVE',
+                lastUpdatedAt: Date.now()
+              }
+            } : item));
+          }
         },
         status => {
           if (!cancelled) setWsConnectionStatus(status);
@@ -6398,6 +6414,31 @@ priceData.current
         }));
         
         setStocks(updatedStocks);
+
+        // 🛡️ 매우 중요한 수정: 지금까지 이 함수는 stocks 배열만 갱신하고 scalperInventory는
+        // 전혀 건드리지 않았다. scalperInventory(등록된 종목의 실제 데이터 소스)는 오직 "현재
+        // 선택된 종목"만 refreshInventoryItem을 통해 갱신되고 있었고, 나머지 등록 종목들은
+        // 등록 당시 가격에 영원히 고정되어 있었다. 그 결과 메인 엔진 루프와 센서 갱신 로직이
+        // 선택 안 한 종목에 대해서는 오래된(또는 존재하지 않는) 가격으로 판단하거나 아예
+        // 건너뛰게 되어, "종목을 클릭해야만 실시간으로 감시/매매되는 것처럼" 보이는 근본
+        // 원인이었다. 이제 등록된 전체 종목의 market 네임스페이스를 여기서 함께 갱신한다.
+        const priceMap = new Map<string, Stock>(updatedStocks.map(s => [s.symbol, s]));
+        setScalperInventory(prev => prev.map(item => {
+          const updated = priceMap.get(item.symbol);
+          if (!updated || !updated.price || updated.price <= 0) return item;
+          if (item.market.currentPrice === updated.price && item.market.changePercent === (updated.changePercent || 0)) return item;
+          return {
+            ...item,
+            market: {
+              ...item.market,
+              currentPrice: updated.price,
+              changePercent: updated.changePercent || 0,
+              volume: updated.volume || item.market.volume,
+              priceStatus: 'LIVE',
+              lastUpdatedAt: Date.now()
+            }
+          };
+        }));
       } catch (err: any) {
         console.error("Real-time price sync failed:", err);
       }
