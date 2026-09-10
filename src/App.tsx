@@ -6215,7 +6215,10 @@ priceData.current
       }
       
       setBotStatus("상태 동기화 완료");
-      await updateKisBuyableQty(totalConvertedBalance);
+      // 🛡️ 여기서 updateKisBuyableQty()를 또 부르지 않는다 — 같은 API(getDomesticBuyableAmount,
+      // TTTC8908R)가 이미 2초 주기(refreshInventoryItem)와 종목 선택 변경 시점에 훨씬 자주
+      // 호출되고 있어서 완전히 중복이었다. 이 중복 호출이 handleSyncKIS 한 사이클을 불필요하게
+      // 늘려서 "SYNC SKIPPED" 반복의 원인 중 하나였다.
     } catch (e: any) {
       console.error("KIS Sync Error", e);
       const msg = e.response?.data?.msg1 || e.message;
