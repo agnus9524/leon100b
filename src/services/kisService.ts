@@ -901,7 +901,11 @@ await this.getDomesticPrice(symbol);
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/inquire-period-profit';
 
-      const trId = 'TTTC8494R';
+      // 🛡️ 실제 KIS 공식 API 목록(api.xlsx) 대조 결과, TTTC8494R은 이 엔드포인트(inquire-period-profit)가
+      // 아니라 inquire-balance-rlz-pl(주식잔고조회_실현손익)용 TR_ID였다. inquire-period-profit
+      // (기간별손익일별합산조회)의 정확한 TR_ID는 TTTC8708R이다. TR_ID와 엔드포인트가 서로 안 맞는
+      // 조합으로 호출되고 있어서 정상적인 응답을 못 받고 있었을 가능성이 높다.
+      const trId = 'TTTC8708R';
 
       const headers = {
         'content-type': 'application/json',
@@ -1057,10 +1061,15 @@ await this.getDomesticPrice(symbol);
 
       const hashkey = await this.getHashKey(body);
 
+      // 🛡️ 매우 중요한 수정: 실제 KIS 공식 API 목록(api.xlsx) 대조 결과, 국내주식 현금주문의
+      // 정확한 TR_ID는 매도 TTTC0011U / 매수 TTTC0012U였다. 기존에 쓰던 TTTC0802U(매수) /
+      // TTTC0801U(매도)는 잘못된 값으로, 이게 "매수 신호는 뜨는데 실제로는 KIS 앱에 주문 자체가
+      // 전혀 없다"는 문제의 근본 원인이었을 가능성이 매우 높다. TR_ID가 틀리면 KIS 서버가 주문
+      // 요청 자체를 정상 처리하지 못한다.
       const trId =
   side === 'BUY'
-    ? 'TTTC0802U'
-    : 'TTTC0801U';
+    ? 'TTTC0012U'
+    : 'TTTC0011U';
 
       const headers = {
         'content-type': 'application/json',
@@ -1134,8 +1143,10 @@ console.log(
 
     const hashkey = await this.getHashKey(body);
 
-    // TR_ID: TTTC0803U (실전 주식 정정/취소)
-   const trId = 'TTTC0803U';
+    // 🛡️ 실제 KIS 공식 API 목록(api.xlsx) 대조 결과, 국내주식 정정취소주문의 정확한 TR_ID는
+    // TTTC0013U였다. 기존 TTTC0803U는 잘못된 값으로, 이게 주문 취소/정정이 실패하거나 이상하게
+    // 동작하던 근본 원인이었을 가능성이 높다.
+    const trId = 'TTTC0013U';
 
     const headers = {
       'content-type': 'application/json',
