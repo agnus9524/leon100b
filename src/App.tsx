@@ -6711,7 +6711,11 @@ priceData.current
   //    높은 종목부터 자동으로 등록하고 봇을 시작해서 슬롯을 채운다.
   // ============================================================
   const DEAD_SIGNAL_SCORE = 30;
-  const DEAD_SIGNAL_DURATION_MS = 1 * 60 * 1000; // 1분 — 어차피 다시 좋아지면 자동 채움이 재등록해주므로 오래 붙잡아둘 필요 없음
+  // 🛡️ 1분은 너무 짧았다 — KIS 거래량/등락률 순위는 하루 누적 기준이라 1분 사이엔 거의 안
+  // 바뀌는데, 1분마다 퇴출시키면 같은 종목이 "퇴출 → 같은 순위표에서 재등록"을 반복해서
+  // 실제로는 다양해지지 않고 몇 개 종목만 계속 들락날락하는 것처럼 보였다. 채움 주기(5분)와
+  // 맞춰서 5분으로 늘린다.
+  const DEAD_SIGNAL_DURATION_MS = 5 * 60 * 1000;
   const lowScoreSinceRef = React.useRef<Record<string, number>>({});
   const wasMarketOpenRef = React.useRef<boolean>(false);
   const isAutoFillingRef = React.useRef<boolean>(false);
@@ -6770,7 +6774,7 @@ priceData.current
         toRemove.forEach(symbol => {
           delete lowScoreSinceRef.current[symbol];
           const name = currentInventory.find(t => t.symbol === symbol)?.name || symbol;
-          addLog(symbol, '매도', 0, 0, `[자동 퇴출] ${name} — 1분간 매수 신호 없음(30점 미만)으로 인벤토리에서 자동 제거`);
+          addLog(symbol, '매도', 0, 0, `[자동 퇴출] ${name} — 5분간 매수 신호 없음(30점 미만)으로 인벤토리에서 자동 제거`);
         });
         showNotification(`[자동 퇴출] ${toRemove.length}개 종목이 신호 없음으로 인벤토리에서 제거되었습니다.`, 'info');
       }
@@ -8894,6 +8898,11 @@ useEffect(() => {
             } catch (err: any) {
                 console.error("Failed to query domestic buyable amount:", err);
                 setBotStatus("매수 가능 수량 조회 실패");
+                // 🛡️ 여기에 addLog가 없어서, 매수가능수량 조회 자체가 예외로 실패하면(큐 congestion,
+                // 타임아웃 등) GLOBAL TRADE LOGS에 아무 흔적도 안 남고 조용히 매수 시도가 끝나고
+                // 있었다. "[BUY ORDER] 콘솔로그는 찍히는데 그 다음이 아예 없다"는 증상의 유력한
+                // 원인이었다.
+                addLog(stock.symbol, '매수', tradePrice, amount, `[주문취소] 매수 가능 수량 조회 실패: ${err?.message || '알 수 없는 오류'}`);
                 showNotification(`매수 가능 수량 조회 실패: ${err.message}`, "error");
                 return 0; // KIS API 오류 시 안전을 위해 진입하지 않음
             }
