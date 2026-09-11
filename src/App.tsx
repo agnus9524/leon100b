@@ -9033,9 +9033,11 @@ useEffect(() => {
                 showNotification(`주문 스킵: KIS 정규 장운영시간이 아닙니다.`, "info");
             } else if (errMsg.includes('EGW00201') || errMsg.includes('429') || errMsg.includes('초당')) {
                 setBotStatus("[요청 제한] 초당 거래건수 초과 (자동 조절 중)");
+                addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[주문실패] 요청 한도 초과(429) — 이 시도는 취소되었습니다`);
                 showNotification(`요청 한도 초과: 잠시 후 다시 시도합니다.`, "info");
             } else {
                 setBotStatus("증권사 API 서버 통신 오류");
+                addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[주문실패] 증권사 API 통신 오류: ${errMsg}`);
                 showNotification(`KIS 통신 오류: ${errMsg}`, "error");
             }
             return 0;
