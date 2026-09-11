@@ -1816,6 +1816,9 @@ export default function App() {
   // ref로만 읽는다 — state를 의존성에 넣으면 웹소켓 상태가 바뀔 때마다(연결/재연결/끊김) 그
   // effect 전체가 재시작되면서 "즉시 전체조회"가 다시 실행되어 오히려 순간 폭주를 만들 수 있다.
   const wsConnectionStatusRef = React.useRef(wsConnectionStatus);
+  // 🕐 종목별 마지막 웹소켓 tick 수신 시각 — syncAllPrices가 "오래 갱신 안 된 종목"을 골라
+  // REST로 보완할 때 이 값을 기준으로 판단한다.
+  const lastWsTickAtRef = React.useRef<Record<string, number>>({});
   useEffect(() => { wsConnectionStatusRef.current = wsConnectionStatus; }, [wsConnectionStatus]);
   const registeredSymbolsKeyRaw = scalperTabs.map(t => t.symbol).sort().join(',');
   // 🛡️ 종목이 하나 등록/삭제될 때마다 이 키가 바뀌어서 웹소켓 전체가 끊겼다 재연결되고 있었다.
@@ -1847,6 +1850,10 @@ export default function App() {
       .connectWebSocket(
         symbols,
         tick => {
+          // 🕐 이 종목이 방금 웹소켓으로 갱신됐다는 걸 기록 — syncAllPrices가 "오래 갱신 안 된
+          // 종목"만 REST로 보완할 때 이 시각을 기준으로 판단한다.
+          lastWsTickAtRef.current[tick.symbol] = Date.now();
+
           // 🔄 웹소켓 실시간 체결 틱을 REST 폴링과 동일한 필드에 반영한다.
           // REST 폴링(syncAllPrices/syncSelectedPrice)은 그대로 계속 동작하는 백업이고,
           // 웹소켓이 연결되어 있을 때는 이 틱이 훨씬 더 빠르게(초 단위가 아니라 체결 즉시) 값을
@@ -6390,15 +6397,28 @@ priceData.current
     const syncAllPrices = async () => {
       if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음 (연동 전 에러 스팸 방지)
       if (!isKoreanMarketOpen()) return; // 🕘 정규장(평일 09:00~15:30) 외 시간에는 가격이 안 움직이므로 호출하지 않음
-      // 🔄 웹소켓이 정상 연결되어 실시간 체결을 받고 있으면, 같은 데이터를 REST로 또 조회하지 않는다.
-      // (웹소켓 tick 핸들러가 이미 stocks의 price/change/volume/executionStrength를 실시간으로
-      // 갱신하고 있으므로, 이 REST 폴링은 웹소켓이 끊겼을 때만 필요한 백업이다.)
-      if (wsConnectionStatusRef.current === 'open') return;
       try {
+        // 🛡️ 매우 중요한 수정: 예전엔 웹소켓이 열려있으면 REST를 통째로 꺼버렸는데, 웹소켓은
+        // "실제 체결이 발생한 종목"에 대해서만 tick을 보낸다. 거래가 뜸한 종목은 웹소켓에서도
+        // 데이터가 안 오고 REST도 꺼져있으니, 그 종목의 가격이 등록 당시 값에 영원히 고정되는
+        // 문제가 있었다 — 이게 "선택 안 한 종목은 가격이 안 바뀐다"는 증상의 진짜 근본 원인이다.
+        // 이제 웹소켓 연결 여부와 무관하게, 종목별로 "마지막 갱신 후 얼마나 지났는지"를 확인해서
+        // 15초 이상 갱신이 안 된 종목만 골라 REST로 보완한다 (활발히 거래되는 종목은 웹소켓이
+        // 계속 최신 상태로 유지해줄 것이므로 이 조건에 걸리지 않아 REST 호출 자체가 안 생긴다).
+        const STALE_THRESHOLD_MS = 15000;
+        const now = Date.now();
         const currentStocks = stocksRef.current;
         if (currentStocks.length === 0) return;
 
-        const updatedStocks = await Promise.all(currentStocks.map(async (s) => {
+        const targetStocks = wsConnectionStatusRef.current === 'open'
+          ? currentStocks.filter(s => {
+              const lastUpdate = lastWsTickAtRef.current[s.symbol] || 0;
+              return now - lastUpdate >= STALE_THRESHOLD_MS;
+            })
+          : currentStocks;
+        if (targetStocks.length === 0) return;
+
+        const updatedTargets = await Promise.all(targetStocks.map(async (s) => {
           try {
             const priceData = await kisService.getPrice(s.symbol);
             if (priceData && priceData.current > 0) {
@@ -6427,7 +6447,12 @@ priceData.current
           }
           return { ...s };
         }));
-        
+
+        // 🛡️ updatedTargets는 "이번에 REST로 새로 조회한 일부 종목"만 담고 있다. 나머지(웹소켓으로
+        // 이미 최신 상태인) 종목은 그대로 두고, 이번에 갱신된 것만 병합한다.
+        const targetPriceMap = new Map<string, Stock>(updatedTargets.map(s => [s.symbol, s]));
+        const updatedStocks = currentStocks.map(s => targetPriceMap.get(s.symbol) || s);
+
         setStocks(updatedStocks);
 
         // 🛡️ 매우 중요한 수정: 지금까지 이 함수는 stocks 배열만 갱신하고 scalperInventory는
