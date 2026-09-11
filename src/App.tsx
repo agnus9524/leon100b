@@ -1248,6 +1248,13 @@ export default function App() {
     }
     return localStorage.getItem('sleek_last_symbol_KR') || '073240';
   });
+  // 🛡️ syncAllPrices/syncSelectedPrice/syncLiveOrderbook을 감싸는 effect가 종목을 클릭할 때마다
+  // (selectedSymbol이 바뀔 때마다) 통째로 재시작되면, 등록된 전체 종목을 25초마다 갱신해야 할
+  // syncAllPrices의 타이머가 클릭할 때마다 리셋되어 버려서 한 번도 제대로 실행되지 못하는 문제가
+  // 있었다 — "선택 안 한 종목은 가격이 안 바뀐다"는 증상의 진짜 근본 원인이었을 가능성이 높다.
+  // ref로 참조하면 effect의 dependency array에서 selectedSymbol을 뺄 수 있어 이 문제가 해결된다.
+  const selectedSymbolRef = React.useRef(selectedSymbol);
+  useEffect(() => { selectedSymbolRef.current = selectedSymbol; }, [selectedSymbol]);
   const [balance, setBalance] = useState(0); // User's money (will be synced via KIS)
   const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
   const [orderableKrw, setOrderableKrw] = useState<number>(() => {
@@ -6487,13 +6494,14 @@ priceData.current
       if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음
       if (!isKoreanMarketOpen()) return; // 🕘 정규장 외 시간에는 조회하지 않음
       if (wsConnectionStatusRef.current === 'open') return; // 웹소켓이 이미 실시간으로 갱신 중이면 REST 중단
-      if (!selectedSymbol) return;
+      const currentSelectedSymbol = selectedSymbolRef.current;
+      if (!currentSelectedSymbol) return;
       try {
-        const priceData = await kisService.getPrice(selectedSymbol);
+        const priceData = await kisService.getPrice(currentSelectedSymbol);
         if (priceData && priceData.current > 0) {
           const realPrice = priceData.current;
           setStocks(prev => prev.map(s => {
-            if (s.symbol !== selectedSymbol) return s;
+            if (s.symbol !== currentSelectedSymbol) return s;
             const newHistory = Array.isArray(s.history) ? [...s.history] : [];
             if (newHistory.length > 0) {
               newHistory[newHistory.length - 1] = {
@@ -6520,7 +6528,7 @@ priceData.current
           }));
         }
       } catch (innerErr: any) {
-        console.warn(`Fast price sync failed for ${selectedSymbol}:`, innerErr);
+        console.warn(`Fast price sync failed for ${currentSelectedSymbol}:`, innerErr);
       }
     };
 
@@ -6531,19 +6539,20 @@ priceData.current
 
   if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음
   if (!isKoreanMarketOpen()) return; // 🕘 정규장 외 시간에는 호가가 안 움직이므로 조회하지 않음
-  if (!selectedSymbol) return;
+  const currentSelectedSymbol = selectedSymbolRef.current;
+  if (!currentSelectedSymbol) return;
 
   // 🔄 호가창 UI는 "현재 선택된 종목" 하나만 화면에 보여준다. 예전에는 등록된 종목 전체(예: 8개)를
   // 5초마다 전부 조회하고 있었는데, 선택되지 않은 종목들의 호가 데이터(liveOrderbooks, 복수형)는
   // 실제로 어디서도 읽히지 않는 완전한 낭비 호출이었다. 선택된 종목 하나만 조회하도록 좁혀서
   // 호출 횟수를 최대 (등록 종목 수)배 줄인다.
   try {
-    const ob = await kisService.fetchLiveOrderbook(selectedSymbol);
+    const ob = await kisService.fetchLiveOrderbook(currentSelectedSymbol);
     if (ob) {
       setLiveOrderbook(ob);
     }
   } catch (e) {
-    console.warn(`Live orderbook fetch failed for ${selectedSymbol}`, e);
+    console.warn(`Live orderbook fetch failed for ${currentSelectedSymbol}`, e);
   }
 };
 
@@ -6576,7 +6585,7 @@ priceData.current
       if (orderbookInterval) clearInterval(orderbookInterval);
       if (kisSyncInterval) clearInterval(kisSyncInterval);
     };
-  }, [kisConfig.isConnected, marketType, selectedSymbol, isGapBotActive]);
+  }, [kisConfig.isConnected, marketType, isGapBotActive]);
 
   // ============================================================
   // 🛡️ 등록된 전체 종목의 전략센서(RSI 포함) 계산 전용 갱신 — API 호출 없음
