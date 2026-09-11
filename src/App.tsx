@@ -4761,14 +4761,10 @@ setGapInventory(nextInv);
       ]);
 
       try {
-        let volumeLeaders: any[], fluctuationLeaders: any[];
-        try {
-          [volumeLeaders, fluctuationLeaders] = await fetchRanking();
-        } catch (firstErr) {
-          console.warn('[추천 조회 1차 시도 실패, 5초 후 재시도]', firstErr);
-          await new Promise(r => setTimeout(r, 5000));
-          [volumeLeaders, fluctuationLeaders] = await fetchRanking(); // 2차 시도 — 여기서도 실패하면 아래 catch로 빠짐
-        }
+        // 🛡️ 재시도 로직 제거 — 큐가 이미 붐벼서 실패하는 상황에서, 5초 후 재시도는 그 붐비는
+        // 큐에 요청을 또 하나 얹는 것과 같아서 오히려 상황을 악화시켰다. 1차 시도로 끝내고
+        // 실패하면 바로 아래 2순위(추적 종목 풀)로 넘어간다.
+        const [volumeLeaders, fluctuationLeaders] = await fetchRanking();
 
         // symbol 기준으로 병합 (중복 제거) — 두 순위에 모두 등장하는 종목이 특히 유의미한 후보
         const mergedMap = new Map<string, { symbol: string; name: string; price: number; changePercent: number; volume: string }>();
@@ -6792,7 +6788,10 @@ priceData.current
       // 🛡️ 20종목이 이미 실시간 폴링 중인 상태에서 너무 자주 부르면 요청 큐가 밀려서
       // 타임아웃(ranking_timeout)이 나기 쉽다. 1분으로 단축했으니, 만약 타임아웃/부하 문제가
       // 다시 나타나면 이 값을 다시 늘려야 한다.
-      const AUTO_FILL_CHECK_INTERVAL_MS = 1 * 60 * 1000;
+      // 🛡️ 1분 주기가 15종목으로 줄인 후에도 여전히 ranking_timeout을 자주 유발해서, 부하를
+      // 줄이기 위해 5분으로 다시 늘린다. 빈 슬롯이 몇 분 늦게 채워지는 것보다, 큐가 계속
+      // 막혀서 다른 API 호출(매수/매도 포함)까지 영향받는 게 더 문제이기 때문이다.
+      const AUTO_FILL_CHECK_INTERVAL_MS = 5 * 60 * 1000;
       const now = Date.now();
       if (now - lastAutoFillAttemptRef.current < AUTO_FILL_CHECK_INTERVAL_MS) return;
       lastAutoFillAttemptRef.current = now;
