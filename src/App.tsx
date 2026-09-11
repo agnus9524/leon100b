@@ -6396,10 +6396,6 @@ priceData.current
   // Real-time Stock Price & Orderbook Sync Interval
   useEffect(() => {
     if (!isAppInitialized) return;
-    let slowInterval: ReturnType<typeof setInterval>;
-    let fastInterval: ReturnType<typeof setInterval>;
-    let orderbookInterval: ReturnType<typeof setInterval>;
-    let kisSyncInterval: ReturnType<typeof setInterval>;
 
     // 1. Sync for all watchlist stocks (every 10 seconds)
     const syncAllPrices = async () => {
@@ -6566,24 +6562,23 @@ priceData.current
     // syncLiveOrderbook(5초마다)도 같은 큐를 나눠 쓴다. 한 주기(T초) 안에 처리해야 하는 총 호출 수는
     // 대략 N(등록종목) + T/2 + T/5 이고, 이게 600ms×호출수 ≤ T초를 만족해야 다음 주기와 안 겹친다.
     // N=25일 때 필요한 최소 주기는 약 26초(N×0.6/0.58) — 여유를 두고 30초로 설정한다.
-    slowInterval = setInterval(syncAllPrices, 25000); // 웹소켓 백업용 REST 폴링 — 웹소켓이 이미 대부분을 커버하므로 여유 있는 주기
-    fastInterval = setInterval(syncSelectedPrice, 2000);
-    orderbookInterval = setInterval(syncLiveOrderbook, 5000);
-
-    if (kisConfig.isConnected) {
-      // 🛡️ 20종목이 큐를 붐비게 하는 상황에서는 sync 한 번(잔고+주문가능금액 조회)이 10초를
-      // 넘기기 쉬워서, 다음 10초 주기가 오면 이전 sync가 아직 안 끝나 계속 "SYNC SKIPPED"가
-      // 반복 출력되고 있었다. 20초로 늘려서 sync가 완료될 시간을 넉넉히 준다.
-      kisSyncInterval = setInterval(() => {
-        handleSyncKIS();
-      }, 20000);
-    }
+    // 🔗 예전엔 syncAllPrices(25초)/syncSelectedPrice(2초)/syncLiveOrderbook(5초)/handleSyncKIS(20초)가
+    // 각자 별도의 setInterval로 따로 관리되고 있었다. 이렇게 흩어져 있으면 effect를 손볼 때마다
+    // 의존성 배열을 전부 다시 점검해야 하고, 실제로 바로 앞에서 "selectedSymbol이 의존성에 남아있어
+    // 종목 클릭할 때마다 전부 재시작된다"는 버그가 여기서 나왔다. 이제 하나의 마스터 틱(1초)으로
+    // 통합하고, 카운터로 각자의 주기를 맞춘다 — 관리 지점이 하나로 줄어들어 같은 종류의 실수가
+    // 재발할 여지가 줄어든다.
+    let masterTickCount = 0;
+    const masterInterval = setInterval(() => {
+      masterTickCount += 1;
+      if (masterTickCount % 2 === 0) syncSelectedPrice();          // 2초마다
+      if (masterTickCount % 5 === 0) syncLiveOrderbook();          // 5초마다
+      if (masterTickCount % 20 === 0 && kisConfig.isConnected) handleSyncKIS(); // 20초마다
+      if (masterTickCount % 25 === 0) syncAllPrices();             // 25초마다 — 계산 근거는 위 주석 참고
+    }, 1000);
 
     return () => {
-      if (slowInterval) clearInterval(slowInterval);
-      if (fastInterval) clearInterval(fastInterval);
-      if (orderbookInterval) clearInterval(orderbookInterval);
-      if (kisSyncInterval) clearInterval(kisSyncInterval);
+      clearInterval(masterInterval);
     };
   }, [kisConfig.isConnected, marketType, isGapBotActive]);
 
