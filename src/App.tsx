@@ -2451,6 +2451,7 @@ setGapInventory(nextInv);
   const autoSellInFlightRef = React.useRef<Set<string>>(new Set());
   const isExecutingRef = React.useRef<boolean>(false);
   const pendingTradeKeysRef = React.useRef<Set<string>>(new Set());
+  const duplicateBlockLoggedAtRef = React.useRef<Record<string, number>>({});
 
   // ============================================================
   // 🛑 네트워크/API 과부하 시 자동 정지 안전장치
@@ -8800,6 +8801,15 @@ useEffect(() => {
     const tradeLockKey = `${stock.symbol}_${action}`;
     if (pendingTradeKeysRef.current.has(tradeLockKey)) {
       console.warn(`[중복 주문 방지] ${stock.symbol} ${action} 주문이 이미 진행 중입니다.`);
+      // 🛡️ 예전엔 콘솔 경고만 하고 GLOBAL TRADE LOGS엔 아무것도 안 남았다. KIS 응답이 느려지면
+      // (큐 혼잡, 재시도 등) 이전 시도가 몇 초씩 진행 중일 수 있는데, 그 사이 엔진 루프가 계속
+      // 돌면서 매번 조용히 여기 막혀서 "진입 메시지는 뜨는데 실제 주문은 하나도 안 되는" 것처럼
+      // 보일 수 있었다. 로그가 도배되지 않도록 같은 종목당 3초에 한 번만 남긴다.
+      const lastLoggedAt = duplicateBlockLoggedAtRef.current[tradeLockKey] || 0;
+      if (Date.now() - lastLoggedAt > 3000) {
+        duplicateBlockLoggedAtRef.current[tradeLockKey] = Date.now();
+        addLog(stock.symbol, action === 'SELL' ? '매도' : '매수', stock.price, amount, `[대기중] 이전 ${action === 'BUY' ? '매수' : '매도'} 주문이 아직 KIS 응답을 기다리는 중이라 이번 시도는 건너뜁니다.`);
+      }
       return 0;
     }
     pendingTradeKeysRef.current.add(tradeLockKey);
