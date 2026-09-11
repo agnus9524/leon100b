@@ -854,7 +854,7 @@ interface NewsItem {
 //   20(전체종목) + T/2000(선택종목) + T/5000(호가) 건
 // 이걸 600ms×건수로 처리하는 시간이 T보다 작아야 밀리지 않는다: (20 + 0.3T/1000 + 0.12T/1000)×600 ≤ T
 // → T ≥ 약 20.7초. 여유를 두어 25초로 설정했다 (아래 syncAllPrices 주기 참고).
-const MAX_INVENTORY_PER_MARKET = 10;
+const MAX_INVENTORY_PER_MARKET = 5;
 
 const INITIAL_STOCKS_KR: Stock[] = [
   {
@@ -6398,25 +6398,14 @@ priceData.current
       if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음 (연동 전 에러 스팸 방지)
       if (!isKoreanMarketOpen()) return; // 🕘 정규장(평일 09:00~15:30) 외 시간에는 가격이 안 움직이므로 호출하지 않음
       try {
-        // 🛡️ 매우 중요한 수정: 예전엔 웹소켓이 열려있으면 REST를 통째로 꺼버렸는데, 웹소켓은
-        // "실제 체결이 발생한 종목"에 대해서만 tick을 보낸다. 거래가 뜸한 종목은 웹소켓에서도
-        // 데이터가 안 오고 REST도 꺼져있으니, 그 종목의 가격이 등록 당시 값에 영원히 고정되는
-        // 문제가 있었다 — 이게 "선택 안 한 종목은 가격이 안 바뀐다"는 증상의 진짜 근본 원인이다.
-        // 이제 웹소켓 연결 여부와 무관하게, 종목별로 "마지막 갱신 후 얼마나 지났는지"를 확인해서
-        // 15초 이상 갱신이 안 된 종목만 골라 REST로 보완한다 (활발히 거래되는 종목은 웹소켓이
-        // 계속 최신 상태로 유지해줄 것이므로 이 조건에 걸리지 않아 REST 호출 자체가 안 생긴다).
-        const STALE_THRESHOLD_MS = 15000;
-        const now = Date.now();
+        // 🛡️ 웹소켓 연결 여부에 따라 REST 대상을 골라내는 복잡한 로직(stale 판단 등)을 완전히
+        // 제거했다. 인벤토리를 5종목까지 줄였으니, 웹소켓 상태와 무관하게 항상 등록된 전체
+        // 종목을 REST로 직접 갱신해도 부하 걱정이 없다 — "선택 안 한 종목은 가격이 안 바뀐다"는
+        // 문제를 웹소켓 의존 없이 가장 확실하게 해결하는 방법이다.
         const currentStocks = stocksRef.current;
         if (currentStocks.length === 0) return;
 
-        const targetStocks = wsConnectionStatusRef.current === 'open'
-          ? currentStocks.filter(s => {
-              const lastUpdate = lastWsTickAtRef.current[s.symbol] || 0;
-              return now - lastUpdate >= STALE_THRESHOLD_MS;
-            })
-          : currentStocks;
-        if (targetStocks.length === 0) return;
+        const targetStocks = currentStocks;
 
         const updatedTargets = await Promise.all(targetStocks.map(async (s) => {
           try {
@@ -6559,7 +6548,7 @@ priceData.current
     // syncLiveOrderbook(5초마다)도 같은 큐를 나눠 쓴다. 한 주기(T초) 안에 처리해야 하는 총 호출 수는
     // 대략 N(등록종목) + T/2 + T/5 이고, 이게 600ms×호출수 ≤ T초를 만족해야 다음 주기와 안 겹친다.
     // N=25일 때 필요한 최소 주기는 약 26초(N×0.6/0.58) — 여유를 두고 30초로 설정한다.
-    slowInterval = setInterval(syncAllPrices, 25000); // 20종목 기준 안전 주기 — 계산 근거는 MAX_INVENTORY_PER_MARKET 선언부 주석 참고
+    slowInterval = setInterval(syncAllPrices, 8000); // 5종목 기준 — 5×600ms≈3초면 한 사이클 완료되므로 8초 주기로도 안전하게 여유 있음
     fastInterval = setInterval(syncSelectedPrice, 2000);
     orderbookInterval = setInterval(syncLiveOrderbook, 5000);
 
