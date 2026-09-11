@@ -8551,9 +8551,17 @@ useEffect(() => {
                   scaledQuantity = Math.max(1, Math.min(totalAffordableQty, Math.floor(totalAffordableQty / remainingSlots) || 1));
                 }
                 const scaledCost = priceInKrw * scaledQuantity;
+                // 🛡️ balance(화면 표시용) 대신 실제 KIS 매수가능금액(orderableKrw)을 우선 참조한다 —
+                // balance가 동기화 지연 등으로 stale할 수 있어서 실제와 다르게 차단될 수 있었다.
+                const effectiveCash = orderableKrw > 0 ? orderableKrw : balance;
 
-                if (balance < scaledCost) {
-                  if (isSelected) setScalperMessage(`[매수 차단] 예수금 부족 (필요: ${formatCurrency(scaledCost)})`);
+                if (effectiveCash < scaledCost) {
+                  // 🛡️ 예전엔 isSelected일 때만 메시지를 남겨서, 선택 안 한 종목이 여기 걸리면
+                  // 로그 한 줄 없이 조용히 매수 시도가 중단되고 있었다. 이제는 선택 여부와 무관하게
+                  // 항상 GLOBAL TRADE LOGS에 남긴다 — "BUY_READY까지 갔는데 그 다음이 안 보인다"는
+                  // 문제의 정확한 원인 중 하나였다.
+                  if (isSelected) setScalperMessage(`[매수 차단] 예수금 부족 (필요: ${formatCurrency(scaledCost)}, 보유: ${formatCurrency(effectiveCash)})`);
+                  addLog(stockItem.symbol, '매수', targetBuyPrice, scaledQuantity, `[매수차단] 예수금 부족 — 필요 ${formatCurrency(scaledCost)}, 실제 매수가능 ${formatCurrency(effectiveCash)}`);
                   break;
                 }
 
