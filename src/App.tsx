@@ -1256,6 +1256,10 @@ export default function App() {
   const selectedSymbolRef = React.useRef(selectedSymbol);
   useEffect(() => { selectedSymbolRef.current = selectedSymbol; }, [selectedSymbol]);
   const [balance, setBalance] = useState(0); // User's money (will be synced via KIS)
+  // 🛡️ balance가 바뀔 때마다(계좌 동기화 등) 메인 매매 엔진 루프의 effect가 재시작되지 않도록
+  // ref로도 추적한다 — 루프 안에서는 항상 최신값을 ref로 읽고, effect의 dependency에서는 뺀다.
+  const balanceRef = React.useRef(balance);
+  useEffect(() => { balanceRef.current = balance; }, [balance]);
   const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
   const [orderableKrw, setOrderableKrw] = useState<number>(() => {
     const saved = localStorage.getItem('sleek_orderable_krw');
@@ -1298,6 +1302,9 @@ export default function App() {
   const [holdings, setHoldings] = useState<Record<string, number>>(() => {
     try { return JSON.parse(localStorage.getItem('sleek_holdings') || '{}'); } catch { return {}; }
   });
+  // 🛡️ holdings가 바뀔 때마다 메인 매매 엔진 루프가 재시작되지 않도록 ref로도 추적
+  const holdingsRef = React.useRef(holdings);
+  useEffect(() => { holdingsRef.current = holdings; }, [holdings]);
 
   // Track recently traded symbols to prevent race conditions during KIS balance polling lag
   const recentLocalTradesRef = React.useRef<Record<string, { timestamp: number; quantity: number; avgPrice: number }>>({});
@@ -8302,6 +8309,19 @@ useEffect(() => {
         setScalperMessage("장 마감 (정규장 09:00~15:30 KST 외 — 감시 대기 중)");
         return;
       }
+      // 🛡️ 매우 중요한 수정: 이 값들(selectedStock/balance/holdings/activeTabId)이 effect의
+      // dependency array에 있으면, 선택된 종목의 가격이 바뀌거나(초당 여러 번 가능) 계좌가
+      // 동기화될 때마다(20초마다) 이 매매 엔진 루프 전체가 재시작(clearInterval → 새
+      // setInterval)되어, scalpingSpeed로 설정한 주기를 제대로 못 지키고 판단이 계속 끊기고
+      // 있었다. "매수 메시지는 뜨는데 실제 주문은 안 들어간다", "선택 안 한 종목은 감시가 안
+      // 되는 것 같다"는 증상들이 전부 이 하나의 원인에서 나왔을 가능성이 매우 높다. 이제
+      // dependency array에서 이 값들을 빼고, 매 tick마다 ref에서 최신값을 직접 읽어와서 기존
+      // 변수명 그대로 로컬 상수로 캡처한다 (아래 기존 로직은 전혀 손대지 않아도 그대로 최신값을
+      // 쓰게 된다).
+      const selectedStock = stocksRef.current.find(s => s.symbol === selectedSymbolRef.current) || null;
+      const balance = balanceRef.current;
+      const holdings = holdingsRef.current;
+      const activeTabId = activeTabIdRef.current;
       isExecutingRef.current = true;
       try {
         // 내가 '스타트'한 종목(스캘핑 탭에서 isBotActive가 true이거나 현재 활성 탭이 시작된 종목)만 선별
@@ -8797,7 +8817,7 @@ useEffect(() => {
     }, Math.max(1000, scalpingSpeed));
 
     return () => clearInterval(gapInterval);
-  }, [isGapBotActive, selectedSymbol, selectedStock?.price, gapBuyPrice, gapSellPrice, tradeQuantity, balance, marketType, exchangeRate, kisConfig.isConnected, holdings, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, entryPriceMode, lowestBidOnlyMode, maxSlots, allowSamePriceEntry, enableCombinedAvgProfitExit, detectStockStrategies]);
+  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, marketType, exchangeRate, kisConfig.isConnected, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, entryPriceMode, lowestBidOnlyMode, maxSlots, allowSamePriceEntry, enableCombinedAvgProfitExit, detectStockStrategies]);
 
   const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number, buyPrice?: number, slotId?: string, exitReason?: ExitReason, entryReason?: string): Promise<number> => {
     if (action === 'HOLD' || amount <= 0) return 0;
