@@ -854,7 +854,7 @@ interface NewsItem {
 //   20(전체종목) + T/2000(선택종목) + T/5000(호가) 건
 // 이걸 600ms×건수로 처리하는 시간이 T보다 작아야 밀리지 않는다: (20 + 0.3T/1000 + 0.12T/1000)×600 ≤ T
 // → T ≥ 약 20.7초. 여유를 두어 25초로 설정했다 (아래 syncAllPrices 주기 참고).
-const MAX_INVENTORY_PER_MARKET = 15;
+const MAX_INVENTORY_PER_MARKET = 10;
 
 const INITIAL_STOCKS_KR: Stock[] = [
   {
@@ -8473,13 +8473,13 @@ useEffect(() => {
           const stockHoldingsQty = holdings[stockItem.symbol] || 0;
           const inFlightBuyCount = buyingLockPricesRef.current.filter(p => p.symbol === stockItem.symbol).length;
           const pendingBuyCount = pendingBuyOrdersRef.current.filter(p => p.symbol === stockItem.symbol).length;
-          const currentInvCount = isSelected ? currentInventory.length : (stockHoldingsQty > 0 ? 1 : 0);
+          const currentInvCount = currentInventory.length;
           const totalOccupied = currentInvCount + pendingBuyCount + inFlightBuyCount;
 
           const isAll4SensorsFullEntry = isAll4SensorsOn && totalOccupied < itemMaxSlots;
 
           const isSamePriceBlocked = !allowSamePriceEntry && !isAll4SensorsFullEntry && (
-            (isSelected && currentInventory.some(slot => Math.abs(slot.price - targetBuyPrice) < tickSize * 0.95)) ||
+            currentInventory.some(slot => Math.abs(slot.price - targetBuyPrice) < tickSize * 0.95) ||
             pendingBuyOrdersRef.current.some(p => p.symbol === stockItem.symbol && Math.abs(p.orderPrice - targetBuyPrice) < tickSize * 0.95) ||
             buyingLockPricesRef.current.some(p => p.symbol === stockItem.symbol && Math.abs(p.price - targetBuyPrice) < tickSize * 0.95)
           );
@@ -8540,7 +8540,7 @@ useEffect(() => {
               for (let i = 0; i < slotsToBuy; i++) {
                 const inFlightNow = buyingLockPricesRef.current.filter(p => p.symbol === stockItem.symbol).length;
                 const pendingNow = pendingBuyOrdersRef.current.filter(p => p.symbol === stockItem.symbol).length;
-                const currentTotalOccupied = (isSelected ? gapInventoryRef.current.length : (holdings[stockItem.symbol] > 0 ? 1 : 0)) + pendingNow + inFlightNow;
+                const currentTotalOccupied = (isSelected ? gapInventoryRef.current.length : (tabItem.gapInventory || []).length) + pendingNow + inFlightNow;
 
                 if (currentTotalOccupied >= itemMaxSlots) break;
 
