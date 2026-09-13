@@ -54,18 +54,6 @@ export interface IntegratedTradingHeaderProps {
   setEntryPriceMode: (m: any) => void;
   scalpingSpeed: number;
   setScalpingSpeed: (s: number) => void;
-  orderBookData: {
-    askLevels: number[];
-    askVolumes: number[];
-    bidLevels: number[];
-    bidVolumes: number[];
-    maxLevelVol: number;
-    totalAskVolume: number;
-    totalBidVolume: number;
-    askPctVal: number;
-    bidPctVal: number;
-    isRealData?: boolean;
-  } | null;
   gapBuyPrice: number;
   gapSellPrice: number;
   isScalperRecLoading: boolean;
@@ -147,7 +135,6 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
   setEntryPriceMode,
   scalpingSpeed,
   setScalpingSpeed,
-  orderBookData,
   gapBuyPrice,
   gapSellPrice,
   isScalperRecLoading,
@@ -536,106 +523,6 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
               );
             })}
           </div>
-        </div>
-
-      {/* 2번째 반응형 창 — 실시간 잔량 호가창 (4호가) */}
-
-        <div className="w-full bg-black/40 rounded-2xl border border-sleek-border p-2 flex flex-col justify-between min-w-0 space-y-1 shadow-inner">
-          <div>
-            <div className="flex items-center justify-between pb-1 border-b border-white/10 mb-1">
-              <span className="text-[10.5px] font-black text-slate-300 uppercase tracking-wider flex items-center gap-1">
-                <Activity className="w-3 h-3 text-sleek-blue" />
-                실시간 잔량 호가창 (4호가)
-                {orderBookData?.isRealData && (
-                  <span className="text-[8.5px] px-1 rounded bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30 font-mono">
-                    LIVE
-                  </span>
-                )}
-              </span>
-              {selectedStock && (
-                <span className="text-[9.5px] font-mono text-slate-400 truncate max-w-[80px]">
-                  {selectedStock.symbol}
-                </span>
-              )}
-            </div>
-
-            {orderBookData && selectedStock ? (
-              <>
-                {/* Ask Levels (매도 4~1호가) */}
-                <div className="space-y-0.5">
-                  {orderBookData.askLevels.map((lvlPrice, idx) => {
-                    const vol = orderBookData.askVolumes[idx];
-                    const isBoundary = gapSellPrice > 0 && lvlPrice >= gapSellPrice;
-                    const barPct = Math.min(100, Math.round((vol / orderBookData.maxLevelVol) * 100));
-                    return (
-                      <div key={`top-ask-${idx}`} className="flex items-center justify-between h-3.5 px-1 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
-                        <div className="absolute right-0 top-0 bottom-0 bg-sky-500/30 border-l border-sky-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
-                        <span className="w-11 shrink-0 text-[8.5px] text-sky-400 font-bold font-sans z-10 whitespace-nowrap">매도 {4 - idx}</span>
-                        <span className={cn(
-                          "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[9.5px] whitespace-nowrap px-0.5",
-                          isBoundary ? "text-amber-400 font-black underline decoration-sky-400" : "text-sky-200"
-                        )}>
-                          {formatCurrency(lvlPrice)}
-                        </span>
-                        <span className="w-12 shrink-0 text-right text-sky-100 font-bold font-mono tabular-nums text-[8.5px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* 현재 체결가 — 매도호가와 매수호가 사이 중앙에 크게 표시 */}
-                <div className="my-1 py-1.5 px-2 bg-white/5 border-y border-white/10 flex items-center justify-center gap-2 rounded">
-                  <span className="text-[9px] font-bold text-slate-400 uppercase shrink-0">현재 체결가</span>
-                  <span className={cn(
-                    "font-black text-lg font-mono tabular-nums",
-                    (selectedStock?.change || 0) >= 0 ? "text-rose-400" : "text-sky-400"
-                  )}>
-                    {formatCurrency(selectedStock?.price || 0)}
-                  </span>
-                </div>
-
-                {/* Bid Levels (매수 1~4호가) */}
-                <div className="space-y-0.5">
-                  {orderBookData.bidLevels.map((lvlPrice, idx) => {
-                    const vol = orderBookData.bidVolumes[idx];
-                    const isBoundary = gapBuyPrice > 0 && lvlPrice <= gapBuyPrice;
-                    const barPct = Math.min(100, Math.round((vol / orderBookData.maxLevelVol) * 100));
-                    return (
-                      <div key={`top-bid-${idx}`} className="flex items-center justify-between h-3.5 px-1 rounded hover:bg-white/5 transition-all relative overflow-hidden group font-mono tabular-nums text-xs">
-                        <div className="absolute right-0 top-0 bottom-0 bg-rose-500/30 border-l border-rose-400/60 pointer-events-none transition-all duration-300" style={{ width: `${barPct}%` }} />
-                        <span className="w-11 shrink-0 text-[8.5px] text-rose-400 font-bold font-sans z-10 whitespace-nowrap">매수 {idx + 1}</span>
-                        <span className={cn(
-                          "flex-1 text-right font-bold z-10 font-mono tabular-nums text-[9.5px] whitespace-nowrap px-0.5",
-                          isBoundary ? "text-amber-400 font-black underline decoration-rose-400" : "text-rose-200"
-                        )}>
-                          {formatCurrency(lvlPrice)}
-                        </span>
-                        <span className="w-12 shrink-0 text-right text-rose-100 font-bold font-mono tabular-nums text-[8.5px] z-10 whitespace-nowrap">{formatQuantity(vol)}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              </>
-            ) : (
-              <div className="py-8 text-center text-slate-500 text-xs font-mono">
-                종목 선택 대기 중
-              </div>
-            )}
-          </div>
-
-          {/* Order Book Pressure Gauge */}
-          {orderBookData && selectedStock && (
-            <div className="pt-0.5 border-t border-white/5 space-y-0.5">
-              <div className="flex justify-between text-[8px] text-slate-400 font-bold font-sans">
-                <span className="text-sky-400">매도 {formatQuantity(orderBookData.totalAskVolume)} ({orderBookData.askPctVal}%)</span>
-                <span className="text-rose-400">매수 {formatQuantity(orderBookData.totalBidVolume)} ({orderBookData.bidPctVal}%)</span>
-              </div>
-              <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden flex">
-                <div className="h-full bg-sky-400 transition-all duration-300" style={{ width: `${orderBookData.askPctVal}%` }} />
-                <div className="h-full bg-rose-400 transition-all duration-300" style={{ width: `${orderBookData.bidPctVal}%` }} />
-              </div>
-            </div>
-          )}
         </div>
 
       {/* 4번째 반응형 창 — START AI SCALPER */}

@@ -358,6 +358,19 @@ interface Stock {
 // 서버/브라우저가 어느 타임존에서 돌아가든 항상 정확한 한국시간 기준으로 판단하기 위해
 // Intl.DateTimeFormat으로 KST 요일/시/분을 직접 계산한다 (new Date().getHours() 등은 로컬
 // 타임존에 좌우되어 배포 환경에 따라 틀릴 수 있다).
+// 🕘 한국 정규장(평일 09:00~15:30 KST) + 2026-09-14부터 신설되는 KRX 애프터마켓(16:00~20:00) 여부 판단.
+// 서버/브라우저가 어느 타임존에서 돌아가든 항상 정확한 한국시간 기준으로 판단하기 위해
+// Intl.DateTimeFormat으로 KST 요일/시/분/날짜를 직접 계산한다.
+//
+// [2026.09.08 공지 반영] KRX 거래시간 확대 및 NXT 제도 변경(9/14 시행):
+//   - 정규장: 09:00~15:20, 종가단일가 15:20~15:30 (기존과 동일, 안 바뀜)
+//   - 15:30~16:00: 장후 시간외종가 구간 — 이 시간엔 실질적인 스캘핑 거래가 의미 없어 휴장으로 취급
+//   - 16:00~20:00: KRX 애프터마켓 신설(9/14부터) — NXT는 기존에도 있었으나 KRX는 이번에 새로 생김
+//   - ⚠️ 주의: KRX는 정규장 마감 후 미체결 주문이 자동 취소된다. 즉 정규장에서 애프터마켓으로
+//     넘어갈 때 이전 미체결 주문은 이미 사라진 것으로 간주해야 하고, 애프터마켓에서 다시 새로
+//     주문을 넣어야 한다 (이 시점의 매매 로직/슬롯 관리는 별도로 세션 전환을 인지해야 할 수 있음).
+const KRX_AFTERMARKET_LAUNCH_KST = '2026-09-14'; // 이 날짜(포함) 이후부터 애프터마켓 거래 허용
+
 const isKoreanMarketOpen = (): boolean => {
   const kstFormatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Seoul',
@@ -374,9 +387,22 @@ const isKoreanMarketOpen = (): boolean => {
   if (weekday === 'Sat' || weekday === 'Sun') return false; // 주말은 휴장 (공휴일까지는 별도 캘린더가 없어 반영하지 못함)
 
   const minutesNow = hour * 60 + minute;
-  const marketOpen = 9 * 60;        // 09:00
-  const marketClose = 15 * 60 + 30; // 15:30
-  return minutesNow >= marketOpen && minutesNow <= marketClose;
+
+  // 정규장 (09:00 ~ 15:30, 종가단일가 포함) — 기존과 동일
+  const regularOpen = 9 * 60;
+  const regularClose = 15 * 60 + 30;
+  const isRegularSession = minutesNow >= regularOpen && minutesNow <= regularClose;
+  if (isRegularSession) return true;
+
+  // KRX 애프터마켓 (16:00 ~ 20:00) — 2026-09-14부터 신설. 그 전까지는 이 시간대에 거래하지 않는다.
+  const afterMarketOpen = 16 * 60;
+  const afterMarketClose = 20 * 60;
+  const isAfterMarketSession = minutesNow >= afterMarketOpen && minutesNow <= afterMarketClose;
+  if (!isAfterMarketSession) return false;
+
+  const kstDateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Seoul' }); // en-CA → YYYY-MM-DD
+  const todayKst = kstDateFormatter.format(new Date());
+  return todayKst >= KRX_AFTERMARKET_LAUNCH_KST;
 };
 
 // Utility function to get tick size by market and price
@@ -3104,78 +3130,6 @@ setGapInventory(nextInv);
     }
   }, [selectedStock, kisConfig.isConnected, kisBuyableQty, orderableKrw, orderableUsd, balance, exchangeRate]);
 
-  const orderBookData = useMemo(() => {
-    if (!selectedStock) return null;
-    const isUSStock = selectedStock.market === 'US' || /^[A-Za-z]/.test(selectedStock.symbol) || marketType === 'US';
-    const currentPrice = selectedStock.price;
-    const tickSize = getTickSize(currentPrice, isUSStock ? 'US' : 'KR');
-
-    // Use live real-time orderbook from KIS / Naver if available
-    if (
-      liveOrderbook && 
-      liveOrderbook.symbol === selectedStock.symbol && 
-      Array.isArray(liveOrderbook.askLevels) && 
-      liveOrderbook.askLevels.length > 0 &&
-      Array.isArray(liveOrderbook.bidLevels) &&
-      liveOrderbook.bidLevels.length > 0
-    ) {
-      const askVolumes = liveOrderbook.askVolumes || [0, 0, 0, 0];
-      const bidVolumes = liveOrderbook.bidVolumes || [0, 0, 0, 0];
-      const maxLevelVol = liveOrderbook.maxLevelVol || Math.max(...askVolumes, ...bidVolumes, 1);
-      const totalAskVolume = liveOrderbook.totalAskVolume || askVolumes.reduce((a: number, b: number) => a + b, 0);
-      const totalBidVolume = liveOrderbook.totalBidVolume || bidVolumes.reduce((a: number, b: number) => a + b, 0);
-      const totalDepth = (totalAskVolume + totalBidVolume) || 1;
-      const askPctVal = liveOrderbook.askPctVal || ((totalAskVolume / totalDepth) * 100).toFixed(1);
-      const bidPctVal = liveOrderbook.bidPctVal || ((totalBidVolume / totalDepth) * 100).toFixed(1);
-
-      return {
-        isUSStock,
-        currentPrice,
-        tickSize,
-        isRealData: true,
-        askLevels: liveOrderbook.askLevels,
-        bidLevels: liveOrderbook.bidLevels,
-        askVolumes,
-        bidVolumes,
-        maxLevelVol,
-        totalAskVolume,
-        totalBidVolume,
-        askPctVal,
-        bidPctVal
-      };
-    }
-
-    // Dynamic price level fallback when orderbook is initial loading
-    const askLevels = Array.from({ length: 4 }, (_, i) => 
-      isUSStock ? Number((currentPrice + (4 - i) * tickSize).toFixed(4)) : currentPrice + (4 - i) * tickSize
-    );
-    const bidLevels = Array.from({ length: 4 }, (_, i) => 
-      isUSStock ? Number((currentPrice - (i + 1) * tickSize).toFixed(4)) : currentPrice - (i + 1) * tickSize
-    );
-    const askVolumes = [0, 0, 0, 0];
-    const bidVolumes = [0, 0, 0, 0];
-    const maxLevelVol = 1;
-    const totalAskVolume = 0;
-    const totalBidVolume = 0;
-    const askPctVal = '50.0';
-    const bidPctVal = '50.0';
-
-    return {
-      isUSStock,
-      currentPrice,
-      tickSize,
-      isRealData: false,
-      askLevels,
-      bidLevels,
-      askVolumes,
-      bidVolumes,
-      maxLevelVol,
-      totalAskVolume,
-      totalBidVolume,
-      askPctVal,
-      bidPctVal
-    };
-  }, [selectedStock, liveOrderbook, marketType]);
   const totalValue = useMemo(() => {
     // Total Asset Valuation = Cash Balance + Current Market Value of Stock Holdings + Pending Order Reserves
     let stockValue = 0;
@@ -6761,19 +6715,23 @@ priceData.current
     const autoManageInventory = async () => {
       const marketOpen = isKoreanMarketOpen();
 
-      // ① 정규장 시작/종료 순간(엣지)을 감지해서 전 종목 봇을 한 번만 켜고/끈다
+      // ① 거래 가능 시간 시작/종료 순간(엣지)을 감지해서 전 종목 봇을 한 번만 켜고/끈다.
+      // isKoreanMarketOpen()은 정규장(09:00~15:30)과, 2026-09-14부터 신설되는 KRX 애프터마켓
+      // (16:00~20:00) 둘 다를 포함하므로, 정규장 마감(15:30) 시 자동 정지되고 — 이때 KRX 쪽
+      // 미체결 주문도 어차피 자동 취소되므로 자연스럽게 맞아떨어진다 — 애프터마켓 시작(16:00,
+      // 9/14부터) 시 자동으로 다시 시작된다.
       if (marketOpen && !wasMarketOpenRef.current) {
         setScalperInventory(prev => prev.map(item => ({ ...item, strategy: { ...item.strategy, isBotActive: true } })));
         setIsGapBotActive(true);
-        showNotification('[자동 시작] 정규장이 열려 등록된 전 종목의 스캘핑을 자동으로 시작합니다.', 'success');
+        showNotification('[자동 시작] 거래 가능 시간이 시작되어 등록된 전 종목의 스캘핑을 자동으로 시작합니다.', 'success');
       } else if (!marketOpen && wasMarketOpenRef.current) {
         setScalperInventory(prev => prev.map(item => ({ ...item, strategy: { ...item.strategy, isBotActive: false } })));
         setIsGapBotActive(false);
-        showNotification('[자동 종료] 정규장이 마감되어 스캘핑을 자동으로 정지합니다.', 'info');
+        showNotification('[자동 종료] 거래 가능 시간이 종료되어 스캘핑을 자동으로 정지합니다. (미체결 주문이 있다면 거래소 정책에 따라 취소될 수 있습니다)', 'info');
       }
       wasMarketOpenRef.current = marketOpen;
 
-      if (!marketOpen) return; // 장 마감 중엔 아래 슬롯 관리도 할 필요 없음
+      if (!marketOpen) return; // 거래 시간 외에는 아래 슬롯 관리도 할 필요 없음
 
       // ② 신호 없음(15분간 30점 미만) 종목 자동 제거 — 보유 물량 있으면 절대 제외
       const currentInventory = scalperTabsRef.current;
@@ -8306,7 +8264,7 @@ useEffect(() => {
     const gapInterval = setInterval(async () => {
       if (isExecutingRef.current) return;
       if (!isKoreanMarketOpen()) {
-        setScalperMessage("장 마감 (정규장 09:00~15:30 KST 외 — 감시 대기 중)");
+        setScalperMessage("장 마감 (정규장 09:00~15:30, 애프터마켓 16:00~20:00[9/14~] KST 외 — 감시 대기 중)");
         return;
       }
       // 🛡️ 매우 중요한 수정: 이 값들(selectedStock/balance/holdings/activeTabId)이 effect의
@@ -9894,7 +9852,6 @@ useEffect(() => {
                 setEntryPriceMode={setEntryPriceMode}
                 scalpingSpeed={scalpingSpeed}
                 setScalpingSpeed={setScalpingSpeed}
-                orderBookData={orderBookData}
                 gapBuyPrice={gapBuyPrice}
                 gapSellPrice={gapSellPrice}
                 isScalperRecLoading={isScalperRecLoading}
