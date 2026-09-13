@@ -2555,6 +2555,21 @@ setGapInventory(nextInv);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
   const [maxSlots, setMaxSlots] = useState<number>(10);
+  // 💰 종목당 목표 투자금액 — 추천종목이 인벤토리에 등록될 때(자동 채움/수동 클릭 모두), 이 금액에
+  // 맞춰 "가격 대비 수량"을 자동으로 계산한다. 예: 10,000원 설정 시 990원 종목은 10주, 4,900원
+  // 종목은 2주, 13,000원 종목은 1주로 각각 계산되어 투자금액이 비슷하게 맞춰진다.
+  const [targetInvestmentPerStock, setTargetInvestmentPerStock] = useState<number>(() => {
+    const saved = localStorage.getItem('sleek_target_investment_per_stock');
+    return saved !== null && !isNaN(Number(saved)) ? Number(saved) : 10000;
+  });
+  useEffect(() => {
+    localStorage.setItem('sleek_target_investment_per_stock', String(targetInvestmentPerStock));
+  }, [targetInvestmentPerStock]);
+  // 가격에 맞춰 수량 계산 — 최소 1주는 보장
+  const calcQuantityForTargetAmount = React.useCallback((price: number): number => {
+    if (!price || price <= 0 || targetInvestmentPerStock <= 0) return 1;
+    return Math.max(1, Math.floor(targetInvestmentPerStock / price));
+  }, [targetInvestmentPerStock]);
   const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(false); // 🛡️ 기본값을 안전한 쪽(차단)으로 변경 — 이전 기본값(true=차단 해제)은 "1주씩 연속 매수" 위험의 핵심 원인이었다
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
@@ -4979,7 +4994,10 @@ setGapInventory(nextInv);
       });
 
       openOrSwitchScalperTab(rec.symbol, resolvedName, resolvedPrice, rec);
-      showNotification(`[스캘퍼 타겟 등록] ${resolvedName}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (현재 체결가 ${resolvedPrice.toLocaleString()}원, 추천가 ${rec.recommendedPrice.toLocaleString()}원, 스캘핑 점수 ${rec.scalpingScore}점)`, "success");
+      // 💰 목표 투자금액에 맞춰 수량 자동 계산 (수동 클릭 등록에도 자동 채움과 동일하게 적용)
+      const autoQty = calcQuantityForTargetAmount(resolvedPrice);
+      updateTab(rec.symbol, { tradeQuantity: autoQty });
+      showNotification(`[스캘퍼 타겟 등록] ${resolvedName}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (현재 체결가 ${resolvedPrice.toLocaleString()}원, 추천가 ${rec.recommendedPrice.toLocaleString()}원, 스캘핑 점수 ${rec.scalpingScore}점, 자동 수량 ${autoQty}주)`, "success");
       // 🛡️ 등록해도 모달을 닫지 않는다 — 여러 종목을 연속으로 등록할 수 있게, 닫는 건 사용자가
       // 직접 닫기 버튼을 눌렀을 때만 하도록 한다.
 
@@ -4994,7 +5012,7 @@ setGapInventory(nextInv);
       console.error('[스캘퍼 등록 실패] 예외 발생:', err);
       showNotification(`[스캘퍼 등록 실패] ${err?.message || '알 수 없는 오류가 발생했습니다.'}`, 'error');
     }
-  }, [stocks, openOrSwitchScalperTab, showNotification]);
+  }, [stocks, openOrSwitchScalperTab, showNotification, calcQuantityForTargetAmount]);
 
   const handleBatchRegisterTop3 = useCallback((top3List: ScalperRecommendation[]) => {
     try {
@@ -6839,8 +6857,9 @@ priceData.current
         for (const rec of candidates) {
           if ((scalperTabsRef.current.filter(t => !/^[A-Za-z]/.test(t.symbol) && !toRemove.includes(t.symbol)).length) >= MAX_INVENTORY_PER_MARKET) break;
           handleSelectRecommendationStock(rec);
-          // 등록 직후 봇도 바로 시작 상태로 (자동 관리 모드이므로)
-          updateTab(rec.symbol, { isBotActive: true });
+          // 등록 직후 봇도 바로 시작 상태로 (자동 관리 모드이므로), 수량은 목표 투자금액에 맞춰 자동 계산
+          const autoQty = calcQuantityForTargetAmount(rec.price);
+          updateTab(rec.symbol, { isBotActive: true, tradeQuantity: autoQty });
           await new Promise(r => setTimeout(r, 800)); // 연속 등록 시 상태 업데이트가 겹치지 않도록 간격 확대
         }
         if (candidates.length > 0) {
@@ -6856,7 +6875,7 @@ priceData.current
     autoManageInventory();
     const autoManageInterval = setInterval(autoManageInventory, 30000); // 30초마다 점검
     return () => clearInterval(autoManageInterval);
-  }, [isAppInitialized, detectStockStrategies, calculateBuyScore, holdings, loadScalperRecommendations, handleSelectRecommendationStock, showNotification]);
+  }, [isAppInitialized, detectStockStrategies, calculateBuyScore, holdings, loadScalperRecommendations, handleSelectRecommendationStock, showNotification, calcQuantityForTargetAmount]);
 
   // ============================================================
   // 🐕 봇 정지 자동 재개(watchdog)
@@ -9887,6 +9906,8 @@ useEffect(() => {
                 gapBuyPrice={gapBuyPrice}
                 gapSellPrice={gapSellPrice}
                 isScalperRecLoading={isScalperRecLoading}
+                targetInvestmentPerStock={targetInvestmentPerStock}
+                setTargetInvestmentPerStock={setTargetInvestmentPerStock}
                 isRefreshingTop3={isRefreshingTop3}
                 scalperTabs={scalperTabs}
                 activeTabId={activeTabId}
