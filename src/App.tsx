@@ -2359,7 +2359,14 @@ setGapInventory(nextInv);
         tags: recommendationSource.tags,
         category: recommendationSource.category
       } : { reason: '수동 등록', category: '수동 등록' },
-      strategy: { gapBuyPrice: limits.lowerLimit, gapSellPrice: limits.upperLimit }
+      strategy: {
+        gapBuyPrice: limits.lowerLimit,
+        gapSellPrice: limits.upperLimit,
+        // 💰 생성 시점에 바로 목표 투자금액 기준 수량을 계산해서 넣는다 — 생성 후 별도로
+        // updateTab을 불러서 수정하는 방식은 렌더 타이밍에 따라 반영이 씹힐 수 있어서
+        // (다른 effect가 뒤이어 기본값으로 되돌리는 경우 등), 아예 생성 시점에 확정한다.
+        tradeQuantity: calcQuantityForTargetAmount(newStockObj.price || 0)
+      }
     });
 
     // 8개 초과 시 제거할 대상을 현재 스냅샷(ref) 기준으로 먼저 결정
