@@ -5688,6 +5688,11 @@ priceData.current
 
   const refreshInventoryItem = React.useCallback(async (symbol: string) => {
     if (!symbol) return;
+    // 🛡️ 전체 종목 담당 함수들(syncAllPrices, refreshAllInventorySensors)은 장 마감 시간에
+    // 실행을 안 하는데, 선택된 종목 전용인 이 함수만 게이트가 빠져있어서 장 마감 중에도 선택된
+    // 종목만 계속 갱신되고 있었다 — "선택한 종목만 가격/로그가 계속 바뀐다"는 증상의 실제
+    // 원인이었다. 형평성을 맞춰서 이 함수도 정규장/애프터마켓 시간에만 동작하도록 한다.
+    if (!isKoreanMarketOpen()) return;
     try {
       const priceData = await kisService.getPrice(symbol);
       if (priceData && priceData.current > 0) {
