@@ -4811,8 +4811,35 @@ setGapInventory(nextInv);
     // 추천이 없는 게 낫다는 원칙.
     fallbackSymbolsRef.current = new Set();
 
-    return list
-      .sort((a, b) => b.scalpingScore - a.scalpingScore)
+    const scoredCandidates = list.sort((a, b) => b.scalpingScore - a.scalpingScore);
+
+    // 🛡️ 장기 우하향 종목 제외 필터 — 단기 거래량/점수만 보고 추천하면, 관리종목처럼 1년 내내
+    // 꾸준히 무너지고 있는 종목(예: 몇 년째 -90% 이상 하락 중)도 "오늘 거래량이 튀었다"는
+    // 이유만으로 추천될 수 있다. 이런 종목은 짧은 반등이 있어도 장기 추세상 오를 확률보다
+    // 내릴 확률이 높다고 보는 게 합리적이므로, 점수 상위 후보에 한해 월봉(1회 호출로 약
+    // 12개월치를 한꺼번에 받을 수 있어 일봉보다 훨씬 가볍다) 데이터를 확인해서, 1년 전 대비
+    // 현재가가 70% 미만(즉 30% 이상 하락)이면 "명백한 우하향"으로 보고 제외한다.
+    const trendCheckPool = scoredCandidates.slice(0, MAX_SCALPER_RECOMMENDATIONS * 2);
+    const trendResults = await Promise.allSettled(
+      trendCheckPool.map(async (rec) => {
+        const monthly = await kisService.getDomesticDailyPrice(rec.symbol, 'M');
+        const bars = Array.isArray(monthly?.output) ? monthly.output : [];
+        if (bars.length < 6) return { symbol: rec.symbol, isDowntrend: false }; // 상장한 지 얼마 안 됐거나 데이터 부족하면 판단 보류(제외하지 않음)
+        const oldestClose = Number(bars[bars.length - 1]?.stck_clpr || 0); // 월봉은 최신순으로 오므로 마지막이 가장 오래된 달
+        const currentPrice = rec.price;
+        if (oldestClose <= 0 || currentPrice <= 0) return { symbol: rec.symbol, isDowntrend: false };
+        const isDowntrend = currentPrice < oldestClose * 0.7; // 1년 전 대비 30% 이상 하락
+        return { symbol: rec.symbol, isDowntrend };
+      })
+    );
+    const downtrendSymbols = new Set(
+      trendResults
+        .filter((r): r is PromiseFulfilledResult<{ symbol: string; isDowntrend: boolean }> => r.status === 'fulfilled' && r.value.isDowntrend)
+        .map(r => r.value.symbol)
+    );
+
+    return scoredCandidates
+      .filter(r => !downtrendSymbols.has(r.symbol))
       .slice(0, MAX_SCALPER_RECOMMENDATIONS)
       .map((item, idx) => ({ ...item, rank: idx + 1 }));
   }, [detectStockStrategies, kisConfig.isConnected]);
