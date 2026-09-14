@@ -17,16 +17,18 @@ export interface ScalperTab {
   autoCancelThreshold: number;
   tradeLogs?: TradeLog[];
   changePercent?: number;
-  sensors?: {
-    pullback: boolean;
-    breakout: boolean;
-    vwap: boolean;
-    cvd: boolean;
-    volumeMomentum: boolean;
-    rsi: number;
-    activeCount: number;
-    lastUpdatedAt: number;
-  };
+  sensors?: ScalperSensors;
+}
+
+export interface ScalperSensors {
+  pullback: boolean;
+  breakout: boolean;
+  vwap: boolean;
+  cvd: boolean;
+  volumeMomentum: boolean;
+  rsi: number;
+  activeCount: number;
+  lastUpdatedAt: number;
 }
 
 export interface Stock {

@@ -1038,69 +1038,241 @@ await this.getDomesticPrice(symbol);
     }
   }
 
-  public async orderDomestic(symbol: string, side: 'BUY' | 'SELL', price: string, qty: string, ordDvsn: string = '00') {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    return this.queueRequest(async () => {
-      const token = await this.getAccessToken();
-      const endpoint = '/uapi/domestic-stock/v1/trading/order-cash';
-      
-      // SLL_TYPE is required for domestic stock sell orders
-      // 01: General Cash Sell
-      const body: any = {
-        CANO: this.config.accountNo,
-        ACNT_PRDT_CD: this.config.accountCode,
-        PDNO: symbol,
-        ORD_DVSN: ordDvsn, // 00 for Limit, 01 for Market
-        ORD_QTY: qty,
-        ORD_UNPR: ordDvsn === '01' ? '0' : price,
-      };
-
-      if (side === 'SELL') {
-        body.SLL_TYPE = '01'; // Default to 01 (General Cash Sell)
-      }
-
-      const hashkey = await this.getHashKey(body);
-
-      // 🔄 사용자 확인 결과 TTTC0012U/TTTC0011U(api.xlsx 문서 대조로 "정확하다"고 판단했던 값)로는
-      // 실제 주문이 KIS에 들어가지 않아서, 이전에 쓰던 TTTC0802U(매수)/TTTC0801U(매도)로 되돌린다.
-      const trId =
-  side === 'BUY'
-    ? 'TTTC0802U'
-    : 'TTTC0801U';
-
-      const headers = {
-        'content-type': 'application/json',
-        'authorization': `Bearer ${token}`,
-        'appkey': this.config.appKey,
-        'appsecret': this.config.appSecret,
-        'tr-id': trId,
-        'hashkey': hashkey,
-        'custtype': 'P',
-      };
-
-console.log(
-  '[KIS BUY SEND]',
-  {
-    symbol,
-    qty,
-    price,
-    ordDvsn,
-    side
+  public async orderDomestic(
+  symbol: string,
+  side: 'BUY' | 'SELL',
+  price: string,
+  qty: string,
+  ordDvsn: string = '00'
+) {
+  if (!this.config) {
+    throw new Error('KIS Config not initialized');
   }
-);
 
+  return this.queueRequest(async () => {
+    // ============================================================
+    // 1. 접근 토큰
+    // ============================================================
+    const token = await this.getAccessToken();
 
+    // ============================================================
+    // 2. 국내주식 현금주문 API
+    // ============================================================
+    const endpoint =
+      '/uapi/domestic-stock/v1/trading/order-cash';
 
-      const res = await axios.post(`${this.baseUrl}${endpoint}`, body, { headers });
-      if (res.data.rt_cd && res.data.rt_cd !== '0') {
-        if (res.data.msg_cd === 'EGW00201' || res.data.msg1?.includes('초당 거래건수')) {
-          throw new Error(`[429] ${res.data.msg1}`);
-        }
-        throw new Error(`국내 주문 실패: ${res.data.msg1} (${res.data.msg_cd})`);
-      }
-      return res.data;
+    // ============================================================
+    // 3. 주문 데이터
+    //
+    // ORD_DVSN
+    // 00 = 지정가
+    // 01 = 시장가
+    //
+    // 지정가(00) → ORD_UNPR에 실제 주문가격 전달
+    // 시장가(01) → ORD_UNPR = '0'
+    // ============================================================
+    const body: any = {
+      CANO: this.config.accountNo,
+      ACNT_PRDT_CD: this.config.accountCode,
+      PDNO: symbol,
+      ORD_DVSN: ordDvsn,
+      ORD_QTY: qty,
+      ORD_UNPR: ordDvsn === '01' ? '0' : price,
+    };
+
+    // ============================================================
+    // 4. 매도 주문
+    // ============================================================
+    if (side === 'SELL') {
+      body.SLL_TYPE = '01';
+    }
+
+    // ============================================================
+    // 5. Hashkey 생성
+    // ============================================================
+    const hashkey = await this.getHashKey(body);
+
+    // ============================================================
+    // 6. 한국투자증권 실전 주문 TR-ID
+    //
+    // 현금매수 : TTC0012U
+    // 매도     : 현재 사용하던 TTC0011U 유지
+    // ============================================================
+    const trId =
+      side === 'BUY'
+        ? 'TTC0012U'
+        : 'TTC0011U';
+
+    // ============================================================
+    // 7. HTTP Header
+    // ============================================================
+    const headers = {
+      'content-type': 'application/json',
+      'authorization': `Bearer ${token}`,
+      'appkey': this.config.appKey,
+      'appsecret': this.config.appSecret,
+      'tr-id': trId,
+      'hashkey': hashkey,
+      'custtype': 'P',
+    };
+
+    // ============================================================
+    // 8. 주문 전송 로그
+    // ============================================================
+    console.log('[KIS ORDER SEND]', {
+      symbol,
+      side,
+      qty,
+      price,
+      ordDvsn,
+      trId,
+      endpoint,
     });
-  }
+
+    console.log('[KIS ORDER BODY]', {
+      CANO: this.config.accountNo,
+      ACNT_PRDT_CD: this.config.accountCode,
+      PDNO: symbol,
+      ORD_DVSN: ordDvsn,
+      ORD_QTY: qty,
+      ORD_UNPR: body.ORD_UNPR,
+      ...(side === 'SELL' ? { SLL_TYPE: '01' } : {}),
+    });
+
+    // ============================================================
+    // 9. 실제 한국투자증권 주문 API 호출
+    // ============================================================
+    let res;
+
+    try {
+      res = await axios.post(
+        `${this.baseUrl}${endpoint}`,
+        body,
+        {
+          headers,
+        }
+      );
+    } catch (error: any) {
+      // ==========================================================
+      // HTTP 자체가 실패한 경우
+      // ==========================================================
+      console.error('[KIS ORDER HTTP ERROR]', {
+        status: error?.response?.status,
+        statusText: error?.response?.statusText,
+        data: error?.response?.data,
+        message: error?.message,
+      });
+
+      const errorData = error?.response?.data;
+
+      throw new Error(
+        `한국투자증권 주문 API 통신 실패: ${
+          errorData?.msg1 ||
+          error?.message ||
+          '알 수 없는 통신 오류'
+        }`
+      );
+    }
+
+    // ============================================================
+    // 10. KIS 응답 확인
+    // ============================================================
+    const data = res?.data;
+
+    console.log('[KIS ORDER RESPONSE]', {
+      httpStatus: res?.status,
+      rt_cd: data?.rt_cd,
+      msg_cd: data?.msg_cd,
+      msg1: data?.msg1,
+      output: data?.output,
+      output1: data?.output1,
+    });
+
+    // ============================================================
+    // 11. KIS 주문 실패
+    // ============================================================
+    if (data?.rt_cd !== '0') {
+
+      // KIS 초당 거래건수 제한
+      if (
+        data?.msg_cd === 'EGW00201' ||
+        data?.msg1?.includes('초당 거래건수')
+      ) {
+        throw new Error(
+          `[429] ${data?.msg1 || '한국투자증권 API 요청 제한'}`
+        );
+      }
+
+      throw new Error(
+        `국내주식 ${
+          side === 'BUY' ? '매수' : '매도'
+        } 주문 실패: ${
+          data?.msg1 || 'KIS 주문 실패'
+        } (${data?.msg_cd || 'UNKNOWN'})`
+      );
+    }
+
+    // ============================================================
+    // 12. ★ 실제 주문번호(ODNO) 확인
+    //
+    // rt_cd === '0'만으로 주문 성공 처리하지 않는다.
+    // 반드시 KIS가 반환한 주문번호가 있어야 한다.
+    // ============================================================
+    const odno =
+      data?.output?.ODNO ||
+      data?.output?.odno ||
+      data?.output1?.ODNO ||
+      data?.output1?.odno;
+
+    // ============================================================
+    // 13. 주문번호가 없으면 "주문 성공"으로 처리하지 않는다.
+    // ============================================================
+    if (!odno) {
+
+      console.error('[KIS ORDER ACCEPT UNKNOWN]', {
+        symbol,
+        side,
+        qty,
+        price,
+        ordDvsn,
+        trId,
+        rt_cd: data?.rt_cd,
+        msg_cd: data?.msg_cd,
+        msg1: data?.msg1,
+        output: data?.output,
+        output1: data?.output1,
+        fullResponse: data,
+      });
+
+      throw new Error(
+        `한국투자증권 주문 접수 확인 실패: 주문번호(ODNO)가 없습니다. ` +
+        `${data?.msg1 || ''}`
+      );
+    }
+
+    // ============================================================
+    // 14. ★ 여기까지 왔으면 KIS 주문 접수 응답 확인
+    // ============================================================
+    console.log('[KIS ORDER ACCEPTED]', {
+      symbol,
+      side,
+      qty,
+      price,
+      ordDvsn,
+      trId,
+      odno,
+    });
+
+    // ============================================================
+    // 15. 상위 executeTrade()에서 사용할 결과 반환
+    // ============================================================
+    return {
+      ...data,
+      odno,
+      orderAccepted: true,
+    };
+  });
+}
 
   public async cancelDomesticOrder(orgNo: string, ordNo: string, qty: string, ordDvsn: string = '00') {
     return this.reviseDomestic(orgNo, ordNo, qty, "0", '02', ordDvsn);
@@ -1140,9 +1312,7 @@ console.log(
 
     const hashkey = await this.getHashKey(body);
 
-    // 🔄 사용자 확인 결과 TTTC0013U(api.xlsx 문서 대조값)로는 실제 취소/정정이 안 되고 있어서,
-    // 이전에 쓰던 TTTC0803U로 되돌린다.
-    const trId = 'TTTC0803U';
+    const trId = 'TTTC0013U';
 
     const headers = {
       'content-type': 'application/json',
