@@ -550,11 +550,14 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                 {/* 🎯 종목별 개별 센서 표시 — 이 종목의 실시간 감시 상태를 한눈에 확인 */}
                 <div className="flex items-center gap-1 flex-wrap pl-3">
                   {([
-                    { key: 'pullback', label: '눌림목', onCls: 'bg-teal-500/20 text-teal-300 border-teal-500/40', dotCls: 'bg-teal-400' },
-                    { key: 'breakout', label: '돌파', onCls: 'bg-amber-500/20 text-amber-300 border-amber-500/40', dotCls: 'bg-amber-400' },
-                    { key: 'vwap', label: 'VWAP', onCls: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', dotCls: 'bg-indigo-400' },
-                    { key: 'cvd', label: 'CVD', onCls: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40', dotCls: 'bg-fuchsia-400' },
-                  ] as const).map(({ key, label, onCls, dotCls }) => {
+                    { key: 'pullback', label: '눌림목', detail: '', onCls: 'bg-teal-500/20 text-teal-300 border-teal-500/40', dotCls: 'bg-teal-400' },
+                    { key: 'breakout', label: '돌파', detail: '', onCls: 'bg-amber-500/20 text-amber-300 border-amber-500/40', dotCls: 'bg-amber-400' },
+                    { key: 'vwap', label: 'VWAP', detail: '', onCls: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', dotCls: 'bg-indigo-400' },
+                    // 🚧 예전엔 여기가 'CVD'였는데, 실제 계산은 진짜 CVD(매수체결량-매도체결량 누적)가
+                    // 아니라 POC지지/매수흡수 기반이라 이름이 부정확했다. 진짜 CVD는 별도 과제로
+                    // 남겨두고, 이 자리는 정확히 계산되는 "단기 모멘텀"(SMA5>SMA20)으로 대체한다.
+                    { key: 'shortTermMomentum', label: '단기 모멘텀', detail: 'SMA5 > SMA20', onCls: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40', dotCls: 'bg-fuchsia-400' },
+                  ] as const).map(({ key, label, detail, onCls, dotCls }) => {
                     const isOn = tab.sensors?.[key] === true;
                     return (
                       <span
@@ -563,7 +566,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                           "text-[10px] font-bold px-1.5 py-0.5 rounded-full border flex items-center gap-0.5 transition-all",
                           isOn ? onCls : "bg-white/5 text-slate-500 border-white/10"
                         )}
-                        title={`${tabName} — ${label} 센서 ${isOn ? '감지됨' : '대기 중'}`}
+                        title={`${tabName} — ${label} 센서 ${isOn ? '감지됨' : '대기 중'}${detail ? ` (${detail})` : ''}`}
                       >
                         <span className={cn("w-1 h-1 rounded-full", isOn ? dotCls : "bg-slate-600")} />
                         {label}

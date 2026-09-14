@@ -177,6 +177,7 @@ export interface ScalperTab {
     breakout: boolean;
     vwap: boolean;
     cvd: boolean;
+    shortTermMomentum: boolean;
     volumeMomentum: boolean;
     rsi: number;
     activeCount: number;
@@ -248,7 +249,8 @@ export interface ScalperInventoryItem {
     pullback: boolean;
     breakout: boolean;
     vwap: boolean;
-    cvd: boolean;
+    cvd: boolean; // 🚧 향후 진짜 CVD(매수체결량-매도체결량 누적) 구현 전까지는 UI에 노출하지 않음
+    shortTermMomentum: boolean; // 단기 모멘텀 — SMA5 > SMA20 (구 'CVD' 배지가 담당하던 자리를 대체)
     volumeMomentum: boolean;
     rsi: number;
     activeCount: number;
@@ -324,6 +326,7 @@ const createInventoryItem = (params: {
       breakout: false,
       vwap: false,
       cvd: false,
+      shortTermMomentum: false,
       volumeMomentum: false,
       rsi: 50,
       activeCount: 0,
@@ -1728,7 +1731,7 @@ export default function App() {
         lastUpdatedAt: now
       },
       sensors: {
-        pullback: false, breakout: false, vwap: false, cvd: false, volumeMomentum: false,
+        pullback: false, breakout: false, vwap: false, cvd: false, shortTermMomentum: false, volumeMomentum: false,
         rsi: 50, activeCount: 0, lastUpdatedAt: now
       },
       strategy: {
@@ -2732,23 +2735,27 @@ setGapInventory(nextInv);
       }
     });
 
-    let cvd = 0;
+    // 🛡️ 예전엔 이 변수 이름이 "cvd"였는데, 실제로는 매수체결량-매도체결량의 누적(진짜 CVD)이
+    // 아니라 "가격이 오르면 +1, 내리면 -1"을 누적한 순수 가격방향 카운터였다 — 거래량이 전혀
+    // 반영되지 않는다. 이름을 정확하게 priceDirection으로 바꾼다. (진짜 CVD는 별도 과제로 남겨둠 —
+    // 실제 매수/매도 체결량 구분 데이터가 필요하다)
+    let priceDirection = 0;
     let prevP = historyPrices[0] || currentPrice;
-    const cvdSeries: number[] = [];
+    const priceDirectionSeries: number[] = [];
     historyPrices.forEach(p => {
       const delta = p > prevP ? 1 : p < prevP ? -1 : 0;
-      cvd += delta;
-      cvdSeries.push(cvd);
+      priceDirection += delta;
+      priceDirectionSeries.push(priceDirection);
       prevP = p;
     });
 
     const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
     const recentLow = historyPrices.length >= 5 ? Math.min(...historyPrices.slice(-10, -1)) : currentPrice;
-    const recentMaxCvd = cvdSeries.length >= 5 ? Math.max(...cvdSeries.slice(-10, -1)) : cvd;
-    const recentMinCvd = cvdSeries.length >= 5 ? Math.min(...cvdSeries.slice(-10, -1)) : cvd;
+    const recentMaxPriceDirection = priceDirectionSeries.length >= 5 ? Math.max(...priceDirectionSeries.slice(-10, -1)) : priceDirection;
+    const recentMinPriceDirection = priceDirectionSeries.length >= 5 ? Math.min(...priceDirectionSeries.slice(-10, -1)) : priceDirection;
 
-    const isBullishAbsorption = (currentPrice <= recentLow * 1.01) && (cvd > recentMinCvd);
-    const isBearishAbsorption = (currentPrice >= recentPeak * 0.995) && (cvd < recentMaxCvd);
+    const isBullishAbsorption = (currentPrice <= recentLow * 1.01) && (priceDirection > recentMinPriceDirection);
+    const isBearishAbsorption = (currentPrice >= recentPeak * 0.995) && (priceDirection < recentMaxPriceDirection);
 
     const momentumPositive = sma5 >= sma20;
     const isNearLowerBand = currentPrice <= bb.lower * 1.005;
@@ -2771,11 +2778,13 @@ setGapInventory(nextInv);
     const isBreakout = hasRecentPriceMovement && currentPrice >= recentPeak && currentPrice > lastPrice && rsi >= 50;
     const isVwapSupport = hasRecentPriceMovement && currentPrice >= vwap * 0.998 && currentPrice >= sma5 && hasVolumeMomentum;
     const isPocSupport = hasRecentPriceMovement && Math.abs(currentPrice - poc) / (poc || 1) < 0.008;
+    // 🚧 향후 진짜 CVD 구현 시 이 isVolumeProfile 로직도 함께 재검토 예정 — 지금은 POC지지/매수흡수
+    // 기반이며, UI에서는 "CVD" 배지 대신 shortTermMomentum(단기 모멘텀) 배지로 대체해 노출한다.
     const isVolumeProfile = isPocSupport || (hasRecentPriceMovement && isBullishAbsorption);
 
     const activeCount = (isPullback ? 1 : 0) + (isBreakout ? 1 : 0) + (isVwapSupport ? 1 : 0) + (isVolumeProfile ? 1 : 0);
 
-    return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd, isBullishAbsorption, isBearishAbsorption, bb, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice, hasVolumeMomentum, recentPeak, hasRecentPriceMovement };
+    return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd: priceDirection, isBullishAbsorption, isBearishAbsorption, bb, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice, hasVolumeMomentum, recentPeak, hasRecentPriceMovement };
   }, [marketType]);
 
   // ============================================================
@@ -2795,7 +2804,12 @@ setGapInventory(nextInv);
   // ============================================================
   const BUY_SCORE_THRESHOLD = 60; // 130점 만점 중 60점 이상이면 매수 (약 46% — 여러 종목을 훑을 때 기회를 너무 놓치지 않도록 완화)
   const prevVwapAboveRef = React.useRef<Record<string, boolean>>({});
-  const prevExecutionStrengthRef = React.useRef<Record<string, number>>({});
+  const vwapBreakoutAtRef = React.useRef<Record<string, number>>({}); // VWAP 신규 상향돌파가 일어난 시각(ms) — 20초 신선도 창 판단용
+  const execStrengthWindowRef = React.useRef<Record<string, { value: number; time: number }[]>>({}); // 체결강도 최근 4초 이력 — 노이즈에 덜 민감한 평균 기준선 계산용
+  const execJumpActiveRef = React.useRef<Record<string, boolean>>({}); // 체결강도 급증을 일회성 이벤트로 만들기 위한 잠금 플래그
+  const lastCumulativeVolumeRef = React.useRef<Record<string, number>>({}); // 직전에 관측한 누적거래량 — 구간별 증가량(델타) 계산용
+  const prevSma5Ref = React.useRef<Record<string, number>>({});
+  const prevSma20Ref = React.useRef<Record<string, number>>({});
   const sellExecStrengthRef = React.useRef<Record<string, number>>({}); // RSI 극단 반전 판단용 — 매도 로직 전용 체결강도 추적 (매수 점수제와 독립)
   const volumeHistoryRef = React.useRef<Record<string, number[]>>({});
   const prevPriceForComboRef = React.useRef<Record<string, number>>({}); // 체결강도+거래량+가격 결합 방향 판단용 직전 가격
@@ -2817,36 +2831,84 @@ setGapInventory(nextInv);
     const isAboveVwap = strat.vwap > 0 && currentPrice >= strat.vwap;
     if (isAboveVwap) { score += 15; breakdown.push('VWAP 위(+15)'); }
 
-    // 2. VWAP 돌파 — 직전엔 VWAP 아래였다가 지금 막 위로 올라온 경우 (+20)
+    // 2. VWAP 신규 상향돌파 (+20) — 직전엔 VWAP 아래였다가 지금 막 위로 올라온 "이벤트"를 감지한다.
+    // 🛡️ 예전엔 이 순간 한 틱에서만 +20을 줬는데, 초단타에서는 이게 오히려 두 가지 문제를 만들 수
+    // 있었다: ① 엔진 루프 타이밍에 따라 정확히 그 교차 tick을 못 잡으면 보너스를 놓칠 수 있고,
+    // ② 반대로 VWAP 경계선 바로 위/아래를 짧게 오르내리는 노이즈에서는 매 교차마다 계속 +20이
+    // 재발동되어 신호가 부풀려질 수 있었다. 이제 "교차 시점"을 타임스탬프로 기록해두고, 그 이후
+    // 20초 동안은 계속 위에 머물러 있으면 "신선한 돌파"로 계속 인정해 +20을 유지한다 — 20초가
+    // 지나면 자연스럽게 +15(단순히 위에 있음)로 줄어들고, 다시 아래로 내려갔다가 재돌파해야만
+    // +20이 다시 부여된다.
+    const VWAP_BREAKOUT_FRESH_MS = 20000;
     const wasAboveVwap = prevVwapAboveRef.current[sym];
-    if (isAboveVwap && wasAboveVwap === false) { score += 20; breakdown.push('VWAP 돌파(+20)'); }
+    const now = Date.now();
+    if (isAboveVwap && wasAboveVwap === false) {
+      vwapBreakoutAtRef.current[sym] = now; // 신규 돌파 이벤트 발생 — 신선도 타이머 시작
+    }
+    const breakoutAt = vwapBreakoutAtRef.current[sym];
+    if (isAboveVwap && breakoutAt !== undefined && (now - breakoutAt) <= VWAP_BREAKOUT_FRESH_MS) {
+      score += 20;
+      breakdown.push('VWAP 돌파(+20)');
+    }
     prevVwapAboveRef.current[sym] = isAboveVwap;
 
     // 3. 매수 체결강도 130 이상 (+15) — KIS 실제 체결강도(cttr) 기준
     const execStrength = stock.executionStrength || 0;
     if (execStrength >= 130) { score += 15; breakdown.push('체결강도130+(+15)'); }
 
-    // 4. 체결강도 급증 — 직전 대비 30 이상 상승 (+10)
-    const prevExec = prevExecutionStrengthRef.current[sym];
-    if (prevExec !== undefined && execStrength - prevExec >= 30) { score += 10; breakdown.push('체결강도급증(+10)'); }
+    // 4. 체결강도 급증 (+10) — 🛡️ 두 가지를 개선했다:
+    // ① 예전엔 "직전 tick 대비"로 비교해서, 실시간 웹소켓 데이터가 101→135→104→139처럼 순간적으로
+    //    튀기만 해도 매 tick마다 +10이 반복 지급될 수 있었다. 이제 "최근 3~5초 평균"을 기준선으로
+    //    삼아서, 순간적인 데이터 노이즈에는 덜 민감하고 진짜 추세 변화만 잡아낸다.
+    // ② 급증을 "상태"가 아니라 "일회성 이벤트"로 만든다 — 급증이 한 번 인정되면, 강도가 다시
+    //    평상시 수준(기준선 근처)으로 내려갈 때까지는 같은 급증 구간에서 또 지급하지 않는다.
+    const EXEC_STRENGTH_WINDOW_MS = 4000; // 4초 평균을 기준선으로 사용
+    const nowTs = Date.now();
+    const execWindow = (execStrengthWindowRef.current[sym] || []).filter(e => nowTs - e.time <= EXEC_STRENGTH_WINDOW_MS);
+    const execBaseline = execWindow.length >= 2 ? execWindow.reduce((a, b) => a + b.value, 0) / execWindow.length : undefined;
+    const strengthJump = execBaseline !== undefined ? execStrength - execBaseline : 0;
+    const isJumpActive = execJumpActiveRef.current[sym] === true;
+    if (execBaseline !== undefined && strengthJump >= 30 && !isJumpActive) {
+      score += 10;
+      breakdown.push('체결강도급증(+10)');
+      execJumpActiveRef.current[sym] = true; // 같은 급증 구간에서는 재지급하지 않도록 잠금
+    } else if (execBaseline !== undefined && strengthJump < 15) {
+      execJumpActiveRef.current[sym] = false; // 평상시 수준으로 복귀 — 다음 급증을 다시 인정할 수 있게 해제
+    }
+    if (execStrength > 0) {
+      execStrengthWindowRef.current[sym] = [...execWindow, { value: execStrength, time: nowTs }].slice(-20);
+    }
 
-    // 5. 실제 거래량 2배 이상 — 최근 평균 거래량 대비 (+15)
+    // 5. 실제 거래량 2배 이상 — 🛡️ 매우 중요한 수정: stock.volume은 KIS의 acml_vol(당일 누적거래량)
+    // 이라 하루 종일 계속 커지기만 한다. 예전엔 이 누적값 자체를 기록해서 평균을 냈는데, 이러면
+    // "현재 누적값 ≥ 과거 누적값 평균×2"라는 조건이 장 후반으로 갈수록 실제 거래량 폭발과 무관하게
+    // 거의 항상 충족되는 착시가 있었다(09:10 10만 → 09:11 20만은 2배지만 그냥 시간이 지나서 쌓인
+    // 것일 뿐일 수 있음). 이제 "구간별 증가량(델타)"을 추적해서, 최근 증가 속도를 평소 증가 속도와
+    // 비교한다 — 이래야 진짜 "지금 이 순간 거래가 몰리고 있는지"를 잡아낸다.
     const rawVol = Number(String(stock.volume || '0').replace(/,/g, '')) || 0;
-    const volHist = volumeHistoryRef.current[sym] || [];
-    const avgVol = volHist.length >= 3 ? volHist.reduce((a, b) => a + b, 0) / volHist.length : 0;
-    if (avgVol > 0 && rawVol >= avgVol * 2) { score += 15; breakdown.push('거래량2배+(+15)'); }
-    volumeHistoryRef.current[sym] = [...volHist, rawVol].slice(-20);
+    const prevCumVol = lastCumulativeVolumeRef.current[sym];
+    const volDelta = (prevCumVol !== undefined && rawVol >= prevCumVol) ? rawVol - prevCumVol : 0;
+    lastCumulativeVolumeRef.current[sym] = rawVol;
+
+    const deltaHist = volumeHistoryRef.current[sym] || [];
+    const avgVol = deltaHist.length >= 3 ? deltaHist.reduce((a, b) => a + b, 0) / deltaHist.length : 0;
+    // 🛡️ 거래량이 급증해도 가격이 하락 중이면 "매도 물량 출회"일 수 있으므로 가산점을 주지 않는다
+    // — 직전 tick 가격(결합신호 블록보다 먼저 실행되므로 아직 갱신 전 값)과 비교한다.
+    const prevPriceForVolCheck = prevPriceForComboRef.current[sym];
+    const priceNotFalling = prevPriceForVolCheck === undefined || currentPrice >= prevPriceForVolCheck;
+    if (avgVol > 0 && volDelta >= avgVol * 2 && priceNotFalling) { score += 15; breakdown.push('거래량2배+(+15)'); }
+    if (volDelta > 0) volumeHistoryRef.current[sym] = [...deltaHist, volDelta].slice(-20);
 
     // 5-1. 🎯 체결강도 + 거래량 + 가격 결합 신호 — 개별로는 이미 위에서 반영했지만, 셋이 동시에
     // 같은 방향이면 훨씬 신뢰도 높은 신호가 된다. 체결강도↑ + 거래량↑ + 가격↑이 전부 겹치면
     // 강한 매수 후보로 보너스를, 반대로 체결강도↓ + 가격 정체 + 거래량↓이 전부 겹치면
     // "추격매수 위험" 신호로 보고 감점한다.
     const prevPriceCombo = prevPriceForComboRef.current[sym];
-    if (prevExec !== undefined && prevPriceCombo !== undefined && currentPrice > 0) {
-      const execRising = execStrength > prevExec;
-      const execFalling = execStrength < prevExec;
-      const volRising = avgVol > 0 && rawVol > avgVol;
-      const volFalling = avgVol > 0 && rawVol < avgVol * 0.7;
+    if (execBaseline !== undefined && prevPriceCombo !== undefined && currentPrice > 0) {
+      const execRising = execStrength > execBaseline;
+      const execFalling = execStrength < execBaseline;
+      const volRising = avgVol > 0 && volDelta > avgVol;
+      const volFalling = avgVol > 0 && volDelta < avgVol * 0.7;
       const priceRising = currentPrice > prevPriceCombo;
       const priceFlat = Math.abs(currentPrice - prevPriceCombo) / prevPriceCombo < 0.001; // 0.1% 미만 변화는 "정체"로 간주
 
@@ -2859,13 +2921,27 @@ setGapInventory(nextInv);
       }
     }
     prevPriceForComboRef.current[sym] = currentPrice;
-    if (execStrength > 0) prevExecutionStrengthRef.current[sym] = execStrength;
 
     // 6. RSI 45~65 — 과열도 과매도도 아닌 안정적 구간 (+10)
     if (strat.rsi >= 45 && strat.rsi <= 65) { score += 10; breakdown.push('RSI45~65(+10)'); }
 
-    // 7. 단기 이동평균 상승 — SMA5 >= SMA20 (+10)
-    if (strat.momentumPositive) { score += 10; breakdown.push('단기이평상승(+10)'); }
+    // 7. 단기 이동평균 모멘텀 — 🛡️ 예전엔 "SMA5 >= SMA20"이라는 상태 하나로 뭉뚱그려 +10을 줬는데,
+    // 이러면 "이미 오래 전에 골든크로스가 나서 상승이 끝나가는 종목"과 "지금 막 모멘텀이 붙는
+    // 종목"을 구분하지 못했다. 세 요소로 나눈다: ① SMA5>SMA20 상태(+6) ② SMA5·SMA20 둘 다 상승
+    // 중(+2, "지금도 오르고 있다"는 의미) ③ 최근 골든크로스 이벤트(+2, 막 교차한 신선한 신호).
+    const prevSma5 = prevSma5Ref.current[sym];
+    const prevSma20 = prevSma20Ref.current[sym];
+    const sma5GtSma20 = strat.sma5 > 0 && strat.sma20 > 0 && strat.sma5 > strat.sma20;
+    if (sma5GtSma20) { score += 6; breakdown.push('SMA5>SMA20(+6)'); }
+    if (prevSma5 !== undefined && prevSma20 !== undefined) {
+      const sma5Rising = strat.sma5 > prevSma5;
+      const sma20Rising = strat.sma20 > prevSma20;
+      if (sma5GtSma20 && sma5Rising && sma20Rising) { score += 2; breakdown.push('단기이평동반상승(+2)'); }
+      const wasGoldenCross = prevSma5 <= prevSma20;
+      if (sma5GtSma20 && wasGoldenCross) { score += 2; breakdown.push('골든크로스(+2)'); }
+    }
+    if (strat.sma5 > 0) prevSma5Ref.current[sym] = strat.sma5;
+    if (strat.sma20 > 0) prevSma20Ref.current[sym] = strat.sma20;
 
     // 8. 매도호가 소진 (+10) — 실시간 호가 데이터가 있는 종목(주로 선택된 종목)에서만 반영
     if (askDepletion) { score += 10; breakdown.push('매도호가소진(+10)'); }
@@ -5861,6 +5937,7 @@ priceData.current
               breakout: sensor.isBreakout,
               vwap: sensor.isVwapSupport,
               cvd: sensor.isVolumeProfile,
+              shortTermMomentum: sensor.momentumPositive,
               volumeMomentum: sensor.hasVolumeMomentum,
               rsi: roundedRsi,
               activeCount: sensor.activeCount,
@@ -6702,6 +6779,7 @@ priceData.current
               breakout: strat.isBreakout,
               vwap: strat.isVwapSupport,
               cvd: strat.isVolumeProfile,
+              shortTermMomentum: strat.momentumPositive,
               volumeMomentum: strat.hasVolumeMomentum,
               rsi: roundedRsi,
               activeCount: strat.activeCount,
@@ -8443,7 +8521,10 @@ useEffect(() => {
               breakout: strat.isBreakout,
               vwap: strat.isVwapSupport,
               cvd: strat.isVolumeProfile,
-              volumeMomentum: momentumPositive,
+              shortTermMomentum: momentumPositive,
+              // 🛡️ 여기 예전엔 volumeMomentum에 momentumPositive(SMA5>SMA20 비교값)가 잘못
+              // 들어가 있었다 — 진짜 거래량 모멘텀이 아니라 이동평균 비교값이 들어간 오기였다.
+              volumeMomentum: strat.hasVolumeMomentum,
               rsi: roundedRsi,
               activeCount: strat.activeCount,
               lastUpdatedAt: Date.now()
