@@ -384,6 +384,37 @@ interface Stock {
 //     주문을 넣어야 한다 (이 시점의 매매 로직/슬롯 관리는 별도로 세션 전환을 인지해야 할 수 있음).
 const KRX_AFTERMARKET_LAUNCH_KST = '2026-09-14'; // 이 날짜(포함) 이후부터 애프터마켓 거래 허용
 
+// 🕗 데이터 수집(가격 이력 축적) 전용 시간 판단 — KRX 공지에 따르면 08:20~09:00은 "시가 단일가"
+// 구간으로 실제 호가/가격 데이터가 존재한다. 다만 이건 연속거래가 아니라 단일가 방식이라 실제
+// 매수/매도 판단에 쓰기엔 부적합하므로, isKoreanMarketOpen()(실제 매매 판단용, 09:00부터 시작)은
+// 그대로 두고, 이 함수는 오직 "가격 이력을 미리 쌓아서 09:00 정각에 RSI/VWAP 등이 바로 유의미한
+// 값을 낼 수 있게" 하는 데이터 수집 목적으로만 쓴다. 08:30부터 시작 — 시가단일가(08:20)가 어느
+// 정도 안정된 이후 시점을 잡아, 너무 이른 호가 데이터의 노이즈를 피한다.
+// ⚠️ KIS가 이 시간대에 실제로 유효한 시세를 주는지는 100% 확정할 수 없다 — 혹시 데이터가 없거나
+// 0원으로 오면 기존 안전장치(가격 0 이하 무시 등)가 그대로 작동해 무해하게 넘어간다.
+const isKoreanDataCollectionActive = (): boolean => {
+  const kstFormatter = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'Asia/Seoul',
+    weekday: 'short',
+    hour: 'numeric',
+    minute: 'numeric',
+    hourCycle: 'h23'
+  });
+  const parts = kstFormatter.formatToParts(new Date());
+  const weekday = parts.find(p => p.type === 'weekday')?.value || '';
+  const hour = Number(parts.find(p => p.type === 'hour')?.value || 0);
+  const minute = Number(parts.find(p => p.type === 'minute')?.value || 0);
+
+  if (weekday === 'Sat' || weekday === 'Sun') return false;
+
+  const minutesNow = hour * 60 + minute;
+  const preMarketOpen = 8 * 60 + 30; // 08:30 — 시가단일가(08:20) 안정화 이후 시점
+  if (minutesNow >= preMarketOpen) {
+    return isKoreanMarketOpen() || minutesNow < 9 * 60; // 09:00 이전(프리마켓 구간)이거나, 정규장/애프터마켓 시간이면 true
+  }
+  return false;
+};
+
 const isKoreanMarketOpen = (): boolean => {
   const kstFormatter = new Intl.DateTimeFormat('en-US', {
     timeZone: 'Asia/Seoul',
@@ -6655,7 +6686,7 @@ priceData.current
     // 1. Sync for all watchlist stocks (every 10 seconds)
     const syncAllPrices = async () => {
       if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음 (연동 전 에러 스팸 방지)
-      if (!isKoreanMarketOpen()) return; // 🕘 정규장(평일 09:00~15:30) 외 시간에는 가격이 안 움직이므로 호출하지 않음
+      if (!isKoreanDataCollectionActive()) return; // 🕗 정규장(09:00~15:30)에 더해 08:30~09:00 프리마켓(시가단일가) 구간도 포함 — 09:00 정각에 RSI/VWAP이 바로 유의미하도록 미리 이력을 쌓는다
       try {
         // 🔄 웹소켓 기반 방식으로 원복 — 웹소켓이 연결되어 있으면, 종목별로 "마지막 갱신 후 얼마나
         // 지났는지"를 확인해서 15초 이상 갱신이 안 된 종목만 골라 REST로 보완한다. 활발히
@@ -6807,7 +6838,7 @@ priceData.current
     if (!isAppInitialized) return;
 
     const refreshAllInventorySensors = () => {
-      if (!isKoreanMarketOpen()) return; // 🕘 정규장(평일 09:00~15:30 KST) 외에는 가격이 움직이지 않으므로 재계산 자체를 하지 않는다
+      if (!isKoreanDataCollectionActive()) return; // 🕗 09:00 정각에 센서가 바로 유의미하도록 08:30부터 미리 계산 — 실제 매수/매도는 별도 엔진 루프가 isKoreanMarketOpen()으로 09:00부터만 실행하므로 안전하다
       const currentStocks = stocksRef.current;
       const registeredSymbols = scalperTabsRef.current.map(t => t.symbol);
       if (registeredSymbols.length === 0) return;
