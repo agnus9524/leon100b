@@ -486,15 +486,15 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                       "w-1.5 h-1.5 rounded-full shrink-0",
                       tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" : "bg-slate-500"
                     )} />
-                    <span className="font-bold text-sm truncate text-white shrink min-w-0">{tabName}</span>
-                    <span className="hidden md:inline text-[9.5px] text-slate-400 shrink-0">
+                    <span className="font-bold text-base truncate text-white shrink min-w-0">{tabName}</span>
+                    <span className="hidden md:inline text-[11px] text-slate-400 shrink-0">
                       보유 <strong className="text-slate-200">{(tab.holdingQty || 0).toLocaleString()}</strong>
                     </span>
-                    <span className="hidden md:inline text-[9.5px] text-slate-400 shrink-0">
+                    <span className="hidden md:inline text-[11px] text-slate-400 shrink-0">
                       주문가능 <strong className="text-sleek-blue">{(tab.orderableQty || 0).toLocaleString()}</strong>
                     </span>
                     <span className={cn(
-                      "hidden md:inline text-[9.5px] font-bold shrink-0",
+                      "hidden md:inline text-[11px] font-bold shrink-0",
                       (tab.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400"
                     )}>
                       {(tab.changePercent || 0) >= 0 ? '+' : ''}{(tab.changePercent || 0).toFixed(2)}%
@@ -505,14 +505,14 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                     {isPriceLoading ? (
                       <span className="hidden md:inline text-[10px] font-bold text-slate-500 animate-pulse">연결 중...</span>
                     ) : (
-                      <span className="hidden md:flex items-center gap-1 text-xs font-black font-mono text-rose-500 tabular-nums">
-                        <span className="text-[9px] font-bold text-slate-400">현재 체결가</span>
+                      <span className="hidden md:flex items-center gap-1 text-sm font-black font-mono text-rose-500 tabular-nums">
+                        <span className="text-[10.5px] font-bold text-slate-400">현재 체결가</span>
                         {formatCurrency(tabPrice)}
                       </span>
                     )}
 
                     {tab.isBotActive && (
-                      <span className="text-[9px] font-black bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/30 shrink-0">
+                      <span className="text-[10.5px] font-black bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/30 shrink-0">
                         ON
                       </span>
                     )}
@@ -560,7 +560,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                       <span
                         key={key}
                         className={cn(
-                          "text-[8.5px] font-bold px-1.5 py-0.5 rounded-full border flex items-center gap-0.5 transition-all",
+                          "text-[10px] font-bold px-1.5 py-0.5 rounded-full border flex items-center gap-0.5 transition-all",
                           isOn ? onCls : "bg-white/5 text-slate-500 border-white/10"
                         )}
                         title={`${tabName} — ${label} 센서 ${isOn ? '감지됨' : '대기 중'}`}
@@ -571,21 +571,39 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                     );
                   })}
                   {tab.sensors && (
-                    <span className="text-[8.5px] font-bold text-slate-500 ml-auto">
+                    <span className="text-[11px] font-bold text-slate-500 ml-auto">
                       RSI {Math.round(tab.sensors.rsi)} · {tab.sensors.activeCount}/4
                     </span>
                   )}
                 </div>
 
+                {/* 📦 종목별 슬롯 현황 — 예전에 우측 사이드바에 있던 "선택 종목 슬롯 현황"을 각 종목 카드 안으로 이동 */}
+                {(() => {
+                  const slots = (tab.gapInventory || []).filter(s => typeof s === 'object' && s.quantity > 0);
+                  if (slots.length === 0) return null;
+                  const totalQty = slots.reduce((sum, s) => sum + s.quantity, 0);
+                  const avgPrice = totalQty > 0 ? slots.reduce((sum, s) => sum + s.price * s.quantity, 0) / totalQty : 0;
+                  const pnlPercent = avgPrice > 0 && tabPrice > 0 ? ((tabPrice - avgPrice) / avgPrice) * 100 : 0;
+                  return (
+                    <div className="pl-3 flex items-center gap-2 text-[10px] font-mono">
+                      <span className="font-bold text-slate-400">슬롯 {slots.length}개 · {totalQty}주</span>
+                      <span className="text-slate-500">평단 {formatCurrency(avgPrice)}</span>
+                      <span className={cn("font-black", pnlPercent >= 0 ? "text-rose-400" : "text-sky-400")}>
+                        {pnlPercent >= 0 ? '+' : ''}{pnlPercent.toFixed(2)}%
+                      </span>
+                    </div>
+                  );
+                })()}
+
                 {/* 📜 종목별 개별 로그창 — GLOBAL TRADE LOGS 중 이 종목만 걸러서 최근 메시지를 보여준다 */}
-                <div className="pl-3 pr-1 py-1 bg-black/30 rounded-lg border border-white/5 max-h-[68px] overflow-y-auto custom-scrollbar space-y-0.5">
+                <div className="pl-3 pr-1 py-1.5 bg-black/30 rounded-lg border border-white/5 max-h-[84px] overflow-y-auto custom-scrollbar space-y-1">
                   {(() => {
                     const myLogs = tradeLogs.filter(l => l.symbol === tab.symbol).slice(0, 4);
                     if (myLogs.length === 0) {
-                      return <div className="text-[8.5px] text-slate-600 py-0.5">아직 이벤트가 없습니다</div>;
+                      return <div className="text-[10px] text-slate-600 py-0.5">아직 이벤트가 없습니다</div>;
                     }
                     return myLogs.map((log, i) => (
-                      <div key={i} className="text-[8.5px] font-mono text-slate-300 flex items-center gap-1.5 truncate">
+                      <div key={i} className="text-[10px] font-mono text-slate-300 flex items-center gap-1.5 truncate">
                         <span className="text-slate-500 shrink-0">{log.time}</span>
                         <span className={cn(
                           "font-bold shrink-0",
