@@ -6949,13 +6949,13 @@ priceData.current
   // ③ 빈 슬롯이 생기면(신호없음으로 빠지거나 처음 시작할 때) 추천종목 목록에서 점수가 가장
   //    높은 종목부터 자동으로 등록하고 봇을 시작해서 슬롯을 채운다.
   // ============================================================
-  const DEAD_SIGNAL_SCORE = 30;
   // 🛡️ 1분은 너무 짧았다 — KIS 거래량/등락률 순위는 하루 누적 기준이라 1분 사이엔 거의 안
   // 바뀌는데, 1분마다 퇴출시키면 같은 종목이 "퇴출 → 같은 순위표에서 재등록"을 반복해서
   // 실제로는 다양해지지 않고 몇 개 종목만 계속 들락날락하는 것처럼 보였다. 채움 주기(5분)와
   // 맞춰서 5분으로 늘린다.
   const DEAD_SIGNAL_DURATION_MS = 5 * 60 * 1000;
   const lowScoreSinceRef = React.useRef<Record<string, number>>({});
+  const scoreHistoryForEvictionRef = React.useRef<Record<string, number[]>>({}); // 퇴출 판정용 최근 점수 이력 — 순간 노이즈가 아니라 평균 추세로 판단하기 위함
   const wasMarketOpenRef = React.useRef<boolean>(false);
   const isAutoFillingRef = React.useRef<boolean>(false);
   const lastAutoFillAttemptRef = React.useRef<number>(0);
@@ -6984,7 +6984,13 @@ priceData.current
 
       if (!marketOpen) return; // 거래 시간 외에는 아래 슬롯 관리도 할 필요 없음
 
-      // ② 신호 없음(15분간 30점 미만) 종목 자동 제거 — 보유 물량 있으면 절대 제외
+      // ② 신호 없음(장기간 약세 지속) 종목 자동 제거 — 보유 물량 있으면 절대 제외
+      // 🛡️ 예전엔 "이 순간 점수가 30 미만"이라는 단일 기준 하나만 봤는데, 순간 점수는 노이즈에
+      // 흔들릴 수 있고, 무엇보다 "관망 중이던 종목이 갑자기 신호가 생길 가능성"을 세밀하게
+      // 반영하지 못했다. 이제 ① 최근 5분 평균 점수가 낮고 ② 체결강도도 약하고 ③ 거래량 모멘텀도
+      // 없고 ④ VWAP 아래인 — 네 조건이 전부 동시에 성립하는 "명백한 약세 지속" 상태가 5분간
+      // 이어질 때만 교체 후보로 삼는다. 하나라도 회복되면(신호 하나만 살아나도) 타이머가 리셋되어
+      // 계속 감시를 유지한다.
       const currentInventory = scalperTabsRef.current;
       const toRemove: string[] = [];
       currentInventory.forEach(item => {
@@ -6994,13 +7000,26 @@ priceData.current
         const hasHoldings = (holdings[item.symbol] || 0) > 0;
         if (hasHoldings) {
           delete lowScoreSinceRef.current[item.symbol]; // 보유 중이면 신호없음 판정 자체를 하지 않는다
+          delete scoreHistoryForEvictionRef.current[item.symbol];
           return;
         }
 
         const strat = detectStockStrategies(stockItem);
         const { score } = calculateBuyScore(stockItem, strat);
 
-        if (score < DEAD_SIGNAL_SCORE) {
+        // 최근 5분 평균 점수 추적
+        const scoreHist = scoreHistoryForEvictionRef.current[item.symbol] || [];
+        const updatedHist = [...scoreHist, score].slice(-20); // 최근 20회 샘플(약 5분치, 15초 주기 기준)
+        scoreHistoryForEvictionRef.current[item.symbol] = updatedHist;
+        const avgScore = updatedHist.reduce((a, b) => a + b, 0) / updatedHist.length;
+
+        const isWeakScore = avgScore < 35;
+        const isWeakExecution = (stockItem.executionStrength || 0) < 100;
+        const isNoVolumeMomentum = !strat.hasVolumeMomentum;
+        const isBelowVwap = strat.vwap > 0 && stockItem.price < strat.vwap;
+        const isClearlyWeak = isWeakScore && isWeakExecution && isNoVolumeMomentum && isBelowVwap;
+
+        if (isClearlyWeak) {
           const since = lowScoreSinceRef.current[item.symbol];
           if (!since) {
             lowScoreSinceRef.current[item.symbol] = Date.now();
@@ -7008,7 +7027,7 @@ priceData.current
             toRemove.push(item.symbol);
           }
         } else {
-          delete lowScoreSinceRef.current[item.symbol]; // 점수가 회복되면 신호없음 타이머 초기화
+          delete lowScoreSinceRef.current[item.symbol]; // 조건 중 하나라도 회복되면 타이머 초기화
         }
       });
 
@@ -7016,10 +7035,11 @@ priceData.current
         setScalperInventory(prev => prev.filter(item => !toRemove.includes(item.symbol)));
         toRemove.forEach(symbol => {
           delete lowScoreSinceRef.current[symbol];
+          delete scoreHistoryForEvictionRef.current[symbol];
           const name = currentInventory.find(t => t.symbol === symbol)?.name || symbol;
-          addLog(symbol, '매도', 0, 0, `[자동 퇴출] ${name} — 5분간 매수 신호 없음(30점 미만)으로 인벤토리에서 자동 제거`);
+          addLog(symbol, '매도', 0, 0, `[자동 퇴출] ${name} — 5분간 약세 지속(평균점수·체결강도·거래량모멘텀·VWAP 모두 부진)으로 인벤토리에서 자동 제거`);
         });
-        showNotification(`[자동 퇴출] ${toRemove.length}개 종목이 신호 없음으로 인벤토리에서 제거되었습니다.`, 'info');
+        showNotification(`[자동 퇴출] ${toRemove.length}개 종목이 약세 지속으로 인벤토리에서 제거되었습니다.`, 'info');
       }
 
       // ③ 빈 슬롯을 추천종목 상위 점수 순으로 자동 채우기
@@ -7185,73 +7205,15 @@ priceData.current
     return () => clearInterval(interval);
   }, []);
 
-  // 1. High-frequency simulated/micro-tick price fluctuations to show real-time fast-paced activity when bot is active
-  useEffect(() => {
-    if (!isGapBotActive || !selectedStock) return;
-
-    const simInterval = setInterval(() => {
-      setStocks(prev => prev.map(stock => {
-        if (stock.symbol !== selectedStock.symbol) return stock;
-
-        const currentPrice = stock.price;
-        const isUS = stock.market === 'US' || /^[A-Z]/.test(stock.symbol);
-        const tickSize = getTickSize(currentPrice, isUS ? 'US' : 'KR');
-
-        let move = 0;
-        if (kisConfig.isConnected) {
-          // A. KIS Connected: Rapid micro-tick fluctuations using exact exchange tick sizes
-          const moves = [-tickSize, 0, tickSize];
-          move = moves[Math.floor(Math.random() * moves.length)];
-        } else {
-          // B. Simulated Mode: Oscillate price around the defined range using discrete tick sizes
-          const minPrice = gapBuyPrice > 0 ? gapBuyPrice : currentPrice * 0.95;
-          const maxPrice = gapSellPrice > 0 ? gapSellPrice : currentPrice * 1.05;
-          const centerPrice = (minPrice + maxPrice) / 2;
-
-          let upProb = 0.42;
-          let downProb = 0.42;
-          if (currentPrice > centerPrice) {
-            upProb = 0.32;
-            downProb = 0.52;
-          } else if (currentPrice < centerPrice) {
-            upProb = 0.52;
-            downProb = 0.32;
-          }
-
-          const rand = Math.random();
-          if (rand < downProb) move = -tickSize;
-          else if (rand < downProb + upProb) move = tickSize;
-          else move = 0;
-        }
-
-        if (move === 0) return stock;
-
-        const newPrice = Math.max(tickSize, isUS ? Number((currentPrice + move).toFixed(2)) : currentPrice + move);
-        const basePrice = stock.basePrice || (stock.price - stock.change) || newPrice;
-        const { change, changePercent } = calcStockChange(newPrice, basePrice, isUS ? 'US' : 'KR');
-
-        const newHistory = Array.isArray(stock.history) ? [...stock.history] : [];
-        if (newHistory.length > 0) {
-          newHistory[newHistory.length - 1] = {
-            ...newHistory[newHistory.length - 1],
-            price: newPrice
-          };
-        }
-
-        return {
-          ...stock,
-          price: newPrice,
-          basePrice,
-          change,
-          changePercent,
-          history: newHistory
-        };
-      }));
-    }, kisConfig.isConnected ? 450 : scalpingSpeed); // 450ms for extremely responsive KIS visual ticks, or scalpingSpeed for simulation
-
-    return () => clearInterval(simInterval);
-  }, [isGapBotActive, selectedSymbol, kisConfig.isConnected, gapBuyPrice, gapSellPrice, scalpingSpeed, selectedStock]);
-
+  // 🛡️ 매우 중요한 삭제: 여기 있던 "High-frequency simulated/micro-tick price fluctuations" 코드는
+  // 실제 KIS 데이터가 아니라, 선택된 종목(selectedStock)에 대해서만 -tickSize/0/+tickSize 중
+  // 하나를 랜덤하게 골라 가격을 인위적으로 흔드는 가짜 시뮬레이션이었다. 심각한 점은
+  // kisConfig.isConnected(실제 KIS 연동 상태)에서도 이 코드가 그대로 실행되어, 진짜 실시간
+  // 시세를 가짜 랜덤값으로 덮어쓰고 있었다는 것이다 — "선택한 종목만 실시간으로 계속 움직이는
+  // 것처럼 보인다"는 증상의 실제 원인이 바로 이 코드였다: 그 움직임 자체가 진짜 체결이 아니라
+  // 화면 효과용 가짜 데이터였다. 실전 매매 프로그램에서 진짜 가격을 가짜 값으로 덮어쓰는 코드는
+  // 매매 판단 자체를 오염시킬 수 있어 완전히 제거한다. 이제 모든 종목의 가격은 오직 웹소켓
+  // (H0STCNT0)과 REST 백업(syncAllPrices)을 통해서만 갱신된다.
 
 
   const cancelPendingBuyOrder = async (orderId: string) => {
