@@ -2035,46 +2035,398 @@ await this.getDomesticPrice(symbol);
 );
   }
 
-  public async checkOrderExecution(odno: string) {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    if (!odno) return { found: false, isFullyFilled: false, isPartiallyFilled: false, isUnfilled: true, price: 0 };
-    
-    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-    const cleanOdno = odno.toString().trim().replace(/^0+/, '');
-    const paddedOdno = odno.toString().trim().padStart(10, '0');
+ public async checkOrderExecution(
+  odno: string
+) {
 
-    try {
-      const res = await this.getDomesticOrderExecutions(todayStr, todayStr);
-      if (res && res.rt_cd === '0' && res.output1 && Array.isArray(res.output1)) {
-        const order = res.output1.find((item: any) => {
-          const itemOdno = (item.odno || item.ODNO || '').toString().trim();
-          const cleanItemOdno = itemOdno.replace(/^0+/, '');
-          return itemOdno === odno || itemOdno === paddedOdno || cleanItemOdno === cleanOdno;
-        });
-        if (order) {
-          const ordQty = Number(order.ord_qty || order.ORD_QTY || 0);
-          const ccldQty = Number(order.tot_ccld_qty || order.TOT_CCLD_QTY || 0);
-          const rmndQty = Number(order.rmnd_qty || order.RMND_QTY || 0);
-          const prpr = Number(order.avg_prvs || order.AVG_PRVS || order.ord_unpr || order.ORD_UNPR || 0);
-          
-          return {
-            found: true,
-            ordQty,
-            ccldQty,
-            rmndQty,
-            isFullyFilled: ccldQty === ordQty && ordQty > 0,
-            isPartiallyFilled: ccldQty > 0 && ccldQty < ordQty,
-            isUnfilled: ccldQty === 0,
-            price: prpr
-          };
-        }
-      }
-      return { found: false, isFullyFilled: false, isPartiallyFilled: false, isUnfilled: true, price: 0 };
-    } catch (e) {
-      console.error("[KIS Service] checkOrderExecution error:", e);
-      return { found: false, isFullyFilled: false, isPartiallyFilled: false, isUnfilled: true, price: 0, error: e };
-    }
+  if (!this.config) {
+    throw new Error(
+      'KIS Config not initialized'
+    );
   }
+
+
+  if (!odno) {
+
+    return {
+      found: false,
+      isFullyFilled: false,
+      isPartiallyFilled: false,
+      isUnfilled: true,
+      price: 0,
+      error:
+        new Error('ODNO가 없습니다.')
+    };
+
+  }
+
+
+  const now =
+    new Date();
+
+  const todayStr =
+    `${now.getFullYear()}${String(
+      now.getMonth() + 1
+    ).padStart(2, '0')}${String(
+      now.getDate()
+    ).padStart(2, '0')}`;
+
+
+  const cleanOdno =
+    odno
+      .toString()
+      .trim()
+      .replace(/^0+/, '');
+
+
+  const paddedOdno =
+    odno
+      .toString()
+      .trim()
+      .padStart(10, '0');
+
+
+  try {
+
+    const res =
+      await this.getDomesticOrderExecutions(
+        todayStr,
+        todayStr,
+        '00',
+        '00'
+      );
+
+
+    // ========================================================
+    // 조회 자체 실패
+    // ========================================================
+
+    if (
+      !res ||
+      res.rt_cd !== '0'
+    ) {
+
+      console.warn(
+        '[KIS 체결조회 실패]',
+        res
+      );
+
+
+      return {
+
+        found: false,
+
+        isFullyFilled: false,
+
+        isPartiallyFilled: false,
+
+        isUnfilled: true,
+
+        price: 0,
+
+        error:
+          new Error(
+            res?.msg1 ||
+            'KIS 주문체결조회 실패'
+          )
+
+      };
+
+    }
+
+
+    const output =
+      Array.isArray(res.output1)
+        ? res.output1
+        : [];
+
+
+    // ========================================================
+    // 주문번호 검색
+    // ========================================================
+
+    const order =
+      output.find(
+        (item: any) => {
+
+          const itemOdno =
+            String(
+              item.odno ??
+              item.ODNO ??
+              ''
+            ).trim();
+
+
+          const cleanItemOdno =
+            itemOdno
+              .replace(/^0+/, '');
+
+
+          return (
+
+            itemOdno === odno ||
+
+            itemOdno === paddedOdno ||
+
+            cleanItemOdno === cleanOdno
+
+          );
+
+        }
+      );
+
+
+    // ========================================================
+    // 주문번호가 아직 조회되지 않음
+    // ========================================================
+
+    if (!order) {
+
+      console.log(
+        `[KIS 체결조회] 주문번호 ${odno} 아직 조회되지 않음`
+      );
+
+
+      return {
+
+        found: false,
+
+        isFullyFilled: false,
+
+        isPartiallyFilled: false,
+
+        isUnfilled: true,
+
+        price: 0
+
+      };
+
+    }
+
+
+    // ========================================================
+    // 주문 / 체결 수량
+    // ========================================================
+
+    const ordQty =
+      Number(
+        order.ord_qty ??
+        order.ORD_QTY ??
+        0
+      );
+
+
+    const ccldQty =
+      Number(
+        order.tot_ccld_qty ??
+        order.TOT_CCLD_QTY ??
+        0
+      );
+
+
+    const rmndQty =
+      Number(
+        order.rmnd_qty ??
+        order.RMND_QTY ??
+        0
+      );
+
+
+    const rejectQty =
+      Number(
+        order.rjct_qty ??
+        order.RJCT_QTY ??
+        0
+      );
+
+
+    const orderPrice =
+      Number(
+        order.avg_prvs ??
+        order.AVG_PRVS ??
+        order.ord_unpr ??
+        order.ORD_UNPR ??
+        0
+      );
+
+
+    console.log(
+      '[KIS ORDER STATUS]',
+      {
+        odno,
+        ordQty,
+        ccldQty,
+        rmndQty,
+        rejectQty,
+        orderPrice,
+        raw:
+          order
+      }
+    );
+
+
+    // ========================================================
+    // 거부
+    // ========================================================
+
+    if (rejectQty > 0) {
+
+      return {
+
+        found: true,
+
+        isFullyFilled: false,
+
+        isPartiallyFilled: false,
+
+        isUnfilled: false,
+
+        isRejected: true,
+
+        price:
+          orderPrice,
+
+        ordQty,
+
+        ccldQty,
+
+        rmndQty,
+
+        rejectQty
+
+      };
+
+    }
+
+
+    // ========================================================
+    // 전량 체결
+    // ========================================================
+
+    if (
+      ordQty > 0 &&
+      ccldQty >= ordQty
+    ) {
+
+      return {
+
+        found: true,
+
+        isFullyFilled: true,
+
+        isPartiallyFilled: false,
+
+        isUnfilled: false,
+
+        isRejected: false,
+
+        price:
+          orderPrice,
+
+        ordQty,
+
+        ccldQty,
+
+        rmndQty,
+
+        rejectQty
+
+      };
+
+    }
+
+
+    // ========================================================
+    // 일부 체결
+    // ========================================================
+
+    if (ccldQty > 0) {
+
+      return {
+
+        found: true,
+
+        isFullyFilled: false,
+
+        isPartiallyFilled: true,
+
+        isUnfilled:
+          rmndQty > 0,
+
+        isRejected: false,
+
+        price:
+          orderPrice,
+
+        ordQty,
+
+        ccldQty,
+
+        rmndQty,
+
+        rejectQty
+
+      };
+
+    }
+
+
+    // ========================================================
+    // 주문은 존재하지만 미체결
+    // ========================================================
+
+    return {
+
+      found: true,
+
+      isFullyFilled: false,
+
+      isPartiallyFilled: false,
+
+      isUnfilled: true,
+
+      isRejected: false,
+
+      price:
+        orderPrice,
+
+      ordQty,
+
+      ccldQty,
+
+      rmndQty,
+
+      rejectQty
+
+    };
+
+  } catch (e) {
+
+    console.error(
+      '[KIS Service] checkOrderExecution error:',
+      e
+    );
+
+
+    return {
+
+      found: false,
+
+      isFullyFilled: false,
+
+      isPartiallyFilled: false,
+
+      isUnfilled: true,
+
+      price: 0,
+
+      error: e
+
+    };
+
+  }
+
+}
 
   public async orderDomestic(
   symbol: string,
