@@ -9381,47 +9381,6 @@ useEffect(() => {
     }
   };
 
-  const [manualTradingSymbol, setManualTradingSymbol] = useState<string | null>(null);
-
-  const handleManualBuy = React.useCallback(async (targetStock: Stock, quantity: number, price?: number) => {
-    if (!targetStock) {
-      showNotification("매수할 종목을 선택해 주세요.", "error");
-      return;
-    }
-    const buyQty = quantity > 0 ? quantity : 1;
-    const buyPrice = (price && price > 0) ? price : targetStock.price;
-    if (buyPrice <= 0) {
-      showNotification(`${targetStock.name}: 현재 가격 정보가 없어 매수할 수 없습니다.`, "error");
-      return;
-    }
-
-    try {
-      setManualTradingSymbol(targetStock.symbol);
-      showNotification(`${targetStock.name} ${buyQty}주 (${formatCurrency(buyPrice)}) 수동 매수 주문 전송 중...`, "info");
-      transitionLifecycleStatus(targetStock.symbol, 'BUY_READY', `수동 즉시 매수 (${buyQty}주 @ ${formatCurrency(buyPrice)})`);
-      const executedQty = await executeTrade(
-        'BUY',
-        targetStock,
-        buyQty,
-        `[수동 즉시 매수] ${targetStock.name} ${buyQty}주`,
-        buyPrice,
-        undefined,
-        undefined,
-        undefined,
-        'MANUAL'
-      );
-      if (executedQty > 0) {
-        showNotification(`${targetStock.name} ${executedQty}주 매수 주문 성공`, "success");
-        playScalpingSound('BUY');
-      }
-    } catch (err: any) {
-      console.error("[Manual Buy Error]", err);
-      showNotification(`매수 주문 처리 실패: ${err?.message || '오류 발생'}`, "error");
-    } finally {
-      setManualTradingSymbol(null);
-    }
-  }, [executeTrade, showNotification, transitionLifecycleStatus, playScalpingSound, formatCurrency]);
-
   const handleExecuteManualSell = async () => {
     if (isSubmittingManualSell) return;
 
@@ -9979,8 +9938,6 @@ useEffect(() => {
                 handleClearAllInventory={handleClearAllInventory}
                 updateTab={updateTab}
                 INITIAL_STOCKS={INITIAL_STOCKS}
-                handleManualBuy={handleManualBuy}
-                manualTradingSymbol={manualTradingSymbol}
               />
             );
           })()}
