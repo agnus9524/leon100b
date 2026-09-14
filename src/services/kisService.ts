@@ -963,8 +963,12 @@ await this.getDomesticPrice(symbol);
     try {
       const token = await this.getAccessToken();
       const endpoint = '/uapi/domestic-stock/v1/trading/inquire-daily-ccnl';
-      
-      const trId = 'TTTC8001R';
+
+      // 🛡️ 매우 중요한 수정: TTTC8001R은 KIS 공식 저장소의 legacy(구버전) TR이었다. 최신 공식
+      // open-trading-api 기준으로 국내주식 inquire-daily-ccld의 3개월 이내 실전 조회 TR은
+      // TTTC0081R이다 (3개월 이전 조회는 별도로 CTSC9215R을 쓴다 — 스캘퍼는 당일/최근 체결만
+      // 확인하면 되므로 TTTC0081R만 있으면 충분하다).
+      const trId = 'TTTC0081R';
 
       const headers = {
         'content-type': 'application/json',
@@ -989,7 +993,9 @@ await this.getDomesticPrice(symbol);
         CTX_AREA_NK100: '',
         INQR_DVSN: '00',
         PRCS_DVSN: prcsDvsn,
-        CANO_PWD: this.config.accountPw || ''
+        CANO_PWD: this.config.accountPw || '',
+        // 🛡️ 새 TR(TTTC0081R)로 바꾸면서 최신 공식 예제를 따라 거래소 ID도 함께 명시한다.
+        EXCG_ID_DVSN_CD: getExchangeIdForOrder(),
       };
 
       const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));

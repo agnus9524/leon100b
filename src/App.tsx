@@ -1297,6 +1297,11 @@ export default function App() {
   const balanceRef = React.useRef(balance);
   useEffect(() => { balanceRef.current = balance; }, [balance]);
   const [principal, setPrincipal] = useState(0); // Investment principal (will be synced via KIS)
+  // 💰 KIS가 직접 계산해서 주는 총자산(tot_evlu_amt = 예수금 + 보유종목 평가금액) — 로컬에서
+  // balance + holdings×현재가로 재계산하는 대신, 이 값이 있으면 그대로 신뢰한다. KIS 응답이
+  // 곧 SSOT(Single Source Of Truth)라는 원칙에 맞춘 것 — 로컬 계산은 holdings/현재가 동기화
+  // 타이밍이 어긋나면 미세하게 다른 값이 나올 수 있지만, 이 값은 그럴 위험이 없다.
+  const [kisTotalAssetValue, setKisTotalAssetValue] = useState<number>(0);
   const [orderableKrw, setOrderableKrw] = useState<number>(() => {
     const saved = localStorage.getItem('sleek_orderable_krw');
     if (saved === '154000' || saved === '980543') {
@@ -3206,6 +3211,16 @@ setGapInventory(nextInv);
   }, [selectedStock, kisConfig.isConnected, kisBuyableQty, orderableKrw, orderableUsd, balance, exchangeRate]);
 
   const totalValue = useMemo(() => {
+    // 💰 KIS가 직접 계산해서 주는 총평가금액(tot_evlu_amt = 예수금 + 보유종목 평가금액)이 있으면
+    // 그대로 신뢰한다 — 로컬에서 holdings×현재가로 재계산하면 동기화 타이밍에 따라 미세하게
+    // 어긋날 수 있지만, KIS 응답 자체는 그럴 위험이 없다. 다만 이 값은 "국내 계좌" 잔고조회
+    // 기준이라, 해외주식을 보유 중이면 그 평가금액이 반영되지 않아 부정확할 수 있다 — 그 경우엔
+    // 기존 로컬 재계산으로 폴백한다.
+    const hasOverseasHoldings = Object.entries(holdings).some(([sym, qty]) => Number(qty) > 0 && /^[A-Z]/.test(sym));
+    if (kisTotalAssetValue > 0 && !hasOverseasHoldings) {
+      return kisTotalAssetValue;
+    }
+
     // Total Asset Valuation = Cash Balance + Current Market Value of Stock Holdings + Pending Order Reserves
     let stockValue = 0;
     Object.entries(holdings).forEach(([sym, rawQty]) => {
@@ -3224,7 +3239,7 @@ setGapInventory(nextInv);
     });
 
     return Math.floor(balance + stockValue);
-  }, [balance, holdings, stocks, avgPrices, exchangeRate, pendingBuyOrders]);
+  }, [balance, holdings, stocks, avgPrices, exchangeRate, pendingBuyOrders, kisTotalAssetValue]);
 
   const convertedValue = displayCurrency === 'USD' ? Math.round(totalValue / exchangeRate) : Math.round(totalValue);
   const convertedBalance = displayCurrency === 'USD' ? Math.round(balance / exchangeRate) : Math.round(balance);
@@ -5939,7 +5954,10 @@ priceData.current
           // 🔍 총자산(tot_evlu_amt 등) 관련 필드의 정확한 이름을 확인하기 위한 1회성 진단 로그 —
           // 현재는 balance + holdings×현재가로 로컬 재계산하고 있는데, KIS가 직접 계산해서 주는
           // 총자산 값을 그대로 쓰는 게 더 정확할 수 있다. 이 로그로 실제 필드명을 확인한다.
-          console.log('[KIS 잔고조회 output2 전체 필드 — 총자산 필드명 확인용]', out2);
+          // 🔍 실사용 로그로 확인된 필드명: tot_evlu_amt(총평가금액) = 예수금 + 보유종목 평가금액.
+          // 이 값이 있으면 로컬 재계산(balance + holdings×현재가) 대신 이 값을 총자산으로 신뢰한다.
+          const kisTotalAsset = Number(out2.tot_evlu_amt || 0);
+          if (kisTotalAsset > 0) setKisTotalAssetValue(kisTotalAsset);
           // 🔍 dncl_amt 계열 필드명이 KIS 공식 문서 기준과 정확히 일치하는지 확신할 수 없어서,
           // 더 널리 문서화된 필드명(dnca_tot_amt=예수금총금액, prvs_rcdl_excc_amt=가수도정산금액)도
           // 후보로 추가한다 — 실제 어떤 필드가 맞는지는 아래 진단 툴팁으로 직접 확인 가능하다.
