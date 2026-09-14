@@ -4817,131 +4817,111 @@ setGapInventory(nextInv);
 
     const scoredCandidates = list.sort((a, b) => b.scalpingScore - a.scalpingScore);
 
-   // ============================================================
-// 1년 장기 추세 필터
 // ============================================================
-// 중요:
-// - 추천 검색을 막는 필수 필터가 아니다.
-// - KIS API를 20개 동시에 호출하면 429 / queue 지연이 발생할 수 있다.
-// - 따라서 점수 상위 5개만 순차적으로 확인한다.
-// - 개별 종목 요청이 실패해도 해당 종목은 제외하지 않는다.
-// - 전체 추세 필터는 최대 5초만 사용한다.
+// ★ 실시간 초단타 최종 추천 랭킹
+// ============================================================
+//
+// 1년 추세 필터는 사용하지 않는다.
+// 이유:
+// - 초단타는 장기 추세보다 현재 거래량/등락률/전략신호가 중요
+// - 월봉 API 추가 호출로 KIS 요청량 증가
+// - trend_filter_timeout 및 429 발생 가능성 증가
+// - 실시간 추천 속도 저하
+//
+// 최종 순위는 generateRealtimeRecommendations()에서 계산된
+// scalpingScore를 기준으로 결정한다.
 // ============================================================
 
-const trendCheckPool = scoredCandidates.slice(0, 5);
+const rankedCandidates = [...scoredCandidates]
+  .filter((item) => {
+    // 가격이 없는 종목은 추천하지 않는다.
+    if (!item || !item.symbol) return false;
+    if (!Number.isFinite(Number(item.price))) return false;
+    if (Number(item.price) <= 0) return false;
 
-let downtrendSymbols = new Set<string>();
+    // 종목명이 없거나 코드와 같은 경우 제외
+    if (!item.name || item.name.trim().length === 0) return false;
+    if (item.name === item.symbol) return false;
 
-try {
-  const trendStartTime = Date.now();
+    return true;
+  })
+  .sort((a, b) => {
+    // 1순위: 스캘핑 종합점수
+    const scoreA = Number(a.scalpingScore || 0);
+    const scoreB = Number(b.scalpingScore || 0);
 
-  for (const rec of trendCheckPool) {
-
-    // 전체 추세 필터 제한시간
-    if (Date.now() - trendStartTime >= 5000) {
-      console.warn(
-        '[1년 추세 필터] 5초 제한시간 도달 → 추세 필터 중단'
-      );
-      break;
+    if (scoreA !== scoreB) {
+      return scoreB - scoreA;
     }
 
-    try {
+    // 2순위: 등락률
+    const changeA = Number(a.changePercent || 0);
+    const changeB = Number(b.changePercent || 0);
 
-      const monthly =
-        await kisService.getDomesticDailyPrice(
-          rec.symbol,
-          'M'
-        );
-
-      const bars =
-        Array.isArray(monthly?.output)
-          ? monthly.output
-          : [];
-
-      // 데이터 부족 → 제외하지 않음
-      if (bars.length < 6) {
-        continue;
-      }
-
-      // 월봉은 최신순이므로 마지막 데이터가
-      // 가장 오래된 월봉
-      const oldestClose = Number(
-        bars[bars.length - 1]?.stck_clpr || 0
-      );
-
-      const currentPrice =
-        Number(rec.price || 0);
-
-      // 가격 데이터가 없으면 제외하지 않음
-      if (
-        oldestClose <= 0 ||
-        currentPrice <= 0
-      ) {
-        continue;
-      }
-
-      // 1년 전 대비 30% 이상 하락한 종목
-      const isDowntrend =
-        currentPrice < oldestClose * 0.7;
-
-      if (isDowntrend) {
-        downtrendSymbols.add(rec.symbol);
-
-        console.log(
-          `[1년 추세 필터 제외] ${rec.name}(${rec.symbol})`,
-          {
-            currentPrice,
-            oldestClose,
-            declineRate:
-              ((currentPrice / oldestClose - 1) * 100)
-                .toFixed(1) + '%'
-          }
-        );
-      }
-
-    } catch (error) {
-
-      // 개별 종목 오류는 추천 전체에 영향을 주지 않는다.
-      console.warn(
-        `[1년 추세 필터 개별 실패] ${rec.name}(${rec.symbol})`,
-        error
-      );
-
-      continue;
+    if (changeA !== changeB) {
+      return changeB - changeA;
     }
-  }
 
-} catch (trendErr) {
+    // 3순위: 거래량
+    const volumeA =
+      Number(
+        String(a.volume || '0').replace(/,/g, '')
+      ) || 0;
 
-  // 추세 필터 자체가 실패해도
-  // 추천종목 검색은 반드시 계속 진행한다.
-  console.warn(
-    '[1년 추세 필터 실패 → 필터 없이 추천 진행]',
-    trendErr
+    const volumeB =
+      Number(
+        String(b.volume || '0').replace(/,/g, '')
+      ) || 0;
+
+    return volumeB - volumeA;
+  });
+
+// ============================================================
+// ★ 최종 추천 TOP 10
+// ============================================================
+
+const finalRecommendations =
+  rankedCandidates
+    .slice(0, MAX_SCALPER_RECOMMENDATIONS)
+    .map((item, index) => ({
+      ...item,
+      rank: index + 1,
+    }));
+
+// ============================================================
+// ★ 1순위 종목 로그
+// ============================================================
+
+if (finalRecommendations.length > 0) {
+
+  const top = finalRecommendations[0];
+
+  console.log(
+    '[★ 실시간 스캘핑 1순위]',
+    {
+      rank: 1,
+      symbol: top.symbol,
+      name: top.name,
+      price: top.price,
+      changePercent: top.changePercent,
+      volume: top.volume,
+      scalpingScore: top.scalpingScore,
+    }
   );
 
-  downtrendSymbols.clear();
+} else {
+
+  console.warn(
+    '[실시간 스캘핑 추천] 유효한 추천 종목이 없습니다.'
+  );
 }
 
 // ============================================================
-// 최종 추천
+// 최종 반환
 // ============================================================
 
-return scoredCandidates
-  .filter(
-    r => !downtrendSymbols.has(r.symbol)
-  )
-  .slice(0, MAX_SCALPER_RECOMMENDATIONS)
-  .map((item, idx) => ({
-    ...item,
-    rank: idx + 1
-  }));
+return finalRecommendations;
 
-    return scoredCandidates
-      .filter(r => !downtrendSymbols.has(r.symbol))
-      .slice(0, MAX_SCALPER_RECOMMENDATIONS)
-      .map((item, idx) => ({ ...item, rank: idx + 1 }));
-  }, [detectStockStrategies, kisConfig.isConnected]);
 
   const handleGetRecommendations = useCallback(async () => {
     setIsGettingRecommendations(true);
