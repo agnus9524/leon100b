@@ -2782,6 +2782,7 @@ setGapInventory(nextInv);
   const prevExecutionStrengthRef = React.useRef<Record<string, number>>({});
   const sellExecStrengthRef = React.useRef<Record<string, number>>({}); // RSI 극단 반전 판단용 — 매도 로직 전용 체결강도 추적 (매수 점수제와 독립)
   const volumeHistoryRef = React.useRef<Record<string, number[]>>({});
+  const prevPriceForComboRef = React.useRef<Record<string, number>>({}); // 체결강도+거래량+가격 결합 방향 판단용 직전 가격
 
   const calculateBuyScore = React.useCallback((
     stock: Stock,
@@ -2812,7 +2813,6 @@ setGapInventory(nextInv);
     // 4. 체결강도 급증 — 직전 대비 30 이상 상승 (+10)
     const prevExec = prevExecutionStrengthRef.current[sym];
     if (prevExec !== undefined && execStrength - prevExec >= 30) { score += 10; breakdown.push('체결강도급증(+10)'); }
-    if (execStrength > 0) prevExecutionStrengthRef.current[sym] = execStrength;
 
     // 5. 실제 거래량 2배 이상 — 최근 평균 거래량 대비 (+15)
     const rawVol = Number(String(stock.volume || '0').replace(/,/g, '')) || 0;
@@ -2820,6 +2820,30 @@ setGapInventory(nextInv);
     const avgVol = volHist.length >= 3 ? volHist.reduce((a, b) => a + b, 0) / volHist.length : 0;
     if (avgVol > 0 && rawVol >= avgVol * 2) { score += 15; breakdown.push('거래량2배+(+15)'); }
     volumeHistoryRef.current[sym] = [...volHist, rawVol].slice(-20);
+
+    // 5-1. 🎯 체결강도 + 거래량 + 가격 결합 신호 — 개별로는 이미 위에서 반영했지만, 셋이 동시에
+    // 같은 방향이면 훨씬 신뢰도 높은 신호가 된다. 체결강도↑ + 거래량↑ + 가격↑이 전부 겹치면
+    // 강한 매수 후보로 보너스를, 반대로 체결강도↓ + 가격 정체 + 거래량↓이 전부 겹치면
+    // "추격매수 위험" 신호로 보고 감점한다.
+    const prevPriceCombo = prevPriceForComboRef.current[sym];
+    if (prevExec !== undefined && prevPriceCombo !== undefined && currentPrice > 0) {
+      const execRising = execStrength > prevExec;
+      const execFalling = execStrength < prevExec;
+      const volRising = avgVol > 0 && rawVol > avgVol;
+      const volFalling = avgVol > 0 && rawVol < avgVol * 0.7;
+      const priceRising = currentPrice > prevPriceCombo;
+      const priceFlat = Math.abs(currentPrice - prevPriceCombo) / prevPriceCombo < 0.001; // 0.1% 미만 변화는 "정체"로 간주
+
+      if (execRising && volRising && priceRising) {
+        score += 10;
+        breakdown.push('체결강도+거래량+가격 동반상승(+10)');
+      } else if (execFalling && volFalling && priceFlat) {
+        score -= 15;
+        breakdown.push('추격매수 위험신호(-15)');
+      }
+    }
+    prevPriceForComboRef.current[sym] = currentPrice;
+    if (execStrength > 0) prevExecutionStrengthRef.current[sym] = execStrength;
 
     // 6. RSI 45~65 — 과열도 과매도도 아닌 안정적 구간 (+10)
     if (strat.rsi >= 45 && strat.rsi <= 65) { score += 10; breakdown.push('RSI45~65(+10)'); }
@@ -4752,8 +4776,8 @@ setGapInventory(nextInv);
       // 한 번 더 시도한다 — 일시적인 혼잡으로 인한 실패 가능성을 낮추기 위함이다.
       const fetchRanking = () => Promise.race([
         Promise.all([
-          kisService.getVolumeRanking('J', 80),
-          kisService.getFluctuationRanking('J', 'UP', 70)
+          kisService.getVolumeRanking('J', 80, { minPrice: 1000, maxPrice: 20000 }),
+          kisService.getFluctuationRanking('J', 'UP', 70, { minPrice: 1000, maxPrice: 20000 })
         ]),
         new Promise<[any[], any[]]>((_, reject) => setTimeout(() => reject(new Error('ranking_timeout')), 20000))
       ]);
@@ -4776,8 +4800,8 @@ setGapInventory(nextInv);
         // 원인이 되므로 아예 추천하지 않는 게 안전하다.
         const isEtfName = (name: string) => {
           const lower = (name || '').toLowerCase();
-          return lower.includes('kodex') || lower.includes('tiger') || lower.includes('etf')
-            || (name || '').includes('인버스') || (name || '').includes('레버리지') || (name || '').includes('선물');
+          return lower.includes('kodex') || lower.includes('tiger') || lower.includes('etf') || lower.includes('spac')
+            || (name || '').includes('인버스') || (name || '').includes('레버리지') || (name || '').includes('선물') || (name || '').includes('스팩');
         };
         const merged = Array.from(mergedMap.values()).filter(v => v.name && v.name.trim().length > 0 && !isEtfName(v.name));
 
@@ -5912,6 +5936,10 @@ priceData.current
           foundAnyData = true;
           domesticSuccess = true;
           const out2 = Array.isArray(domesticBalanceData.output2) ? (domesticBalanceData.output2[0] || {}) : domesticBalanceData.output2;
+          // 🔍 총자산(tot_evlu_amt 등) 관련 필드의 정확한 이름을 확인하기 위한 1회성 진단 로그 —
+          // 현재는 balance + holdings×현재가로 로컬 재계산하고 있는데, KIS가 직접 계산해서 주는
+          // 총자산 값을 그대로 쓰는 게 더 정확할 수 있다. 이 로그로 실제 필드명을 확인한다.
+          console.log('[KIS 잔고조회 output2 전체 필드 — 총자산 필드명 확인용]', out2);
           // 🔍 dncl_amt 계열 필드명이 KIS 공식 문서 기준과 정확히 일치하는지 확신할 수 없어서,
           // 더 널리 문서화된 필드명(dnca_tot_amt=예수금총금액, prvs_rcdl_excc_amt=가수도정산금액)도
           // 후보로 추가한다 — 실제 어떤 필드가 맞는지는 아래 진단 툴팁으로 직접 확인 가능하다.
@@ -8846,7 +8874,10 @@ useEffect(() => {
                 if (isKR) {
                     setBotStatus(`[KIS API] ${stock.symbol} 매수 가능 수량 조회 중...`);
                     let parsedQty = 0;
-                    const psblRes = await kisService.getDomesticBuyableAmount(stock.symbol, (tradePrice || 0).toString(), kisConfig.domesticOrderType || '00');
+                    // 🛡️ 실제 주문에 쓸 기준(지정가/시장가)과 동일한 기준으로 조회해야 정확하다 —
+                    // 목표가(tradePrice)가 있으면 지정가로, 없으면 전역 설정을 따른다.
+                    const buyableCheckOrdDvsn = (tradePrice && tradePrice > 0) ? '00' : (kisConfig.domesticOrderType || '00');
+                    const psblRes = await kisService.getDomesticBuyableAmount(stock.symbol, (tradePrice || 0).toString(), buyableCheckOrdDvsn);
                     if (psblRes && psblRes.rt_cd === '0' && psblRes.output) {
                         const candidateQtys = [
                           psblRes.output.nrcy_buy_qty,
@@ -8957,13 +8988,19 @@ useEffect(() => {
         }
 
         try {
+            // 🛡️ 매우 중요한 수정: 예전엔 여기서 kisConfig.domesticOrderType(전역 설정, entryPriceMode와
+            // 무관)을 그대로 ordDvsn으로 썼다. 그런데 "매수1호가/매수2호가" 같은 진입 호가 방식은
+            // 특정 가격(tradePrice)을 목표로 계산한 것이므로, 반드시 지정가(00)로 주문해야 그 가격이
+            // 실제로 반영된다 — 전역 설정이 우연히 '01'(시장가)이면 애써 계산한 목표가가 무시되고
+            // 엉뚱한 가격에 체결될 위험이 있었다. 이제 유효한 목표가가 있으면 무조건 지정가로 낸다.
+            const effectiveOrdDvsn = (tradePrice && tradePrice > 0) ? '00' : (kisConfig.domesticOrderType || '00');
             setBotStatus(`[KIS API] ${stock.symbol} ${action === 'BUY' ? '매수' : '매도'} 주문 전송 중...`);
             const res = await kisService.order(
                 stock.symbol, 
                 action, 
                 (tradePrice || 0).toString(), 
                 (finalAmount || 1).toString(),
-                kisConfig.domesticOrderType || '00'
+                effectiveOrdDvsn
             );
             
             if (res.rt_cd === '0') {

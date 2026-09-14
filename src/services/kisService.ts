@@ -18,6 +18,18 @@ interface KISConfig {
   isConnected: boolean;
 }
 
+// 🏦 거래소 ID 구분코드 — 주문 시 EXCG_ID_DVSN_CD에 들어가는 값. 지금은 KRX 정규 스캘핑만
+// 지원하므로 항상 'KRX'를 반환하지만, 추후 NXT 애프터마켓 전용 주문이나 SOR(스마트 주문 라우팅,
+// 여러 거래소 중 최선을 자동으로 골라주는 방식) 통합매매를 지원할 때 이 함수 내부 로직만 확장하면
+// 되도록 타입을 분리해뒀다. 무작정 문자열 'KRX'를 여기저기 하드코딩하지 않기 위함이다.
+export type ExchangeId = 'KRX' | 'SOR' | 'NXT';
+
+export function getExchangeIdForOrder(): ExchangeId {
+  // 현재는 국내 KRX 정규 스캘핑만 지원한다. NXT/SOR을 실제로 쓰게 되면 여기서 시간대(애프터마켓
+  // 여부)나 사용자 설정에 따라 분기하면 된다.
+  return 'KRX';
+}
+
 export interface NormalizedPrice {
   current: number;
   prevClose: number;
@@ -1046,6 +1058,10 @@ await this.getDomesticPrice(symbol);
       
       // SLL_TYPE is required for domestic stock sell orders
       // 01: General Cash Sell
+      // 🛡️ 매우 중요한 추가: EXCG_ID_DVSN_CD(거래소 ID 구분코드)가 그동안 빠져있었다. 정정취소
+      // 함수(reviseDomestic)에는 이미 있었는데 정작 실제 매수/매도 주문에는 없었다 — KIS 공식
+      // 문서가 이 필드를 필수로 요구하고 있고, 특히 이제 KRX/NXT 복수 거래소 체제가 되면서 이
+      // 필드 없이는 주문이 어느 거래소로 가는지 불명확해질 수 있다. KRX를 명시적으로 지정한다.
       const body: any = {
         CANO: this.config.accountNo,
         ACNT_PRDT_CD: this.config.accountCode,
@@ -1053,6 +1069,8 @@ await this.getDomesticPrice(symbol);
         ORD_DVSN: ordDvsn, // 00 for Limit, 01 for Market
         ORD_QTY: qty,
         ORD_UNPR: ordDvsn === '01' ? '0' : price,
+        EXCG_ID_DVSN_CD: getExchangeIdForOrder(),
+        CNDT_PRIC: '', // 조건가격 — 일반 지정가/시장가 주문에서는 사용하지 않음
       };
 
       if (side === 'SELL') {
@@ -1137,7 +1155,7 @@ console.log(
       ORD_UNPR: isCancel ? '0' : (price || '0'),
       QTY_ALL_ORD_YN: allOrdYn,
       CNDT_PRIC: '',
-      EXCG_ID_DVSN_CD: 'KRX'
+      EXCG_ID_DVSN_CD: getExchangeIdForOrder()
     };
 
     const hashkey = await this.getHashKey(body);
@@ -1172,7 +1190,7 @@ console.log(
    * 실시간으로 가져온다. "추천종목 찾기"가 미리 등록해둔 예시 종목이 아니라 실제 시장을
    * 분석하도록 하기 위한 후보군 소스다.
    */
-  public async getVolumeRanking(marketDivCode: 'J' | 'Q' = 'J', count: number = 40): Promise<{ symbol: string; name: string; price: number; changePercent: number; volume: string }[]> {
+  public async getVolumeRanking(marketDivCode: 'J' | 'Q' = 'J', count: number = 40, priceFilter?: { minPrice?: number; maxPrice?: number; minVolume?: number }): Promise<{ symbol: string; name: string; price: number; changePercent: number; volume: string; volumeIncreaseRate?: number; avgVolume?: number; tradingValue?: number }[]> {
     if (!this.config) return [];
     const callStartedAt = Date.now();
     try {
@@ -1196,10 +1214,18 @@ console.log(
         FID_DIV_CLS_CODE: '0',       // 0: 전체
         FID_BLNG_CLS_CODE: '0',      // 0: 평균거래량 기준
         FID_TRGT_CLS_CODE: '111111111',
-        FID_TRGT_EXLS_CLS_CODE: '000000000',
-        FID_INPUT_PRICE_1: '',
-        FID_INPUT_PRICE_2: '',
-        FID_VOL_CNT: '',
+        // 🛡️ 위험/관리종목 제외 — 코스나인 같은 관리종목이 "오늘 거래량이 튀었다"는 이유만으로
+        // 후보에 오르는 걸 API 단계에서부터 막는다. 9자리 각 자릿수가 순서대로 투자위험/투자경고/
+        // 투자주의/신용주문불가/증거금100%/정리매매/관리종목/불성실공시/우선주를 나타내며, 1이면
+        // 해당 종류를 제외한다는 것이 KIS 문서에서 흔히 알려진 관례다 — 전부 1로 설정해 최대한
+        // 안전하게 걸러낸다. (실제 응답을 보고 필요시 조정)
+        FID_TRGT_EXLS_CLS_CODE: '111111111',
+        // 🔍 가격범위/최소거래량 필터를 API 단에서 적용할 수 있게 옵션화했다 — 기본값(옵션 없음)은
+        // 예전처럼 전체 가격대·거래량을 다 받아오고, 필요할 때만 특정 가격대(예: 저가주 스캘핑)로
+        // 좁혀서 불필요한 데이터를 애초에 받지 않을 수 있다.
+        FID_INPUT_PRICE_1: priceFilter?.minPrice ? String(priceFilter.minPrice) : '',
+        FID_INPUT_PRICE_2: priceFilter?.maxPrice ? String(priceFilter.maxPrice) : '',
+        FID_VOL_CNT: priceFilter?.minVolume ? String(priceFilter.minVolume) : '',
         FID_INPUT_DATE_1: '',
       };
 
@@ -1207,12 +1233,25 @@ console.log(
 
       if (res.data && Array.isArray(res.data.output)) {
         this.recordCallResult(true, Date.now() - callStartedAt);
+        // 🔍 실제 응답에 어떤 필드가 오는지 최초 1건만 콘솔에 남긴다 — 평균거래량/거래증가율/
+        // 거래금액의 정확한 필드명을 다음번에 실사용 로그로 확정하기 위함.
+        if (res.data.output.length > 0 && !this._volumeRankingFieldsLogged) {
+          this._volumeRankingFieldsLogged = true;
+          console.log('[KIS 거래량순위 원본 필드 샘플]', res.data.output[0]);
+        }
         return res.data.output.slice(0, count).map((item: any) => ({
           symbol: item.mksc_shrn_iscd || item.stck_shrn_iscd || '',
           name: item.hts_kor_isnm || '',
           price: Number(item.stck_prpr || 0),
           changePercent: Number(item.prdy_ctrt || 0) * (item.prdy_vrss_sign === '4' || item.prdy_vrss_sign === '5' ? -1 : 1),
-          volume: Number(item.acml_vol || 0).toLocaleString()
+          volume: Number(item.acml_vol || 0).toLocaleString(),
+          // 🔍 KIS 거래량순위 API는 평균거래량/거래증가율/거래금액 같은 세부 지표도 함께 내려줄 수
+          // 있는데, 그동안 5개 기본 필드만 뽑고 나머지는 버려지고 있었다. 정확한 필드명이 100%
+          // 확정되지 않아 알려진 후보 필드명을 여러 개 시도한다 — 값이 없으면 undefined로 남아
+          // 기존 로직에 전혀 영향을 주지 않는다. (실사용 로그로 정확한 필드명 확인 후 캘리브레이션 필요)
+          volumeIncreaseRate: item.vol_inrt !== undefined ? Number(item.vol_inrt) : (item.prdy_vol_inrt !== undefined ? Number(item.prdy_vol_inrt) : undefined),
+          avgVolume: item.avrg_vol !== undefined ? Number(item.avrg_vol) : undefined,
+          tradingValue: item.acml_tr_pbmn !== undefined ? Number(item.acml_tr_pbmn) : undefined,
         })).filter((s: any) => s.symbol && s.price > 0);
       }
       this.recordCallResult(false, Date.now() - callStartedAt);
@@ -1229,7 +1268,7 @@ console.log(
    * 실시간으로 가져온다. 거래량순위와 결합하면 "거래량도 많고 방향성도 뚜렷한" 스캘핑에 더
    * 적합한 종목을 골라낼 수 있다.
    */
-  public async getFluctuationRanking(marketDivCode: 'J' | 'Q' = 'J', direction: 'UP' | 'DOWN' = 'UP', count: number = 40): Promise<{ symbol: string; name: string; price: number; changePercent: number; volume: string }[]> {
+  public async getFluctuationRanking(marketDivCode: 'J' | 'Q' = 'J', direction: 'UP' | 'DOWN' = 'UP', count: number = 40, priceFilter?: { minPrice?: number; maxPrice?: number; minVolume?: number }): Promise<{ symbol: string; name: string; price: number; changePercent: number; volume: string }[]> {
     if (!this.config) return [];
     const callStartedAt = Date.now();
     try {
@@ -1253,11 +1292,13 @@ console.log(
         fid_rank_sort_cls_code: direction === 'UP' ? '0' : '1', // 0: 상승률 순, 1: 하락률 순
         fid_input_cnt_1: '0',
         fid_prc_cls_code: '0',
-        fid_input_price_1: '',
-        fid_input_price_2: '',
-        fid_vol_cnt: '',
+        // 🔍 가격범위/최소거래량 필터를 API 단에서 적용할 수 있게 옵션화 — 거래량순위와 동일한 이유
+        fid_input_price_1: priceFilter?.minPrice ? String(priceFilter.minPrice) : '',
+        fid_input_price_2: priceFilter?.maxPrice ? String(priceFilter.maxPrice) : '',
+        fid_vol_cnt: priceFilter?.minVolume ? String(priceFilter.minVolume) : '',
         fid_trgt_cls_code: '0',
-        fid_trgt_exls_cls_code: '0',
+        // 🛡️ 위험/관리종목 제외 — 거래량순위와 동일한 이유로 9자리 전부 제외(1)로 설정
+        fid_trgt_exls_cls_code: '111111111',
         fid_div_cls_code: '0',
         fid_rsfl_rate1: '',
         fid_rsfl_rate2: '',
@@ -1319,6 +1360,7 @@ console.log(
   private lastRequestTime = 0;
   private minRequestInterval = 500; // Minimum 500ms interval between API calls to prevent Rate Limit (EGW00201 / 429)
   private globalRateLimitCooldownUntil = 0; // 🛡️ 429가 뜨면 이 시각까지 전체 가격 조회를 잠시 미룬다 (한 종목만 재시도해서는 부족함)
+  private _volumeRankingFieldsLogged = false; // 🔍 거래량순위 API 원본 필드 샘플을 최초 1회만 로그로 남기기 위한 플래그
 
   /** 지수 백오프 지연시간 계산: 1차 2초, 2차 4초, 3차 8초, 4차 15초, 5차 30초 (상한 고정) */
   private getBackoffDelay(attempt: number): number {
