@@ -1822,47 +1822,209 @@ await this.getDomesticPrice(symbol);
     }
   }
 
-  public async getDomesticOrderExecutions(startDate: string, endDate: string, oderFg: '00' | '01' | '02' = '00', prcsDvsn: '00' | '01' | '02' = '00') {
-    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output1: [], output2: [] };
-    try {
-      const token = await this.getAccessToken();
-      const endpoint = '/uapi/domestic-stock/v1/trading/inquire-daily-ccnl';
-      
-      const trId = 'TTTC8001R';
+  public async getDomesticOrderExecutions(
+  startDate: string,
+  endDate: string,
+  oderFg: '00' | '01' | '02' = '00',
+  prcsDvsn: '00' | '01' | '02' = '00'
+) {
 
-      const headers = {
-        'content-type': 'application/json',
-        'authorization': `Bearer ${token}`,
-        'appkey': this.config.appKey,
-        'appsecret': this.config.appSecret,
-        'tr-id': trId,
-        'tr_id': trId,
-        'custtype': 'P',
-      };
+  if (!this.config) {
 
-      const params = {
-        CANO: this.config.accountNo,
-        ACNT_PRDT_CD: this.config.accountCode,
-        INQR_STRT_DT: startDate,
-        INQR_END_DT: endDate,
-        SND_CD: '',
-        SMRT_OTSN_YN: 'N',
-        SMRT_SND_CD: '',
-        ODER_FG_CD: oderFg,
-        CTX_AREA_FK100: '',
-        CTX_AREA_NK100: '',
-        INQR_DVSN: '00',
-        PRCS_DVSN: prcsDvsn,
-        CANO_PWD: this.config.accountPw || ''
-      };
+    return {
+      rt_cd: '1',
+      msg1: 'KIS Config not initialized',
+      output1: [],
+      output2: []
+    };
 
-      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
-      return res.data;
-    } catch (error: any) {
-      console.warn("[KIS Service] Domestic Order Executions Exception safely caught:", error?.response?.data || error?.message);
-      return { rt_cd: '0', output1: [], output2: [] };
-    }
   }
+
+
+  try {
+
+    const token =
+      await this.getAccessToken();
+
+
+    const endpoint =
+      '/uapi/domestic-stock/v1/trading/inquire-daily-ccnl';
+
+
+    // ==========================================================
+    // ★ 최신 국내주식 일별 주문체결조회
+    // ==========================================================
+
+    const trId =
+      'TTTC0081R';
+
+
+    const headers = {
+
+      'content-type':
+        'application/json',
+
+      'authorization':
+        `Bearer ${token}`,
+
+      'appkey':
+        this.config.appKey,
+
+      'appsecret':
+        this.config.appSecret,
+
+      'tr-id':
+        trId,
+
+      'custtype':
+        'P'
+
+    };
+
+
+    const params = {
+
+      CANO:
+        this.config.accountNo,
+
+      ACNT_PRDT_CD:
+        this.config.accountCode,
+
+      INQR_STRT_DT:
+        startDate,
+
+      INQR_END_DT:
+        endDate,
+
+      SLL_BUY_DVSN_CD:
+        oderFg,
+
+      INQR_DVSN:
+        '00',
+
+      PDNO:
+        '',
+
+      CCLD_DVSN:
+        prcsDvsn,
+
+      ORD_GNO_BRNO:
+        '',
+
+      ODNO:
+        '',
+
+      INQR_DVSN_3:
+        '00',
+
+      INQR_DVSN_1:
+        '',
+
+      CTX_AREA_FK100:
+        '',
+
+      CTX_AREA_NK100:
+        '',
+
+      // ★ 거래소
+      EXCG_ID_DVSN_CD:
+        'KRX'
+
+    };
+
+
+    console.log(
+      '[KIS ORDER EXECUTION CHECK]',
+      {
+        trId,
+        startDate,
+        endDate,
+        oderFg,
+        prcsDvsn
+      }
+    );
+
+
+    const res =
+      await this.queueRequest<any>(
+        () =>
+          axios.get(
+            `${this.baseUrl}${endpoint}`,
+            {
+              headers,
+              params,
+              timeout: 8000
+            }
+          )
+      );
+
+
+    console.log(
+      '[KIS ORDER EXECUTION RESPONSE]',
+      res.data
+    );
+
+
+    if (
+      res.data &&
+      res.data.rt_cd &&
+      res.data.rt_cd !== '0'
+    ) {
+
+      console.warn(
+        '[KIS ORDER EXECUTION ERROR]',
+        {
+          rt_cd:
+            res.data.rt_cd,
+
+          msg_cd:
+            res.data.msg_cd,
+
+          msg1:
+            res.data.msg1
+        }
+      );
+
+    }
+
+
+    return res.data;
+
+  } catch (error: any) {
+
+    console.error(
+      '[KIS 주문체결조회 실패]',
+      {
+        message:
+          error?.message,
+
+        response:
+          error?.response?.data
+      }
+    );
+
+
+    // ★ 실패를 성공/빈 조회로 위장하지 않는다.
+    return {
+
+      rt_cd:
+        '1',
+
+      msg1:
+        error?.response?.data?.msg1 ||
+        error?.message ||
+        '주문체결조회 실패',
+
+      output1:
+        [],
+
+      output2:
+        []
+
+    };
+
+  }
+}
 
   public async cancelOrder(symbol: string, orgNo: string, ordNo: string, qty: string, ordDvsn: string = '00') {
     return this.cancelDomesticOrder(
