@@ -234,45 +234,8 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
 
           {/* Filter Bar (Strategy & Price Filters) */}
           <div className="px-4 sm:px-5 py-3 bg-slate-900/60 border-b border-slate-800/80 space-y-2.5 shrink-0">
-            {/* Top Row: Strategies & Top 3 Batch */}
-            <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-2">
-              <div className="flex items-center gap-2">
-                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-gradient-to-r from-emerald-500/20 to-teal-500/20 text-emerald-300 border border-emerald-500/40 text-xs font-black shrink-0">
-                  <span>👑 코스피(KOSPI) 전용</span>
-                </span>
-                
-                <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-                  {[
-                    { id: 'ALL' as const, label: '전체 전략', icon: Trophy, count: strategyCounts.ALL },
-                    { id: 'SUPPORT_REBOUND' as const, label: '① 눌림목 반등', icon: Target, count: strategyCounts.SUPPORT_REBOUND },
-                    { id: 'MOMENTUM_BREAKOUT' as const, label: '② 모멘텀 돌파', icon: Zap, count: strategyCounts.MOMENTUM_BREAKOUT },
-                    { id: 'VWAP_SUPPORT' as const, label: '③ VWAP 지지', icon: BarChart2, count: strategyCounts.VWAP_SUPPORT },
-                    { id: 'CVD_FLOW' as const, label: '④ CVD 수급', icon: Flame, count: strategyCounts.CVD_FLOW }
-                  ].map(tab => {
-                    const Icon = tab.icon;
-                    const active = activeCategory === tab.id;
-                    return (
-                      <button
-                        key={tab.id}
-                        type="button"
-                        onClick={() => setActiveCategory(tab.id)}
-                        className={`px-2.5 py-1 rounded-xl text-[11px] font-bold font-sans flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
-                          active 
-                            ? 'bg-gradient-to-r from-emerald-500/30 to-teal-500/30 text-emerald-200 border border-emerald-500/60 shadow-[0_0_12px_rgba(16,185,129,0.3)]' 
-                            : 'bg-slate-800/70 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
-                        }`}
-                      >
-                        <Icon className={`w-3 h-3 ${active ? 'text-emerald-400' : 'text-slate-500'}`} />
-                        <span>{tab.label}</span>
-                        <span className={`text-[9.5px] px-1 rounded-full font-mono font-black ${active ? 'bg-emerald-500/40 text-emerald-100' : 'bg-slate-700/50 text-slate-400'}`}>
-                          {tab.count}
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
+            {/* Top Row: Top 3 Batch */}
+            <div className="flex flex-col lg:flex-row lg:items-center justify-end gap-2">
               {top3.length > 0 && (
                 <button
                   type="button"
@@ -283,75 +246,6 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
                   <span>TOP 3 일괄 등록</span>
                 </button>
               )}
-            </div>
-
-            {/* Bottom Row: Price Filtering (< 10000, < 50000, < 100000, 200000, 500000, 1000000, Custom Search) */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pt-2 border-t border-slate-800/60">
-              <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar py-0.5">
-                <div className="flex items-center gap-1 text-[11px] font-bold text-amber-400 mr-1 shrink-0">
-                  <Coins className="w-3.5 h-3.5" />
-                  <span>금액 검색:</span>
-                </div>
-                {PRICE_FILTER_OPTIONS.map(opt => {
-                  const active = priceFilter === opt.id;
-                  const count = opt.id === 'ALL' ? priceCounts.ALL : priceCounts[opt.id as keyof typeof priceCounts] ?? 0;
-                  return (
-                    <button
-                      key={opt.id}
-                      type="button"
-                      onClick={() => {
-                        setPriceFilter(opt.id);
-                        if (opt.id !== 'CUSTOM') setCustomPriceInput('');
-                      }}
-                      className={`px-2.5 py-1 rounded-xl text-[11px] font-bold font-sans flex items-center gap-1 transition-all cursor-pointer whitespace-nowrap ${
-                        active
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/60 shadow-[0_0_10px_rgba(245,158,11,0.2)]'
-                          : 'bg-slate-800/50 hover:bg-slate-800 text-slate-400 hover:text-slate-200 border border-slate-800'
-                      }`}
-                    >
-                      <span>{opt.shortLabel}</span>
-                      <span className={`text-[9px] px-1 rounded-full font-mono font-black ${active ? 'bg-amber-500/40 text-amber-100' : 'bg-slate-700/50 text-slate-400'}`}>
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Direct Price Input Search */}
-              <div className="flex items-center gap-1.5 shrink-0 self-start sm:self-auto">
-                <div className="relative">
-                  <input
-                    type="text"
-                    value={customPriceInput}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setCustomPriceInput(val);
-                      if (val.trim()) {
-                        setPriceFilter('CUSTOM');
-                      } else {
-                        setPriceFilter('ALL');
-                      }
-                    }}
-                    placeholder="직접 금액 이하 (원)"
-                    className="w-36 sm:w-40 bg-black/40 border border-slate-700 focus:border-amber-500 rounded-xl py-1 pl-6 pr-2 text-xs font-mono text-white placeholder:text-slate-500 outline-none transition-all"
-                  />
-                  <Search className="w-3 h-3 text-slate-400 absolute left-2 top-1/2 -translate-y-1/2" />
-                </div>
-                {customPriceInput && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCustomPriceInput('');
-                      setPriceFilter('ALL');
-                    }}
-                    className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-xs cursor-pointer"
-                    title="금액 필터 초기화"
-                  >
-                    <X className="w-3 h-3" />
-                  </button>
-                )}
-              </div>
             </div>
           </div>
 
