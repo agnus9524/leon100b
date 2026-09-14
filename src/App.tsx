@@ -2093,12 +2093,7 @@ export default function App() {
     return lastMarket === 'US' ? lastUS : lastKR;
   });
 
-  // 🔄 스캘핑 종목 탭 자동 순환 상태 및 순환 주기 (1초~10초, 기본 OFF)
-  const [isAutoRotateTabs, setIsAutoRotateTabs] = useState<boolean>(false);
-  const [tabRotationInterval, setTabRotationInterval] = useState<number>(() => {
-    const saved = localStorage.getItem('sleek_tab_rotation_interval');
-    return saved ? Math.max(1, Math.min(10, Number(saved))) : 5;
-  });
+
 
   // Manual Limit Sell States
   const [manualSellModalOpen, setManualSellModalOpen] = useState<boolean>(false);
@@ -2133,29 +2128,6 @@ export default function App() {
     })));
   }, []);
 
-  // 🔄 종목 탭 자동 순환 (오른쪽 탭으로 연속 순환 - 수동 매도 모달 열림 시 일시 중지)
-  useEffect(() => {
-    if (!isAutoRotateTabs || manualSellModalOpen) return;
-
-    const intervalMs = Math.max(1, Math.min(10, tabRotationInterval)) * 1000;
-    const rotateInterval = setInterval(() => {
-      const currentMarketTabs = scalperTabsRef.current.filter(tab => {
-        const isTabUS = /^[A-Z]/.test(tab.symbol);
-        return marketType === 'US' ? isTabUS : !isTabUS;
-      });
-
-      if (currentMarketTabs.length <= 1) return;
-
-      const currentIdx = currentMarketTabs.findIndex(t => t.id === activeTabId);
-      const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % currentMarketTabs.length : 0;
-      const nextTab = currentMarketTabs[nextIdx];
-      if (nextTab && nextTab.id !== activeTabId) {
-        handleSwitchTab(nextTab.id);
-      }
-    }, intervalMs);
-
-    return () => clearInterval(rotateInterval);
-  }, [isAutoRotateTabs, activeTabId, marketType, manualSellModalOpen, tabRotationInterval]);
 
   const activeTabIdRef = React.useRef<string>(activeTabId);
   useEffect(() => {
