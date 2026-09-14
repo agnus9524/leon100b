@@ -1750,7 +1750,8 @@ public async getWebsocketApprovalKey() {
 public async connectWebSocket(
   symbols: string[],
   onTick: (data: { symbol: string; price: number; change: number; changePercent: number; volume: string; executionStrength?: number; time: string }) => void,
-  onStatusChange?: (status: 'connecting' | 'open' | 'closed' | 'error') => void
+  onStatusChange?: (status: 'connecting' | 'open' | 'closed' | 'error') => void,
+  onOrderbook?: (data: { symbol: string; totalBidVolume: number; totalAskVolume: number; bidPrice1: number; askPrice1: number }) => void
 ): Promise<WebSocket> {
   const wsUrl = "wss://service-100-221699414173.us-west1.run.app/ws/kis";
   const approvalKey = await this.getWebsocketApprovalKey();
@@ -1804,6 +1805,30 @@ public async connectWebSocket(
     return null;
   };
 
+  // 🎯 실시간 호가(H0STASP0) 파싱 — H0STCNT0(체결가)와 같은 파이프/캐럿 구분 텍스트 형식이다.
+  // 정확한 필드 인덱스는 KIS 문서상 일반적으로 알려진 관례를 따랐다: 매도호가1(index 3),
+  // 매수호가1(index 13), 총매도호가잔량(index 43), 총매수호가잔량(index 44). 실측 응답이 이
+  // 인덱스와 어긋나면 재조정이 필요할 수 있다 — 그 경우에도 파싱 실패는 조용히 무시되어
+  // 트레이딩 로직에 잘못된 값이 들어가지 않는다.
+  const parseOrderbook = (raw: string): { symbol: string; totalBidVolume: number; totalAskVolume: number; bidPrice1: number; askPrice1: number } | null => {
+    try {
+      if (!raw.includes('|')) return null;
+      const parts = raw.split('|');
+      if (parts.length < 4 || parts[1] !== 'H0STASP0') return null;
+      const fields = parts[3].split('^');
+      const symbol = fields[0];
+      if (!symbol) return null;
+      const askPrice1 = Number(fields[3] || 0);
+      const bidPrice1 = Number(fields[13] || 0);
+      const totalAskVolume = Number(fields[43] || 0);
+      const totalBidVolume = Number(fields[44] || 0);
+      if (totalAskVolume <= 0 && totalBidVolume <= 0) return null;
+      return { symbol, totalBidVolume, totalAskVolume, bidPrice1, askPrice1 };
+    } catch {
+      return null;
+    }
+    };
+
   const connect = (): WebSocket => {
     onStatusChange?.('connecting');
     const ws = new WebSocket(wsUrl);
@@ -1818,8 +1843,11 @@ public async connectWebSocket(
     };
 
     ws.onmessage = (event) => {
-      const tick = parseTick(String(event.data));
+      const raw = String(event.data);
+      const tick = parseTick(raw);
       if (tick) onTick(tick);
+      const orderbook = parseOrderbook(raw);
+      if (orderbook && onOrderbook) onOrderbook(orderbook);
     };
 
     ws.onerror = () => {

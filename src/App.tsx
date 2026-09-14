@@ -1961,6 +1961,17 @@ export default function App() {
         },
         status => {
           if (!cancelled) setWsConnectionStatus(status);
+        },
+        orderbook => {
+          // 🎯 실시간 호가(H0STASP0) — REST 라운드로빈(5초에 1종목)보다 훨씬 빠르게 종목별 호가를
+          // 갱신한다. liveOrderbooksRef는 이미 종목별 Record 구조라 그대로 재사용 가능하다.
+          liveOrderbooksRef.current[orderbook.symbol] = {
+            symbol: orderbook.symbol,
+            totalBidVolume: orderbook.totalBidVolume,
+            totalAskVolume: orderbook.totalAskVolume,
+            bidPrice1: orderbook.bidPrice1,
+            askPrice1: orderbook.askPrice1,
+          };
         }
       )
       .then(ws => {

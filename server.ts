@@ -17,6 +17,7 @@ let approvalKey = "";
 const clients = new Set<WebSocket>();
 
 const subscribedSymbols = new Set<string>();
+const subscribedOrderbookSymbols = new Set<string>(); // H0STASP0(실시간 호가) 구독 종목 추적
 
 const currentFilename = typeof __filename !== 'undefined' ? __filename : '';
 const currentDirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(currentFilename || process.cwd());
@@ -372,6 +373,47 @@ return;
 
   console.log(
     "[KIS SUBSCRIBE]",
+    symbol
+  );
+
+}
+
+// 🎯 H0STASP0(실시간 호가) 구독 — subscribeSymbol(H0STCNT0, 체결가)과 완전히 동일한 방식이며
+// tr_id만 다르다. 종목코드 기반 공개 시세 데이터라 체결통보(H0STCNI0)처럼 암호화나 별도의
+// HTS ID가 필요 없어서 안전하게 바로 추가할 수 있다.
+function subscribeOrderbook(
+  symbol: string
+) {
+
+  if (!/^\d{6}$/.test(symbol)) {
+    return;
+  }
+
+  if (subscribedOrderbookSymbols.has(symbol)) {
+    return;
+  }
+
+  subscribedOrderbookSymbols.add(symbol);
+
+  kisWs?.send(
+    JSON.stringify({
+      header: {
+        approval_key: approvalKey,
+        custtype: "P",
+        tr_type: "1",
+        "content-type": "utf-8"
+      },
+      body: {
+        input: {
+          tr_id: "H0STASP0",
+          tr_key: symbol
+        }
+      }
+    })
+  );
+
+  console.log(
+    "[KIS SUBSCRIBE ORDERBOOK]",
     symbol
   );
 
@@ -1667,6 +1709,7 @@ wss.on("connection", (client, req) => {
       const data = JSON.parse(msg.toString());
       if (data.type === "subscribe" && data.symbol) {
         subscribeSymbol(data.symbol);
+        subscribeOrderbook(data.symbol); // 체결가와 함께 실시간 호가도 구독
       }
     } catch (e) {
       console.warn("[WS CLIENT MSG PARSE ERROR]", e);
