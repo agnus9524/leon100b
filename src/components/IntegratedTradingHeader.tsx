@@ -519,7 +519,15 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                       onClick={(e) => e.stopPropagation()}
                       onChange={(e) => {
                         e.stopPropagation();
-                        updateTab(tab.symbol, { tradeQuantity: Number(e.target.value) });
+                        const newQty = Number(e.target.value);
+                        updateTab(tab.symbol, { tradeQuantity: newQty });
+                        // 🛡️ 매우 중요한 수정: 이 종목이 현재 선택된 탭이라면 전역 tradeQuantity도
+                        // 함께 갱신해야 한다. 안 그러면 START/STOP을 누를 때 도는 동기화 effect가
+                        // (아직 안 바뀐) 오래된 전역값으로 이 종목의 tradeQuantity를 다시 덮어써서,
+                        // 방금 바꾼 수량이 START 누르는 순간 원래대로 되돌아가는 버그가 있었다.
+                        if (tab.id === activeTabId) {
+                          setTradeQuantity(newQty);
+                        }
                       }}
                       className={cn(
                         "shrink-0 bg-black/60 border border-white/10 rounded-md text-[10px] font-bold text-slate-300 outline-none px-1 py-0.5",
