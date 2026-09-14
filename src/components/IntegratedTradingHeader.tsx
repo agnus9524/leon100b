@@ -57,6 +57,7 @@ export interface IntegratedTradingHeaderProps {
   gapBuyPrice: number;
   gapSellPrice: number;
   isScalperRecLoading: boolean;
+  tradeLogs: { symbol: string; time: string; reason: string; type: string; price: number }[];
   targetInvestmentPerStock: number;
   setTargetInvestmentPerStock: (v: number) => void;
   isRefreshingTop3: boolean;
@@ -140,6 +141,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
   gapBuyPrice,
   gapSellPrice,
   isScalperRecLoading,
+  tradeLogs,
   targetInvestmentPerStock,
   setTargetInvestmentPerStock,
   isRefreshingTop3,
@@ -574,6 +576,28 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                     </span>
                   )}
                 </div>
+
+                {/* 📜 종목별 개별 로그창 — GLOBAL TRADE LOGS 중 이 종목만 걸러서 최근 메시지를 보여준다 */}
+                <div className="pl-3 pr-1 py-1 bg-black/30 rounded-lg border border-white/5 max-h-[68px] overflow-y-auto custom-scrollbar space-y-0.5">
+                  {(() => {
+                    const myLogs = tradeLogs.filter(l => l.symbol === tab.symbol).slice(0, 4);
+                    if (myLogs.length === 0) {
+                      return <div className="text-[8.5px] text-slate-600 py-0.5">아직 이벤트가 없습니다</div>;
+                    }
+                    return myLogs.map((log, i) => (
+                      <div key={i} className="text-[8.5px] font-mono text-slate-300 flex items-center gap-1.5 truncate">
+                        <span className="text-slate-500 shrink-0">{log.time}</span>
+                        <span className={cn(
+                          "font-bold shrink-0",
+                          log.type === 'BUY' || log.type === '매수' ? "text-rose-400" : "text-sky-400"
+                        )}>
+                          {log.type === 'BUY' || log.type === '매수' ? 'BUY' : 'SELL'}
+                        </span>
+                        <span className="text-slate-400 truncate">{log.reason}</span>
+                      </div>
+                    ));
+                  })()}
+                </div>
                 </div>
               );
             })}
@@ -619,212 +643,6 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
           </button>
         </div>
 
-      {/* 5번째 반응형 창 — 4/4 올-그린 + 개별 센서 버튼 */}
-        {/* 1열: 4/4 올-그린 + 4대 개별 전략 센서 버튼 (눌림목/돌파/VWAP/CVD) — 왼쪽 */}
-        <div className="flex items-center gap-1.5 flex-wrap">
-
-          {/* 🎯 4/4 올-그린 (4대 핵심전략 일괄 선택 토글) — 눌림목 버튼 바로 왼쪽 */}
-          <button
-            type="button"
-            onClick={() => {
-              if (handleSelectAllGreen) {
-                handleSelectAllGreen();
-              } else if (setSelectedScalperStrategies) {
-                setSelectedScalperStrategies(['PULLBACK', 'BREAKOUT', 'VWAP_SUPPORT', 'VOLUME_PROFILE_CVD']);
-              }
-              setScalperStrategyMode('ALL_SENSORS_4');
-            }}
-            className={cn(
-              "px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shrink-0",
-              selectedScalperStrategies.length === 4
-                ? cn(
-                    "bg-emerald-500/20 text-emerald-200",
-                    activeStrategyDetection.activeCount === 4
-                      ? "border-emerald-400 shadow-[0_0_14px_rgba(16,185,129,0.7)] ring-2 ring-emerald-400/80 animate-pulse"
-                      : "border-white/10"
-                  )
-                : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/10 opacity-60 hover:opacity-100"
-            )}
-            title="[최상급 4/4 올-그린] 눌림목 + 돌파 + VWAP + CVD 4개 전략 전체 선택"
-          >
-            <span className={cn(
-              "w-2 h-2 rounded-full transition-all shrink-0",
-              activeStrategyDetection.activeCount === 4 
-                ? "bg-emerald-400 shadow-[0_0_8px_#10b981] animate-ping" 
-                : selectedScalperStrategies.length === 4
-                ? "bg-emerald-400"
-                : "bg-slate-600/60 border border-slate-700"
-            )} />
-            <span>🎯 4/4 올-그린</span>
-          </button>
-
-          {/* ① 눌림목 (진입 타이밍 ★★★★) */}
-          <button
-            type="button"
-            onClick={() => {
-              if (handleToggleStrategy) {
-                handleToggleStrategy('PULLBACK');
-              } else if (setSelectedScalperStrategies) {
-                const isSelected = selectedScalperStrategies.includes('PULLBACK');
-                const next = isSelected 
-                  ? selectedScalperStrategies.filter(s => s !== 'PULLBACK')
-                  : [...selectedScalperStrategies, 'PULLBACK'];
-                setSelectedScalperStrategies(next.length > 0 ? next : ['PULLBACK']);
-              }
-            }}
-            className={cn(
-              "px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shrink-0",
-              selectedScalperStrategies.includes('PULLBACK')
-                ? cn(
-                    "bg-cyan-500/20 text-cyan-200",
-                    activeStrategyDetection.isPullback
-                      ? "border-cyan-400 shadow-[0_0_14px_rgba(6,182,212,0.7)] ring-2 ring-cyan-400/80 animate-pulse"
-                      : "border-white/10"
-                  )
-                : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/10 opacity-60 hover:opacity-100"
-            )}
-            title="[진입 타이밍 ★★★★] 상승 추세 지지선 눌림목 후 반등 진입 (수익률 최적 진입)"
-          >
-            <span className={cn(
-              "w-2 h-2 rounded-full transition-all shrink-0",
-              activeStrategyDetection.isPullback 
-                ? "bg-cyan-400 shadow-[0_0_8px_#06b6d4] animate-pulse" 
-                : selectedScalperStrategies.includes('PULLBACK')
-                ? "bg-cyan-400/70"
-                : "bg-slate-600/60 border border-slate-700"
-            )} />
-            <span>① 눌림목</span>
-          </button>
-
-          {/* ② 돌파 (진입 신호 ★★★★) */}
-          <button
-            type="button"
-            onClick={() => {
-              if (handleToggleStrategy) {
-                handleToggleStrategy('BREAKOUT');
-              } else if (setSelectedScalperStrategies) {
-                const isSelected = selectedScalperStrategies.includes('BREAKOUT');
-                const next = isSelected 
-                  ? selectedScalperStrategies.filter(s => s !== 'BREAKOUT')
-                  : [...selectedScalperStrategies, 'BREAKOUT'];
-                setSelectedScalperStrategies(next.length > 0 ? next : ['BREAKOUT']);
-              }
-            }}
-            className={cn(
-              "px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shrink-0",
-              selectedScalperStrategies.includes('BREAKOUT')
-                ? cn(
-                    "bg-amber-500/20 text-amber-200",
-                    activeStrategyDetection.isBreakout
-                      ? "border-amber-400 shadow-[0_0_14px_rgba(245,158,11,0.7)] ring-2 ring-amber-400/80 animate-pulse"
-                      : "border-white/10"
-                  )
-                : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/10 opacity-60 hover:opacity-100"
-            )}
-            title="[진입 신호 ★★★★] 당일/전고점/박스 상단 돌파 (가짜 돌파 주의, CVD 연계 권장)"
-          >
-            <span className={cn(
-              "w-2 h-2 rounded-full transition-all shrink-0",
-              activeStrategyDetection.isBreakout 
-                ? "bg-amber-400 shadow-[0_0_8px_#f59e0b] animate-pulse" 
-                : selectedScalperStrategies.includes('BREAKOUT')
-                ? "bg-amber-400/70"
-                : "bg-slate-600/60 border border-slate-700"
-            )} />
-            <span>② 돌파</span>
-          </button>
-
-          {/* ③ VWAP (방향 필터 ★★★★★) */}
-          <button
-            type="button"
-            onClick={() => {
-              if (handleToggleStrategy) {
-                handleToggleStrategy('VWAP_SUPPORT');
-              } else if (setSelectedScalperStrategies) {
-                const isSelected = selectedScalperStrategies.includes('VWAP_SUPPORT');
-                const next = isSelected 
-                  ? selectedScalperStrategies.filter(s => s !== 'VWAP_SUPPORT')
-                  : [...selectedScalperStrategies, 'VWAP_SUPPORT'];
-                setSelectedScalperStrategies(next.length > 0 ? next : ['VWAP_SUPPORT']);
-              }
-            }}
-            className={cn(
-              "px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shrink-0",
-              selectedScalperStrategies.includes('VWAP_SUPPORT')
-                ? cn(
-                    "bg-indigo-500/20 text-indigo-200",
-                    activeStrategyDetection.isVwapSupport
-                      ? "border-indigo-400 shadow-[0_0_14px_rgba(99,102,241,0.7)] ring-2 ring-indigo-400/80 animate-pulse"
-                      : "border-white/10"
-                  )
-                : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/10 opacity-60 hover:opacity-100"
-            )}
-            title="[방향 필터 ★★★★★] 기관 평균단가 (VWAP 위=매수 우위 필터, 지지선 반등 진입)"
-          >
-            <span className={cn(
-              "w-2 h-2 rounded-full transition-all shrink-0",
-              activeStrategyDetection.isVwapSupport 
-                ? "bg-indigo-400 shadow-[0_0_8px_#6366f1] animate-pulse" 
-                : selectedScalperStrategies.includes('VWAP_SUPPORT')
-                ? "bg-indigo-400/70"
-                : "bg-slate-600/60 border border-slate-700"
-            )} />
-            <span>③ VWAP</span>
-          </button>
-
-          {/* ④ CVD (수급 확인 ★★★★★) */}
-          <button
-            type="button"
-            onClick={() => {
-              if (handleToggleStrategy) {
-                handleToggleStrategy('VOLUME_PROFILE_CVD');
-              } else if (setSelectedScalperStrategies) {
-                const isSelected = selectedScalperStrategies.includes('VOLUME_PROFILE_CVD');
-                const next = isSelected 
-                  ? selectedScalperStrategies.filter(s => s !== 'VOLUME_PROFILE_CVD')
-                  : [...selectedScalperStrategies, 'VOLUME_PROFILE_CVD'];
-                setSelectedScalperStrategies(next.length > 0 ? next : ['VOLUME_PROFILE_CVD']);
-              }
-            }}
-            className={cn(
-              "px-2 py-1.5 rounded-xl text-xs font-black border transition-all text-center cursor-pointer flex items-center justify-center gap-1.5 shrink-0",
-              selectedScalperStrategies.includes('VOLUME_PROFILE_CVD')
-                ? cn(
-                    "bg-purple-500/20 text-purple-200",
-                    activeStrategyDetection.isVolumeProfile
-                      ? "border-purple-400 shadow-[0_0_14px_rgba(168,85,247,0.7)] ring-2 ring-purple-400/80 animate-pulse"
-                      : "border-white/10"
-                  )
-                : "bg-white/5 text-slate-400 hover:text-slate-200 border-white/10 opacity-60 hover:opacity-100"
-            )}
-            title="[수급 확인 ★★★★★] CVD 누적 거래량 체결 델타 & 실제 자금 유입·세력 매집 확인"
-          >
-            <span className={cn(
-              "w-2 h-2 rounded-full transition-all shrink-0",
-              activeStrategyDetection.isVolumeProfile 
-                ? "bg-purple-400 shadow-[0_0_8px_#a855f7] animate-pulse" 
-                : selectedScalperStrategies.includes('VOLUME_PROFILE_CVD')
-                ? "bg-purple-400/70"
-                : "bg-slate-600/60 border border-slate-700"
-            )} />
-            <span>④ CVD</span>
-          </button>
-
-        </div>
-
-      {/* 6번째 반응형 창 — 실시간 상태 메시지 */}
-        {/* 2열: 실시간 상태 메시지창 — 오른쪽 */}
-        <div className="flex flex-col gap-1">
-          <span className="text-xs font-black text-slate-300 uppercase flex items-center gap-1.5 px-0.5">
-            <Activity className="w-3.5 h-3.5 text-amber-400 animate-pulse" />
-            실시간 상태 메시지
-          </span>
-          <div className="text-xs sm:text-sm font-mono flex items-center bg-black/40 px-3.5 py-2 rounded-2xl border border-sleek-blue/30 shadow-inner">
-            <span className="font-bold text-sleek-blue text-xs sm:text-sm leading-snug truncate w-full">
-              {displayScalperMessage}
-            </span>
-          </div>
-        </div>
 
       {/* ─────────────────────────────────────────────────────────────
           3행: 핵심 스캘퍼 5열 종합 제어 대시보드

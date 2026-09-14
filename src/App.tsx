@@ -2093,7 +2093,12 @@ export default function App() {
     return lastMarket === 'US' ? lastUS : lastKR;
   });
 
-
+  // 🔄 스캘핑 종목 탭 자동 순환 상태 및 순환 주기 (1초~10초, 기본 OFF)
+  const [isAutoRotateTabs, setIsAutoRotateTabs] = useState<boolean>(false);
+  const [tabRotationInterval, setTabRotationInterval] = useState<number>(() => {
+    const saved = localStorage.getItem('sleek_tab_rotation_interval');
+    return saved ? Math.max(1, Math.min(10, Number(saved))) : 5;
+  });
 
   // Manual Limit Sell States
   const [manualSellModalOpen, setManualSellModalOpen] = useState<boolean>(false);
@@ -2128,6 +2133,29 @@ export default function App() {
     })));
   }, []);
 
+  // 🔄 종목 탭 자동 순환 (오른쪽 탭으로 연속 순환 - 수동 매도 모달 열림 시 일시 중지)
+  useEffect(() => {
+    if (!isAutoRotateTabs || manualSellModalOpen) return;
+
+    const intervalMs = Math.max(1, Math.min(10, tabRotationInterval)) * 1000;
+    const rotateInterval = setInterval(() => {
+      const currentMarketTabs = scalperTabsRef.current.filter(tab => {
+        const isTabUS = /^[A-Z]/.test(tab.symbol);
+        return marketType === 'US' ? isTabUS : !isTabUS;
+      });
+
+      if (currentMarketTabs.length <= 1) return;
+
+      const currentIdx = currentMarketTabs.findIndex(t => t.id === activeTabId);
+      const nextIdx = currentIdx >= 0 ? (currentIdx + 1) % currentMarketTabs.length : 0;
+      const nextTab = currentMarketTabs[nextIdx];
+      if (nextTab && nextTab.id !== activeTabId) {
+        handleSwitchTab(nextTab.id);
+      }
+    }, intervalMs);
+
+    return () => clearInterval(rotateInterval);
+  }, [isAutoRotateTabs, activeTabId, marketType, manualSellModalOpen, tabRotationInterval]);
 
   const activeTabIdRef = React.useRef<string>(activeTabId);
   useEffect(() => {
@@ -4789,112 +4817,53 @@ setGapInventory(nextInv);
 
     const scoredCandidates = list.sort((a, b) => b.scalpingScore - a.scalpingScore);
 
-// ============================================================
-// ★ 실시간 초단타 최종 추천 랭킹
-// ============================================================
-//
-// 1년 추세 필터는 사용하지 않는다.
-// 이유:
-// - 초단타는 장기 추세보다 현재 거래량/등락률/전략신호가 중요
-// - 월봉 API 추가 호출로 KIS 요청량 증가
-// - trend_filter_timeout 및 429 발생 가능성 증가
-// - 실시간 추천 속도 저하
-//
-// 최종 순위는 generateRealtimeRecommendations()에서 계산된
-// scalpingScore를 기준으로 결정한다.
-// ============================================================
-
-const rankedCandidates = [...scoredCandidates]
-  .filter((item) => {
-    // 가격이 없는 종목은 추천하지 않는다.
-    if (!item || !item.symbol) return false;
-    if (!Number.isFinite(Number(item.price))) return false;
-    if (Number(item.price) <= 0) return false;
-
-    // 종목명이 없거나 코드와 같은 경우 제외
-    if (!item.name || item.name.trim().length === 0) return false;
-    if (item.name === item.symbol) return false;
-
-    return true;
-  })
-  .sort((a, b) => {
-    // 1순위: 스캘핑 종합점수
-    const scoreA = Number(a.scalpingScore || 0);
-    const scoreB = Number(b.scalpingScore || 0);
-
-    if (scoreA !== scoreB) {
-      return scoreB - scoreA;
+    // 🛡️ 장기 우하향 종목 제외 필터 — 단기 거래량/점수만 보고 추천하면, 관리종목처럼 1년 내내
+    // 꾸준히 무너지고 있는 종목(예: 몇 년째 -90% 이상 하락 중)도 "오늘 거래량이 튀었다"는
+    // 이유만으로 추천될 수 있다. 이런 종목은 짧은 반등이 있어도 장기 추세상 오를 확률보다
+    // 내릴 확률이 높다고 보는 게 합리적이므로, 점수 상위 후보에 한해 월봉(1회 호출로 약
+    // 12개월치를 한꺼번에 받을 수 있어 일봉보다 훨씬 가볍다) 데이터를 확인해서, 1년 전 대비
+    // 현재가가 70% 미만(즉 30% 이상 하락)이면 "명백한 우하향"으로 보고 제외한다.
+    // 🛡️ 매우 중요한 수정: 예전엔 이 풀이 MAX_SCALPER_RECOMMENDATIONS*2(최대 140개)였는데,
+    // 이 각각에 대해 월봉 API를 개별 호출하다 보니 요청 큐가 완전히 마비되어 "추천종목을
+    // 검색 못하는" 원인이 되었다. 실제로 인벤토리에 채울 수 있는 종목 수(15개 안팎)를 감안하면
+    // 상위 20개 정도만 확인해도 충분하므로 대폭 줄인다.
+    const trendCheckPool = scoredCandidates.slice(0, 20);
+    // 🛡️ 매우 중요한 추가 수정: 풀 크기를 줄여도(140→20), 이 단계 전체에 타임아웃이 없어서
+    // 요청 큐가 조금만 붐벼도(429 재시도 등) 전체가 무한정 늘어질 수 있었다 — 이게 "20개로
+    // 줄였는데도 여전히 추천종목 찾기가 안 된다"는 원인이었다. 12초 안에 못 끝나면 필터링
+    // 자체를 건너뛰고 점수 순위 그대로 반환한다(추세 필터는 "있으면 좋은" 부가 기능이지,
+    // 추천 자체를 막을 이유가 되면 안 된다).
+    let downtrendSymbols = new Set<string>();
+    try {
+      const trendResults = await Promise.race([
+        Promise.allSettled(
+          trendCheckPool.map(async (rec) => {
+            const monthly = await kisService.getDomesticDailyPrice(rec.symbol, 'M');
+            const bars = Array.isArray(monthly?.output) ? monthly.output : [];
+            if (bars.length < 6) return { symbol: rec.symbol, isDowntrend: false }; // 상장한 지 얼마 안 됐거나 데이터 부족하면 판단 보류(제외하지 않음)
+            const oldestClose = Number(bars[bars.length - 1]?.stck_clpr || 0); // 월봉은 최신순으로 오므로 마지막이 가장 오래된 달
+            const currentPrice = rec.price;
+            if (oldestClose <= 0 || currentPrice <= 0) return { symbol: rec.symbol, isDowntrend: false };
+            const isDowntrend = currentPrice < oldestClose * 0.7; // 1년 전 대비 30% 이상 하락
+            return { symbol: rec.symbol, isDowntrend };
+          })
+        ),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('trend_filter_timeout')), 12000))
+      ]);
+      downtrendSymbols = new Set(
+        trendResults
+          .filter((r): r is PromiseFulfilledResult<{ symbol: string; isDowntrend: boolean }> => r.status === 'fulfilled' && r.value.isDowntrend)
+          .map(r => r.value.symbol)
+      );
+    } catch (trendErr) {
+      console.warn('[1년 추세 필터 시간초과, 필터링 없이 진행]', trendErr);
     }
 
-    // 2순위: 등락률
-    const changeA = Number(a.changePercent || 0);
-    const changeB = Number(b.changePercent || 0);
-
-    if (changeA !== changeB) {
-      return changeB - changeA;
-    }
-
-    // 3순위: 거래량
-    const volumeA =
-      Number(
-        String(a.volume || '0').replace(/,/g, '')
-      ) || 0;
-
-    const volumeB =
-      Number(
-        String(b.volume || '0').replace(/,/g, '')
-      ) || 0;
-
-    return volumeB - volumeA;
-  });
-
-// ============================================================
-// ★ 최종 추천 TOP 10
-// ============================================================
-
-const finalRecommendations =
-  rankedCandidates
-    .slice(0, MAX_SCALPER_RECOMMENDATIONS)
-    .map((item, index) => ({
-      ...item,
-      rank: index + 1,
-    }));
-
-// ============================================================
-// ★ 1순위 종목 로그
-// ============================================================
-
-if (finalRecommendations.length > 0) {
-
-  const top = finalRecommendations[0];
-
-  console.log(
-    '[★ 실시간 스캘핑 1순위]',
-    {
-      rank: 1,
-      symbol: top.symbol,
-      name: top.name,
-      price: top.price,
-      changePercent: top.changePercent,
-      volume: top.volume,
-      scalpingScore: top.scalpingScore,
-    }
-  );
-
-} else {
-
-  console.warn(
-    '[실시간 스캘핑 추천] 유효한 추천 종목이 없습니다.'
-  );
-}
-
-// ============================================================
-// 최종 반환
-// ============================================================
-
-return finalRecommendations;
+    return scoredCandidates
+      .filter(r => !downtrendSymbols.has(r.symbol))
+      .slice(0, MAX_SCALPER_RECOMMENDATIONS)
+      .map((item, idx) => ({ ...item, rank: idx + 1 }));
   }, [detectStockStrategies, kisConfig.isConnected]);
-
 
   const handleGetRecommendations = useCallback(async () => {
     setIsGettingRecommendations(true);
@@ -9166,46 +9135,9 @@ useEffect(() => {
                        return 0; // Return 0 immediately so local state/slots do not optimistically update
                    }
                } else {
-
-                    // ========================================================
-                    // ★ KIS rt_cd=0 이지만 주문번호(ODNO)가 없는 경우
-                    // 절대로 주문 성공으로 처리하지 않는다.
-                    // ========================================================
-
-                    const responseMessage =
-                        res?.msg1 ||
-                        'KIS 주문번호(ODNO) 없음';
-
-                    console.error(
-                        '[KIS 주문 접수 검증 실패]',
-                        {
-                            symbol: stock.symbol,
-                            action,
-                            price: tradePrice,
-                            qty: finalAmount,
-                            response: res
-                        }
-                    );
-
-                    setBotStatus(
-                        `[주문 확인 실패] ${stock.name} KIS 주문번호(ODNO)를 확인할 수 없습니다.`
-                    );
-
-                    addLog(
-                        stock.symbol,
-                        action === 'BUY' ? '매수' : '매도',
-                        tradePrice,
-                        finalAmount,
-                        `[주문 확인 실패] KIS 응답은 성공이지만 주문번호(ODNO)가 없습니다. 실제 주문 성공으로 처리하지 않습니다. ${responseMessage}`
-                    );
-
-                    showNotification(
-                        `${stock.name} 주문번호 확인 실패 — 실제 주문 성공으로 처리하지 않습니다.`,
-                        "error"
-                    );
-
-                    return 0;
-                }
+                   addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[실제계좌 주문완료] ${reason}`);
+                   showNotification(`${stock.name} ${action === 'BUY' ? '매수' : '매도'} 주문 성공`, "success");
+               }
             } else {
                setBotStatus(`[KIS API 오류] ${res.msg1}`);
                addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[주문실패] ${res.msg1}`);
@@ -10013,6 +9945,7 @@ useEffect(() => {
                 gapBuyPrice={gapBuyPrice}
                 gapSellPrice={gapSellPrice}
                 isScalperRecLoading={isScalperRecLoading}
+                tradeLogs={tradeLogs}
                 targetInvestmentPerStock={targetInvestmentPerStock}
                 setTargetInvestmentPerStock={setTargetInvestmentPerStock}
                 isRefreshingTop3={isRefreshingTop3}
