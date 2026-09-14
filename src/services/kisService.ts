@@ -7,7 +7,7 @@ import { Stock } from '../types';
 
 // 스캘퍼 추천종목 개수 제한 — UI 라벨("실시간 초단타 스캘핑 최적 추천 10선")과 실제 반환 개수를
 // 이 상수 하나로 통일한다. 실시간 계산 추천, 기본(fallback) 추천, 백엔드 API 응답 전부 이 값으로 캡.
-export const MAX_SCALPER_RECOMMENDATIONS = 10;
+export const MAX_SCALPER_RECOMMENDATIONS = 70;
 
 interface KISConfig {
   appKey: string;
@@ -80,1017 +80,141 @@ class KISService {
     };
   }
 
-  // generateRealtimeRecommendations 실시간 초단타 점수 엔진
-  public generateRealtimeRecommendations(
+public generateRealtimeRecommendations(
   stocks: Stock[],
   detectStockStrategies: (stock: Stock) => any
 ): ScalperRecommendation[] {
 
-  // ============================================================
-  // ★ 실시간 초단타 추천 엔진 V2
-  // ============================================================
-  //
-  // 목표:
-  // "지금 당장 매수했을 때 상대적으로 유리한 종목"을 1위로 선정
-  //
-  // 점수 100점
-  //
-  // ① 전략 신호       45점
-  // ② 거래량 모멘텀   15점
-  // ③ 실제 체결강도   20점
-  // ④ 실시간 상승률   10점
-  // ⑤ RSI 진입 적정성  5점
-  // ⑥ 복합신호 보너스  5점
-  //
-  // ※ 1년 추세 / 월봉 / 장기추세 데이터 사용 안 함
-  // ※ 추가 KIS API 호출 없음
-  // ============================================================
+  return stocks
+  .filter(stock => {
+const strat =
+detectStockStrategies(stock);
 
+// 4개 센서 전부 요구하면 조건이 너무 엄격해서 실제 시장에서 거의 항상 0개가 나온다
+// (그 결과 항상 고정 fallback 데이터만 보이게 된다). 최소 1개 이상 센서가 감지되면
+// 후보에 포함시키고, scalpingScore로 랭킹해서 상위 8개만 남긴다 — 다중 신호 종목은
+// 자연히 점수가 높아 상위에 랭크된다.
+return strat.activeCount >= 1;
 
-  // ------------------------------------------------------------
-  // 안전한 숫자 변환
-  // ------------------------------------------------------------
-
-  const toNumber = (value: any, fallback = 0): number => {
-
-    const n = Number(
-      String(value ?? '')
-        .replace(/,/g, '')
-        .replace(/%/g, '')
-        .trim()
-    );
-
-    return Number.isFinite(n)
-      ? n
-      : fallback;
-  };
-
-
-  // ------------------------------------------------------------
-  // 0 ~ max 범위 제한
-  // ------------------------------------------------------------
-
-  const clamp = (
-    value: number,
-    min: number,
-    max: number
-  ): number => {
-
-    return Math.min(
-      max,
-      Math.max(min, value)
-    );
-  };
-
-
-  // ------------------------------------------------------------
-  // 거래량 숫자 변환
-  // ------------------------------------------------------------
-
-  const parseVolume = (value: any): number => {
-
-    if (typeof value === 'number') {
-      return Number.isFinite(value)
-        ? value
-        : 0;
-    }
-
-    const raw = String(value ?? '')
-      .trim()
-      .replace(/,/g, '');
-
-    if (!raw) {
-      return 0;
-    }
-
-    const match = raw.match(
-      /^([\d.]+)\s*(억|만|K|M|B)?$/i
-    );
-
-    if (!match) {
-      const numeric = Number(raw);
-
-      return Number.isFinite(numeric)
-        ? numeric
-        : 0;
-    }
-
-    const base = Number(match[1]);
-
-    if (!Number.isFinite(base)) {
-      return 0;
-    }
-
-    const unit = (match[2] || '').toUpperCase();
-
-    switch (unit) {
-
-      case 'B':
-        return base * 1_000_000_000;
-
-      case 'M':
-        return base * 1_000_000;
-
-      case 'K':
-        return base * 1_000;
-
-      case '억':
-        return base * 100_000_000;
-
-      case '만':
-        return base * 10_000;
-
-      default:
-        return base;
-    }
-  };
-
-
-  // ============================================================
-  // 1. 후보 종목 생성
-  // ============================================================
-
-  const candidates = stocks
-    .filter((stock) => {
-
-      if (!stock) {
-        return false;
-      }
-
-      if (!stock.symbol) {
-        return false;
-      }
-
-      const price =
-        toNumber(stock.price);
-
-      if (price <= 0) {
-        return false;
-      }
-
-      if (!stock.name) {
-        return false;
-      }
-
-      // 전략 분석
-      const strat =
-        detectStockStrategies(stock);
-
-      if (!strat) {
-        return false;
-      }
-
-      // 최소 1개 전략 신호가 있는 종목만 후보
-      return (
-        toNumber(strat.activeCount) >= 1
-      );
-    });
-
-
-  // ============================================================
-  // 2. 종목별 실시간 스캘핑 점수 계산
-  // ============================================================
-
-  const scoredCandidates =
-    candidates.map((stock) => {
+})
+    .map(stock => {
 
       const strat =
         detectStockStrategies(stock);
 
+      let score = 0;
 
-      const price =
-        toNumber(stock.price);
+      if (strat.isPullback) score += 40;
+      if (strat.isBreakout) score += 5;
+      if (strat.isVwapSupport) score += 40;
+      if (strat.isVolumeProfile) score += 40;
 
-      const change =
-        toNumber(stock.change);
+      if (strat.hasVolumeMomentum)
+        score += 10;
 
-      const changePercent =
-        toNumber(stock.changePercent);
+      if (strat.activeCount === 4)
+        score += 30;
 
-      const executionStrengthRaw =
-        toNumber(
-          stock.executionStrength,
-          100
-        );
+      score = Math.min(score, 100);
 
-      const executionStrength =
-        executionStrengthRaw > 0
-          ? executionStrengthRaw
-          : 100;
-
-      const volume =
-        parseVolume(stock.volume);
-
-
-      // ========================================================
-      // A. 전략 신호 점수 : 45점
-      // ========================================================
-
-      let strategyScore = 0;
-
-
-      // --------------------------------------------------------
-      // 돌파
-      // --------------------------------------------------------
-
-      if (strat.isBreakout) {
-
-        strategyScore += 15;
-
-      }
-
-
-      // --------------------------------------------------------
-      // VWAP 지지
-      // --------------------------------------------------------
-
-      if (strat.isVwapSupport) {
-
-        strategyScore += 10;
-
-      }
-
-
-      // --------------------------------------------------------
-      // CVD / Volume Profile
-      // --------------------------------------------------------
-
-      if (strat.isVolumeProfile) {
-
-        strategyScore += 10;
-
-      }
-
-
-      // --------------------------------------------------------
-      // 눌림목 반등
-      // --------------------------------------------------------
-
-      if (strat.isPullback) {
-
-        strategyScore += 10;
-
-      }
-
-
-      strategyScore =
-        clamp(
-          strategyScore,
-          0,
-          45
-        );
-
-
-      // ========================================================
-      // B. 거래량 모멘텀 : 15점
-      // ========================================================
-
-      let volumeScore = 0;
-
-
-      if (strat.hasVolumeMomentum) {
-
-        volumeScore = 15;
-
-      } else if (volume > 0) {
-
-        // 거래량 모멘텀 센서가 없으면
-        // 거래량 자체로 과도한 가점을 주지 않는다.
-        volumeScore = 5;
-
-      }
-
-
-      volumeScore =
-        clamp(
-          volumeScore,
-          0,
-          15
-        );
-
-
-      // ========================================================
-      // C. 실제 체결강도 : 20점
-      // ========================================================
-      //
-      // KIS cttr:
-      //
-      // 100  = 중립
-      // 100↑ = 매수체결 우세
-      // 100↓ = 매도체결 우세
-      //
-      // 단순히 100 + 센서 개수 같은 가짜 값은 사용하지 않는다.
-      // ========================================================
-
-      let executionScore = 0;
-
-
-      if (executionStrength >= 180) {
-
-        executionScore = 20;
-
-      } else if (executionStrength >= 160) {
-
-        executionScore = 18;
-
-      } else if (executionStrength >= 140) {
-
-        executionScore = 16;
-
-      } else if (executionStrength >= 125) {
-
-        executionScore = 14;
-
-      } else if (executionStrength >= 115) {
-
-        executionScore = 12;
-
-      } else if (executionStrength >= 105) {
-
-        executionScore = 10;
-
-      } else if (executionStrength >= 100) {
-
-        executionScore = 8;
-
-      } else if (executionStrength >= 95) {
-
-        executionScore = 5;
-
-      } else if (executionStrength >= 90) {
-
-        executionScore = 2;
-
-      } else {
-
-        executionScore = 0;
-
-      }
-
-
-      executionScore =
-        clamp(
-          executionScore,
-          0,
-          20
-        );
-
-
-      // ========================================================
-      // D. 실시간 상승 모멘텀 : 10점
-      // ========================================================
-      //
-      // 너무 높은 상승률을 무조건 최고점으로 주지 않는다.
-      //
-      // 초단타에서는
-      //
-      // +1 ~ +5%
-      //
-      // 구간을 우선적으로 평가한다.
-      //
-      // +7% 이상은 과열 가능성을 고려해 감점한다.
-      // ========================================================
-
-      let momentumScore = 0;
-
-
-      if (
-        changePercent >= 1 &&
-        changePercent <= 5
-      ) {
-
-        momentumScore =
-          10;
-
-      } else if (
-        changePercent > 5 &&
-        changePercent <= 7
-      ) {
-
-        momentumScore =
-          8;
-
-      } else if (
-        changePercent > 7 &&
-        changePercent <= 10
-      ) {
-
-        momentumScore =
-          5;
-
-      } else if (
-        changePercent > 10
-      ) {
-
-        momentumScore =
-          2;
-
-      } else if (
-        changePercent > 0 &&
-        changePercent < 1
-      ) {
-
-        momentumScore =
-          6;
-
-      } else {
-
-        momentumScore =
-          0;
-
-      }
-
-
-      momentumScore =
-        clamp(
-          momentumScore,
-          0,
-          10
-        );
-
-
-      // ========================================================
-      // E. RSI 진입 적정성 : 5점
-      // ========================================================
-
-      const rsi =
-        toNumber(
-          strat.rsi,
-          50
-        );
-
-
-      let rsiScore = 0;
-
-
-      // 가장 좋은 초단타 진입 구간
-      if (
-        rsi >= 55 &&
-        rsi <= 68
-      ) {
-
-        rsiScore = 5;
-
-      }
-
-      // 약간 높은 구간
-      else if (
-        rsi > 68 &&
-        rsi <= 72
-      ) {
-
-        rsiScore = 4;
-
-      }
-
-      // 아직 상승 모멘텀이 약함
-      else if (
-        rsi >= 50 &&
-        rsi < 55
-      ) {
-
-        rsiScore = 3;
-
-      }
-
-      // 과열 가능성
-      else if (
-        rsi > 72 &&
-        rsi <= 78
-      ) {
-
-        rsiScore = 2;
-
-      }
-
-      // 극단적 과열
-      else if (
-        rsi > 78
-      ) {
-
-        rsiScore = 0;
-
-      }
-
-      else {
-
-        rsiScore = 1;
-
-      }
-
-
-      rsiScore =
-        clamp(
-          rsiScore,
-          0,
-          5
-        );
-
-
-      // ========================================================
-      // F. 복합신호 보너스 : 5점
-      // ========================================================
-      //
-      // 하나의 센서만 발생한 종목보다
-      //
-      // 돌파 + 거래량
-      // VWAP + 거래량
-      // CVD + 체결강도
-      // 눌림목 + VWAP
-      //
-      // 같이 여러 신호가 동시에 발생하는 종목을 우선한다.
-      // ========================================================
-
-      const activeCount =
-        toNumber(
-          strat.activeCount
-        );
-
-
-      let combinationScore = 0;
-
-
-      if (activeCount >= 4) {
-
-        combinationScore = 5;
-
-      } else if (activeCount === 3) {
-
-        combinationScore = 4;
-
-      } else if (activeCount === 2) {
-
-        combinationScore = 2;
-
-      } else {
-
-        combinationScore = 0;
-
-      }
-
-
-      // ========================================================
-      // ★ 최종 100점 계산
-      // ========================================================
-
-      const rawScore =
-        strategyScore +
-        volumeScore +
-        executionScore +
-        momentumScore +
-        rsiScore +
-        combinationScore;
-
-
-      const scalpingScore =
-        clamp(
-          Math.round(rawScore),
-          0,
-          100
-        );
-
-
-      // ========================================================
-      // 등급
-      // ========================================================
-
-      const grade:
-        'SSS' | 'SS' | 'S' | 'A+' =
-
-        scalpingScore >= 90
-          ? 'SSS'
-          : scalpingScore >= 80
-          ? 'SS'
-          : scalpingScore >= 70
-          ? 'S'
-          : 'A+';
-
-
-      // ========================================================
-      // 추천 카테고리
-      // ========================================================
-
-      const category =
-        strat.isVolumeProfile
-          ? 'CVD_FLOW'
-          : strat.isBreakout
-          ? 'MOMENTUM_BREAKOUT'
-          : strat.isVwapSupport
-          ? 'VWAP_SUPPORT'
-          : strat.isPullback
-          ? 'SUPPORT_REBOUND'
-          : 'VOLUME_SURGE';
-
-
-      // ========================================================
-      // 태그
-      // ========================================================
-
-      const tags = [
-
-        strat.isPullback
-          ? '#눌림목'
-          : false,
-
-        strat.isBreakout
-          ? '#돌파'
-          : false,
-
-        strat.isVwapSupport
-          ? '#VWAP'
-          : false,
-
-        strat.isVolumeProfile
-          ? '#CVD'
-          : false,
-
-        strat.hasVolumeMomentum
-          ? '#거래량급증'
-          : false,
-
-        executionStrength >= 120
-          ? '#체결강도우위'
-          : false,
-
-        changePercent >= 1
-          ? '#상승모멘텀'
-          : false,
-
-        rsi >= 55 && rsi <= 68
-          ? '#RSI진입적정'
-          : false
-
-      ].filter(Boolean) as string[];
-
-
-      // ========================================================
-      // 추천 사유
-      // ========================================================
-
-      const reasonParts: string[] = [];
-
-
-      if (strat.isBreakout) {
-
-        reasonParts.push(
-          '돌파 신호'
-        );
-
-      }
-
-
-      if (strat.isPullback) {
-
-        reasonParts.push(
-          '눌림목 반등'
-        );
-
-      }
-
-
-      if (strat.isVwapSupport) {
-
-        reasonParts.push(
-          'VWAP 지지'
-        );
-
-      }
-
-
-      if (strat.isVolumeProfile) {
-
-        reasonParts.push(
-          'CVD 수급'
-        );
-
-      }
-
-
-      if (strat.hasVolumeMomentum) {
-
-        reasonParts.push(
-          '거래량 모멘텀'
-        );
-
-      }
-
-
-      if (executionStrength >= 120) {
-
-        reasonParts.push(
-          `체결강도 ${Math.round(executionStrength)}%`
-        );
-
-      }
-
-
-      if (changePercent > 0) {
-
-        reasonParts.push(
-          `등락률 +${changePercent.toFixed(2)}%`
-        );
-
-      }
-
-
-      const reason =
-        reasonParts.length > 0
-          ? reasonParts.join(' · ')
-          : `${activeCount}개 실시간 전략 신호`;
-
-
-      // ========================================================
-      // 결과 객체
-      // ========================================================
+      const grade: 'SSS' | 'SS' | 'S' | 'A+' =
+        score >= 95 ? 'SSS' :
+        score >= 85 ? 'SS' :
+        score >= 70 ? 'S' :
+        'A+';
 
       return {
-
         rank: 0,
 
-        symbol:
-          stock.symbol,
+        symbol: stock.symbol,
+        name: stock.name,
 
-        name:
-          stock.name,
+        marketType: (stock.market === 'US' ? 'KOSDAQ' : 'KOSPI') as 'KOSPI' | 'KOSDAQ',
 
-        marketType:
-          (stock.market === 'US'
-            ? 'KOSDAQ'
-            : 'KOSPI') as
-            'KOSPI' | 'KOSDAQ',
+        price: stock.price,
+        recommendedPrice: stock.price, // 이 함수가 호출된 지금 이 순간의 가격을 스냅샷으로 고정 — 이후 절대 재할당하지 않음
 
-        price,
+        change: stock.change || 0,
 
-        recommendedPrice:
-          price,
-
-        change,
-
-        changePercent,
+        changePercent:
+          stock.changePercent || 0,
 
         volume:
           stock.volume || '0',
 
-        tradeAmount:
-          '-',
+        tradeAmount: '-',
 
-        // 실제 거래량 급증률을 알 수 없는 경우
-        // 기존처럼 200이라는 가짜 값을 넣지 않는다.
         volumeSurgeRate:
           strat.hasVolumeMomentum
-            ? 150
+            ? 200
             : 100,
 
-        // ★ 실제 KIS 체결강도
         volumeIntensity:
-          Math.round(
-            executionStrength
-          ),
+          // 실제 체결강도(KIS가 계산해서 제공하는 cttr = 매수체결량/매도체결량 기반)가 있으면 그걸 쓰고,
+          // 없으면 센서 개수로 인위적으로 부풀리지 않고 중립값(100)을 보여준다.
+          // (이전에는 "100 + 센서개수*20"이라는 가짜 값을 체결강도인 것처럼 표시하고 있었다)
+          stock.executionStrength !== undefined && stock.executionStrength > 0
+            ? Math.round(stock.executionStrength)
+            : 100,
 
-        // ★ 핵심 점수
-        scalpingScore,
+        scalpingScore: score,
 
         grade,
 
-        category,
+        category: (
+          strat.isVolumeProfile
+            ? 'CVD_FLOW'
+            : strat.isVwapSupport
+            ? 'VWAP_SUPPORT'
+            : strat.isBreakout
+            ? 'MOMENTUM_BREAKOUT'
+            : 'SUPPORT_REBOUND'
+        ) as 'VOLUME_SURGE' | 'MOMENTUM_BREAKOUT' | 'SUPPORT_REBOUND' | 'VWAP_SUPPORT' | 'CVD_FLOW',
 
         targetPrice:
           Math.round(
-            price * 1.02
+            stock.price * 1.02
           ),
 
         stopLoss:
           Math.round(
-            price * 0.985
+            stock.price * 0.985
           ),
 
         expectedReturn:
           Number(
-            (scalpingScore / 100 * 3)
-              .toFixed(2)
+            (score / 30).toFixed(2)
           ),
 
-        rsi,
+        rsi:
+          Number(strat.rsi || 50),
 
-        reason,
+        reason:
+          `${strat.activeCount}/4 전략 충족`,
 
-        tags,
+        tags: [
+          strat.isPullback && '#눌림목',
+          strat.isBreakout && '#돌파',
+          strat.isVwapSupport && '#VWAP',
+          strat.isVolumeProfile && '#CVD'
+        ].filter(Boolean) as string[],
 
         holdingTime:
-          '3분 ~ 15분',
-
-        // 내부 디버깅용 값
-        _scoreBreakdown: {
-          strategyScore,
-          volumeScore,
-          executionScore,
-          momentumScore,
-          rsiScore,
-          combinationScore,
-          executionStrength,
-          changePercent,
-          volume,
-          activeCount
-        }
-
-      } as ScalperRecommendation & {
-        _scoreBreakdown: {
-          strategyScore: number;
-          volumeScore: number;
-          executionScore: number;
-          momentumScore: number;
-          rsiScore: number;
-          combinationScore: number;
-          executionStrength: number;
-          changePercent: number;
-          volume: number;
-          activeCount: number;
-        };
+          '3분 ~ 15분'
       };
-    });
-
-
-  // ============================================================
-  // 3. ★ 최종 순위 결정
-  // ============================================================
-  //
-  // 1순위:
-  //    scalpingScore
-  //
-  // 동점이면:
-  //    ① 체결강도
-  //    ② 등락률
-  //    ③ 거래량
-  //
-  // 순으로 결정한다.
-  // ============================================================
-
-  const rankedCandidates =
-    scoredCandidates
-      .sort((a: any, b: any) => {
-
-        // 1순위: 종합 스캘핑 점수
-        if (
-          b.scalpingScore !==
-          a.scalpingScore
-        ) {
-
-          return (
-            b.scalpingScore -
-            a.scalpingScore
-          );
-
-        }
-
-
-        // 2순위: 실제 체결강도
-        const execA =
-          a._scoreBreakdown
-            ?.executionStrength ?? 100;
-
-        const execB =
-          b._scoreBreakdown
-            ?.executionStrength ?? 100;
-
-        if (execB !== execA) {
-
-          return execB - execA;
-
-        }
-
-
-        // 3순위: 등락률
-        if (
-          b.changePercent !==
-          a.changePercent
-        ) {
-
-          return (
-            b.changePercent -
-            a.changePercent
-          );
-
-        }
-
-
-        // 4순위: 거래량
-        const volA =
-          a._scoreBreakdown
-            ?.volume ?? 0;
-
-        const volB =
-          b._scoreBreakdown
-            ?.volume ?? 0;
-
-        return volB - volA;
-
-      });
-
-
-  // ============================================================
-  // 4. TOP 10
-  // ============================================================
-
-  const finalRecommendations =
-    rankedCandidates
-      .slice(
-        0,
-        MAX_SCALPER_RECOMMENDATIONS
-      )
-      .map(
-        (item: any, index: number) => {
-
-          const result = {
-            ...item,
-
-            rank:
-              index + 1
-          };
-
-          // 내부 디버깅 정보는 화면 객체에서 제거
-          delete result._scoreBreakdown;
-
-          return result;
-        }
-      );
-
-
-  // ============================================================
-  // 5. ★ 1순위 로그
-  // ============================================================
-
-  if (
-    finalRecommendations.length > 0
-  ) {
-
-    const first =
-      finalRecommendations[0];
-
-
-    console.log(
-      '============================================================'
-    );
-
-    console.log(
-      '★ 실시간 초단타 최종 1순위'
-    );
-
-    console.log({
-      rank: 1,
-
-      name:
-        first.name,
-
-      symbol:
-        first.symbol,
-
-      price:
-        first.price,
-
-      changePercent:
-        first.changePercent,
-
-      executionStrength:
-        first.volumeIntensity,
-
-      rsi:
-        first.rsi,
-
-      scalpingScore:
-        first.scalpingScore,
-
-      grade:
-        first.grade,
-
-      category:
-        first.category,
-
-      reason:
-        first.reason,
-
-      tags:
-        first.tags
-    });
-
-    console.log(
-      '============================================================'
-    );
-
-  } else {
-
-    console.warn(
-      '[실시간 초단타 추천] 유효한 후보 종목이 없습니다.'
-    );
-
-  }
-
-
-  // ============================================================
-  // 6. 최종 반환
-  // ============================================================
-
-  return finalRecommendations;
+    })
+    .sort(
+      (a, b) =>
+        b.scalpingScore -
+        a.scalpingScore
+    )
+    .slice(0, MAX_SCALPER_RECOMMENDATIONS)
+    .map((item, idx) => ({
+      ...item,
+      rank: idx + 1
+    }));
 }
+
 
   public init(config: KISConfig, savedToken?: string, savedExpiresAt?: number, savedIssuedAt?: number) {
     // Sanitize config by trimming strings to eliminate accidental trailing whitespace
@@ -1822,209 +946,47 @@ await this.getDomesticPrice(symbol);
     }
   }
 
-  public async getDomesticOrderExecutions(
-  startDate: string,
-  endDate: string,
-  oderFg: '00' | '01' | '02' = '00',
-  prcsDvsn: '00' | '01' | '02' = '00'
-) {
+  public async getDomesticOrderExecutions(startDate: string, endDate: string, oderFg: '00' | '01' | '02' = '00', prcsDvsn: '00' | '01' | '02' = '00') {
+    if (!this.config) return { rt_cd: '1', msg1: "KIS Config not initialized", output1: [], output2: [] };
+    try {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/trading/inquire-daily-ccnl';
+      
+      const trId = 'TTTC8001R';
 
-  if (!this.config) {
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': trId,
+        'tr_id': trId,
+        'custtype': 'P',
+      };
 
-    return {
-      rt_cd: '1',
-      msg1: 'KIS Config not initialized',
-      output1: [],
-      output2: []
-    };
+      const params = {
+        CANO: this.config.accountNo,
+        ACNT_PRDT_CD: this.config.accountCode,
+        INQR_STRT_DT: startDate,
+        INQR_END_DT: endDate,
+        SND_CD: '',
+        SMRT_OTSN_YN: 'N',
+        SMRT_SND_CD: '',
+        ODER_FG_CD: oderFg,
+        CTX_AREA_FK100: '',
+        CTX_AREA_NK100: '',
+        INQR_DVSN: '00',
+        PRCS_DVSN: prcsDvsn,
+        CANO_PWD: this.config.accountPw || ''
+      };
 
-  }
-
-
-  try {
-
-    const token =
-      await this.getAccessToken();
-
-
-    const endpoint =
-      '/uapi/domestic-stock/v1/trading/inquire-daily-ccnl';
-
-
-    // ==========================================================
-    // ★ 최신 국내주식 일별 주문체결조회
-    // ==========================================================
-
-    const trId =
-      'TTTC0081R';
-
-
-    const headers = {
-
-      'content-type':
-        'application/json',
-
-      'authorization':
-        `Bearer ${token}`,
-
-      'appkey':
-        this.config.appKey,
-
-      'appsecret':
-        this.config.appSecret,
-
-      'tr-id':
-        trId,
-
-      'custtype':
-        'P'
-
-    };
-
-
-    const params = {
-
-      CANO:
-        this.config.accountNo,
-
-      ACNT_PRDT_CD:
-        this.config.accountCode,
-
-      INQR_STRT_DT:
-        startDate,
-
-      INQR_END_DT:
-        endDate,
-
-      SLL_BUY_DVSN_CD:
-        oderFg,
-
-      INQR_DVSN:
-        '00',
-
-      PDNO:
-        '',
-
-      CCLD_DVSN:
-        prcsDvsn,
-
-      ORD_GNO_BRNO:
-        '',
-
-      ODNO:
-        '',
-
-      INQR_DVSN_3:
-        '00',
-
-      INQR_DVSN_1:
-        '',
-
-      CTX_AREA_FK100:
-        '',
-
-      CTX_AREA_NK100:
-        '',
-
-      // ★ 거래소
-      EXCG_ID_DVSN_CD:
-        'KRX'
-
-    };
-
-
-    console.log(
-      '[KIS ORDER EXECUTION CHECK]',
-      {
-        trId,
-        startDate,
-        endDate,
-        oderFg,
-        prcsDvsn
-      }
-    );
-
-
-    const res =
-      await this.queueRequest<any>(
-        () =>
-          axios.get(
-            `${this.baseUrl}${endpoint}`,
-            {
-              headers,
-              params,
-              timeout: 8000
-            }
-          )
-      );
-
-
-    console.log(
-      '[KIS ORDER EXECUTION RESPONSE]',
-      res.data
-    );
-
-
-    if (
-      res.data &&
-      res.data.rt_cd &&
-      res.data.rt_cd !== '0'
-    ) {
-
-      console.warn(
-        '[KIS ORDER EXECUTION ERROR]',
-        {
-          rt_cd:
-            res.data.rt_cd,
-
-          msg_cd:
-            res.data.msg_cd,
-
-          msg1:
-            res.data.msg1
-        }
-      );
-
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
+      return res.data;
+    } catch (error: any) {
+      console.warn("[KIS Service] Domestic Order Executions Exception safely caught:", error?.response?.data || error?.message);
+      return { rt_cd: '0', output1: [], output2: [] };
     }
-
-
-    return res.data;
-
-  } catch (error: any) {
-
-    console.error(
-      '[KIS 주문체결조회 실패]',
-      {
-        message:
-          error?.message,
-
-        response:
-          error?.response?.data
-      }
-    );
-
-
-    // ★ 실패를 성공/빈 조회로 위장하지 않는다.
-    return {
-
-      rt_cd:
-        '1',
-
-      msg1:
-        error?.response?.data?.msg1 ||
-        error?.message ||
-        '주문체결조회 실패',
-
-      output1:
-        [],
-
-      output2:
-        []
-
-    };
-
   }
-}
 
   public async cancelOrder(symbol: string, orgNo: string, ordNo: string, qty: string, ordDvsn: string = '00') {
     return this.cancelDomesticOrder(
@@ -2035,860 +997,112 @@ await this.getDomesticPrice(symbol);
 );
   }
 
- public async checkOrderExecution(
-  odno: string
-) {
-
-  if (!this.config) {
-    throw new Error(
-      'KIS Config not initialized'
-    );
-  }
-
-
-  if (!odno) {
-
-    return {
-      found: false,
-      isFullyFilled: false,
-      isPartiallyFilled: false,
-      isUnfilled: true,
-      price: 0,
-      error:
-        new Error('ODNO가 없습니다.')
-    };
-
-  }
-
-
-  const now =
-    new Date();
-
-  const todayStr =
-    `${now.getFullYear()}${String(
-      now.getMonth() + 1
-    ).padStart(2, '0')}${String(
-      now.getDate()
-    ).padStart(2, '0')}`;
-
-
-  const cleanOdno =
-    odno
-      .toString()
-      .trim()
-      .replace(/^0+/, '');
-
-
-  const paddedOdno =
-    odno
-      .toString()
-      .trim()
-      .padStart(10, '0');
-
-
-  try {
-
-    const res =
-      await this.getDomesticOrderExecutions(
-        todayStr,
-        todayStr,
-        '00',
-        '00'
-      );
-
-
-    // ========================================================
-    // 조회 자체 실패
-    // ========================================================
-
-    if (
-      !res ||
-      res.rt_cd !== '0'
-    ) {
-
-      console.warn(
-        '[KIS 체결조회 실패]',
-        res
-      );
-
-
-      return {
-
-        found: false,
-
-        isFullyFilled: false,
-
-        isPartiallyFilled: false,
-
-        isUnfilled: true,
-
-        price: 0,
-
-        error:
-          new Error(
-            res?.msg1 ||
-            'KIS 주문체결조회 실패'
-          )
-
-      };
-
-    }
-
-
-    const output =
-      Array.isArray(res.output1)
-        ? res.output1
-        : [];
-
-
-    // ========================================================
-    // 주문번호 검색
-    // ========================================================
-
-    const order =
-      output.find(
-        (item: any) => {
-
-          const itemOdno =
-            String(
-              item.odno ??
-              item.ODNO ??
-              ''
-            ).trim();
-
-
-          const cleanItemOdno =
-            itemOdno
-              .replace(/^0+/, '');
-
-
-          return (
-
-            itemOdno === odno ||
-
-            itemOdno === paddedOdno ||
-
-            cleanItemOdno === cleanOdno
-
-          );
-
-        }
-      );
-
-
-    // ========================================================
-    // 주문번호가 아직 조회되지 않음
-    // ========================================================
-
-    if (!order) {
-
-      console.log(
-        `[KIS 체결조회] 주문번호 ${odno} 아직 조회되지 않음`
-      );
-
-
-      return {
-
-        found: false,
-
-        isFullyFilled: false,
-
-        isPartiallyFilled: false,
-
-        isUnfilled: true,
-
-        price: 0
-
-      };
-
-    }
-
-
-    // ========================================================
-    // 주문 / 체결 수량
-    // ========================================================
-
-    const ordQty =
-      Number(
-        order.ord_qty ??
-        order.ORD_QTY ??
-        0
-      );
-
-
-    const ccldQty =
-      Number(
-        order.tot_ccld_qty ??
-        order.TOT_CCLD_QTY ??
-        0
-      );
-
-
-    const rmndQty =
-      Number(
-        order.rmnd_qty ??
-        order.RMND_QTY ??
-        0
-      );
-
-
-    const rejectQty =
-      Number(
-        order.rjct_qty ??
-        order.RJCT_QTY ??
-        0
-      );
-
-
-    const orderPrice =
-      Number(
-        order.avg_prvs ??
-        order.AVG_PRVS ??
-        order.ord_unpr ??
-        order.ORD_UNPR ??
-        0
-      );
-
-
-    console.log(
-      '[KIS ORDER STATUS]',
-      {
-        odno,
-        ordQty,
-        ccldQty,
-        rmndQty,
-        rejectQty,
-        orderPrice,
-        raw:
-          order
-      }
-    );
-
-
-    // ========================================================
-    // 거부
-    // ========================================================
-
-    if (rejectQty > 0) {
-
-      return {
-
-        found: true,
-
-        isFullyFilled: false,
-
-        isPartiallyFilled: false,
-
-        isUnfilled: false,
-
-        isRejected: true,
-
-        price:
-          orderPrice,
-
-        ordQty,
-
-        ccldQty,
-
-        rmndQty,
-
-        rejectQty
-
-      };
-
-    }
-
-
-    // ========================================================
-    // 전량 체결
-    // ========================================================
-
-    if (
-      ordQty > 0 &&
-      ccldQty >= ordQty
-    ) {
-
-      return {
-
-        found: true,
-
-        isFullyFilled: true,
-
-        isPartiallyFilled: false,
-
-        isUnfilled: false,
-
-        isRejected: false,
-
-        price:
-          orderPrice,
-
-        ordQty,
-
-        ccldQty,
-
-        rmndQty,
-
-        rejectQty
-
-      };
-
-    }
-
-
-    // ========================================================
-    // 일부 체결
-    // ========================================================
-
-    if (ccldQty > 0) {
-
-      return {
-
-        found: true,
-
-        isFullyFilled: false,
-
-        isPartiallyFilled: true,
-
-        isUnfilled:
-          rmndQty > 0,
-
-        isRejected: false,
-
-        price:
-          orderPrice,
-
-        ordQty,
-
-        ccldQty,
-
-        rmndQty,
-
-        rejectQty
-
-      };
-
-    }
-
-
-    // ========================================================
-    // 주문은 존재하지만 미체결
-    // ========================================================
-
-    return {
-
-      found: true,
-
-      isFullyFilled: false,
-
-      isPartiallyFilled: false,
-
-      isUnfilled: true,
-
-      isRejected: false,
-
-      price:
-        orderPrice,
-
-      ordQty,
-
-      ccldQty,
-
-      rmndQty,
-
-      rejectQty
-
-    };
-
-  } catch (e) {
-
-    console.error(
-      '[KIS Service] checkOrderExecution error:',
-      e
-    );
-
-
-    return {
-
-      found: false,
-
-      isFullyFilled: false,
-
-      isPartiallyFilled: false,
-
-      isUnfilled: true,
-
-      price: 0,
-
-      error: e
-
-    };
-
-  }
-
-}
-
-  public async orderDomestic(
-  symbol: string,
-  side: 'BUY' | 'SELL',
-  price: string,
-  qty: string,
-  ordDvsn: string = '00'
-) {
-  if (!this.config) {
-    throw new Error('KIS Config not initialized');
-  }
-
-  return this.queueRequest(async () => {
-
-    const token = await this.getAccessToken();
-
-    const endpoint =
-      '/uapi/domestic-stock/v1/trading/order-cash';
-
-
-    // ============================================================
-    // 주문값 정규화
-    // ============================================================
-
-    const normalizedSymbol =
-      String(symbol || '').trim();
-
-    const normalizedQty =
-      String(qty || '0').trim();
-
-    const numericPrice =
-      Number(price || 0);
-
-    const normalizedOrdDvsn =
-      String(ordDvsn || '00').trim();
-
-
-    // ============================================================
-    // 주문 기본 검증
-    // ============================================================
-
-    if (!/^\d{6}$/.test(normalizedSymbol)) {
-      throw new Error(
-        `[KIS 주문 차단] 잘못된 국내 종목코드: ${normalizedSymbol}`
-      );
-    }
-
-    if (
-      !/^\d+$/.test(normalizedQty) ||
-      Number(normalizedQty) <= 0
-    ) {
-      throw new Error(
-        `[KIS 주문 차단] 잘못된 주문수량: ${normalizedQty}`
-      );
-    }
-
-
-    // 지정가 주문은 가격 필수
-    if (
-      normalizedOrdDvsn === '00' &&
-      (!Number.isFinite(numericPrice) ||
-        numericPrice <= 0)
-    ) {
-      throw new Error(
-        `[KIS 주문 차단] 지정가 주문 가격이 없습니다: ${price}`
-      );
-    }
-
-
-    // ============================================================
-    // ★ KIS 최신 국내주식 현금주문 Body
-    // ============================================================
-
-    const body: any = {
-
-      CANO:
-        this.config.accountNo,
-
-      ACNT_PRDT_CD:
-        this.config.accountCode,
-
-      PDNO:
-        normalizedSymbol,
-
-      ORD_DVSN:
-        normalizedOrdDvsn,
-
-      ORD_QTY:
-        normalizedQty,
-
-      ORD_UNPR:
-        normalizedOrdDvsn === '01'
-          ? '0'
-          : String(Math.round(numericPrice)),
-
-      // ★ 중요
-      EXCG_ID_DVSN_CD:
-        'KRX',
-
-      // 조건가격
-      CNDT_PRIC:
-        '',
-
-      // 매도 유형
-      SLL_TYPE:
-        side === 'SELL'
-          ? '01'
-          : ''
-    };
-
-
-    // ============================================================
-    // ★ 최신 실전 주문 TR-ID
-    //
-    // 매수 : TTTC0012U
-    // 매도 : TTTC0011U
-    // ============================================================
-
-    const trId =
-      side === 'BUY'
-        ? 'TTTC0012U'
-        : 'TTTC0011U';
-
-
-    // ============================================================
-    // Hash Key
-    //
-    // 반드시 실제 전송 Body와 동일한 Body로 생성
-    // ============================================================
-
-    const hashkey =
-      await this.getHashKey(body);
-
-
-    // ============================================================
-    // Headers
-    // ============================================================
-
-    const headers = {
-
-      'content-type':
-        'application/json; charset=utf-8',
-
-      'authorization':
-        `Bearer ${token}`,
-
-      'appkey':
-        this.config.appKey,
-
-      'appsecret':
-        this.config.appSecret,
-
-      'tr-id':
-        trId,
-
-      'hashkey':
-        hashkey,
-
-      'custtype':
-        'P'
-    };
-
-
-    // ============================================================
-    // ★ 주문 전 최종 로그
-    // ============================================================
-
-    console.log(
-      '============================================================'
-    );
-
-    console.log(
-      '[KIS REAL ORDER REQUEST]'
-    );
-
-    console.log({
-
-      endpoint,
-
-      trId,
-
-      side,
-
-      symbol:
-        normalizedSymbol,
-
-      qty:
-        normalizedQty,
-
-      price:
-        body.ORD_UNPR,
-
-      ordDvsn:
-        normalizedOrdDvsn,
-
-      exchange:
-        body.EXCG_ID_DVSN_CD,
-
-      account:
-        this.config.accountNo,
-
-      accountProduct:
-        this.config.accountCode
-
-    });
-
-    console.log(
-      '[KIS REAL ORDER BODY]',
-      body
-    );
-
-    console.log(
-      '============================================================'
-    );
-
-
-    // ============================================================
-    // ★ 실제 KIS 주문 전송
-    // ============================================================
-
-    let res: any;
+  public async checkOrderExecution(odno: string) {
+    if (!this.config) throw new Error("KIS Config not initialized");
+    if (!odno) return { found: false, isFullyFilled: false, isPartiallyFilled: false, isUnfilled: true, price: 0 };
+    
+    const todayStr = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const cleanOdno = odno.toString().trim().replace(/^0+/, '');
+    const paddedOdno = odno.toString().trim().padStart(10, '0');
 
     try {
-
-      res =
-        await axios.post(
-          `${this.baseUrl}${endpoint}`,
-          body,
-          {
-            headers,
-
-            // 주문 API가 무한 대기하지 않도록 제한
-            timeout: 10000
-          }
-        );
-
-    } catch (error: any) {
-
-      const apiError =
-        error?.response?.data;
-
-      console.error(
-        '[KIS REAL ORDER HTTP ERROR]',
-        {
-          status:
-            error?.response?.status,
-
-          data:
-            apiError,
-
-          message:
-            error?.message
+      const res = await this.getDomesticOrderExecutions(todayStr, todayStr);
+      if (res && res.rt_cd === '0' && res.output1 && Array.isArray(res.output1)) {
+        const order = res.output1.find((item: any) => {
+          const itemOdno = (item.odno || item.ODNO || '').toString().trim();
+          const cleanItemOdno = itemOdno.replace(/^0+/, '');
+          return itemOdno === odno || itemOdno === paddedOdno || cleanItemOdno === cleanOdno;
+        });
+        if (order) {
+          const ordQty = Number(order.ord_qty || order.ORD_QTY || 0);
+          const ccldQty = Number(order.tot_ccld_qty || order.TOT_CCLD_QTY || 0);
+          const rmndQty = Number(order.rmnd_qty || order.RMND_QTY || 0);
+          const prpr = Number(order.avg_prvs || order.AVG_PRVS || order.ord_unpr || order.ORD_UNPR || 0);
+          
+          return {
+            found: true,
+            ordQty,
+            ccldQty,
+            rmndQty,
+            isFullyFilled: ccldQty === ordQty && ordQty > 0,
+            isPartiallyFilled: ccldQty > 0 && ccldQty < ordQty,
+            isUnfilled: ccldQty === 0,
+            price: prpr
+          };
         }
-      );
-
-
-      throw new Error(
-        `[KIS 주문 통신 실패] ${
-          apiError?.msg1 ||
-          error?.message ||
-          'HTTP 주문 요청 실패'
-        }`
-      );
+      }
+      return { found: false, isFullyFilled: false, isPartiallyFilled: false, isUnfilled: true, price: 0 };
+    } catch (e) {
+      console.error("[KIS Service] checkOrderExecution error:", e);
+      return { found: false, isFullyFilled: false, isPartiallyFilled: false, isUnfilled: true, price: 0, error: e };
     }
+  }
+
+  public async orderDomestic(symbol: string, side: 'BUY' | 'SELL', price: string, qty: string, ordDvsn: string = '00') {
+    if (!this.config) throw new Error("KIS Config not initialized");
+    return this.queueRequest(async () => {
+      const token = await this.getAccessToken();
+      const endpoint = '/uapi/domestic-stock/v1/trading/order-cash';
+      
+      // SLL_TYPE is required for domestic stock sell orders
+      // 01: General Cash Sell
+      const body: any = {
+        CANO: this.config.accountNo,
+        ACNT_PRDT_CD: this.config.accountCode,
+        PDNO: symbol,
+        ORD_DVSN: ordDvsn, // 00 for Limit, 01 for Market
+        ORD_QTY: qty,
+        ORD_UNPR: ordDvsn === '01' ? '0' : price,
+      };
+
+      if (side === 'SELL') {
+        body.SLL_TYPE = '01'; // Default to 01 (General Cash Sell)
+      }
+
+      const hashkey = await this.getHashKey(body);
+
+      // 🔄 두 개의 독립적인 소스(공식 API 문서 api.xlsx, C# 참고 구현)가 모두 매수 TTTC0012U /
+      // 매도 TTTC0011U를 가리키고 있어서 다시 이 값으로 변경한다. 지난 테스트 때는 ODNO(진짜
+      // 주문번호) 검증 로직이 아직 없어서 실패 원인이 불명확했는데, 이제는 있으므로 이번엔
+      // 성공/실패가 로그에 명확하게 남는다.
+      const trId =
+  side === 'BUY'
+    ? 'TTTC0012U'
+    : 'TTTC0011U';
+
+      const headers = {
+        'content-type': 'application/json',
+        'authorization': `Bearer ${token}`,
+        'appkey': this.config.appKey,
+        'appsecret': this.config.appSecret,
+        'tr-id': trId,
+        'hashkey': hashkey,
+        'custtype': 'P',
+      };
+
+console.log(
+  '[KIS BUY SEND]',
+  {
+    symbol,
+    qty,
+    price,
+    ordDvsn,
+    side
+  }
+);
 
 
-    const data =
-      res?.data;
 
-
-    // ============================================================
-    // ★ KIS 원본 응답 반드시 출력
-    // ============================================================
-
-    console.log(
-      '============================================================'
-    );
-
-    console.log(
-      '[KIS REAL ORDER RESPONSE]',
-      data
-    );
-
-    console.log(
-      '============================================================'
-    );
-
-
-    // ============================================================
-    // ★ KIS가 명시적으로 주문 거부/실패한 경우
-    // ============================================================
-
-    if (
-      !data ||
-      data.rt_cd !== '0'
-    ) {
-
-      const msg =
-        data?.msg1 ||
-        data?.msg_cd ||
-        'KIS 주문 접수 실패';
-
-      console.error(
-        '[KIS REAL ORDER REJECTED]',
-        {
-          rt_cd:
-            data?.rt_cd,
-
-          msg_cd:
-            data?.msg_cd,
-
-          msg1:
-            data?.msg1,
-
-          output:
-            data?.output
+      const res = await axios.post(`${this.baseUrl}${endpoint}`, body, { headers });
+      if (res.data.rt_cd && res.data.rt_cd !== '0') {
+        if (res.data.msg_cd === 'EGW00201' || res.data.msg1?.includes('초당 거래건수')) {
+          throw new Error(`[429] ${res.data.msg1}`);
         }
-      );
-
-
-      throw new Error(
-        `[KIS 주문 거부] ${msg} ${
-          data?.msg_cd
-            ? `(${data.msg_cd})`
-            : ''
-        }`
-      );
-    }
-
-
-    // ============================================================
-    // ★★★ 가장 중요 ★★★
-    //
-    // rt_cd = 0 만으로 주문 성공 처리하지 않는다.
-    //
-    // 반드시 ODNO가 있어야 한다.
-    // ============================================================
-
-    const output =
-      data?.output || {};
-
-
-    const rawOdno =
-      output?.ODNO ??
-      output?.odno ??
-      data?.output1?.ODNO ??
-      data?.output1?.odno ??
-      '';
-
-
-    const odno =
-      String(rawOdno || '').trim();
-
-
-    const rawOrgNo =
-      output?.KRX_FWDG_ORD_ORGNO ??
-      output?.krx_fwdg_ord_orgno ??
-      '';
-
-
-    const orgNo =
-      String(rawOrgNo || '').trim();
-
-
-    // ============================================================
-    // ODNO가 없으면 절대로 주문 성공 처리하지 않는다.
-    // ============================================================
-
-    if (!odno) {
-
-      console.error(
-        '[KIS 주문 위험 응답] rt_cd=0 이지만 ODNO가 없습니다.',
-        data
-      );
-
-
-      throw new Error(
-        `[KIS 주문 확인 실패] rt_cd=0이지만 KIS 주문번호(ODNO)를 받지 못했습니다. 실제 주문 성공으로 처리하지 않습니다. ${
-          data?.msg1 || ''
-        }`
-      );
-    }
-
-
-    // ============================================================
-    // ★ 실제 주문 접수 성공
-    // ============================================================
-
-    console.log(
-      '============================================================'
-    );
-
-    console.log(
-      '[KIS REAL ORDER ACCEPTED]'
-    );
-
-    console.log({
-
-      side,
-
-      symbol:
-        normalizedSymbol,
-
-      qty:
-        normalizedQty,
-
-      price:
-        body.ORD_UNPR,
-
-      ordDvsn:
-        normalizedOrdDvsn,
-
-      trId,
-
-      odno,
-
-      orgNo,
-
-      orderTime:
-        output?.ORD_TMD ??
-        output?.ord_tmd ??
-        ''
-
+        throw new Error(`국내 주문 실패: ${res.data.msg1} (${res.data.msg_cd})`);
+      }
+      return res.data;
     });
-
-    console.log(
-      '============================================================'
-    );
-
-
-    // ============================================================
-    // executeTrade()에서 사용할 수 있도록
-    // 원본 응답 + 검증된 주문번호 반환
-    // ============================================================
-
-    return {
-
-      ...data,
-
-      output: {
-
-        ...output,
-
-        ODNO:
-          odno,
-
-        KRX_FWDG_ORD_ORGNO:
-          orgNo
-
-      },
-
-      orderAccepted:
-        true,
-
-      odno,
-
-      orgNo
-
-    };
-
-  });
-}
+  }
 
   public async cancelDomesticOrder(orgNo: string, ordNo: string, qty: string, ordDvsn: string = '00') {
     return this.reviseDomestic(orgNo, ordNo, qty, "0", '02', ordDvsn);
@@ -2928,7 +1142,9 @@ await this.getDomesticPrice(symbol);
 
     const hashkey = await this.getHashKey(body);
 
-    const trId = 'TTTC0013U';
+    // 🔄 사용자 확인 결과 TTTC0013U(api.xlsx 문서 대조값)로는 실제 취소/정정이 안 되고 있어서,
+    // 이전에 쓰던 TTTC0803U로 되돌린다.
+    const trId = 'TTTC0803U';
 
     const headers = {
       'content-type': 'application/json',
