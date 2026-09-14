@@ -58,8 +58,9 @@ export interface IntegratedTradingHeaderProps {
   gapSellPrice: number;
   isScalperRecLoading: boolean;
   tradeLogs: { symbol: string; time: string; reason: string; type: string; price: number }[];
-  targetInvestmentPerStock: number;
-  setTargetInvestmentPerStock: (v: number) => void;
+  priceRangeOptions: { label: string; minPrice: number; maxPrice?: number }[];
+  priceRangeIndex: number;
+  setPriceRangeIndex: (idx: number) => void;
   isRefreshingTop3: boolean;
   scalperTabs: ScalperTab[];
   activeTabId: string;
@@ -142,8 +143,9 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
   gapSellPrice,
   isScalperRecLoading,
   tradeLogs,
-  targetInvestmentPerStock,
-  setTargetInvestmentPerStock,
+  priceRangeOptions,
+  priceRangeIndex,
+  setPriceRangeIndex,
   isRefreshingTop3,
   scalperTabs,
   activeTabId,
@@ -381,24 +383,18 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                 <span>{(isScalperRecLoading || isRefreshingTop3) ? "추천 분석중..." : "추천종목 찾기"}</span>
               </button>
 
-              {/* 💰 종목당 목표 투자금액 입력 — 추천종목이 인벤토리에 등록될 때(자동/수동 모두) 이
-                  금액에 맞춰 가격 대비 수량이 자동으로 계산된다. 예: 10,000원 입력 시 990원 종목은
-                  10주, 13,000원 종목은 1주로 각각 계산되어 투자금액이 비슷하게 맞춰진다. */}
-              <div
-                className="flex items-center gap-1 px-2 py-1 rounded-xl bg-black/40 border border-white/10 shrink-0"
-                title="종목당 목표 투자금액 — 추천종목이 등록될 때 이 금액에 맞춰 수량이 자동 계산됩니다 (예: 990원 종목 → 10주, 13,000원 종목 → 1주)"
+              {/* 💰 가격구간 선택 드롭다운 — "종목당 10000원" 입력창 자리를 대체. 선택한 구간의
+                  종목만 추천종목 검색/자동채움 대상이 된다 (KIS 랭킹 API 단계에서부터 필터링). */}
+              <select
+                value={priceRangeIndex}
+                onChange={(e) => setPriceRangeIndex(Number(e.target.value))}
+                className="shrink-0 bg-black/40 border border-white/10 rounded-xl text-[11px] font-bold text-emerald-300 outline-none px-2 py-1 cursor-pointer appearance-none hover:border-emerald-500/50"
+                title="이 가격구간에 있는 종목만 추천/자동채움 대상이 됩니다"
               >
-                <span className="text-[9px] font-bold text-slate-400 whitespace-nowrap">종목당</span>
-                <input
-                  type="number"
-                  min={1000}
-                  step={1000}
-                  value={targetInvestmentPerStock}
-                  onChange={(e) => setTargetInvestmentPerStock(Math.max(0, Number(e.target.value) || 0))}
-                  className="w-16 bg-transparent text-[11px] font-black font-mono text-emerald-300 outline-none text-right"
-                />
-                <span className="text-[9px] font-bold text-slate-400">원</span>
-              </div>
+                {priceRangeOptions.map((opt, idx) => (
+                  <option key={idx} value={idx} className="bg-sleek-bg text-white">{opt.label}</option>
+                ))}
+              </select>
 
             </div>
 

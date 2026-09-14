@@ -358,7 +358,7 @@ interface Stock {
   change: number;
   changePercent: number;
   volume: string;
-  history: { time: string; price: number }[];
+  history: { time: string; price: number; timestamp?: number }[];
   market: 'KR' | 'US';
   isAI?: boolean;
   momentum?: number; // 0-100 score
@@ -1931,8 +1931,9 @@ export default function App() {
           setStocks(prev => prev.map(s => {
             if (s.symbol !== tick.symbol) return s;
             const nowLabel = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const nowTs = Date.now();
             const oldHistory = Array.isArray(s.history) ? s.history : [];
-            const newHistory = [...oldHistory.slice(-59), { time: nowLabel, price: tick.price }];
+            const newHistory = [...oldHistory.slice(-599), { time: nowLabel, price: tick.price, timestamp: nowTs }];
             return {
               ...s,
               price: tick.price,
@@ -2613,18 +2614,36 @@ setGapInventory(nextInv);
   // 💰 종목당 목표 투자금액 — 추천종목이 인벤토리에 등록될 때(자동 채움/수동 클릭 모두), 이 금액에
   // 맞춰 "가격 대비 수량"을 자동으로 계산한다. 예: 10,000원 설정 시 990원 종목은 10주, 4,900원
   // 종목은 2주, 13,000원 종목은 1주로 각각 계산되어 투자금액이 비슷하게 맞춰진다.
-  const [targetInvestmentPerStock, setTargetInvestmentPerStock] = useState<number>(() => {
-    const saved = localStorage.getItem('sleek_target_investment_per_stock');
-    return saved !== null && !isNaN(Number(saved)) ? Number(saved) : 10000;
-  });
-  useEffect(() => {
-    localStorage.setItem('sleek_target_investment_per_stock', String(targetInvestmentPerStock));
-  }, [targetInvestmentPerStock]);
+  // 🛡️ UI 입력창은 삭제하고 가격구간 드롭다운으로 대체했지만, 종목당 투자금액 기반 수량 계산
+  // 로직 자체는 그대로 유지한다 — 기본값(10,000원)을 내부적으로 고정해서 사용한다.
+  const [targetInvestmentPerStock] = useState<number>(10000);
   // 가격에 맞춰 수량 계산 — 최소 1주는 보장
   const calcQuantityForTargetAmount = React.useCallback((price: number): number => {
     if (!price || price <= 0 || targetInvestmentPerStock <= 0) return 1;
     return Math.max(1, Math.floor(targetInvestmentPerStock / price));
   }, [targetInvestmentPerStock]);
+
+  // 💰 추천종목 검색/자동채움에 적용할 가격구간 — "종목당 10000원" 입력창 자리를 대체하는 드롭다운.
+  // 선택한 구간의 종목만 KIS 랭킹 API 단계에서부터 후보로 걸러진다(추가 API 호출 없이 파라미터만
+  // 바뀜). maxPrice가 undefined면 "무제한"을 의미한다.
+  const PRICE_RANGE_OPTIONS: { label: string; minPrice: number; maxPrice?: number }[] = [
+    { label: '1,000원 ~ 20,000원', minPrice: 1000, maxPrice: 20000 },
+    { label: '20,000원 ~ 50,000원', minPrice: 20000, maxPrice: 50000 },
+    { label: '50,000원 ~ 100,000원', minPrice: 50000, maxPrice: 100000 },
+    { label: '100,000원 ~ 500,000원', minPrice: 100000, maxPrice: 500000 },
+    { label: '500,000원 ~ 무제한', minPrice: 500000, maxPrice: undefined },
+  ];
+  const [priceRangeIndex, setPriceRangeIndex] = useState<number>(() => {
+    const saved = localStorage.getItem('sleek_scalper_price_range_index');
+    const idx = saved !== null ? Number(saved) : 0;
+    return (!isNaN(idx) && idx >= 0 && idx < PRICE_RANGE_OPTIONS.length) ? idx : 0;
+  });
+  useEffect(() => {
+    localStorage.setItem('sleek_scalper_price_range_index', String(priceRangeIndex));
+  }, [priceRangeIndex]);
+  const priceRangeIndexRef = React.useRef(priceRangeIndex);
+  useEffect(() => { priceRangeIndexRef.current = priceRangeIndex; }, [priceRangeIndex]);
+
   const [allowSamePriceEntry, setAllowSamePriceEntry] = useState<boolean>(false); // 🛡️ 기본값을 안전한 쪽(차단)으로 변경 — 이전 기본값(true=차단 해제)은 "1주씩 연속 매수" 위험의 핵심 원인이었다
   const [enableCombinedAvgProfitExit, setEnableCombinedAvgProfitExit] = useState<boolean>(false); 
   const [isSmartScalperMode, setIsSmartScalperMode] = useState<boolean>(true);
@@ -2749,8 +2768,26 @@ setGapInventory(nextInv);
       prevP = p;
     });
 
-    const recentPeak = historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice;
-    const recentLow = historyPrices.length >= 5 ? Math.min(...historyPrices.slice(-10, -1)) : currentPrice;
+    // 🛡️ 매우 중요한 수정: 예전엔 "최근 10개 샘플"(실제로는 몇 초~몇십 초 수준, 웹소켓 tick 빈도에
+    // 따라 들쭉날쭉)을 전고점/전저점 기준으로 삼았는데, 초단타 스캘핑에서 의미 있는 "단기 전고점"은
+    // 5분 정도의 시간 창이어야 한다는 게 더 실전적이다. 이제 history의 실제 timestamp를 이용해
+    // 정확히 "최근 5분" 이내 데이터만 필터링한다. timestamp가 없는 오래된 데이터나 데이터 자체가
+    // 부족하면 기존 인덱스 기반 방식으로 안전하게 폴백한다.
+    const FIVE_MIN_MS = 5 * 60 * 1000;
+    const nowForPeak = Date.now();
+    const timestampedHistory = Array.isArray(targetStock.history) ? targetStock.history : [];
+    // 가장 최근 항목(현재가와 사실상 동일한 시점)은 제외하고, 그 이전 5분 이내 데이터만 사용
+    const fiveMinWindow = timestampedHistory.length > 1
+      ? timestampedHistory.slice(0, -1).filter(h => h.timestamp !== undefined && (nowForPeak - h.timestamp) <= FIVE_MIN_MS)
+      : [];
+    const fiveMinPrices = fiveMinWindow.map(h => h.price).filter((p): p is number => typeof p === 'number' && !isNaN(p));
+
+    const recentPeak = fiveMinPrices.length >= 5
+      ? Math.max(...fiveMinPrices)
+      : (historyPrices.length >= 5 ? Math.max(...historyPrices.slice(-10, -1)) : currentPrice);
+    const recentLow = fiveMinPrices.length >= 5
+      ? Math.min(...fiveMinPrices)
+      : (historyPrices.length >= 5 ? Math.min(...historyPrices.slice(-10, -1)) : currentPrice);
     const recentMaxPriceDirection = priceDirectionSeries.length >= 5 ? Math.max(...priceDirectionSeries.slice(-10, -1)) : priceDirection;
     const recentMinPriceDirection = priceDirectionSeries.length >= 5 ? Math.min(...priceDirectionSeries.slice(-10, -1)) : priceDirection;
 
@@ -2802,7 +2839,7 @@ setGapInventory(nextInv);
   //   단기 이동평균 상승    +10   매도호가 소진(호가 데이터 있을 때만) +10
   //   전고점 돌파           +15   매수호가 우세(호가 데이터 있을 때만) +10
   // ============================================================
-  const BUY_SCORE_THRESHOLD = 60; // 130점 만점 중 60점 이상이면 매수 (약 46% — 여러 종목을 훑을 때 기회를 너무 놓치지 않도록 완화)
+  const BUY_SCORE_THRESHOLD = 46; // 100점 만점 중 46점 이상이면 매수 (기존 130점 만점 60점=약 46%와 동일 비율 유지)
   const prevVwapAboveRef = React.useRef<Record<string, boolean>>({});
   const vwapBreakoutAtRef = React.useRef<Record<string, number>>({}); // VWAP 신규 상향돌파가 일어난 시각(ms) — 20초 신선도 창 판단용
   const execStrengthWindowRef = React.useRef<Record<string, { value: number; time: number }[]>>({}); // 체결강도 최근 4초 이력 — 노이즈에 덜 민감한 평균 기준선 계산용
@@ -2810,6 +2847,8 @@ setGapInventory(nextInv);
   const lastCumulativeVolumeRef = React.useRef<Record<string, number>>({}); // 직전에 관측한 누적거래량 — 구간별 증가량(델타) 계산용
   const prevSma5Ref = React.useRef<Record<string, number>>({});
   const prevSma20Ref = React.useRef<Record<string, number>>({});
+  const prevAbovePeakRef = React.useRef<Record<string, boolean>>({}); // 전고점 돌파 이벤트 판단용
+  const peakBreakoutAtRef = React.useRef<Record<string, number>>({}); // 전고점 신규 돌파가 일어난 시각(ms) — VWAP과 동일한 신선도 창 판단용
   const sellExecStrengthRef = React.useRef<Record<string, number>>({}); // RSI 극단 반전 판단용 — 매도 로직 전용 체결강도 추적 (매수 점수제와 독립)
   const volumeHistoryRef = React.useRef<Record<string, number[]>>({});
   const prevPriceForComboRef = React.useRef<Record<string, number>>({}); // 체결강도+거래량+가격 결합 방향 판단용 직전 가격
@@ -2951,18 +2990,47 @@ setGapInventory(nextInv);
     if (strat.sma5 > 0) prevSma5Ref.current[sym] = strat.sma5;
     if (strat.sma20 > 0) prevSma20Ref.current[sym] = strat.sma20;
 
-    // 8. 매도호가 소진 (+10) — 실시간 호가 데이터가 있는 종목(주로 선택된 종목)에서만 반영
-    if (askDepletion) { score += 10; breakdown.push('매도호가소진(+10)'); }
+    // 8. 매도호가 소진 (+5) — 🛡️ 확인 결과 이 값은 실제 "소진 이벤트"(매도호가 잔량이 실시간으로
+    // 줄어들며 체결로 뚫리는 현상)를 측정하는 게 아니라, 매수/매도 총잔량의 정적 스냅샷 비율(3배
+    // 이상)에 불과했다 — 사실상 매수호가우세(아래)와 같은 데이터를 다른 임계값으로 재사용하는
+    // 셈이라, 허수호가에 그대로 노출될 위험이 있었다. 진짜 소진 이벤트를 추적할 수 있게 되기
+    // 전까지는 +10에서 +5(보조점수)로 낮춘다. 실제 호가 잔량 감소 추이를 시계열로 잡을 수 있게
+    // 되면 다시 +10으로 강화할 예정 — 지금은 정적 스냅샷 신뢰도에 맞춘 조정이다.
+    if (askDepletion) { score += 5; breakdown.push('매도호가소진(+5)'); }
 
-    // 9. 전고점 돌파 (+15)
-    if (strat.recentPeak > 0 && currentPrice > strat.recentPeak) { score += 15; breakdown.push('전고점돌파(+15)'); }
+    // 9. 전고점 돌파 (+15) — 🛡️ 예전엔 "현재가 > 전고점"이라는 상태 하나로 판단해서, 전고점 위에
+    // 계속 머물러 있으면 매 틱마다 +15가 반복 지급될 수 있었다(VWAP과 같은 종류의 문제). VWAP
+    // 돌파와 동일하게 "이전엔 전고점 이하였다가 지금 막 돌파한" 이벤트로 바꾸고, 20초 신선도
+    // 창을 둬서 돌파 직후 잠깐 동안만 유효하게 만든다.
+    const isAbovePeak = strat.recentPeak > 0 && currentPrice > strat.recentPeak;
+    const wasAbovePeak = prevAbovePeakRef.current[sym];
+    if (isAbovePeak && wasAbovePeak === false) {
+      peakBreakoutAtRef.current[sym] = now; // 신규 돌파 이벤트 발생 — 신선도 타이머 시작
+    }
+    const peakBreakoutAt = peakBreakoutAtRef.current[sym];
+    if (isAbovePeak && peakBreakoutAt !== undefined && (now - peakBreakoutAt) <= VWAP_BREAKOUT_FRESH_MS) {
+      score += 15;
+      breakdown.push('전고점돌파(+15)');
+    }
+    prevAbovePeakRef.current[sym] = isAbovePeak;
 
-    // 10. 매수호가 우세 (+10) — 실시간 호가 데이터가 있는 종목에서만 반영. 매수잔량이 매도잔량의
+    // 10. 매수호가 우세 (+5) — 실시간 호가 데이터가 있는 종목에서만 반영. 매수잔량이 매도잔량의
     // 1.3배 이상이면 "지금 사려는 사람이 팔려는 사람보다 많다"는 뜻으로 가점 (별도 필수 게이트가
     // 아니라 다른 조건들과 동등한 보너스 점수 — 이것 하나 없다고 매수 기회 자체가 막히지 않는다)
-    if (bidAskRatio !== undefined && bidAskRatio >= 130) { score += 10; breakdown.push('매수호가우세(+10)'); }
+    // 🛡️ 매도호가소진과 마찬가지로 정적 스냅샷 비율이라 허수호가 위험이 있어 +10에서 +5로 조정 —
+    // 둘을 합쳐 "호가/체결 구조" 최대 +10을 이룬다.
+    if (bidAskRatio !== undefined && bidAskRatio >= 130) { score += 5; breakdown.push('매수호가우세(+5)'); }
 
-    return { score, breakdown };
+    // 🛡️ 100점 만점으로 정규화 — 각 조건의 개별 가산점(위 breakdown에 남는 +15, +20 등)은 그대로
+    // 유지해서 로그 가독성을 지키되, 최종 반환하는 점수만 "현재 최대 가능 점수(RAW_MAX_SCORE) 대비
+    // 100점 만점" 비율로 환산한다. 이렇게 하면 앞으로 개별 항목 배점을 조정해도(RAW_MAX_SCORE만
+    // 같이 갱신하면) 항상 100점 기준을 유지할 수 있다.
+    // 현재 RAW_MAX_SCORE 계산 근거: VWAP(15+20) + 체결강도(15+10) + 거래량(15) + 결합신호(10) +
+    // RSI(최대10) + 단기모멘텀(6+2+2) + 매도호가소진(5) + 전고점돌파(15) + 매수호가우세(5) = 130
+    const RAW_MAX_SCORE = 130;
+    const normalizedScore = Math.round((score / RAW_MAX_SCORE) * 100);
+
+    return { score: normalizedScore, breakdown };
   }, []);
 
   const selectedStock = useMemo(() => {
@@ -3475,8 +3543,9 @@ setGapInventory(nextInv);
     const currentP = target.price || 0;
     if (currentP <= 0) return;
 
-    // 🔄 신뢰도는 실제 점수(130점 만점)를 백분율로 환산 — 더 이상 임의의 숫자가 아니다
-    const confidence = Math.round((realScore / 130) * 100);
+    // 🔄 realScore는 calculateBuyScore가 이미 100점 만점으로 정규화해서 반환한 값이다 —
+    // 여기서 다시 /130 등으로 재환산하면 이중 정규화가 되어 실제보다 낮게 표시되는 버그가 있었다.
+    const confidence = Math.round(realScore);
     // 🔄 목표가/손절가는 실제 매매 엔진이 쓰는 설정값(목표순익/손절 %)을 그대로 반영
     const targetP = Math.round(currentP * (1 + scalpingTargetProfit / 100));
     const stopL = Math.round(currentP * (1 + scalpingStopLoss / 100));
@@ -3492,7 +3561,7 @@ setGapInventory(nextInv);
       targetPrice: targetP,
       stopLoss: stopL,
       expectedReturn: expReturn,
-      reason: customReason || `실시간 매수 점수제 분석 결과 ${realScore}/130점 (${confidence}%) — ${realBreakdown.join(', ') || '조건 충족'}. 목표순익 +${expReturn}% 설정 기준.`,
+      reason: customReason || `실시간 매수 점수제 분석 결과 ${realScore}/100점 (${confidence}%) — ${realBreakdown.join(', ') || '조건 충족'}. 목표순익 +${expReturn}% 설정 기준.`,
       technicalTags: realBreakdown.length > 0 ? realBreakdown.map(b => b.replace(/\(\+\d+\)/, '')) : ['점수제 조건 충족']
     });
     setShowAiRecPopup(true);
@@ -4884,13 +4953,19 @@ setGapInventory(nextInv);
       // 🛡️ 등록 종목이 많을수록 요청 큐가 붐벼서 429 백오프가 겹치기 쉽다. "추천종목 조회는
       // 최우선"이라는 원칙에 맞춰, 1차 시도(20초)가 실패해도 곧바로 포기하지 않고 5초 대기 후
       // 한 번 더 시도한다 — 일시적인 혼잡으로 인한 실패 가능성을 낮추기 위함이다.
-      const fetchRanking = () => Promise.race([
-        Promise.all([
-          kisService.getVolumeRanking('J', 80, { minPrice: 1000, maxPrice: 20000 }),
-          kisService.getFluctuationRanking('J', 'UP', 70, { minPrice: 1000, maxPrice: 20000 })
-        ]),
-        new Promise<[any[], any[]]>((_, reject) => setTimeout(() => reject(new Error('ranking_timeout')), 20000))
-      ]);
+      const fetchRanking = () => {
+        // 💰 "종목당 10000원" 입력창 대신 만든 가격구간 드롭다운 — 선택한 구간의 종목만
+        // KIS 랭킹 API 단계에서부터 걸러진다(추가 API 호출 없이 파라미터만 바뀜).
+        const selectedRange = PRICE_RANGE_OPTIONS[priceRangeIndexRef.current] || PRICE_RANGE_OPTIONS[0];
+        const priceFilter = { minPrice: selectedRange.minPrice, maxPrice: selectedRange.maxPrice, minVolume: 100000 };
+        return Promise.race([
+          Promise.all([
+            kisService.getVolumeRanking('J', 80, priceFilter),
+            kisService.getFluctuationRanking('J', 'UP', 70, priceFilter)
+          ]),
+          new Promise<[any[], any[]]>((_, reject) => setTimeout(() => reject(new Error('ranking_timeout')), 20000))
+        ]);
+      };
 
       try {
         // 🛡️ 재시도 로직 제거 — 큐가 이미 붐벼서 실패하는 상황에서, 5초 후 재시도는 그 붐비는
@@ -5890,9 +5965,10 @@ priceData.current
         // 새 가격을 실제 이력에 한 칸씩 누적해서, 시간이 지날수록 진짜 데이터로 자연스럽게 채워지게 한다.
         const prevHistory = Array.isArray(prevStock?.history) ? prevStock!.history : [];
         const nowLabel = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const nowTs = Date.now();
         const newHistory = prevHistory.length > 0
-          ? [...prevHistory.slice(-59), { time: nowLabel, price: priceData.current }]
-          : [{ time: nowLabel, price: priceData.current }];
+          ? [...prevHistory.slice(-599), { time: nowLabel, price: priceData.current, timestamp: nowTs }]
+          : [{ time: nowLabel, price: priceData.current, timestamp: nowTs }];
 
         const updatedStock: Stock = {
           ...(prevStock || { symbol, name: symbol, market: /^[A-Za-z]/.test(symbol) ? 'US' : 'KR', isAI: false } as Stock),
@@ -6818,7 +6894,7 @@ priceData.current
   // 사용자가 직접 확인하고 즉시 선택할 수 있도록 그 종목 하나만 담은 팝업을 자동으로 띄운다.
   // (여러 종목이 나열되는 추천 목록과는 다른, 방금 신호가 뜬 "그 종목 하나"만 보여주는 알림)
   // ============================================================
-  const STRONG_SIGNAL_THRESHOLD = 95; // 일반 매수 기준(60점)보다 훨씬 높은, 예외적으로 강한 신호만
+  const STRONG_SIGNAL_THRESHOLD = 73; // 일반 매수 기준(46점)보다 훨씬 높은, 예외적으로 강한 신호만 (100점 만점 기준 — 기존 130점 만점 95점과 동일 비율)
   const strongSignalAlertedRef = React.useRef<Record<string, number>>({});
   const STRONG_SIGNAL_COOLDOWN_MS = 5 * 60 * 1000; // 같은 종목에 대해 5분 안에는 다시 알리지 않음
 
@@ -8623,7 +8699,7 @@ useEffect(() => {
             ) ? (Number(myOrderbook.totalBidVolume || 0) / Number(myOrderbook.totalAskVolume)) * 100 : undefined;
             const { score: buyScore, breakdown: buyScoreBreakdown } = calculateBuyScore(stockItem, strat, askDepletion, bidAskRatio);
             meetsBuyCriteria = buyScore >= BUY_SCORE_THRESHOLD;
-            strategyLabel = `🎯 [점수제 ${buyScore}/130점] ${buyScoreBreakdown.join(', ') || '신호 부족'}`;
+            strategyLabel = `🎯 [점수제 ${buyScore}/100점] ${buyScoreBreakdown.join(', ') || '신호 부족'}`;
           }
 
           const isUSStock = stockItem.market === 'US' || /^[A-Za-z]/.test(stockItem.symbol) || marketType === 'US';
@@ -10055,8 +10131,9 @@ useEffect(() => {
                 gapSellPrice={gapSellPrice}
                 isScalperRecLoading={isScalperRecLoading}
                 tradeLogs={tradeLogs}
-                targetInvestmentPerStock={targetInvestmentPerStock}
-                setTargetInvestmentPerStock={setTargetInvestmentPerStock}
+                priceRangeOptions={PRICE_RANGE_OPTIONS}
+                priceRangeIndex={priceRangeIndex}
+                setPriceRangeIndex={setPriceRangeIndex}
                 isRefreshingTop3={isRefreshingTop3}
                 scalperTabs={scalperTabs}
                 activeTabId={activeTabId}
