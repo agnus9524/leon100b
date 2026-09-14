@@ -4817,23 +4817,36 @@ setGapInventory(nextInv);
     // 검색 못하는" 원인이 되었다. 실제로 인벤토리에 채울 수 있는 종목 수(15개 안팎)를 감안하면
     // 상위 20개 정도만 확인해도 충분하므로 대폭 줄인다.
     const trendCheckPool = scoredCandidates.slice(0, 20);
-    const trendResults = await Promise.allSettled(
-      trendCheckPool.map(async (rec) => {
-        const monthly = await kisService.getDomesticDailyPrice(rec.symbol, 'M');
-        const bars = Array.isArray(monthly?.output) ? monthly.output : [];
-        if (bars.length < 6) return { symbol: rec.symbol, isDowntrend: false }; // 상장한 지 얼마 안 됐거나 데이터 부족하면 판단 보류(제외하지 않음)
-        const oldestClose = Number(bars[bars.length - 1]?.stck_clpr || 0); // 월봉은 최신순으로 오므로 마지막이 가장 오래된 달
-        const currentPrice = rec.price;
-        if (oldestClose <= 0 || currentPrice <= 0) return { symbol: rec.symbol, isDowntrend: false };
-        const isDowntrend = currentPrice < oldestClose * 0.7; // 1년 전 대비 30% 이상 하락
-        return { symbol: rec.symbol, isDowntrend };
-      })
-    );
-    const downtrendSymbols = new Set(
-      trendResults
-        .filter((r): r is PromiseFulfilledResult<{ symbol: string; isDowntrend: boolean }> => r.status === 'fulfilled' && r.value.isDowntrend)
-        .map(r => r.value.symbol)
-    );
+    // 🛡️ 매우 중요한 추가 수정: 풀 크기를 줄여도(140→20), 이 단계 전체에 타임아웃이 없어서
+    // 요청 큐가 조금만 붐벼도(429 재시도 등) 전체가 무한정 늘어질 수 있었다 — 이게 "20개로
+    // 줄였는데도 여전히 추천종목 찾기가 안 된다"는 원인이었다. 12초 안에 못 끝나면 필터링
+    // 자체를 건너뛰고 점수 순위 그대로 반환한다(추세 필터는 "있으면 좋은" 부가 기능이지,
+    // 추천 자체를 막을 이유가 되면 안 된다).
+    let downtrendSymbols = new Set<string>();
+    try {
+      const trendResults = await Promise.race([
+        Promise.allSettled(
+          trendCheckPool.map(async (rec) => {
+            const monthly = await kisService.getDomesticDailyPrice(rec.symbol, 'M');
+            const bars = Array.isArray(monthly?.output) ? monthly.output : [];
+            if (bars.length < 6) return { symbol: rec.symbol, isDowntrend: false }; // 상장한 지 얼마 안 됐거나 데이터 부족하면 판단 보류(제외하지 않음)
+            const oldestClose = Number(bars[bars.length - 1]?.stck_clpr || 0); // 월봉은 최신순으로 오므로 마지막이 가장 오래된 달
+            const currentPrice = rec.price;
+            if (oldestClose <= 0 || currentPrice <= 0) return { symbol: rec.symbol, isDowntrend: false };
+            const isDowntrend = currentPrice < oldestClose * 0.7; // 1년 전 대비 30% 이상 하락
+            return { symbol: rec.symbol, isDowntrend };
+          })
+        ),
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('trend_filter_timeout')), 12000))
+      ]);
+      downtrendSymbols = new Set(
+        trendResults
+          .filter((r): r is PromiseFulfilledResult<{ symbol: string; isDowntrend: boolean }> => r.status === 'fulfilled' && r.value.isDowntrend)
+          .map(r => r.value.symbol)
+      );
+    } catch (trendErr) {
+      console.warn('[1년 추세 필터 시간초과, 필터링 없이 진행]', trendErr);
+    }
 
     return scoredCandidates
       .filter(r => !downtrendSymbols.has(r.symbol))
