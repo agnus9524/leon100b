@@ -2922,8 +2922,16 @@ setGapInventory(nextInv);
     }
     prevPriceForComboRef.current[sym] = currentPrice;
 
-    // 6. RSI 45~65 — 과열도 과매도도 아닌 안정적 구간 (+10)
-    if (strat.rsi >= 45 && strat.rsi <= 65) { score += 10; breakdown.push('RSI45~65(+10)'); }
+    // 6. RSI 구간별 점수 — 🛡️ 예전엔 45~65 전체를 똑같이 +10으로 뭉뚱그렸는데, 그중에서도
+    // 50~60이 "상승 여력이 있으면서 아직 과열되지 않은" 가장 이상적인 구간이다. VWAP돌파/
+    // 체결강도급증/거래량2배/SMA모멘텀이 이미 상승 신호를 강하게 평가하고 있으므로, RSI는
+    // 주도 신호가 아니라 "과열 방지/진입 적정성 확인용"으로 세분화한다.
+    let rsiScore = 0;
+    if (strat.rsi >= 50 && strat.rsi <= 60) rsiScore = 10;
+    else if (strat.rsi >= 45 && strat.rsi < 50) rsiScore = 6;
+    else if (strat.rsi > 60 && strat.rsi <= 65) rsiScore = 8;
+    else if (strat.rsi > 65 && strat.rsi <= 70) rsiScore = 3;
+    if (rsiScore > 0) { score += rsiScore; breakdown.push(`RSI${Math.round(strat.rsi)}(+${rsiScore})`); }
 
     // 7. 단기 이동평균 모멘텀 — 🛡️ 예전엔 "SMA5 >= SMA20"이라는 상태 하나로 뭉뚱그려 +10을 줬는데,
     // 이러면 "이미 오래 전에 골든크로스가 나서 상승이 끝나가는 종목"과 "지금 막 모멘텀이 붙는
