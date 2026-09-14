@@ -4703,35 +4703,6 @@ setGapInventory(nextInv);
     setIsActivatingKey(false);
   };
 
-  const handleGetRecommendations = useCallback(async () => {
-    setIsGettingRecommendations(true);
-    let success = false;
-    try {
-      const list =
-  await kisService.getScalperRecommendations();
-      if (list && list.length > 0) {
-        setScalperRecommendations(list);
-        setAiRecommendations(list.map(item => ({
-          symbol: item.symbol,
-          name: item.name,
-          price: item.price,
-          change: item.change,
-          changePercent: item.changePercent,
-          volume: item.volume,
-          history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: item.price * (0.98 + (i % 5) * 0.008) })),
-          isAI: true,
-          market: 'KR'
-        })));
-        success = true;
-      }
-    } catch (error: any) {
-      console.warn("Failed to get recommendations, fallback to built-in quant:", error);
-    } finally {
-      setIsGettingRecommendations(false);
-    }
-    return success;
-  }, []);
-
   // ============================================================
   // 🔄 추천종목 목록 로딩 — 실제 코스피 시장을 거래량 기준으로 스캔한다
   // ------------------------------------------------------------
@@ -4841,7 +4812,11 @@ setGapInventory(nextInv);
     // 내릴 확률이 높다고 보는 게 합리적이므로, 점수 상위 후보에 한해 월봉(1회 호출로 약
     // 12개월치를 한꺼번에 받을 수 있어 일봉보다 훨씬 가볍다) 데이터를 확인해서, 1년 전 대비
     // 현재가가 70% 미만(즉 30% 이상 하락)이면 "명백한 우하향"으로 보고 제외한다.
-    const trendCheckPool = scoredCandidates.slice(0, MAX_SCALPER_RECOMMENDATIONS * 2);
+    // 🛡️ 매우 중요한 수정: 예전엔 이 풀이 MAX_SCALPER_RECOMMENDATIONS*2(최대 140개)였는데,
+    // 이 각각에 대해 월봉 API를 개별 호출하다 보니 요청 큐가 완전히 마비되어 "추천종목을
+    // 검색 못하는" 원인이 되었다. 실제로 인벤토리에 채울 수 있는 종목 수(15개 안팎)를 감안하면
+    // 상위 20개 정도만 확인해도 충분하므로 대폭 줄인다.
+    const trendCheckPool = scoredCandidates.slice(0, 20);
     const trendResults = await Promise.allSettled(
       trendCheckPool.map(async (rec) => {
         const monthly = await kisService.getDomesticDailyPrice(rec.symbol, 'M');
@@ -4865,6 +4840,39 @@ setGapInventory(nextInv);
       .slice(0, MAX_SCALPER_RECOMMENDATIONS)
       .map((item, idx) => ({ ...item, rank: idx + 1 }));
   }, [detectStockStrategies, kisConfig.isConnected]);
+
+  const handleGetRecommendations = useCallback(async () => {
+    setIsGettingRecommendations(true);
+    let success = false;
+    try {
+      // 🛡️ 예전엔 여기서 kisService.getScalperRecommendations()(하드코딩된 오래된 가격 — SK하이닉스
+      // 198,000원, 삼성전자 77,600원 등)를 앱 시작 시마다 직접 불러와서 aiRecommendations에
+      // 채우고 있었다. 이건 지난번 "실시간 아니면 추천 없음" 원칙으로 정리했던 3순위 폴백과는
+      // 별개의 경로였는데, 여전히 살아서 실사용 UI에 오래된 가격을 주입하고 있었다. 이제 동일하게
+      // 실시간 데이터 기반의 loadScalperRecommendations를 쓰도록 교체한다.
+      const list = await loadScalperRecommendations();
+      if (list && list.length > 0) {
+        setScalperRecommendations(list);
+        setAiRecommendations(list.map(item => ({
+          symbol: item.symbol,
+          name: item.name,
+          price: item.price,
+          change: item.change,
+          changePercent: item.changePercent,
+          volume: item.volume,
+          history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: item.price * (0.98 + (i % 5) * 0.008) })),
+          isAI: true,
+          market: 'KR'
+        })));
+        success = true;
+      }
+    } catch (error: any) {
+      console.warn("Failed to get recommendations:", error);
+    } finally {
+      setIsGettingRecommendations(false);
+    }
+    return success;
+  }, [loadScalperRecommendations]);
 
   const handleOpenScalperRecommendations = useCallback(async () => {
     setShowScalperRecModal(true);
