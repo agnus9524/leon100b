@@ -4921,6 +4921,7 @@ if (finalRecommendations.length > 0) {
 // ============================================================
 
 return finalRecommendations;
+  }, [detectStockStrategies, kisConfig.isConnected]);
 
 
   const handleGetRecommendations = useCallback(async () => {

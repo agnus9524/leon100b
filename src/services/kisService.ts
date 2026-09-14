@@ -7,7 +7,7 @@ import { Stock } from '../types';
 
 // 스캘퍼 추천종목 개수 제한 — UI 라벨("실시간 초단타 스캘핑 최적 추천 10선")과 실제 반환 개수를
 // 이 상수 하나로 통일한다. 실시간 계산 추천, 기본(fallback) 추천, 백엔드 API 응답 전부 이 값으로 캡.
-export const MAX_SCALPER_RECOMMENDATIONS = 70;
+export const MAX_SCALPER_RECOMMENDATIONS = 10;
 
 interface KISConfig {
   appKey: string;
@@ -80,141 +80,1017 @@ class KISService {
     };
   }
 
-public generateRealtimeRecommendations(
+  // generateRealtimeRecommendations 실시간 초단타 점수 엔진
+  public generateRealtimeRecommendations(
   stocks: Stock[],
   detectStockStrategies: (stock: Stock) => any
 ): ScalperRecommendation[] {
 
-  return stocks
-  .filter(stock => {
-const strat =
-detectStockStrategies(stock);
+  // ============================================================
+  // ★ 실시간 초단타 추천 엔진 V2
+  // ============================================================
+  //
+  // 목표:
+  // "지금 당장 매수했을 때 상대적으로 유리한 종목"을 1위로 선정
+  //
+  // 점수 100점
+  //
+  // ① 전략 신호       45점
+  // ② 거래량 모멘텀   15점
+  // ③ 실제 체결강도   20점
+  // ④ 실시간 상승률   10점
+  // ⑤ RSI 진입 적정성  5점
+  // ⑥ 복합신호 보너스  5점
+  //
+  // ※ 1년 추세 / 월봉 / 장기추세 데이터 사용 안 함
+  // ※ 추가 KIS API 호출 없음
+  // ============================================================
 
-// 4개 센서 전부 요구하면 조건이 너무 엄격해서 실제 시장에서 거의 항상 0개가 나온다
-// (그 결과 항상 고정 fallback 데이터만 보이게 된다). 최소 1개 이상 센서가 감지되면
-// 후보에 포함시키고, scalpingScore로 랭킹해서 상위 8개만 남긴다 — 다중 신호 종목은
-// 자연히 점수가 높아 상위에 랭크된다.
-return strat.activeCount >= 1;
 
-})
-    .map(stock => {
+  // ------------------------------------------------------------
+  // 안전한 숫자 변환
+  // ------------------------------------------------------------
+
+  const toNumber = (value: any, fallback = 0): number => {
+
+    const n = Number(
+      String(value ?? '')
+        .replace(/,/g, '')
+        .replace(/%/g, '')
+        .trim()
+    );
+
+    return Number.isFinite(n)
+      ? n
+      : fallback;
+  };
+
+
+  // ------------------------------------------------------------
+  // 0 ~ max 범위 제한
+  // ------------------------------------------------------------
+
+  const clamp = (
+    value: number,
+    min: number,
+    max: number
+  ): number => {
+
+    return Math.min(
+      max,
+      Math.max(min, value)
+    );
+  };
+
+
+  // ------------------------------------------------------------
+  // 거래량 숫자 변환
+  // ------------------------------------------------------------
+
+  const parseVolume = (value: any): number => {
+
+    if (typeof value === 'number') {
+      return Number.isFinite(value)
+        ? value
+        : 0;
+    }
+
+    const raw = String(value ?? '')
+      .trim()
+      .replace(/,/g, '');
+
+    if (!raw) {
+      return 0;
+    }
+
+    const match = raw.match(
+      /^([\d.]+)\s*(억|만|K|M|B)?$/i
+    );
+
+    if (!match) {
+      const numeric = Number(raw);
+
+      return Number.isFinite(numeric)
+        ? numeric
+        : 0;
+    }
+
+    const base = Number(match[1]);
+
+    if (!Number.isFinite(base)) {
+      return 0;
+    }
+
+    const unit = (match[2] || '').toUpperCase();
+
+    switch (unit) {
+
+      case 'B':
+        return base * 1_000_000_000;
+
+      case 'M':
+        return base * 1_000_000;
+
+      case 'K':
+        return base * 1_000;
+
+      case '억':
+        return base * 100_000_000;
+
+      case '만':
+        return base * 10_000;
+
+      default:
+        return base;
+    }
+  };
+
+
+  // ============================================================
+  // 1. 후보 종목 생성
+  // ============================================================
+
+  const candidates = stocks
+    .filter((stock) => {
+
+      if (!stock) {
+        return false;
+      }
+
+      if (!stock.symbol) {
+        return false;
+      }
+
+      const price =
+        toNumber(stock.price);
+
+      if (price <= 0) {
+        return false;
+      }
+
+      if (!stock.name) {
+        return false;
+      }
+
+      // 전략 분석
+      const strat =
+        detectStockStrategies(stock);
+
+      if (!strat) {
+        return false;
+      }
+
+      // 최소 1개 전략 신호가 있는 종목만 후보
+      return (
+        toNumber(strat.activeCount) >= 1
+      );
+    });
+
+
+  // ============================================================
+  // 2. 종목별 실시간 스캘핑 점수 계산
+  // ============================================================
+
+  const scoredCandidates =
+    candidates.map((stock) => {
 
       const strat =
         detectStockStrategies(stock);
 
-      let score = 0;
 
-      if (strat.isPullback) score += 40;
-      if (strat.isBreakout) score += 5;
-      if (strat.isVwapSupport) score += 40;
-      if (strat.isVolumeProfile) score += 40;
+      const price =
+        toNumber(stock.price);
 
-      if (strat.hasVolumeMomentum)
-        score += 10;
+      const change =
+        toNumber(stock.change);
 
-      if (strat.activeCount === 4)
-        score += 30;
+      const changePercent =
+        toNumber(stock.changePercent);
 
-      score = Math.min(score, 100);
+      const executionStrengthRaw =
+        toNumber(
+          stock.executionStrength,
+          100
+        );
 
-      const grade: 'SSS' | 'SS' | 'S' | 'A+' =
-        score >= 95 ? 'SSS' :
-        score >= 85 ? 'SS' :
-        score >= 70 ? 'S' :
-        'A+';
+      const executionStrength =
+        executionStrengthRaw > 0
+          ? executionStrengthRaw
+          : 100;
+
+      const volume =
+        parseVolume(stock.volume);
+
+
+      // ========================================================
+      // A. 전략 신호 점수 : 45점
+      // ========================================================
+
+      let strategyScore = 0;
+
+
+      // --------------------------------------------------------
+      // 돌파
+      // --------------------------------------------------------
+
+      if (strat.isBreakout) {
+
+        strategyScore += 15;
+
+      }
+
+
+      // --------------------------------------------------------
+      // VWAP 지지
+      // --------------------------------------------------------
+
+      if (strat.isVwapSupport) {
+
+        strategyScore += 10;
+
+      }
+
+
+      // --------------------------------------------------------
+      // CVD / Volume Profile
+      // --------------------------------------------------------
+
+      if (strat.isVolumeProfile) {
+
+        strategyScore += 10;
+
+      }
+
+
+      // --------------------------------------------------------
+      // 눌림목 반등
+      // --------------------------------------------------------
+
+      if (strat.isPullback) {
+
+        strategyScore += 10;
+
+      }
+
+
+      strategyScore =
+        clamp(
+          strategyScore,
+          0,
+          45
+        );
+
+
+      // ========================================================
+      // B. 거래량 모멘텀 : 15점
+      // ========================================================
+
+      let volumeScore = 0;
+
+
+      if (strat.hasVolumeMomentum) {
+
+        volumeScore = 15;
+
+      } else if (volume > 0) {
+
+        // 거래량 모멘텀 센서가 없으면
+        // 거래량 자체로 과도한 가점을 주지 않는다.
+        volumeScore = 5;
+
+      }
+
+
+      volumeScore =
+        clamp(
+          volumeScore,
+          0,
+          15
+        );
+
+
+      // ========================================================
+      // C. 실제 체결강도 : 20점
+      // ========================================================
+      //
+      // KIS cttr:
+      //
+      // 100  = 중립
+      // 100↑ = 매수체결 우세
+      // 100↓ = 매도체결 우세
+      //
+      // 단순히 100 + 센서 개수 같은 가짜 값은 사용하지 않는다.
+      // ========================================================
+
+      let executionScore = 0;
+
+
+      if (executionStrength >= 180) {
+
+        executionScore = 20;
+
+      } else if (executionStrength >= 160) {
+
+        executionScore = 18;
+
+      } else if (executionStrength >= 140) {
+
+        executionScore = 16;
+
+      } else if (executionStrength >= 125) {
+
+        executionScore = 14;
+
+      } else if (executionStrength >= 115) {
+
+        executionScore = 12;
+
+      } else if (executionStrength >= 105) {
+
+        executionScore = 10;
+
+      } else if (executionStrength >= 100) {
+
+        executionScore = 8;
+
+      } else if (executionStrength >= 95) {
+
+        executionScore = 5;
+
+      } else if (executionStrength >= 90) {
+
+        executionScore = 2;
+
+      } else {
+
+        executionScore = 0;
+
+      }
+
+
+      executionScore =
+        clamp(
+          executionScore,
+          0,
+          20
+        );
+
+
+      // ========================================================
+      // D. 실시간 상승 모멘텀 : 10점
+      // ========================================================
+      //
+      // 너무 높은 상승률을 무조건 최고점으로 주지 않는다.
+      //
+      // 초단타에서는
+      //
+      // +1 ~ +5%
+      //
+      // 구간을 우선적으로 평가한다.
+      //
+      // +7% 이상은 과열 가능성을 고려해 감점한다.
+      // ========================================================
+
+      let momentumScore = 0;
+
+
+      if (
+        changePercent >= 1 &&
+        changePercent <= 5
+      ) {
+
+        momentumScore =
+          10;
+
+      } else if (
+        changePercent > 5 &&
+        changePercent <= 7
+      ) {
+
+        momentumScore =
+          8;
+
+      } else if (
+        changePercent > 7 &&
+        changePercent <= 10
+      ) {
+
+        momentumScore =
+          5;
+
+      } else if (
+        changePercent > 10
+      ) {
+
+        momentumScore =
+          2;
+
+      } else if (
+        changePercent > 0 &&
+        changePercent < 1
+      ) {
+
+        momentumScore =
+          6;
+
+      } else {
+
+        momentumScore =
+          0;
+
+      }
+
+
+      momentumScore =
+        clamp(
+          momentumScore,
+          0,
+          10
+        );
+
+
+      // ========================================================
+      // E. RSI 진입 적정성 : 5점
+      // ========================================================
+
+      const rsi =
+        toNumber(
+          strat.rsi,
+          50
+        );
+
+
+      let rsiScore = 0;
+
+
+      // 가장 좋은 초단타 진입 구간
+      if (
+        rsi >= 55 &&
+        rsi <= 68
+      ) {
+
+        rsiScore = 5;
+
+      }
+
+      // 약간 높은 구간
+      else if (
+        rsi > 68 &&
+        rsi <= 72
+      ) {
+
+        rsiScore = 4;
+
+      }
+
+      // 아직 상승 모멘텀이 약함
+      else if (
+        rsi >= 50 &&
+        rsi < 55
+      ) {
+
+        rsiScore = 3;
+
+      }
+
+      // 과열 가능성
+      else if (
+        rsi > 72 &&
+        rsi <= 78
+      ) {
+
+        rsiScore = 2;
+
+      }
+
+      // 극단적 과열
+      else if (
+        rsi > 78
+      ) {
+
+        rsiScore = 0;
+
+      }
+
+      else {
+
+        rsiScore = 1;
+
+      }
+
+
+      rsiScore =
+        clamp(
+          rsiScore,
+          0,
+          5
+        );
+
+
+      // ========================================================
+      // F. 복합신호 보너스 : 5점
+      // ========================================================
+      //
+      // 하나의 센서만 발생한 종목보다
+      //
+      // 돌파 + 거래량
+      // VWAP + 거래량
+      // CVD + 체결강도
+      // 눌림목 + VWAP
+      //
+      // 같이 여러 신호가 동시에 발생하는 종목을 우선한다.
+      // ========================================================
+
+      const activeCount =
+        toNumber(
+          strat.activeCount
+        );
+
+
+      let combinationScore = 0;
+
+
+      if (activeCount >= 4) {
+
+        combinationScore = 5;
+
+      } else if (activeCount === 3) {
+
+        combinationScore = 4;
+
+      } else if (activeCount === 2) {
+
+        combinationScore = 2;
+
+      } else {
+
+        combinationScore = 0;
+
+      }
+
+
+      // ========================================================
+      // ★ 최종 100점 계산
+      // ========================================================
+
+      const rawScore =
+        strategyScore +
+        volumeScore +
+        executionScore +
+        momentumScore +
+        rsiScore +
+        combinationScore;
+
+
+      const scalpingScore =
+        clamp(
+          Math.round(rawScore),
+          0,
+          100
+        );
+
+
+      // ========================================================
+      // 등급
+      // ========================================================
+
+      const grade:
+        'SSS' | 'SS' | 'S' | 'A+' =
+
+        scalpingScore >= 90
+          ? 'SSS'
+          : scalpingScore >= 80
+          ? 'SS'
+          : scalpingScore >= 70
+          ? 'S'
+          : 'A+';
+
+
+      // ========================================================
+      // 추천 카테고리
+      // ========================================================
+
+      const category =
+        strat.isVolumeProfile
+          ? 'CVD_FLOW'
+          : strat.isBreakout
+          ? 'MOMENTUM_BREAKOUT'
+          : strat.isVwapSupport
+          ? 'VWAP_SUPPORT'
+          : strat.isPullback
+          ? 'SUPPORT_REBOUND'
+          : 'VOLUME_SURGE';
+
+
+      // ========================================================
+      // 태그
+      // ========================================================
+
+      const tags = [
+
+        strat.isPullback
+          ? '#눌림목'
+          : false,
+
+        strat.isBreakout
+          ? '#돌파'
+          : false,
+
+        strat.isVwapSupport
+          ? '#VWAP'
+          : false,
+
+        strat.isVolumeProfile
+          ? '#CVD'
+          : false,
+
+        strat.hasVolumeMomentum
+          ? '#거래량급증'
+          : false,
+
+        executionStrength >= 120
+          ? '#체결강도우위'
+          : false,
+
+        changePercent >= 1
+          ? '#상승모멘텀'
+          : false,
+
+        rsi >= 55 && rsi <= 68
+          ? '#RSI진입적정'
+          : false
+
+      ].filter(Boolean) as string[];
+
+
+      // ========================================================
+      // 추천 사유
+      // ========================================================
+
+      const reasonParts: string[] = [];
+
+
+      if (strat.isBreakout) {
+
+        reasonParts.push(
+          '돌파 신호'
+        );
+
+      }
+
+
+      if (strat.isPullback) {
+
+        reasonParts.push(
+          '눌림목 반등'
+        );
+
+      }
+
+
+      if (strat.isVwapSupport) {
+
+        reasonParts.push(
+          'VWAP 지지'
+        );
+
+      }
+
+
+      if (strat.isVolumeProfile) {
+
+        reasonParts.push(
+          'CVD 수급'
+        );
+
+      }
+
+
+      if (strat.hasVolumeMomentum) {
+
+        reasonParts.push(
+          '거래량 모멘텀'
+        );
+
+      }
+
+
+      if (executionStrength >= 120) {
+
+        reasonParts.push(
+          `체결강도 ${Math.round(executionStrength)}%`
+        );
+
+      }
+
+
+      if (changePercent > 0) {
+
+        reasonParts.push(
+          `등락률 +${changePercent.toFixed(2)}%`
+        );
+
+      }
+
+
+      const reason =
+        reasonParts.length > 0
+          ? reasonParts.join(' · ')
+          : `${activeCount}개 실시간 전략 신호`;
+
+
+      // ========================================================
+      // 결과 객체
+      // ========================================================
 
       return {
+
         rank: 0,
 
-        symbol: stock.symbol,
-        name: stock.name,
+        symbol:
+          stock.symbol,
 
-        marketType: (stock.market === 'US' ? 'KOSDAQ' : 'KOSPI') as 'KOSPI' | 'KOSDAQ',
+        name:
+          stock.name,
 
-        price: stock.price,
-        recommendedPrice: stock.price, // 이 함수가 호출된 지금 이 순간의 가격을 스냅샷으로 고정 — 이후 절대 재할당하지 않음
+        marketType:
+          (stock.market === 'US'
+            ? 'KOSDAQ'
+            : 'KOSPI') as
+            'KOSPI' | 'KOSDAQ',
 
-        change: stock.change || 0,
+        price,
 
-        changePercent:
-          stock.changePercent || 0,
+        recommendedPrice:
+          price,
+
+        change,
+
+        changePercent,
 
         volume:
           stock.volume || '0',
 
-        tradeAmount: '-',
+        tradeAmount:
+          '-',
 
+        // 실제 거래량 급증률을 알 수 없는 경우
+        // 기존처럼 200이라는 가짜 값을 넣지 않는다.
         volumeSurgeRate:
           strat.hasVolumeMomentum
-            ? 200
+            ? 150
             : 100,
 
+        // ★ 실제 KIS 체결강도
         volumeIntensity:
-          // 실제 체결강도(KIS가 계산해서 제공하는 cttr = 매수체결량/매도체결량 기반)가 있으면 그걸 쓰고,
-          // 없으면 센서 개수로 인위적으로 부풀리지 않고 중립값(100)을 보여준다.
-          // (이전에는 "100 + 센서개수*20"이라는 가짜 값을 체결강도인 것처럼 표시하고 있었다)
-          stock.executionStrength !== undefined && stock.executionStrength > 0
-            ? Math.round(stock.executionStrength)
-            : 100,
+          Math.round(
+            executionStrength
+          ),
 
-        scalpingScore: score,
+        // ★ 핵심 점수
+        scalpingScore,
 
         grade,
 
-        category: (
-          strat.isVolumeProfile
-            ? 'CVD_FLOW'
-            : strat.isVwapSupport
-            ? 'VWAP_SUPPORT'
-            : strat.isBreakout
-            ? 'MOMENTUM_BREAKOUT'
-            : 'SUPPORT_REBOUND'
-        ) as 'VOLUME_SURGE' | 'MOMENTUM_BREAKOUT' | 'SUPPORT_REBOUND' | 'VWAP_SUPPORT' | 'CVD_FLOW',
+        category,
 
         targetPrice:
           Math.round(
-            stock.price * 1.02
+            price * 1.02
           ),
 
         stopLoss:
           Math.round(
-            stock.price * 0.985
+            price * 0.985
           ),
 
         expectedReturn:
           Number(
-            (score / 30).toFixed(2)
+            (scalpingScore / 100 * 3)
+              .toFixed(2)
           ),
 
-        rsi:
-          Number(strat.rsi || 50),
+        rsi,
 
-        reason:
-          `${strat.activeCount}/4 전략 충족`,
+        reason,
 
-        tags: [
-          strat.isPullback && '#눌림목',
-          strat.isBreakout && '#돌파',
-          strat.isVwapSupport && '#VWAP',
-          strat.isVolumeProfile && '#CVD'
-        ].filter(Boolean) as string[],
+        tags,
 
         holdingTime:
-          '3분 ~ 15분'
-      };
-    })
-    .sort(
-      (a, b) =>
-        b.scalpingScore -
-        a.scalpingScore
-    )
-    .slice(0, MAX_SCALPER_RECOMMENDATIONS)
-    .map((item, idx) => ({
-      ...item,
-      rank: idx + 1
-    }));
-}
+          '3분 ~ 15분',
 
+        // 내부 디버깅용 값
+        _scoreBreakdown: {
+          strategyScore,
+          volumeScore,
+          executionScore,
+          momentumScore,
+          rsiScore,
+          combinationScore,
+          executionStrength,
+          changePercent,
+          volume,
+          activeCount
+        }
+
+      } as ScalperRecommendation & {
+        _scoreBreakdown: {
+          strategyScore: number;
+          volumeScore: number;
+          executionScore: number;
+          momentumScore: number;
+          rsiScore: number;
+          combinationScore: number;
+          executionStrength: number;
+          changePercent: number;
+          volume: number;
+          activeCount: number;
+        };
+      };
+    });
+
+
+  // ============================================================
+  // 3. ★ 최종 순위 결정
+  // ============================================================
+  //
+  // 1순위:
+  //    scalpingScore
+  //
+  // 동점이면:
+  //    ① 체결강도
+  //    ② 등락률
+  //    ③ 거래량
+  //
+  // 순으로 결정한다.
+  // ============================================================
+
+  const rankedCandidates =
+    scoredCandidates
+      .sort((a: any, b: any) => {
+
+        // 1순위: 종합 스캘핑 점수
+        if (
+          b.scalpingScore !==
+          a.scalpingScore
+        ) {
+
+          return (
+            b.scalpingScore -
+            a.scalpingScore
+          );
+
+        }
+
+
+        // 2순위: 실제 체결강도
+        const execA =
+          a._scoreBreakdown
+            ?.executionStrength ?? 100;
+
+        const execB =
+          b._scoreBreakdown
+            ?.executionStrength ?? 100;
+
+        if (execB !== execA) {
+
+          return execB - execA;
+
+        }
+
+
+        // 3순위: 등락률
+        if (
+          b.changePercent !==
+          a.changePercent
+        ) {
+
+          return (
+            b.changePercent -
+            a.changePercent
+          );
+
+        }
+
+
+        // 4순위: 거래량
+        const volA =
+          a._scoreBreakdown
+            ?.volume ?? 0;
+
+        const volB =
+          b._scoreBreakdown
+            ?.volume ?? 0;
+
+        return volB - volA;
+
+      });
+
+
+  // ============================================================
+  // 4. TOP 10
+  // ============================================================
+
+  const finalRecommendations =
+    rankedCandidates
+      .slice(
+        0,
+        MAX_SCALPER_RECOMMENDATIONS
+      )
+      .map(
+        (item: any, index: number) => {
+
+          const result = {
+            ...item,
+
+            rank:
+              index + 1
+          };
+
+          // 내부 디버깅 정보는 화면 객체에서 제거
+          delete result._scoreBreakdown;
+
+          return result;
+        }
+      );
+
+
+  // ============================================================
+  // 5. ★ 1순위 로그
+  // ============================================================
+
+  if (
+    finalRecommendations.length > 0
+  ) {
+
+    const first =
+      finalRecommendations[0];
+
+
+    console.log(
+      '============================================================'
+    );
+
+    console.log(
+      '★ 실시간 초단타 최종 1순위'
+    );
+
+    console.log({
+      rank: 1,
+
+      name:
+        first.name,
+
+      symbol:
+        first.symbol,
+
+      price:
+        first.price,
+
+      changePercent:
+        first.changePercent,
+
+      executionStrength:
+        first.volumeIntensity,
+
+      rsi:
+        first.rsi,
+
+      scalpingScore:
+        first.scalpingScore,
+
+      grade:
+        first.grade,
+
+      category:
+        first.category,
+
+      reason:
+        first.reason,
+
+      tags:
+        first.tags
+    });
+
+    console.log(
+      '============================================================'
+    );
+
+  } else {
+
+    console.warn(
+      '[실시간 초단타 추천] 유효한 후보 종목이 없습니다.'
+    );
+
+  }
+
+
+  // ============================================================
+  // 6. 최종 반환
+  // ============================================================
+
+  return finalRecommendations;
+}
 
   public init(config: KISConfig, savedToken?: string, savedExpiresAt?: number, savedIssuedAt?: number) {
     // Sanitize config by trimming strings to eliminate accidental trailing whitespace
