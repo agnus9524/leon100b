@@ -9194,9 +9194,46 @@ useEffect(() => {
                        return 0; // Return 0 immediately so local state/slots do not optimistically update
                    }
                } else {
-                   addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[실제계좌 주문완료] ${reason}`);
-                   showNotification(`${stock.name} ${action === 'BUY' ? '매수' : '매도'} 주문 성공`, "success");
-               }
+
+                    // ========================================================
+                    // ★ KIS rt_cd=0 이지만 주문번호(ODNO)가 없는 경우
+                    // 절대로 주문 성공으로 처리하지 않는다.
+                    // ========================================================
+
+                    const responseMessage =
+                        res?.msg1 ||
+                        'KIS 주문번호(ODNO) 없음';
+
+                    console.error(
+                        '[KIS 주문 접수 검증 실패]',
+                        {
+                            symbol: stock.symbol,
+                            action,
+                            price: tradePrice,
+                            qty: finalAmount,
+                            response: res
+                        }
+                    );
+
+                    setBotStatus(
+                        `[주문 확인 실패] ${stock.name} KIS 주문번호(ODNO)를 확인할 수 없습니다.`
+                    );
+
+                    addLog(
+                        stock.symbol,
+                        action === 'BUY' ? '매수' : '매도',
+                        tradePrice,
+                        finalAmount,
+                        `[주문 확인 실패] KIS 응답은 성공이지만 주문번호(ODNO)가 없습니다. 실제 주문 성공으로 처리하지 않습니다. ${responseMessage}`
+                    );
+
+                    showNotification(
+                        `${stock.name} 주문번호 확인 실패 — 실제 주문 성공으로 처리하지 않습니다.`,
+                        "error"
+                    );
+
+                    return 0;
+                }
             } else {
                setBotStatus(`[KIS API 오류] ${res.msg1}`);
                addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[주문실패] ${res.msg1}`);
