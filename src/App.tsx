@@ -4817,50 +4817,12 @@ setGapInventory(nextInv);
 
     const scoredCandidates = list.sort((a, b) => b.scalpingScore - a.scalpingScore);
 
-    // 🛡️ 장기 우하향 종목 제외 필터 — 단기 거래량/점수만 보고 추천하면, 관리종목처럼 1년 내내
-    // 꾸준히 무너지고 있는 종목(예: 몇 년째 -90% 이상 하락 중)도 "오늘 거래량이 튀었다"는
-    // 이유만으로 추천될 수 있다. 이런 종목은 짧은 반등이 있어도 장기 추세상 오를 확률보다
-    // 내릴 확률이 높다고 보는 게 합리적이므로, 점수 상위 후보에 한해 월봉(1회 호출로 약
-    // 12개월치를 한꺼번에 받을 수 있어 일봉보다 훨씬 가볍다) 데이터를 확인해서, 1년 전 대비
-    // 현재가가 70% 미만(즉 30% 이상 하락)이면 "명백한 우하향"으로 보고 제외한다.
-    // 🛡️ 매우 중요한 수정: 예전엔 이 풀이 MAX_SCALPER_RECOMMENDATIONS*2(최대 140개)였는데,
-    // 이 각각에 대해 월봉 API를 개별 호출하다 보니 요청 큐가 완전히 마비되어 "추천종목을
-    // 검색 못하는" 원인이 되었다. 실제로 인벤토리에 채울 수 있는 종목 수(15개 안팎)를 감안하면
-    // 상위 20개 정도만 확인해도 충분하므로 대폭 줄인다.
-    const trendCheckPool = scoredCandidates.slice(0, 20);
-    // 🛡️ 매우 중요한 추가 수정: 풀 크기를 줄여도(140→20), 이 단계 전체에 타임아웃이 없어서
-    // 요청 큐가 조금만 붐벼도(429 재시도 등) 전체가 무한정 늘어질 수 있었다 — 이게 "20개로
-    // 줄였는데도 여전히 추천종목 찾기가 안 된다"는 원인이었다. 12초 안에 못 끝나면 필터링
-    // 자체를 건너뛰고 점수 순위 그대로 반환한다(추세 필터는 "있으면 좋은" 부가 기능이지,
-    // 추천 자체를 막을 이유가 되면 안 된다).
-    let downtrendSymbols = new Set<string>();
-    try {
-      const trendResults = await Promise.race([
-        Promise.allSettled(
-          trendCheckPool.map(async (rec) => {
-            const monthly = await kisService.getDomesticDailyPrice(rec.symbol, 'M');
-            const bars = Array.isArray(monthly?.output) ? monthly.output : [];
-            if (bars.length < 6) return { symbol: rec.symbol, isDowntrend: false }; // 상장한 지 얼마 안 됐거나 데이터 부족하면 판단 보류(제외하지 않음)
-            const oldestClose = Number(bars[bars.length - 1]?.stck_clpr || 0); // 월봉은 최신순으로 오므로 마지막이 가장 오래된 달
-            const currentPrice = rec.price;
-            if (oldestClose <= 0 || currentPrice <= 0) return { symbol: rec.symbol, isDowntrend: false };
-            const isDowntrend = currentPrice < oldestClose * 0.7; // 1년 전 대비 30% 이상 하락
-            return { symbol: rec.symbol, isDowntrend };
-          })
-        ),
-        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('trend_filter_timeout')), 12000))
-      ]);
-      downtrendSymbols = new Set(
-        trendResults
-          .filter((r): r is PromiseFulfilledResult<{ symbol: string; isDowntrend: boolean }> => r.status === 'fulfilled' && r.value.isDowntrend)
-          .map(r => r.value.symbol)
-      );
-    } catch (trendErr) {
-      console.warn('[1년 추세 필터 시간초과, 필터링 없이 진행]', trendErr);
-    }
-
+    // 🛡️ 1년 장기 추세 필터를 완전히 제거했다 — 실시간 초단타 추천에서는 거래량/등락률/체결강도/
+    // 눌림목·돌파·VWAP·CVD 같은 실시간 조건이 우선이고, 장기 추세는 그 자체로 KIS 요청 큐를
+    // 불필요하게 점유해서(월봉 API를 추가로 호출) 429/타임아웃 문제를 계속 일으키는 원인이었다.
+    // "추천 자체를 막지 않는 부가 기능"이라는 원래 의도와 달리 실제로는 계속 추천 실패의
+    // 원인이 되어왔으므로, 점수 순위만으로 바로 추천을 완료한다.
     return scoredCandidates
-      .filter(r => !downtrendSymbols.has(r.symbol))
       .slice(0, MAX_SCALPER_RECOMMENDATIONS)
       .map((item, idx) => ({ ...item, rank: idx + 1 }));
   }, [detectStockStrategies, kisConfig.isConnected]);
@@ -9135,8 +9097,18 @@ useEffect(() => {
                        return 0; // Return 0 immediately so local state/slots do not optimistically update
                    }
                } else {
-                   addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[실제계좌 주문완료] ${reason}`);
-                   showNotification(`${stock.name} ${action === 'BUY' ? '매수' : '매도'} 주문 성공`, "success");
+                   // 🛡️ 매우 중요한 수정: 예전엔 여기서(odno=진짜 주문번호가 없는데도) 그냥
+                   // "[실제계좌 주문완료]"라고 성공 처리하고 있었다. rt_cd==='0'은 KIS API 서버와의
+                   // 통신 자체가 성공했다는 뜻일 뿐, 실제로 주문이 접수됐다는 보장이 아니다 — 진짜
+                   // 접수됐다면 반드시 주문번호(ODNO)가 함께 온다. odno가 없다는 건 "통신은 됐지만
+                   // 실제 주문은 안 들어갔다"는 뜻인데 이걸 성공으로 잘못 알려주고 있었던 것이,
+                   // "매수 메시지는 뜨는데 KIS 앱엔 주문이 없다"는 문제의 진짜 원인이었을 가능성이
+                   // 매우 높다. 이제 명확하게 실패로 처리한다.
+                   console.error('[KIS ORDER ACCEPT UNKNOWN] 주문번호 없이 rt_cd만 성공 — 실제 접수 여부 불명확', res);
+                   setBotStatus(`[주문 접수 확인 실패] 주문번호(ODNO)를 받지 못했습니다 — 실제로 접수됐는지 KIS 앱에서 확인하세요.`);
+                   addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[주문접수불명] 주문번호(ODNO) 없음 — KIS 앱에서 실제 접수 여부를 확인하세요. (rt_cd=0이지만 이것만으로 접수를 보장하지 않음)`);
+                   showNotification(`${stock.name} 주문 접수를 확인하지 못했습니다 (주문번호 없음). KIS 앱에서 직접 확인해주세요.`, "error");
+                   return 0; // 접수가 불명확하므로 성공 처리(로컬 상태/슬롯 업데이트)하지 않는다
                }
             } else {
                setBotStatus(`[KIS API 오류] ${res.msg1}`);
