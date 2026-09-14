@@ -4809,13 +4809,28 @@ setGapInventory(nextInv);
       }
     }
 
+    // 🛡️ 매우 중요한 수정: kisService.generateRealtimeRecommendations()가 매긴 점수(눌림목40/
+    // 돌파5/VWAP40/CVD40 — 100점 만점, 실제 매매 판단과는 완전히 다른 단순 체계)를 그대로
+    // 정렬에 쓰지 않는다. 실제 매매 실행(엔진 루프)이 쓰는 calculateBuyScore(130점, VWAP위/
+    // VWAP돌파/체결강도/거래량2배/RSI/단기이평/매도호가소진/전고점돌파/매수호가우세를 정교하게
+    // 반영)로 각 후보의 점수를 재계산해서 덮어쓴다. 이렇게 해야 "추천 1위"가 실제로 봇이 살
+    // "매수 우선순위 1위"와 정확히 같아진다 — 예전엔 추천 목록과 실제 매수 판단이 서로 다른
+    // 잣대를 쓰고 있었다.
+    const rescored = list.map(rec => {
+      const stockItem = stocksRef.current.find(s => s.symbol === rec.symbol);
+      if (!stockItem) return rec; // 최신 시세를 못 찾으면 원래 점수 유지(안전망)
+      const strat = detectStockStrategies(stockItem);
+      const { score } = calculateBuyScore(stockItem, strat);
+      return { ...rec, scalpingScore: score };
+    });
+
     // 🛡️ 예전엔 여기서 1/2순위가 부족하면 하드코딩된 예전 데이터(3순위)로 채워 넣었는데,
     // 이건 실시간 계산이 아닌 가짜/오래된 데이터라 삭제했다. 1/2순위로 구한 만큼만(모자라면
     // 모자란 대로, 극단적으로는 0개도) 정직하게 반환한다 — 실시간 데이터가 아니면 차라리
     // 추천이 없는 게 낫다는 원칙.
     fallbackSymbolsRef.current = new Set();
 
-    const scoredCandidates = list.sort((a, b) => b.scalpingScore - a.scalpingScore);
+    const scoredCandidates = rescored.sort((a, b) => b.scalpingScore - a.scalpingScore);
 
     // 🛡️ 1년 장기 추세 필터를 완전히 제거했다 — 실시간 초단타 추천에서는 거래량/등락률/체결강도/
     // 눌림목·돌파·VWAP·CVD 같은 실시간 조건이 우선이고, 장기 추세는 그 자체로 KIS 요청 큐를
@@ -4825,7 +4840,7 @@ setGapInventory(nextInv);
     return scoredCandidates
       .slice(0, MAX_SCALPER_RECOMMENDATIONS)
       .map((item, idx) => ({ ...item, rank: idx + 1 }));
-  }, [detectStockStrategies, kisConfig.isConnected]);
+  }, [detectStockStrategies, kisConfig.isConnected, calculateBuyScore]);
 
   const handleGetRecommendations = useCallback(async () => {
     setIsGettingRecommendations(true);
