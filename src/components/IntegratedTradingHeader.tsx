@@ -96,6 +96,8 @@ export interface IntegratedTradingHeaderProps {
   handleClearAllInventory: () => void;
   updateTab: (symbol: string, updates: Partial<ScalperTab>) => void;
   INITIAL_STOCKS: Stock[];
+  handleManualBuy?: (stock: Stock, quantity: number, price?: number) => Promise<void>;
+  manualTradingSymbol?: string | null;
 }
 
 export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = ({
@@ -180,6 +182,8 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
   wsConnectionStatus,
   handleClearAllInventory,
   updateTab,
+  handleManualBuy,
+  manualTradingSymbol,
 }) => {
   // 검색 드롭다운 키보드(↑↓ + Enter) 네비게이션용 로컬 상태
   const [highlightedIndex, setHighlightedIndex] = React.useState(-1);
@@ -203,6 +207,14 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
 
   // Portfolio calculations
   const heldSymbols = Object.keys(holdings).filter(sym => (holdings[sym] || 0) > 0);
+
+  const handleManualSellClick = (targetStock: Stock, tabHoldingQty?: number, tabPrice?: number, tradeQty?: number) => {
+    const held = tabHoldingQty || holdings[targetStock.symbol] || 0;
+    setManualSellStock(targetStock);
+    setManualSellQty(held > 0 ? held : (tradeQty || 1));
+    setManualSellPrice(tabPrice && tabPrice > 0 ? tabPrice : targetStock.price);
+    setManualSellModalOpen(true);
+  };
   let totalStockPurchase = 0;
   let totalStockEval = 0;
 
@@ -468,6 +480,20 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
               const tabPrice = (tab.price && tab.price > 0) ? tab.price : (tabStock?.price || 0);
               const isPriceLoading = tab.priceStatus === 'LOADING' && tabPrice <= 0;
 
+              const resolvedStock: Stock = tabStock ? {
+                ...tabStock,
+                price: tabPrice > 0 ? tabPrice : tabStock.price,
+              } : {
+                symbol: tab.symbol,
+                name: tabName,
+                price: tabPrice,
+                change: 0,
+                changePercent: tab.changePercent || 0,
+                volume: '0',
+                history: [],
+                market: /^[A-Z]/.test(tab.symbol) ? 'US' : 'KR'
+              };
+
               return (
                 <div
                   key={tab.id}
@@ -535,6 +561,38 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                         <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
                       ))}
                     </select>
+
+                    {/* 🔴 수동 매수 버튼 */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (handleManualBuy) {
+                          handleManualBuy(resolvedStock, tab.tradeQuantity, tabPrice);
+                        }
+                      }}
+                      disabled={manualTradingSymbol === tab.symbol}
+                      className="shrink-0 px-2 py-0.5 rounded-md bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[10.5px] font-black tracking-tight transition-all active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1 shadow-sm"
+                      title={`${tabName} ${tab.tradeQuantity}주 현재가(${formatCurrency(tabPrice)}) 수동 즉시 매수 주문`}
+                    >
+                      {manualTradingSymbol === tab.symbol ? (
+                        <RefreshCw className="w-2.5 h-2.5 animate-spin" />
+                      ) : null}
+                      <span>매수</span>
+                    </button>
+
+                    {/* 🔵 수동 매도 버튼 */}
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleManualSellClick(resolvedStock, tab.holdingQty, tabPrice, tab.tradeQuantity);
+                      }}
+                      className="shrink-0 px-2 py-0.5 rounded-md bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/40 text-[10.5px] font-black tracking-tight transition-all active:scale-95 cursor-pointer flex items-center gap-1 shadow-sm"
+                      title={`${tabName} 수동 매도 (희망 단가/수량 지정 또는 즉시 매도)`}
+                    >
+                      <span>매도</span>
+                    </button>
 
                     <button
                       type="button"

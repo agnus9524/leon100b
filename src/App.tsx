@@ -1536,7 +1536,12 @@ export default function App() {
     return Number(val).toLocaleString();
   };
 
-  const [liveOrderbook, setLiveOrderbook] = useState<any>(null);
+  // 🛡️ 예전엔 선택된 종목 하나만의 호가를 담는 단일 상태(useState)였는데, 매수 점수제
+  // (매도호가소진/매수호가우세)가 이 값을 참조하다 보니 선택 안 한 종목은 이 두 조건(+20점)을
+  // 절대 받을 수 없는 구조적 문제가 있었다. 이제 종목별로 각자의 호가를 저장하는 Record로
+  // 바꾼다 — ref로 관리해서 갱신될 때마다 불필요한 리렌더를 만들지 않는다.
+  const liveOrderbooksRef = React.useRef<Record<string, any>>({});
+  const orderbookCursorRef = React.useRef<number>(0);
   const [isLiveOrderbookLoading, setIsLiveOrderbookLoading] = useState<boolean>(false);
   const [showKisModal, setShowKisModal] = useState(false);
   const [showKisPassword, setShowKisPassword] = useState(false);
@@ -1910,15 +1915,28 @@ export default function App() {
           // 웹소켓이 연결되어 있을 때는 이 틱이 훨씬 더 빠르게(초 단위가 아니라 체결 즉시) 값을
           // 갱신해준다 — 매매 판단(점수제, RSI 복합조건 등)이 참조하는 값이 바로 이 stocks이므로,
           // 추가 배선 없이 기존 엔진 전체가 자동으로 더 실시간에 가까워진다.
-          setStocks(prev => prev.map(s => s.symbol === tick.symbol ? {
-            ...s,
-            price: tick.price,
-            change: tick.change,
-            changePercent: tick.changePercent,
-            volume: tick.volume,
-            executionStrength: tick.executionStrength !== undefined ? tick.executionStrength : s.executionStrength,
-            isRealTime: true
-          } : s));
+          // 🛡️ 매우 중요한 수정: 예전엔 여기서 price만 갱신하고 history는 전혀 안 늘리고 있었다.
+          // 웹소켓이 연결되어 있으면 REST 백업(syncAllPrices)이 스킵되므로, 이 틱 핸들러가
+          // history를 안 늘리면 선택 안 한 종목들의 history가 영원히 고정되어 RSI/이동평균/VWAP
+          // 등 전략센서가 실제 추세를 전혀 반영하지 못하는 원인이 되고 있었다. refreshInventoryItem과
+          // 동일한 방식으로 매 틱마다 실제 가격을 이력에 누적한다.
+          setStocks(prev => prev.map(s => {
+            if (s.symbol !== tick.symbol) return s;
+            const nowLabel = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const oldHistory = Array.isArray(s.history) ? s.history : [];
+            const newHistory = [...oldHistory.slice(-59), { time: nowLabel, price: tick.price }];
+            return {
+              ...s,
+              price: tick.price,
+              change: tick.change,
+              changePercent: tick.changePercent,
+              volume: tick.volume,
+              executionStrength: tick.executionStrength !== undefined ? tick.executionStrength : s.executionStrength,
+              isRealTime: true,
+              history: newHistory,
+              lastUpdated: nowLabel
+            };
+          }));
 
           // 🛡️ syncAllPrices와 동일한 이유로, 웹소켓 틱도 scalperInventory의 market 네임스페이스를
           // 함께 갱신한다 — 안 그러면 웹소켓이 연결된 동안(syncAllPrices가 스킵되는 상황)에는
@@ -5812,19 +5830,11 @@ priceData.current
     }
   }, [kisConfig.isConnected, updateKisBuyableQty, detectStockStrategies]);
 
-  useEffect(() => {
-    if (!selectedSymbol) return;
-
-    refreshInventoryItem(selectedSymbol);
-
-    const timer = setInterval(() => {
-      refreshInventoryItem(selectedSymbol);
-    }, 2000);
-
-    return () => clearInterval(timer);
-  }, [selectedSymbol, refreshInventoryItem]);
-
-  // 인벤토리 클릭 핸들러 — "선택"만 한다. 데이터 최신화는 위 refreshInventoryItem effect가 전담한다.
+  // 🛡️ 선택 종목 전용 2초 갱신 effect를 제거했다 — 이제 웹소켓(전체 종목 실시간)과 REST
+  // 라운드로빈(1초 1종목, syncInventoryPriceRoundRobin)이 등록된 전체 종목을 균등하게
+  // 커버하므로, 선택된 종목만 추가로 2초마다 더 자주 갱신할 이유가 없다. 오히려 이 특별
+  // 취급이 "선택한 종목만 유독 활발하게 움직이는 것처럼 보이는" 착시의 원인이었다.
+  // 인벤토리 클릭 핸들러 — 이제 순수하게 "화면에 어떤 종목 상세를 보여줄지"만 결정한다.
   const handleSelectInventory = React.useCallback((symbol: string) => {
     handleSwitchTab(symbol);
   }, [handleSwitchTab]);
@@ -6334,7 +6344,7 @@ priceData.current
       if (selectedSymbol) {
         try {
           const ob = await kisService.fetchLiveOrderbook(selectedSymbol);
-          if (ob) setLiveOrderbook(ob);
+          if (ob) liveOrderbooksRef.current[selectedSymbol] = ob;
         } catch (obErr) {
           console.warn("Orderbook initial check skip:", obErr);
         }
@@ -6513,47 +6523,10 @@ priceData.current
     };
 
     // 2. Fast sync for the currently selected stock (every 1.5 seconds)
-    const syncSelectedPrice = async () => {
-      if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음
-      if (!isKoreanMarketOpen()) return; // 🕘 정규장 외 시간에는 조회하지 않음
-      if (wsConnectionStatusRef.current === 'open') return; // 웹소켓이 이미 실시간으로 갱신 중이면 REST 중단
-      const currentSelectedSymbol = selectedSymbolRef.current;
-      if (!currentSelectedSymbol) return;
-      try {
-        const priceData = await kisService.getPrice(currentSelectedSymbol);
-        if (priceData && priceData.current > 0) {
-          const realPrice = priceData.current;
-          setStocks(prev => prev.map(s => {
-            if (s.symbol !== currentSelectedSymbol) return s;
-            const newHistory = Array.isArray(s.history) ? [...s.history] : [];
-            if (newHistory.length > 0) {
-              newHistory[newHistory.length - 1] = {
-                ...newHistory[newHistory.length - 1],
-                price: realPrice
-              };
-            } else {
-              newHistory.push({
-                time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
-                price: realPrice
-              });
-            }
-            return {
-              ...s,
-              price: realPrice,
-              change: priceData.change,
-              changePercent: priceData.changePercent,
-              volume: priceData.volume,
-              executionStrength: priceData.executionStrength,
-              isRealTime: true,
-              lastUpdated: new Date().toLocaleTimeString(),
-              history: newHistory
-            };
-          }));
-        }
-      } catch (innerErr: any) {
-        console.warn(`Fast price sync failed for ${currentSelectedSymbol}:`, innerErr);
-      }
-    };
+    // 🛡️ syncSelectedPrice(선택 종목 전용 2초 REST)를 완전히 제거했다 — 웹소켓 틱 핸들러가
+    // 이제 history까지 정확히 갱신하고, syncAllPrices가 15초 이상 갱신 안 된 종목을 자동으로
+    // REST로 보완하므로, 선택된 종목만 별도로 더 자주 조회할 이유가 없다. 이 함수가 "선택한
+    // 종목만 유독 빠르게 갱신되는" 착시의 또 다른 원인이었다.
 
     // 3. Live real-time orderbook sync for selected stock (every 1.5 seconds)
    
@@ -6562,46 +6535,39 @@ priceData.current
 
   if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음
   if (!isKoreanMarketOpen()) return; // 🕘 정규장 외 시간에는 호가가 안 움직이므로 조회하지 않음
-  const currentSelectedSymbol = selectedSymbolRef.current;
-  if (!currentSelectedSymbol) return;
 
-  // 🔄 호가창 UI는 "현재 선택된 종목" 하나만 화면에 보여준다. 예전에는 등록된 종목 전체(예: 8개)를
-  // 5초마다 전부 조회하고 있었는데, 선택되지 않은 종목들의 호가 데이터(liveOrderbooks, 복수형)는
-  // 실제로 어디서도 읽히지 않는 완전한 낭비 호출이었다. 선택된 종목 하나만 조회하도록 좁혀서
-  // 호출 횟수를 최대 (등록 종목 수)배 줄인다.
+  // 🛡️ 예전엔 선택된 종목 하나만 조회했는데, 매수 점수제(매도호가소진/매수호가우세)가 이
+  // 데이터를 실제 매매 판단에 쓰다 보니 선택 안 한 종목은 이 조건들을 절대 충족할 수 없었다.
+  // 이제 등록된 국내 종목들을 순서대로 하나씩 순환 조회해서, 결국 모든 종목이 자기만의 최신
+  // 호가 데이터를 갖게 한다.
+  const inventory = scalperTabsRef.current.filter(tab => /^\d{6}$/.test(tab.symbol));
+  if (inventory.length === 0) return;
+
+  const index = orderbookCursorRef.current % inventory.length;
+  const target = inventory[index];
+  orderbookCursorRef.current = (index + 1) % inventory.length;
+  if (!target?.symbol) return;
+
   try {
-    const ob = await kisService.fetchLiveOrderbook(currentSelectedSymbol);
+    const ob = await kisService.fetchLiveOrderbook(target.symbol);
     if (ob) {
-      setLiveOrderbook(ob);
+      liveOrderbooksRef.current[target.symbol] = ob;
     }
   } catch (e) {
-    console.warn(`Live orderbook fetch failed for ${currentSelectedSymbol}`, e);
+    console.warn(`Live orderbook fetch failed for ${target.symbol}`, e);
   }
 };
 
     // Immediate initial sync
     syncAllPrices();
-    syncSelectedPrice();
     syncLiveOrderbook();
 
-    // 🩺 인벤토리 상한을 25종목으로 늘리면서 syncAllPrices 주기도 함께 재계산했다.
-    // getPrice()는 호출당 최소 600ms가 강제되는 공유 큐를 쓰고, 여기에 syncSelectedPrice(2초마다)와
-    // syncLiveOrderbook(5초마다)도 같은 큐를 나눠 쓴다. 한 주기(T초) 안에 처리해야 하는 총 호출 수는
-    // 대략 N(등록종목) + T/2 + T/5 이고, 이게 600ms×호출수 ≤ T초를 만족해야 다음 주기와 안 겹친다.
-    // N=25일 때 필요한 최소 주기는 약 26초(N×0.6/0.58) — 여유를 두고 30초로 설정한다.
-    // 🔗 예전엔 syncAllPrices(25초)/syncSelectedPrice(2초)/syncLiveOrderbook(5초)/handleSyncKIS(20초)가
-    // 각자 별도의 setInterval로 따로 관리되고 있었다. 이렇게 흩어져 있으면 effect를 손볼 때마다
-    // 의존성 배열을 전부 다시 점검해야 하고, 실제로 바로 앞에서 "selectedSymbol이 의존성에 남아있어
-    // 종목 클릭할 때마다 전부 재시작된다"는 버그가 여기서 나왔다. 이제 하나의 마스터 틱(1초)으로
-    // 통합하고, 카운터로 각자의 주기를 맞춘다 — 관리 지점이 하나로 줄어들어 같은 종류의 실수가
-    // 재발할 여지가 줄어든다.
     let masterTickCount = 0;
     const masterInterval = setInterval(() => {
       masterTickCount += 1;
-      if (masterTickCount % 2 === 0) syncSelectedPrice();          // 2초마다
-      if (masterTickCount % 5 === 0) syncLiveOrderbook();          // 5초마다
+      if (masterTickCount % 5 === 0) syncLiveOrderbook();          // 5초마다 — 인벤토리 종목 라운드로빈으로 호가 순환 조회
       if (masterTickCount % 20 === 0 && kisConfig.isConnected) handleSyncKIS(); // 20초마다
-      if (masterTickCount % 25 === 0) syncAllPrices();             // 25초마다 — 계산 근거는 위 주석 참고
+      if (masterTickCount % 25 === 0) syncAllPrices();             // 25초마다 — 웹소켓 미연결/stale 종목 REST 백업
     }, 1000);
 
     return () => {
@@ -8496,18 +8462,19 @@ useEffect(() => {
           } else {
             // 🎯 점수제: 선택한 센서들이 전부 동시에 켜져야 하는 엄격한 방식 대신, 여러 매수 신호에
             // 가중치를 매겨 합산한 점수가 기준(65점/120점 만점) 이상이면 진입한다.
+            // 🛡️ 예전엔 선택된 종목 하나의 liveOrderbook만 참조해서, 선택 안 한 종목은 이 두 조건을
+            // 절대 충족할 수 없었다. 이제 종목별로 저장된 자기 자신의 호가 데이터를 참조한다.
+            const myOrderbook = liveOrderbooksRef.current[stockItem.symbol];
             const askDepletion = (
-              liveOrderbook &&
-              liveOrderbook.symbol === stockItem.symbol &&
-              Number(liveOrderbook.totalBidVolume || 0) > 0 &&
-              Number(liveOrderbook.totalAskVolume || 0) > 0 &&
-              (Number(liveOrderbook.totalBidVolume) / Number(liveOrderbook.totalAskVolume)) >= 3
+              myOrderbook &&
+              Number(myOrderbook.totalBidVolume || 0) > 0 &&
+              Number(myOrderbook.totalAskVolume || 0) > 0 &&
+              (Number(myOrderbook.totalBidVolume) / Number(myOrderbook.totalAskVolume)) >= 3
             );
             const bidAskRatio = (
-              liveOrderbook &&
-              liveOrderbook.symbol === stockItem.symbol &&
-              Number(liveOrderbook.totalAskVolume || 0) > 0
-            ) ? (Number(liveOrderbook.totalBidVolume || 0) / Number(liveOrderbook.totalAskVolume)) * 100 : undefined;
+              myOrderbook &&
+              Number(myOrderbook.totalAskVolume || 0) > 0
+            ) ? (Number(myOrderbook.totalBidVolume || 0) / Number(myOrderbook.totalAskVolume)) * 100 : undefined;
             const { score: buyScore, breakdown: buyScoreBreakdown } = calculateBuyScore(stockItem, strat, askDepletion, bidAskRatio);
             meetsBuyCriteria = buyScore >= BUY_SCORE_THRESHOLD;
             strategyLabel = `🎯 [점수제 ${buyScore}/130점] ${buyScoreBreakdown.join(', ') || '신호 부족'}`;
@@ -9414,6 +9381,47 @@ useEffect(() => {
     }
   };
 
+  const [manualTradingSymbol, setManualTradingSymbol] = useState<string | null>(null);
+
+  const handleManualBuy = React.useCallback(async (targetStock: Stock, quantity: number, price?: number) => {
+    if (!targetStock) {
+      showNotification("매수할 종목을 선택해 주세요.", "error");
+      return;
+    }
+    const buyQty = quantity > 0 ? quantity : 1;
+    const buyPrice = (price && price > 0) ? price : targetStock.price;
+    if (buyPrice <= 0) {
+      showNotification(`${targetStock.name}: 현재 가격 정보가 없어 매수할 수 없습니다.`, "error");
+      return;
+    }
+
+    try {
+      setManualTradingSymbol(targetStock.symbol);
+      showNotification(`${targetStock.name} ${buyQty}주 (${formatCurrency(buyPrice)}) 수동 매수 주문 전송 중...`, "info");
+      transitionLifecycleStatus(targetStock.symbol, 'BUY_READY', `수동 즉시 매수 (${buyQty}주 @ ${formatCurrency(buyPrice)})`);
+      const executedQty = await executeTrade(
+        'BUY',
+        targetStock,
+        buyQty,
+        `[수동 즉시 매수] ${targetStock.name} ${buyQty}주`,
+        buyPrice,
+        undefined,
+        undefined,
+        undefined,
+        'MANUAL'
+      );
+      if (executedQty > 0) {
+        showNotification(`${targetStock.name} ${executedQty}주 매수 주문 성공`, "success");
+        playScalpingSound('BUY');
+      }
+    } catch (err: any) {
+      console.error("[Manual Buy Error]", err);
+      showNotification(`매수 주문 처리 실패: ${err?.message || '오류 발생'}`, "error");
+    } finally {
+      setManualTradingSymbol(null);
+    }
+  }, [executeTrade, showNotification, transitionLifecycleStatus, playScalpingSound, formatCurrency]);
+
   const handleExecuteManualSell = async () => {
     if (isSubmittingManualSell) return;
 
@@ -9971,6 +9979,8 @@ useEffect(() => {
                 handleClearAllInventory={handleClearAllInventory}
                 updateTab={updateTab}
                 INITIAL_STOCKS={INITIAL_STOCKS}
+                handleManualBuy={handleManualBuy}
+                manualTradingSymbol={manualTradingSymbol}
               />
             );
           })()}
