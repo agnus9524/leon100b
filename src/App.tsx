@@ -5004,6 +5004,18 @@ setGapInventory(nextInv);
         // 실패하면 바로 아래 2순위(추적 종목 풀)로 넘어간다.
         const [volumeLeaders, fluctuationLeaders] = await fetchRanking();
 
+        // 🔍 실제 KIS 응답을 그대로 콘솔에 남긴다 — 장 시작 전(정규장 09:00 이전)에는 KIS가
+        // 이 랭킹 API에 빈 배열을 줄 수도, 데이터를 줄 수도 있는데, 이 로그를 보면 실제로
+        // 어느 쪽인지 바로 확인할 수 있다. 개수가 0이면 "지금 KIS가 데이터를 안 주고 있다"는
+        // 뜻이고, 개수와 함께 첫 종목 샘플이 찍히면 실제 데이터가 들어오고 있다는 뜻이다.
+        console.log('[KIS 추천 원본 응답]', {
+          거래량순위_개수: volumeLeaders.length,
+          거래량순위_샘플: volumeLeaders[0],
+          등락률순위_개수: fluctuationLeaders.length,
+          등락률순위_샘플: fluctuationLeaders[0],
+          조회시각: new Date().toLocaleTimeString('ko-KR')
+        });
+
         // symbol 기준으로 병합 (중복 제거) — 두 순위에 모두 등장하는 종목이 특히 유의미한 후보
         const mergedMap = new Map<string, { symbol: string; name: string; price: number; changePercent: number; volume: string }>();
         [...volumeLeaders, ...fluctuationLeaders].forEach(v => {

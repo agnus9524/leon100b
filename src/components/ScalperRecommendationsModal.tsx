@@ -487,7 +487,7 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
                               <div className="text-right">
                                 <div className="text-xs text-slate-400 text-[10px]">체결강도</div>
                                 <div className="text-xs font-black text-cyan-300">{stock.volumeIntensity}%</div>
-                                <div className="text-[10px] text-slate-400">RSI {stock.rsi}</div>
+                                <div className="text-[10px] text-slate-400">RSI {Math.round(stock.rsi)}</div>
                               </div>
 
                               <div className="text-right">
