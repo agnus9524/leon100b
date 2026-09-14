@@ -471,13 +471,14 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   key={tab.id}
                   onClick={() => handleSwitchTab(tab.id)}
                   className={cn(
-                    "px-2 py-1.5 rounded-xl border flex items-center justify-between gap-1.5 cursor-pointer transition-all w-full text-left min-w-0 font-mono select-none group",
+                    "px-2 py-1.5 rounded-xl border flex flex-col gap-1 cursor-pointer transition-all w-full text-left min-w-0 font-mono select-none group",
                     isSelected
                       ? "bg-sleek-blue/25 border-sleek-blue text-white shadow-md font-black ring-1 ring-sleek-blue/60"
                       : "bg-black/50 border-white/10 hover:bg-white/10 text-slate-300 hover:text-white"
                   )}
                   title={`${tabName} (${tab.symbol}) 탭으로 전환`}
                 >
+                <div className="flex items-center justify-between gap-1.5 min-w-0 w-full">
                   <div className="flex items-center gap-1.5 min-w-0 flex-1">
                     <span className={cn(
                       "w-1.5 h-1.5 rounded-full shrink-0",
@@ -542,6 +543,37 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                       <X className="w-3 h-3" />
                     </button>
                   </div>
+                </div>
+
+                {/* 🎯 종목별 개별 센서 표시 — 이 종목의 실시간 감시 상태를 한눈에 확인 */}
+                <div className="flex items-center gap-1 flex-wrap pl-3">
+                  {([
+                    { key: 'pullback', label: '눌림목', onCls: 'bg-teal-500/20 text-teal-300 border-teal-500/40', dotCls: 'bg-teal-400' },
+                    { key: 'breakout', label: '돌파', onCls: 'bg-amber-500/20 text-amber-300 border-amber-500/40', dotCls: 'bg-amber-400' },
+                    { key: 'vwap', label: 'VWAP', onCls: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', dotCls: 'bg-indigo-400' },
+                    { key: 'cvd', label: 'CVD', onCls: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40', dotCls: 'bg-fuchsia-400' },
+                  ] as const).map(({ key, label, onCls, dotCls }) => {
+                    const isOn = tab.sensors?.[key] === true;
+                    return (
+                      <span
+                        key={key}
+                        className={cn(
+                          "text-[8.5px] font-bold px-1.5 py-0.5 rounded-full border flex items-center gap-0.5 transition-all",
+                          isOn ? onCls : "bg-white/5 text-slate-500 border-white/10"
+                        )}
+                        title={`${tabName} — ${label} 센서 ${isOn ? '감지됨' : '대기 중'}`}
+                      >
+                        <span className={cn("w-1 h-1 rounded-full", isOn ? dotCls : "bg-slate-600")} />
+                        {label}
+                      </span>
+                    );
+                  })}
+                  {tab.sensors && (
+                    <span className="text-[8.5px] font-bold text-slate-500 ml-auto">
+                      RSI {Math.round(tab.sensors.rsi)} · {tab.sensors.activeCount}/4
+                    </span>
+                  )}
+                </div>
                 </div>
               );
             })}

@@ -172,6 +172,16 @@ export interface ScalperTab {
   holdingQty?: number;
   orderableQty?: number;
   changePercent?: number;
+  sensors?: {
+    pullback: boolean;
+    breakout: boolean;
+    vwap: boolean;
+    cvd: boolean;
+    volumeMomentum: boolean;
+    rsi: number;
+    activeCount: number;
+    lastUpdatedAt: number;
+  };
 }
 
 // ============================================================
@@ -880,7 +890,7 @@ interface NewsItem {
 //   20(전체종목) + T/2000(선택종목) + T/5000(호가) 건
 // 이걸 600ms×건수로 처리하는 시간이 T보다 작아야 밀리지 않는다: (20 + 0.3T/1000 + 0.12T/1000)×600 ≤ T
 // → T ≥ 약 20.7초. 여유를 두어 25초로 설정했다 (아래 syncAllPrices 주기 참고).
-const MAX_INVENTORY_PER_MARKET = 15;
+const MAX_INVENTORY_PER_MARKET = 6;
 
 const INITIAL_STOCKS_KR: Stock[] = [
   {
@@ -1848,7 +1858,8 @@ export default function App() {
       priceStatus: item.market.priceStatus,
       holdingQty: item.account.holdingQty,
       orderableQty: item.account.orderableQty,
-      changePercent: item.market.changePercent
+      changePercent: item.market.changePercent,
+      sensors: item.sensors
     }));
   }, [scalperInventory]);
   const [wsConnectionStatus, setWsConnectionStatus] = useState<'connecting' | 'open' | 'closed' | 'error' | 'idle'>('idle');
