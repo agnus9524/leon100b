@@ -432,7 +432,7 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
                             </div>
                             <div className="flex items-center gap-3 flex-wrap">
                               <span>목표가: <strong className="text-emerald-400">{stock.targetPrice.toLocaleString()}원 (+{stock.expectedReturn}%)</strong></span>
-                              <span>손절가: <strong className="text-rose-400">{stock.stopLoss.toLocaleString()}원 (-1.5%)</strong></span>
+                              <span>손절가: <strong className="text-rose-400">{stock.stopLoss.toLocaleString()}원 ({(((stock.stopLoss / stock.price) - 1) * 100).toFixed(2)}%)</strong></span>
                               <span className="text-slate-500">권장: {stock.holdingTime || '3~15분'}</span>
                             </div>
                           </div>

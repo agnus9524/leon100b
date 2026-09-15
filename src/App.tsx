@@ -366,6 +366,7 @@ interface Stock {
   pattern?: string; // e.g. "Double Bottom", "Cup and Handle"
   executionStrength?: number; // 실제 체결강도(KIS cttr) — 매수체결량/매도체결량 기반. 호가잔량 비율이 아님
   realCvd?: number; // 🎯 진짜 CVD — 매수체결량 누적 - 매도체결량 누적(H0STCNT0 필드 기반, 정확한 인덱스는 진단 로그로 검증 필요)
+  tradingValue?: number; // 🎯 실제 거래대금(KIS acml_tr_pbmn) — 있으면 추천 카드에서 하드코딩 대신 이 값을 그대로 표시
 }
 
 // 🕘 한국 정규장(평일 09:00~15:30 KST) 여부 판단.
@@ -5096,13 +5097,23 @@ setGapInventory(nextInv);
               change: Number((v.price - prevPrice).toFixed(0)),
               changePercent: v.changePercent,
               volume: v.volume,
+              tradingValue: (v as any).tradingValue,
               history,
               market: 'KR' as const,
               isAI: false
             };
           });
           list = kisService.generateRealtimeRecommendations(candidateStocks, detectStockStrategies)
-            .map(r => ({ ...r, dataSource: 'RANKING_API' as const, dataAgeSeconds: 0 }));
+            .map(r => ({
+              ...r,
+              dataSource: 'RANKING_API' as const,
+              dataAgeSeconds: 0,
+              // 🎯 예전엔 목표가/손절가가 가격×1.02 / 가격×0.985라는 고정 공식이었는데, 이건 실제
+              // 사용자가 설정한 목표수익/손절 값과 무관했다. 이제 실제 설정값을 그대로 반영한다.
+              targetPrice: Math.round(r.price * (1 + scalpingTargetProfit / 100)),
+              stopLoss: Math.round(r.price * (1 + scalpingStopLoss / 100)),
+              expectedReturn: scalpingTargetProfit,
+            }));
         }
       } catch (err) {
         console.warn('[거래량/등락률 순위 기반 추천 실패]', err);
@@ -5127,7 +5138,14 @@ setGapInventory(nextInv);
           .map(r => {
             const lastTick = lastWsTickAtRef.current[r.symbol];
             const ageSeconds = lastTick !== undefined ? Math.round((nowForAge - lastTick) / 1000) : undefined;
-            return { ...r, dataSource: 'TRACKED_POOL' as const, dataAgeSeconds: ageSeconds };
+            return {
+              ...r,
+              dataSource: 'TRACKED_POOL' as const,
+              dataAgeSeconds: ageSeconds,
+              targetPrice: Math.round(r.price * (1 + scalpingTargetProfit / 100)),
+              stopLoss: Math.round(r.price * (1 + scalpingStopLoss / 100)),
+              expectedReturn: scalpingTargetProfit,
+            };
           });
         list = [...list, ...supplement];
       }

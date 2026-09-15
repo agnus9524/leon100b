@@ -164,7 +164,11 @@ return strat.activeCount >= 1;
         volume:
           stock.volume || '0',
 
-        tradeAmount: '-',
+        tradeAmount:
+          // 🎯 실제 거래대금(KIS acml_tr_pbmn)이 있으면 억 단위 문자열로 표시, 없으면 기존처럼 '-'
+          (stock as any).tradingValue !== undefined
+            ? `${Math.round((stock as any).tradingValue / 100000000).toLocaleString()}억`
+            : '-',
 
         volumeSurgeRate:
           strat.hasVolumeMomentum
