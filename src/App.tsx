@@ -6790,22 +6790,32 @@ priceData.current
         // 건너뛰게 되어, "종목을 클릭해야만 실시간으로 감시/매매되는 것처럼" 보이는 근본
         // 원인이었다. 이제 등록된 전체 종목의 market 네임스페이스를 여기서 함께 갱신한다.
         const priceMap = new Map<string, Stock>(updatedStocks.map(s => [s.symbol, s]));
-        setScalperInventory(prev => prev.map(item => {
-          const updated = priceMap.get(item.symbol);
-          if (!updated || !updated.price || updated.price <= 0) return item;
-          if (item.market.currentPrice === updated.price && item.market.changePercent === (updated.changePercent || 0)) return item;
-          return {
-            ...item,
-            market: {
-              ...item.market,
-              currentPrice: updated.price,
-              changePercent: updated.changePercent || 0,
-              volume: updated.volume || item.market.volume,
-              priceStatus: 'LIVE',
-              lastUpdatedAt: Date.now()
-            }
-          };
-        }));
+        setScalperInventory(prev => {
+          const result = prev.map(item => {
+            const updated = priceMap.get(item.symbol);
+            const matched = !!updated;
+            const hasValidPrice = !!(updated && updated.price && updated.price > 0);
+            const priceChanged = hasValidPrice && !(item.market.currentPrice === updated!.price && item.market.changePercent === (updated!.changePercent || 0));
+            // 🔍 인벤토리 종목이 이번 사이클에서 stocks 배열에 매칭됐는지, 유효한 가격을 받았는지,
+            // 실제로 값이 바뀌었는지를 명확히 남긴다 — "인벤토리 6종목이 이 갱신에 포함되는지"를
+            // 애매함 없이 확인하기 위함
+            console.log(`[인벤토리 갱신 체크] ${item.symbol}(${item.name})`, { stocks배열에_존재: matched, 유효가격: hasValidPrice, 값바뀜: priceChanged, 기존가격: item.market.currentPrice, 새가격: updated?.price });
+            if (!hasValidPrice) return item;
+            if (!priceChanged) return item;
+            return {
+              ...item,
+              market: {
+                ...item.market,
+                currentPrice: updated!.price,
+                changePercent: updated!.changePercent || 0,
+                volume: updated!.volume || item.market.volume,
+                priceStatus: 'LIVE' as const,
+                lastUpdatedAt: Date.now()
+              }
+            };
+          });
+          return result;
+        });
       } catch (err: any) {
         console.error("Real-time price sync failed:", err);
       }
