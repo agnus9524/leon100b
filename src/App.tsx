@@ -6724,7 +6724,7 @@ priceData.current
       // 에러의 정체). 실제 내부 준비 상태까지 함께 확인해서 이 간극에서 오는 무의미한 API
       // 실패/에러 로그를 막는다.
       if (!kisService.isConfigReady()) return;
-      if (!isKoreanDataCollectionActive()) return; // 🕗 정규장(09:00~15:30)에 더해 08:30~09:00 프리마켓(시가단일가) 구간도 포함 — 09:00 정각에 RSI/VWAP이 바로 유의미하도록 미리 이력을 쌓는다
+      if (!isKoreanDataCollectionActive()) { console.log('[syncAllPrices 중단] 데이터수집 시간 아님'); return; } // 🕗 정규장(09:00~15:30)에 더해 08:30~09:00 프리마켓(시가단일가) 구간도 포함 — 09:00 정각에 RSI/VWAP이 바로 유의미하도록 미리 이력을 쌓는다
       try {
         // 🔄 웹소켓 기반 방식으로 원복 — 웹소켓이 연결되어 있으면, 종목별로 "마지막 갱신 후 얼마나
         // 지났는지"를 확인해서 15초 이상 갱신이 안 된 종목만 골라 REST로 보완한다. 활발히
@@ -6733,7 +6733,7 @@ priceData.current
         const STALE_THRESHOLD_MS = 15000;
         const now = Date.now();
         const currentStocks = stocksRef.current;
-        if (currentStocks.length === 0) return;
+        if (currentStocks.length === 0) { console.log('[syncAllPrices 중단] currentStocks 비어있음'); return; }
 
         const targetStocks = wsConnectionStatusRef.current === 'open'
           ? currentStocks.filter(s => {
@@ -6741,6 +6741,7 @@ priceData.current
               return now - lastUpdate >= STALE_THRESHOLD_MS;
             })
           : currentStocks;
+        console.log('[syncAllPrices 진행]', { 전체종목: currentStocks.length, 대상종목: targetStocks.length, ws상태: wsConnectionStatusRef.current });
         if (targetStocks.length === 0) return;
 
         const updatedTargets = await Promise.all(targetStocks.map(async (s) => {
@@ -6877,10 +6878,11 @@ priceData.current
     if (!isAppInitialized) return;
 
     const refreshAllInventorySensors = () => {
-      if (!isKoreanDataCollectionActive()) return; // 🕗 09:00 정각에 센서가 바로 유의미하도록 08:30부터 미리 계산 — 실제 매수/매도는 별도 엔진 루프가 isKoreanMarketOpen()으로 09:00부터만 실행하므로 안전하다
+      if (!isKoreanDataCollectionActive()) { console.log('[refreshAllInventorySensors 중단] 데이터수집 시간 아님'); return; } // 🕗 09:00 정각에 센서가 바로 유의미하도록 08:30부터 미리 계산 — 실제 매수/매도는 별도 엔진 루프가 isKoreanMarketOpen()으로 09:00부터만 실행하므로 안전하다
       const currentStocks = stocksRef.current;
       const registeredSymbols = scalperTabsRef.current.map(t => t.symbol);
-      if (registeredSymbols.length === 0) return;
+      if (registeredSymbols.length === 0) { console.log('[refreshAllInventorySensors 중단] 등록종목 없음'); return; }
+      console.log('[refreshAllInventorySensors 진행]', { 등록종목: registeredSymbols, stocks배열개수: currentStocks.length });
 
       const pendingLogs: { symbol: string; price: number; msg: string }[] = [];
 
