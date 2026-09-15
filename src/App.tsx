@@ -2887,6 +2887,8 @@ setGapInventory(nextInv);
   const execStrengthWindowRef = React.useRef<Record<string, { value: number; time: number }[]>>({}); // 체결강도 최근 4초 이력 — 노이즈에 덜 민감한 평균 기준선 계산용
   const execJumpActiveRef = React.useRef<Record<string, boolean>>({}); // 체결강도 급증을 일회성 이벤트로 만들기 위한 잠금 플래그
   const lastCumulativeVolumeRef = React.useRef<Record<string, number>>({}); // 직전에 관측한 누적거래량 — 구간별 증가량(델타) 계산용
+  const askVolumeHistoryRef = React.useRef<Record<string, { value: number; time: number }[]>>({}); // 매도호가 실제 소진 이벤트 판정용 — 총매도잔량의 최근 이력(타임스탬프 포함)
+  const askDepletionEventAtRef = React.useRef<Record<string, number>>({}); // 매도호가 소진 이벤트가 감지된 시각 — VWAP돌파와 동일한 신선도 창(20초) 적용
   const prevSma5Ref = React.useRef<Record<string, number>>({});
   const prevSma20Ref = React.useRef<Record<string, number>>({});
   const prevAbovePeakRef = React.useRef<Record<string, boolean>>({}); // 전고점 돌파 이벤트 판단용
@@ -2898,8 +2900,9 @@ setGapInventory(nextInv);
   const calculateBuyScore = React.useCallback((
     stock: Stock,
     strat: ReturnType<typeof detectStockStrategies>,
-    askDepletion?: boolean, // 매도호가 소진 — 실시간 호가 데이터가 있는 종목(주로 선택된 종목)에서만 전달됨
-    bidAskRatio?: number    // 매수호가잔량/매도호가잔량×100 — 100이면 동률, 130이면 매수세가 1.3배 우세
+    askDepletion?: boolean, // 매도호가 소진(정적 스냅샷 비율) — 실시간 호가 데이터가 있는 종목(주로 선택된 종목)에서만 전달됨
+    bidAskRatio?: number,   // 매수호가잔량/매도호가잔량×100 — 100이면 동률, 130이면 매수세가 1.3배 우세
+    isRealDepletionEvent?: boolean // 🎯 총매도잔량이 최근 대비 실제로 빠르게 줄면서 가격도 상승 중인 "진짜 소진 이벤트"
   ): { score: number; breakdown: string[] } => {
     let score = 0;
     const breakdown: string[] = [];
@@ -3032,13 +3035,17 @@ setGapInventory(nextInv);
     if (strat.sma5 > 0) prevSma5Ref.current[sym] = strat.sma5;
     if (strat.sma20 > 0) prevSma20Ref.current[sym] = strat.sma20;
 
-    // 8. 매도호가 소진 (+5) — 🛡️ 확인 결과 이 값은 실제 "소진 이벤트"(매도호가 잔량이 실시간으로
-    // 줄어들며 체결로 뚫리는 현상)를 측정하는 게 아니라, 매수/매도 총잔량의 정적 스냅샷 비율(3배
-    // 이상)에 불과했다 — 사실상 매수호가우세(아래)와 같은 데이터를 다른 임계값으로 재사용하는
-    // 셈이라, 허수호가에 그대로 노출될 위험이 있었다. 진짜 소진 이벤트를 추적할 수 있게 되기
-    // 전까지는 +10에서 +5(보조점수)로 낮춘다. 실제 호가 잔량 감소 추이를 시계열로 잡을 수 있게
-    // 되면 다시 +10으로 강화할 예정 — 지금은 정적 스냅샷 신뢰도에 맞춘 조정이다.
-    if (askDepletion) { score += 5; breakdown.push('매도호가소진(+5)'); }
+    // 8. 매도호가 소진 — 🎯 실제 소진 이벤트를 시계열로 추적할 수 있게 됐다: 총매도잔량이 최근
+    // 8초 대비 30% 이상 줄면서 동시에 가격이 상승 중이면(체결로 매도벽을 먹고 올라가는 중) "진짜
+    // 소진"으로 보고 +10을 준다. 여전히 정적 스냅샷 비율(매수/매도 총잔량 3배 이상)만 만족하는
+    // 경우는 허수호가 위험이 남아있으니 +5(보조점수)로 유지한다.
+    if (isRealDepletionEvent) {
+      score += 10;
+      breakdown.push('매도호가실제소진(+10)');
+    } else if (askDepletion) {
+      score += 5;
+      breakdown.push('매도호가소진(+5)');
+    }
 
     // 9. 전고점 돌파 (+15) — 🛡️ 예전엔 "현재가 > 전고점"이라는 상태 하나로 판단해서, 전고점 위에
     // 계속 머물러 있으면 매 틱마다 +15가 반복 지급될 수 있었다(VWAP과 같은 종류의 문제). VWAP
@@ -3068,8 +3075,8 @@ setGapInventory(nextInv);
     // 100점 만점" 비율로 환산한다. 이렇게 하면 앞으로 개별 항목 배점을 조정해도(RAW_MAX_SCORE만
     // 같이 갱신하면) 항상 100점 기준을 유지할 수 있다.
     // 현재 RAW_MAX_SCORE 계산 근거: VWAP(15+20) + 체결강도(15+10) + 거래량(15) + 결합신호(10) +
-    // RSI(최대10) + 단기모멘텀(6+2+2) + 매도호가소진(5) + 전고점돌파(15) + 매수호가우세(5) = 130
-    const RAW_MAX_SCORE = 130;
+    // RSI(최대10) + 단기모멘텀(6+2+2) + 매도호가실제소진(10) + 전고점돌파(15) + 매수호가우세(5) = 135
+    const RAW_MAX_SCORE = 135;
     const normalizedScore = Math.round((score / RAW_MAX_SCORE) * 100);
 
     return { score: normalizedScore, breakdown };
@@ -8750,6 +8757,31 @@ useEffect(() => {
             // 🛡️ 예전엔 선택된 종목 하나의 liveOrderbook만 참조해서, 선택 안 한 종목은 이 두 조건을
             // 절대 충족할 수 없었다. 이제 종목별로 저장된 자기 자신의 호가 데이터를 참조한다.
             const myOrderbook = liveOrderbooksRef.current[stockItem.symbol];
+            // 🎯 매도호가 실제 소진 이벤트 — 예전엔 매수/매도 총잔량의 정적 스냅샷 비율(3배 이상)만
+            // 보고 있어서 허수호가 위험이 있었다(+5점으로 낮춰둠). 이제 총매도잔량의 최근 이력을
+            // 추적해서, "실제로 잔량이 빠르게 줄어들고 있는지"(체결로 소진되는 중인지)를 함께
+            // 확인한다. 매도1호가 잔량 자체(10호가 중 최우선 호가)까지는 지금 파싱하는 데이터로
+            // 알 수 없어 총매도잔량(10호가 합계) 추세로 근사하지만, "가격이 동시에 상승 중"이라는
+            // 조건을 반드시 함께 걸어서 단순 취소로 인한 잔량 감소와 구분한다 — 취소라면 가격이
+            // 오를 이유가 없지만, 진짜 체결 소진이라면 매도벽을 먹으면서 가격이 오른다.
+            const askDepletionNow = Date.now();
+            const askVolHist = askVolumeHistoryRef.current[stockItem.symbol] || [];
+            const currentAskVol = Number(myOrderbook?.totalAskVolume || 0);
+            const ASK_DEPLETION_WINDOW_MS = 8000; // 최근 8초 전 잔량과 비교
+            const oldEntry = askVolHist.find(e => askDepletionNow - e.time >= ASK_DEPLETION_WINDOW_MS);
+            const priceRisingForDepletion = prevPriceForComboRef.current[stockItem.symbol] !== undefined && currentPrice > prevPriceForComboRef.current[stockItem.symbol]!;
+            const isRealDepletionEvent = !!(
+              oldEntry && oldEntry.value > 0 && currentAskVol > 0 &&
+              (currentAskVol <= oldEntry.value * 0.7) && // 8초 전 대비 30% 이상 감소
+              priceRisingForDepletion
+            );
+            if (isRealDepletionEvent) askDepletionEventAtRef.current[stockItem.symbol] = askDepletionNow;
+            if (currentAskVol > 0) {
+              askVolumeHistoryRef.current[stockItem.symbol] = [...askVolHist.filter(e => askDepletionNow - e.time < 15000), { value: currentAskVol, time: askDepletionNow }];
+            }
+            const depletionEventAt = askDepletionEventAtRef.current[stockItem.symbol];
+            const hasRecentDepletionEvent = depletionEventAt !== undefined && (askDepletionNow - depletionEventAt) <= 20000; // 20초 신선도 창
+
             const askDepletion = (
               myOrderbook &&
               Number(myOrderbook.totalBidVolume || 0) > 0 &&
@@ -8760,7 +8792,7 @@ useEffect(() => {
               myOrderbook &&
               Number(myOrderbook.totalAskVolume || 0) > 0
             ) ? (Number(myOrderbook.totalBidVolume || 0) / Number(myOrderbook.totalAskVolume)) * 100 : undefined;
-            const { score: buyScore, breakdown: buyScoreBreakdown } = calculateBuyScore(stockItem, strat, askDepletion, bidAskRatio);
+            const { score: buyScore, breakdown: buyScoreBreakdown } = calculateBuyScore(stockItem, strat, askDepletion, bidAskRatio, hasRecentDepletionEvent);
             meetsBuyCriteria = buyScore >= BUY_SCORE_THRESHOLD;
             strategyLabel = `🎯 [점수제 ${buyScore}/100점] ${buyScoreBreakdown.join(', ') || '신호 부족'}`;
           }
