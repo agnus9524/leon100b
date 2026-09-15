@@ -1948,6 +1948,11 @@ export default function App() {
       .connectWebSocket(
         symbols,
         tick => {
+          // 🔍 웹소켓 "연결됨" 표시와 별개로, 실제로 파싱된 체결 틱이 들어오는지 명확히 확인하는
+          // 진단 로그 — 만약 이 로그가 안 뜬다면 연결 자체는 됐지만 실제 데이터는 전혀 안 오고
+          // 있다는 뜻이니, syncAllPrices의 25초 REST 백업이 사실상 유일한 데이터 소스가 된다.
+          console.log('[WS TICK 수신]', tick.symbol, tick.price, new Date().toLocaleTimeString('ko-KR'));
+
           // 🕐 이 종목이 방금 웹소켓으로 갱신됐다는 걸 기록 — syncAllPrices가 "오래 갱신 안 된
           // 종목"만 REST로 보완할 때 이 시각을 기준으로 판단한다.
           lastWsTickAtRef.current[tick.symbol] = Date.now();
@@ -5452,12 +5457,20 @@ setGapInventory(nextInv);
   // getPrice()는 다른 폴링 요청들과 같은 대기열을 공유해서, 여기서 await하면
   // 인벤토리 반영이 몇 초씩 늦어지는 원인이 된다 — 최신 시세는 등록 후 비동기로 보정한다.
 
+  // 🛡️ 매우 중요한 수정: 예전엔 검색결과의 price(livePrice)를 최우선으로 썼는데, 이 값이
+  // KOSPI_STOCKS 같은 로컬 마스터 데이터의 "정적 기준가(basePrice)"일 수 있어서 실제 시세와
+  // 다를 수 있었다. 특히 이미 인벤토리에 있어서 실시간으로 계속 갱신되고 있던 종목을 재검색해서
+  // 클릭하면, 이미 갖고 있는 최신 실시간 값을 무시하고 이 오래된 정적 기준가로 순간적으로
+  // 되돌아가서 — 가격이 잘못 표시되고, 그 잘못된 가격 기반으로 VWAP 등 센서가 짧게 가짜 신호를
+  // 내다가 몇 초 후 실시간 동기화가 다시 정정하는 현상이 있었다. 이제 이미 추적 중인 실시간
+  // 값이 있으면 그걸 최우선으로 쓴다.
+  const trackedPrice = stocksRef.current.find(s => s.symbol === recommendedStock.symbol)?.price || 0;
   const safePrice =
-  livePrice > 0
+  trackedPrice > 0
+    ? trackedPrice
+    : livePrice > 0
     ? livePrice
-    : stocksRef.current.find(
-        s => s.symbol === recommendedStock.symbol
-      )?.price || 0;
+    : 0;
 
   // 🛡️ 가격 정보가 전혀 없어도(신규 종목, KOSPI 마스터 검색 결과 등) 등록 자체가 막혀서는 안 된다.
   // 이전에는 여기서 조용히 return해서 "클릭해도 인벤토리에 안 들어오는" 증상의 원인이 되었다.
