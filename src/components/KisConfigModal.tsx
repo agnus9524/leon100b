@@ -264,6 +264,28 @@ export const KisConfigModal: React.FC<KisConfigModalProps> = ({
                   </p>
                 </div>
 
+                {/* 🎯 HTS ID — 계좌번호와는 다른, KIS 회원가입 시 만든 계정 아이디. 실시간 체결통보
+                    구독에만 쓰이며, 이 항목이 비어있으면 체결통보 기능만 비활성 상태로 남고 나머지
+                    기능(시세/주문/잔고)에는 전혀 영향이 없다. */}
+                <div className="space-y-1.5">
+                  <label className="text-xs font-black text-slate-300">
+                    HTS ID <span className="text-slate-500 font-normal">(선택 — 실시간 체결통보용)</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="text"
+                      maxLength={20}
+                      value={kisConfig.htsId || ''}
+                      onChange={(e) => setKisConfig((prev: any) => ({ ...prev, htsId: e.target.value.trim() }))}
+                      placeholder="KIS 회원가입 시 만든 계정 아이디 (계좌번호 아님)"
+                      className="w-full bg-slate-950/80 border border-slate-700/80 focus:border-blue-500 rounded-xl px-3.5 py-2.5 text-xs text-white placeholder:text-slate-600 font-mono outline-none transition-all"
+                    />
+                  </div>
+                  <p className="text-[11px] text-slate-400">
+                    * 입력하지 않아도 매매/시세 기능은 정상 작동합니다. 실시간 체결통보만 켜고 싶을 때 입력하세요.
+                  </p>
+                </div>
+
                 {/* Status indicator */}
                 <div className="bg-slate-950/60 border border-slate-800 rounded-xl p-3 flex items-center justify-between text-xs">
                   <span className="text-slate-400">현재 통신 상태:</span>

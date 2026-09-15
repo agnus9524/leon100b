@@ -9,6 +9,7 @@ import iconv from 'iconv-lite';
 import { ALL_KRX_MASTER_STOCKS, KOSPI_STOCKS, searchKrMasterStocks, getChosung, MasterStock } from './src/constants/kospiMaster';
 import { WebSocketServer } from 'ws';
 import WebSocket from 'ws';
+import crypto from 'crypto';
 
 let kisWs: WebSocket | null = null;
 
@@ -18,6 +19,22 @@ const clients = new Set<WebSocket>();
 
 const subscribedSymbols = new Set<string>();
 const subscribedOrderbookSymbols = new Set<string>(); // H0STASP0(실시간 호가) 구독 종목 추적
+
+// 🎯 H0STCNI0(실시간 체결통보) — 종목별 구독이 아니라 "계좌 전체"에 대한 단일 구독이며, 시세와
+// 달리 AES-256-CBC로 암호화되어 온다. 구독 성공 시 KIS가 최초 1회 응답(JSON)에 복호화용 key/iv를
+// 실어 보내주므로, 그걸 저장해뒀다가 이후 들어오는 암호화된 체결통보 메시지를 복호화한다.
+// 🛡️ 멀티테넌트 안전 설계: 체결통보는 계좌별 개인정보이므로, 시세(H0STCNT0/H0STASP0)처럼 서버
+// 전체가 연결 하나를 공유하면 안 된다. 브라우저 클라이언트(WebSocket) 하나당, 그 사용자 본인의
+// appKey/appSecret/HTS ID로 별도의 KIS 연결을 각각 만들고, 그 연결에서 온 체결통보는 오직 그
+// 클라이언트에게만 전달한다(broadcastToClients를 쓰지 않는다) — 이렇게 해야 A의 거래정보가
+// 그 순간 접속해있는 B/C/D에게 새 나가는 일이 없다.
+interface ExecutionNoticeState {
+  execWs: WebSocket | null;
+  key: string | null;
+  iv: string | null;
+  htsId: string;
+}
+const executionNoticeStateByClient = new Map<WebSocket, ExecutionNoticeState>();
 
 const currentFilename = typeof __filename !== 'undefined' ? __filename : '';
 const currentDirname = typeof __dirname !== 'undefined' ? __dirname : path.dirname(currentFilename || process.cwd());
@@ -185,23 +202,24 @@ setInterval(() => {
   }
 }, 5 * 60 * 1000);
 
-async function getApprovalKey() {
+// 🛡️ 사용자별 자격증명을 받을 수 있게 파라미터화 — 인자를 안 주면 기존처럼 서버 공유 시세용
+// 환경변수(KIS_APP_KEY/SECRET)를 쓰고, 인자를 주면 그 사용자 본인의 appKey/appSecret으로 발급한다.
+// 체결통보(개인정보)는 반드시 그 사용자 자신의 자격증명으로 별도 발급받아야 한다 — 공유 승인키를
+// 쓰면 그 승인키 소유자(서버 환경변수 계정)의 체결통보만 구독 가능하기 때문이다.
+async function getApprovalKey(userAppKey?: string, userAppSecret?: string) {
 
-console.log(
-  "[KIS ENV CHECK]",
-  {
-    appKeyExists:
-      !!process.env.KIS_APP_KEY,
-    secretExists:
-      !!process.env.KIS_APP_SECRET
+  const appkey = userAppKey || process.env.KIS_APP_KEY;
+  const secretkey = userAppSecret || process.env.KIS_APP_SECRET;
+
+  if (!userAppKey) {
+    console.log(
+      "[KIS ENV CHECK]",
+      {
+        appKeyExists: !!process.env.KIS_APP_KEY,
+        secretExists: !!process.env.KIS_APP_SECRET
+      }
+    );
   }
-);
-
-  const appkey =
-    process.env.KIS_APP_KEY;
-
-  const secretkey =
-    process.env.KIS_APP_SECRET;
 
   const res = await axios.post(
     "https://openapi.koreainvestment.com:9443/oauth2/Approval",
@@ -256,13 +274,20 @@ async function connectKis() {
       "message",
       (data) => {
 
+        const raw = data.toString();
+
         console.log(
           "[KIS DATA]",
-          data.toString()
+          raw
         );
 
+        // 🛡️ 이 공유 연결(kisWs)은 오직 공개 시세(H0STCNT0/H0STASP0)만 다룬다 — 체결통보는
+        // 계좌별 개인정보라 여기서 절대 처리하지 않는다. 각 사용자의 체결통보는
+        // subscribeExecutionNoticeForClient()가 만드는 별도의 전용 연결에서 독립적으로
+        // 처리되어, 그 클라이언트에게만 전달된다(broadcastToClients를 타지 않음).
         broadcastToClients(
-          data.toString()
+
+          raw
         );
 
       }
@@ -444,6 +469,126 @@ function subscribeOrderbook(
     symbol
   );
 
+}
+
+// 🔐 H0STCNI0 복호화 — 특정 클라이언트의 key/iv로 복호화한다(전역 공유 아님). 복호화 실패는
+// 조용히 무시(null 반환)해서, 잘못된 데이터가 클라이언트로 그대로 전달되지 않게 한다.
+function decryptExecutionNotice(encryptedBase64: string, key: string, iv: string): string | null {
+  try {
+    const decipher = crypto.createDecipheriv(
+      'aes-256-cbc',
+      Buffer.from(key, 'utf8'),
+      Buffer.from(iv, 'utf8')
+    );
+    let decrypted = decipher.update(encryptedBase64, 'base64', 'utf8');
+    decrypted += decipher.final('utf8');
+    return decrypted;
+  } catch (err) {
+    console.warn("[KIS EXECUTION NOTICE DECRYPT FAIL]", err);
+    return null;
+  }
+}
+
+// 🎯 H0STCNI0(실시간 체결통보) 구독 — 멀티테넌트 안전 버전. 서버 공유 연결(kisWs)과 완전히
+// 별개로, 이 클라이언트(브라우저) 전용의 새 KIS 웹소켓을 열어서 그 사용자 본인의 자격증명으로
+// 승인키를 발급받고, 그 사용자의 HTS ID로만 구독한다. 이 전용 연결에서 오는 데이터는 오직 이
+// client에게만 전달되며(client.send), 다른 접속자에게는 전혀 노출되지 않는다.
+async function subscribeExecutionNoticeForClient(
+  client: WebSocket,
+  htsId: string,
+  userAppKey: string,
+  userAppSecret: string
+) {
+
+  if (!htsId || !userAppKey || !userAppSecret) {
+    console.warn("[KIS EXECUTION NOTICE] htsId/appKey/appSecret 중 누락된 값이 있어 구독을 건너뜁니다");
+    return;
+  }
+
+  // 이미 이 클라이언트에 대한 체결통보 연결이 있으면 중복 생성하지 않는다
+  if (executionNoticeStateByClient.has(client)) {
+    return;
+  }
+
+  const state: ExecutionNoticeState = { execWs: null, key: null, iv: null, htsId };
+  executionNoticeStateByClient.set(client, state);
+
+  try {
+    const userApprovalKey = await getApprovalKey(userAppKey, userAppSecret);
+    const execWs = new WebSocket("ws://ops.koreainvestment.com:21000");
+    state.execWs = execWs;
+
+    execWs.on("open", () => {
+      console.log("[KIS EXECUTION NOTICE WS CONNECTED]", htsId);
+      execWs.send(
+        JSON.stringify({
+          header: {
+            approval_key: userApprovalKey,
+            custtype: "P",
+            tr_type: "1",
+            "content-type": "utf-8"
+          },
+          body: {
+            input: {
+              tr_id: "H0STCNI0",
+              tr_key: htsId
+            }
+          }
+        })
+      );
+    });
+
+    execWs.on("message", (data) => {
+      const raw = data.toString();
+
+      // 구독 응답(JSON)에서 key/iv 추출
+      if (raw.trim().startsWith('{')) {
+        try {
+          const obj = JSON.parse(raw);
+          if (obj?.header?.tr_id === 'H0STCNI0' && obj?.body?.output?.key && obj?.body?.output?.iv) {
+            state.key = obj.body.output.key;
+            state.iv = obj.body.output.iv;
+            console.log("[KIS EXECUTION NOTICE KEY/IV 수신]", htsId);
+          }
+        } catch { /* 무시 */ }
+        return;
+      }
+
+      // 암호화된 체결통보 데이터 — 복호화해서 이 클라이언트에게만 전달
+      if (raw.includes('|H0STCNI0|') && state.key && state.iv) {
+        const parts = raw.split('|');
+        if (parts.length >= 4) {
+          const decrypted = decryptExecutionNotice(parts[3], state.key, state.iv);
+          if (decrypted && client.readyState === WebSocket.OPEN) {
+            client.send(`${parts[0]}|${parts[1]}|${parts[2]}|${decrypted}`);
+          }
+        }
+      }
+    });
+
+    execWs.on("error", (err) => {
+      console.error("[KIS EXECUTION NOTICE WS ERROR]", htsId, err);
+    });
+
+    execWs.on("close", () => {
+      console.log("[KIS EXECUTION NOTICE WS CLOSED]", htsId);
+    });
+
+  } catch (err) {
+    console.error("[KIS EXECUTION NOTICE SUBSCRIBE FAIL]", htsId, err);
+    executionNoticeStateByClient.delete(client);
+  }
+
+}
+
+// 🧹 클라이언트(브라우저) 연결이 끊기면, 그 사용자 전용 체결통보 연결도 함께 정리한다 —
+// 안 그러면 KIS 연결이 계속 열려있는 채로 방치되어 자원이 새고, 승인키도 낭비된다.
+function cleanupExecutionNoticeForClient(client: WebSocket) {
+  const state = executionNoticeStateByClient.get(client);
+  if (state?.execWs) {
+    try { state.execWs.close(); } catch { /* 무시 */ }
+  }
+  executionNoticeStateByClient.delete(client);
 }
 
 async function startServer() {
@@ -1738,6 +1883,12 @@ wss.on("connection", (client, req) => {
         subscribeSymbol(data.symbol);
         subscribeOrderbook(data.symbol); // 체결가와 함께 실시간 호가도 구독
       }
+      // 🎯 체결통보 구독 요청 — 반드시 이 클라이언트 본인의 자격증명(appKey/appSecret/htsId)을
+      // 함께 받아서, 그 사용자 전용의 별도 KIS 연결을 만든다. 서버 공유 자격증명은 절대 쓰지
+      // 않는다 — 그러면 다른 사용자의 체결통보를 구독하게 되는 사고로 이어질 수 있다.
+      if (data.type === "subscribe_execution" && data.htsId && data.appKey && data.appSecret) {
+        subscribeExecutionNoticeForClient(client, data.htsId, data.appKey, data.appSecret);
+      }
     } catch (e) {
       console.warn("[WS CLIENT MSG PARSE ERROR]", e);
     }
@@ -1745,6 +1896,7 @@ wss.on("connection", (client, req) => {
 
   client.on("close", () => {
     clients.delete(client);
+    cleanupExecutionNoticeForClient(client); // 🧹 이 사용자 전용 체결통보 연결도 함께 정리
     console.log("[CLIENT DISCONNECTED]");
   });
 });

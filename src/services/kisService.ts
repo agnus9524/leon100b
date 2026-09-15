@@ -15,6 +15,7 @@ interface KISConfig {
   accountNo: string; // 계좌번호 8자리
   accountCode: string; // 상품코드 2자리 (보통 01)
   accountPw: string; // 계좌비밀번호 4자리
+  htsId?: string; // 🎯 HTS ID(계정 아이디, 계좌번호와 다름) — 실시간 체결통보(H0STCNI0) 구독에 필요. 사용자 본인이 직접 입력해야 하며, 절대 하드코딩하면 안 됨(여러 사용자가 함께 쓰는 서버이므로)
   isConnected: boolean;
 }
 
@@ -1758,9 +1759,11 @@ public async getWebsocketApprovalKey() {
  */
 public async connectWebSocket(
   symbols: string[],
-  onTick: (data: { symbol: string; price: number; change: number; changePercent: number; volume: string; executionStrength?: number; time: string }) => void,
+  onTick: (data: { symbol: string; price: number; change: number; changePercent: number; volume: string; executionStrength?: number; time: string; buyVolume?: number; sellVolume?: number }) => void,
   onStatusChange?: (status: 'connecting' | 'open' | 'closed' | 'error' | 'kis_disconnected') => void,
-  onOrderbook?: (data: { symbol: string; totalBidVolume: number; totalAskVolume: number; bidPrice1: number; askPrice1: number }) => void
+  onOrderbook?: (data: { symbol: string; totalBidVolume: number; totalAskVolume: number; bidPrice1: number; askPrice1: number }) => void,
+  onExecutionNotice?: (data: { symbol: string; orderNo: string; executedQty: number; executedPrice: number; isSell: boolean; isRejected: boolean; isExecuted: boolean; orderQty: number }) => void,
+  htsId?: string
 ): Promise<WebSocket> {
   const wsUrl = "wss://service-100-221699414173.us-west1.run.app/ws/kis";
   const approvalKey = await this.getWebsocketApprovalKey();
@@ -1768,7 +1771,7 @@ public async connectWebSocket(
   let reconnectAttempts = 0;
   const MAX_RECONNECT_ATTEMPTS = 5;
 
-  const parseTick = (raw: string): { symbol: string; price: number; change: number; changePercent: number; volume: string; executionStrength?: number; time: string } | null => {
+  const parseTick = (raw: string): { symbol: string; price: number; change: number; changePercent: number; volume: string; executionStrength?: number; time: string; buyVolume?: number; sellVolume?: number } | null => {
     try {
       // 1) JSON 형식 시도 (프록시가 이미 가공해서 보내는 경우)
       if (raw.trim().startsWith('{') || raw.trim().startsWith('[')) {
@@ -1793,11 +1796,19 @@ public async connectWebSocket(
         if (parts.length < 4 || parts[1] !== 'H0STCNT0') return null;
         const fields = parts[3].split('^');
         // KIS H0STCNT0 표준 필드 순서(0-index): 0=종목코드 1=체결시간 2=현재가 3=전일대비부호 4=전일대비
-        // 5=전일대비율 ... 12=누적거래량 ... 18=체결강도(cttr, 문서상 index — 실측 시 어긋나면 undefined 처리됨)
+        // 5=전일대비율 ... 12=누적거래량 ... 18=체결강도(cttr) ... 19=총매도체결량(SELN_CNTG_SMTN)
+        // 20=총매수체결량(SHNU_CNTG_SMTN) — 문서상 알려진 위치이며, 실측 시 어긋나면 undefined 처리됨
         const symbol = fields[0];
         const price = Number(fields[2] || 0);
         if (!symbol || price <= 0) return null;
         const cttrRaw = Number(fields[18]);
+        // 🔍 진짜 CVD(매수체결량-매도체결량 누적) 계산용 — 1회성 진단 로그로 실제 값 확인 가능하게 함
+        if (!(KISService as any)._cvdFieldLogged) {
+          (KISService as any)._cvdFieldLogged = true;
+          console.log('[KIS H0STCNT0 CVD 필드 진단 — 1회성]', { 전체필드: fields, index19_추정매도체결량: fields[19], index20_추정매수체결량: fields[20] });
+        }
+        const sellVolRaw = Number(fields[19]);
+        const buyVolRaw = Number(fields[20]);
         return {
           symbol,
           price,
@@ -1805,7 +1816,9 @@ public async connectWebSocket(
           changePercent: Number(fields[5] || 0),
           volume: fields[12] || '0',
           executionStrength: !isNaN(cttrRaw) && cttrRaw > 0 && cttrRaw < 1000 ? cttrRaw : undefined,
-          time: fields[1] || ''
+          time: fields[1] || '',
+          buyVolume: !isNaN(buyVolRaw) && buyVolRaw >= 0 ? buyVolRaw : undefined,
+          sellVolume: !isNaN(sellVolRaw) && sellVolRaw >= 0 ? sellVolRaw : undefined,
         };
       }
     } catch {
@@ -1838,6 +1851,48 @@ public async connectWebSocket(
     }
     };
 
+  const parseExecutionNotice = (raw: string): { symbol: string; orderNo: string; executedQty: number; executedPrice: number; isSell: boolean; isRejected: boolean; isExecuted: boolean; orderQty: number } | null => {
+    try {
+      if (!raw.includes('|')) return null;
+      const parts = raw.split('|');
+      if (parts.length < 4 || parts[1] !== 'H0STCNI0') return null;
+      const fields = parts[3].split('^');
+      // 🔍 정확한 필드 순서는 KIS 공식 문서 기준으로 알려진 표준 구조를 따랐다 — 실측 검증을 위해
+      // 1회성 진단 로그를 남긴다: 0=고객ID 1=계좌번호 2=주문번호 3=원주문번호 4=매도매수구분
+      // 8=종목코드 9=체결수량 10=체결단가 12=거부여부 13=체결여부(2=체결) 16=주문수량
+      if (!(KISService as any)._execNoticeFieldLogged) {
+        (KISService as any)._execNoticeFieldLogged = true;
+        console.log('[KIS H0STCNI0 체결통보 필드 진단 — 1회성]', { 전체필드: fields });
+      }
+      const symbol = fields[8];
+      const orderNo = fields[2];
+      if (!symbol || !orderNo) return null;
+      const sellBuyCls = fields[4]; // '01'=매도, '02'=매수 (또는 '1'/'2')
+      const isSell = sellBuyCls === '01' || sellBuyCls === '1';
+      const rfusYn = fields[12]; // 거부여부
+      const isRejected = rfusYn === '1';
+      const cntgYn = fields[13]; // 체결여부: '2'=체결
+      const isExecuted = cntgYn === '2';
+      return {
+        symbol,
+        orderNo,
+        executedQty: Number(fields[9] || 0),
+        executedPrice: Number(fields[10] || 0),
+        isSell,
+        isRejected,
+        isExecuted,
+        orderQty: Number(fields[16] || 0)
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  // 🎯 체결통보 구독에 필요한 이 사용자 본인의 자격증명 — 클래스 필드를 화살표 함수 클로저 안에서
+  // 안전하게 참조하기 위해 지역 변수로 캡처해둔다.
+  const userAppKey = this.config?.appKey;
+  const userAppSecret = this.config?.appSecret;
+
   const connect = (): WebSocket => {
     onStatusChange?.('connecting');
     const ws = new WebSocket(wsUrl);
@@ -1848,6 +1903,11 @@ public async connectWebSocket(
       ws.send(JSON.stringify({ type: 'approval', approval_key: approvalKey }));
       for (const symbol of symbols) {
         ws.send(JSON.stringify({ type: 'subscribe', symbol }));
+      }
+      // 🎯 체결통보는 htsId를 사용자가 직접 입력했을 때만 시도한다 — 반드시 이 사용자 자신의
+      // appKey/appSecret과 함께 보내서, 서버가 이 사용자 전용의 별도 KIS 연결을 만들게 한다.
+      if (htsId && userAppKey && userAppSecret) {
+        ws.send(JSON.stringify({ type: 'subscribe_execution', htsId, appKey: userAppKey, appSecret: userAppSecret }));
       }
     };
 
@@ -1869,6 +1929,8 @@ public async connectWebSocket(
       if (tick) onTick(tick);
       const orderbook = parseOrderbook(raw);
       if (orderbook && onOrderbook) onOrderbook(orderbook);
+      const executionNotice = parseExecutionNotice(raw);
+      if (executionNotice && onExecutionNotice) onExecutionNotice(executionNotice);
     };
 
     ws.onerror = () => {

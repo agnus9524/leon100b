@@ -365,6 +365,7 @@ interface Stock {
   sentiment?: number; // -1 to 1 score
   pattern?: string; // e.g. "Double Bottom", "Cup and Handle"
   executionStrength?: number; // 실제 체결강도(KIS cttr) — 매수체결량/매도체결량 기반. 호가잔량 비율이 아님
+  realCvd?: number; // 🎯 진짜 CVD — 매수체결량 누적 - 매도체결량 누적(H0STCNT0 필드 기반, 정확한 인덱스는 진단 로그로 검증 필요)
 }
 
 // 🕘 한국 정규장(평일 09:00~15:30 KST) 여부 판단.
@@ -1546,6 +1547,7 @@ export default function App() {
     accountNo: '',
     accountCode: '01',
     accountPw: '',
+    htsId: '', // 🎯 HTS ID(계정 아이디, 계좌번호와 다름) — 실시간 체결통보 구독에 필요. 사용자 본인이 직접 입력
     isConnected: false,
     domesticOrderType: '00', // '00' (지정가 - Limit), '01' (시장가 - Market)
   });
@@ -1975,6 +1977,12 @@ export default function App() {
             const nowTs = Date.now();
             const oldHistory = Array.isArray(s.history) ? s.history : [];
             const newHistory = [...oldHistory.slice(-599), { time: nowLabel, price: tick.price, timestamp: nowTs }];
+            // 🎯 진짜 CVD(매수체결량 누적 - 매도체결량 누적) — KIS가 이미 누적치를 주므로 그대로 뺄셈.
+            // 둘 다 유효한 값일 때만 계산하고, 아니면 기존 값을 유지(필드 인덱스가 실제와 다르면
+            // undefined로 남아 조용히 무시됨 — 앞서 심어둔 진단 로그로 실제 인덱스 검증 가능).
+            const realCvd = (tick.buyVolume !== undefined && tick.sellVolume !== undefined)
+              ? tick.buyVolume - tick.sellVolume
+              : s.realCvd;
             return {
               ...s,
               price: tick.price,
@@ -1982,6 +1990,7 @@ export default function App() {
               changePercent: tick.changePercent,
               volume: tick.volume,
               executionStrength: tick.executionStrength !== undefined ? tick.executionStrength : s.executionStrength,
+              realCvd,
               isRealTime: true,
               history: newHistory,
               lastUpdated: nowLabel
@@ -2017,7 +2026,15 @@ export default function App() {
             bidPrice1: orderbook.bidPrice1,
             askPrice1: orderbook.askPrice1,
           };
-        }
+        },
+        executionNotice => {
+          // 🔍 H0STCNI0(실시간 체결통보) — 우선은 실제로 데이터가 들어오는지 확인하는 진단 단계다.
+          // 필드 인덱스(특히 종목코드/체결여부 위치)를 100% 확신할 수 없어서, 기존 REST 폴링
+          // (checkOrderExecution) 기반 체결확인은 그대로 두고 병행한다 — 이 로그로 실제 값이
+          // 맞는지 확인한 뒤에야 REST를 대체하거나 보완하는 다음 단계로 넘어가는 게 안전하다.
+          console.log('[체결통보 수신]', executionNotice);
+        },
+        kisConfig.htsId // 🛡️ 사용자 본인이 직접 입력한 HTS ID가 있을 때만 체결통보 구독 시도 — 비어있으면 아무 일도 안 일어남
       )
       .then(ws => {
         if (cancelled) {
