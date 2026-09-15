@@ -6747,6 +6747,7 @@ priceData.current
         const updatedTargets = await Promise.all(targetStocks.map(async (s) => {
           try {
             const priceData = await kisService.getPrice(s.symbol);
+            console.log(`[getPrice 결과] ${s.symbol}`, priceData);
             if (priceData && priceData.current > 0) {
               const realPrice = priceData.current;
               const safeHist = Array.isArray(s.history) ? s.history : [];
