@@ -198,7 +198,7 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
               <div>
                 <div className="flex items-center gap-2 flex-wrap">
                   <h2 className="text-base sm:text-lg font-black tracking-tight text-white flex items-center gap-1.5">
-                    <span>코스피(KOSPI) 실시간 초단타 스캘핑 최적 추천 70선</span>
+                    <span>코스피(KOSPI) 실시간 초단타 스캘핑 최적 추천 10선</span>
                     <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40 text-[10.5px] font-mono font-bold">
                       <Flame className="w-3 h-3 text-emerald-400 fill-emerald-400 animate-pulse" />
                       실시간 퀀트 점수
@@ -234,19 +234,6 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
 
           {/* Filter Bar (Strategy & Price Filters) */}
           <div className="px-4 sm:px-5 py-3 bg-slate-900/60 border-b border-slate-800/80 space-y-2.5 shrink-0">
-            {/* Top Row: Top 3 Batch */}
-            <div className="flex flex-col lg:flex-row lg:items-center justify-end gap-2">
-              {top3.length > 0 && (
-                <button
-                  type="button"
-                  onClick={() => onBatchRegisterTop3(top3)}
-                  className="px-3 py-1 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-[11px] font-black transition-all cursor-pointer flex items-center gap-1 shadow-[0_0_12px_rgba(16,185,129,0.3)] active:scale-95 whitespace-nowrap self-start lg:self-auto"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  <span>TOP 3 일괄 등록</span>
-                </button>
-              )}
-            </div>
           </div>
 
           {/* Modal Content Scroll Area */}
@@ -292,111 +279,6 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
               </div>
             ) : (
               <>
-                {/* Top 3 Featured Highlight Podiums (when ALL is active) */}
-                {activeCategory === 'ALL' && top3.length >= 3 && (
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    {top3.map((stock, idx) => {
-                      const isRegistered = registeredSymbols.includes(stock.symbol);
-                      const podiumMedals = ['🥇 1위', '🥈 2위', '🥉 3위'];
-                      const podiumBorders = [
-                        'border-amber-500/50 bg-gradient-to-b from-amber-500/10 via-slate-900/90 to-slate-950',
-                        'border-slate-400/50 bg-gradient-to-b from-slate-400/10 via-slate-900/90 to-slate-950',
-                        'border-amber-700/50 bg-gradient-to-b from-amber-700/10 via-slate-900/90 to-slate-950'
-                      ];
-
-                      return (
-                        <div
-                          key={stock.symbol}
-                          className={`p-3.5 rounded-2xl border ${podiumBorders[idx]} flex flex-col justify-between space-y-3 relative overflow-hidden shadow-lg transition-all hover:scale-[1.01]`}
-                        >
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1.5">
-                              <span className="text-xs font-black px-2 py-0.5 rounded-lg bg-black/40 border border-white/10 text-white font-mono">
-                                {podiumMedals[idx]}
-                              </span>
-                              {stock.theme && (
-                                <span className="text-[10px] px-1.5 py-0.5 rounded-md bg-white/5 text-slate-300 font-sans">
-                                  {stock.theme}
-                                </span>
-                              )}
-                            </div>
-                            <div className="flex items-center gap-1 px-2 py-0.5 rounded-lg bg-emerald-500/20 border border-emerald-500/40 text-emerald-300 font-mono text-xs font-black">
-                              <Zap className="w-3 h-3 text-emerald-400 fill-emerald-400" />
-                              <span>{stock.scalpingScore}점</span>
-                              <span className="text-[10px] px-1 bg-emerald-500/40 rounded text-white">{stock.grade}</span>
-                            </div>
-                          </div>
-
-                          <div>
-                            <div className="flex items-baseline justify-between gap-1">
-                              <div>
-                                <h3 className="font-black text-base text-white tracking-tight">{stock.name}</h3>
-                                <p className="text-[11px] font-mono text-slate-400">{stock.symbol} · <span className="text-emerald-400 font-bold">KOSPI</span></p>
-                              </div>
-                              <div className="text-right font-mono">
-                                <div className="text-sm font-black text-white">{stock.price.toLocaleString()}원</div>
-                                <div className={`text-xs font-bold ${stock.changePercent >= 0 ? 'text-rose-400' : 'text-sky-400'}`}>
-                                  {stock.changePercent >= 0 ? '+' : ''}{stock.changePercent.toFixed(2)}%
-                                  {stock.change !== undefined && (
-                                    <span className="text-[10px] ml-1 opacity-80">
-                                      ({stock.change >= 0 ? '+' : ''}{stock.change.toLocaleString()}원)
-                                    </span>
-                                  )}
-                                </div>
-                                {stock.recommendedPrice > 0 && stock.recommendedPrice !== stock.price && (
-                                  <div className="text-[9px] text-slate-500 mt-0.5">추천가 {stock.recommendedPrice.toLocaleString()}원</div>
-                                )}
-                              </div>
-                            </div>
-
-                            <div className="grid grid-cols-2 gap-1.5 mt-2.5 pt-2 border-t border-white/5 text-[11px] font-mono">
-                              <div className="bg-black/30 p-1.5 rounded-lg border border-white/5">
-                                <span className="text-slate-400 text-[10px]">거래량 급증</span>
-                                <div className="text-emerald-400 font-bold">+{stock.volumeSurgeRate}%</div>
-                              </div>
-                              <div className="bg-black/30 p-1.5 rounded-lg border border-white/5">
-                                <span className="text-slate-400 text-[10px]">체결강도</span>
-                                <div className="text-cyan-400 font-bold">{stock.volumeIntensity}%</div>
-                              </div>
-                              <div className="bg-black/30 p-1.5 rounded-lg border border-white/5">
-                                <span className="text-slate-400 text-[10px]">1차 목표가</span>
-                                <div className="text-rose-300 font-bold">+{stock.expectedReturn}%</div>
-                              </div>
-                              <div className="bg-black/30 p-1.5 rounded-lg border border-white/5">
-                                <span className="text-slate-400 text-[10px]">스탑로스</span>
-                                <div className="text-slate-300 font-bold">-1.5%</div>
-                              </div>
-                            </div>
-                          </div>
-
-                          <div className="grid grid-cols-2 gap-1.5 pt-1">
-                            <button
-                              type="button"
-                              onClick={() => onSelectStock(stock)}
-                              className={`py-2 px-2.5 rounded-xl font-bold text-xs flex items-center justify-center gap-1 transition-all cursor-pointer ${
-                                isRegistered 
-                                  ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40' 
-                                  : 'bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700'
-                              }`}
-                            >
-                              {isRegistered ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Plus className="w-3.5 h-3.5" />}
-                              <span>{isRegistered ? '탭 선택' : '스캘퍼 등록'}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => onQuickBuy(stock)}
-                              className="py-2 px-2.5 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 hover:from-rose-500 hover:to-red-500 text-white font-black text-xs flex items-center justify-center gap-1 transition-all cursor-pointer shadow-md active:scale-95"
-                            >
-                              <Zap className="w-3.5 h-3.5 fill-white" />
-                              <span>즉시 매수</span>
-                            </button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-
                 {/* Full 10 Stock List View */}
                 <div className="space-y-2.5">
                   <div className="flex items-center justify-between text-xs text-slate-400 font-bold px-1">
