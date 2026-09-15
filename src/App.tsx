@@ -2050,6 +2050,7 @@ export default function App() {
   // 바로 KIS 실제가를 조회해서 정확한 값으로 채운다.
   // ============================================================
   useEffect(() => {
+    if (!kisService.isConfigReady()) return; // 🛡️ kisService.init()이 아직 완료되기 전이면 시도하지 않음
     const missing = scalperTabs.filter(t => !stocksRef.current.some(s => s.symbol === t.symbol));
     if (missing.length === 0) return;
 
@@ -4647,11 +4648,23 @@ setGapInventory(nextInv);
               if (finalConfig.isConnected) {
                 const tokenData = settings.kisTokenReal || settings.kisToken;
 
+                // 🔍 kisService.init()이 실제로 이 세션에서 호출/완료되는지, 그리고 유효한 설정으로
+                // 호출되는지 확인하기 위한 진단 로그 — "Config not initialized" 에러가 반복되면
+                // 이 로그가 아예 안 찍혔거나(effect 자체가 실행 안 됨) appKey/accountNo가 비어있을
+                // 가능성을 여기서 확인할 수 있다.
+                console.log('[KIS 초기화] kisService.init() 호출', {
+                  appKey존재: !!finalConfig.appKey,
+                  accountNo존재: !!finalConfig.accountNo,
+                  isConnected: finalConfig.isConnected
+                });
+
                 kisService.init(
                   getActiveKisConfig(finalConfig), 
                   tokenData?.token, 
                   tokenData?.expiresAt
                 );
+
+                console.log('[KIS 초기화] kisService.init() 완료 — isConfigReady:', kisService.isConfigReady());
               }
             }
             if (settings.holdings && typeof settings.holdings === 'object') {
