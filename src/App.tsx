@@ -5054,7 +5054,8 @@ setGapInventory(nextInv);
               isAI: false
             };
           });
-          list = kisService.generateRealtimeRecommendations(candidateStocks, detectStockStrategies);
+          list = kisService.generateRealtimeRecommendations(candidateStocks, detectStockStrategies)
+            .map(r => ({ ...r, dataSource: 'RANKING_API' as const, dataAgeSeconds: 0 }));
         }
       } catch (err) {
         console.warn('[거래량/등락률 순위 기반 추천 실패]', err);
@@ -5073,8 +5074,14 @@ setGapInventory(nextInv);
       });
       if (candidatePool.length > 0) {
         const existingSymbols = new Set(list.map(r => r.symbol));
+        const nowForAge = Date.now();
         const supplement = kisService.generateRealtimeRecommendations(candidatePool, detectStockStrategies)
-          .filter(r => !existingSymbols.has(r.symbol));
+          .filter(r => !existingSymbols.has(r.symbol))
+          .map(r => {
+            const lastTick = lastWsTickAtRef.current[r.symbol];
+            const ageSeconds = lastTick !== undefined ? Math.round((nowForAge - lastTick) / 1000) : undefined;
+            return { ...r, dataSource: 'TRACKED_POOL' as const, dataAgeSeconds: ageSeconds };
+          });
         list = [...list, ...supplement];
       }
     }

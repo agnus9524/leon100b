@@ -7,7 +7,7 @@ import { Stock } from '../types';
 
 // 스캘퍼 추천종목 개수 제한 — UI 라벨("실시간 초단타 스캘핑 최적 추천 10선")과 실제 반환 개수를
 // 이 상수 하나로 통일한다. 실시간 계산 추천, 기본(fallback) 추천, 백엔드 API 응답 전부 이 값으로 캡.
-export const MAX_SCALPER_RECOMMENDATIONS = 70;
+export const MAX_SCALPER_RECOMMENDATIONS = 10;
 
 interface KISConfig {
   appKey: string;
@@ -2253,6 +2253,10 @@ export interface ScalperRecommendation {
   expectedReturn: number;
   rsi: number;
   reason: string;
+  // 🔍 이 데이터가 어디서 왔는지, 얼마나 최신인지 구분하기 위한 필드 — 사용자가 "실제 데이터인지
+  // 확인하고 싶다"고 요청해서 추가함
+  dataSource?: 'RANKING_API' | 'TRACKED_POOL'; // RANKING_API: 방금 KIS 순위 API를 직접 호출한 결과(항상 신선함) / TRACKED_POOL: 이미 추적 중이던 종목에서 가져온 결과(마지막 갱신 시점에 따라 오래됐을 수 있음)
+  dataAgeSeconds?: number; // 이 가격 데이터가 마지막으로 갱신된 후 몇 초가 지났는지
   tags: string[];
   theme?: string;
   holdingTime?: string;

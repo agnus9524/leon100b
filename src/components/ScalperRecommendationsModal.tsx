@@ -458,6 +458,19 @@ export const ScalperRecommendationsModal: React.FC<ScalperRecommendationsModalPr
                                   <span className={`text-[10px] px-2 py-0.5 rounded-full font-bold border ${categoryBadge.cls}`}>
                                     {categoryBadge.text}
                                   </span>
+                                  {/* 🔍 이 종목의 가격 데이터가 실제로 얼마나 최신인지 명확히 표시 —
+                                      RANKING_API: 방금 KIS 순위 API를 직접 호출한 결과(항상 신선)
+                                      TRACKED_POOL: 이미 추적 중이던 종목에서 가져온 결과(N초 전 데이터일 수 있음) */}
+                                  {stock.dataSource === 'RANKING_API' && (
+                                    <span className="text-[9.5px] px-1.5 py-0.5 rounded-full font-bold border bg-emerald-500/20 text-emerald-300 border-emerald-500/40" title="방금 KIS 순위 API에서 직접 조회한 실시간 데이터">
+                                      🟢 실시간
+                                    </span>
+                                  )}
+                                  {stock.dataSource === 'TRACKED_POOL' && (
+                                    <span className="text-[9.5px] px-1.5 py-0.5 rounded-full font-bold border bg-amber-500/20 text-amber-300 border-amber-500/40" title="이미 추적 중이던 종목의 데이터 — 마지막 갱신 이후 시간이 지났을 수 있습니다">
+                                      🟡 추적중{stock.dataAgeSeconds !== undefined ? ` (${stock.dataAgeSeconds}초 전)` : ''}
+                                    </span>
+                                  )}
                                 </div>
                                 <div className="text-xs text-slate-300 font-sans line-clamp-1">
                                   {stock.reason}
