@@ -1719,8 +1719,11 @@ export default function App() {
     }));
 
     // 저장된 그대로 반환한다 — 특정 시장(KR/US)에 종목이 하나도 없어도 강제로 채워 넣지 않는다.
-    const usTabs = saved.filter(t => /^[A-Z]/.test(t.symbol));
-    const krTabs = saved.filter(t => !/^[A-Z]/.test(t.symbol));
+    // 🛡️ 다만 MAX_INVENTORY_PER_MARKET 제한은 복원 시에도 반드시 지켜야 한다 — 예전엔 이 제한이
+    // 새로 자동채움할 때만 적용되고 저장된 데이터를 복원할 때는 체크가 없어서, 과거에 등록했다가
+    // 안 지운 종목이 많으면 설정한 한도(예: 6개)를 넘어서 그대로 복원되는 문제가 있었다.
+    const usTabs = saved.filter(t => /^[A-Z]/.test(t.symbol)).slice(0, MAX_INVENTORY_PER_MARKET);
+    const krTabs = saved.filter(t => !/^[A-Z]/.test(t.symbol)).slice(0, MAX_INVENTORY_PER_MARKET);
     return [...krTabs, ...usTabs];
   };
 
