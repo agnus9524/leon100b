@@ -6705,6 +6705,12 @@ priceData.current
     // 1. Sync for all watchlist stocks (every 10 seconds)
     const syncAllPrices = async () => {
       if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음 (연동 전 에러 스팸 방지)
+      // 🛡️ React state(kisConfig.isConnected)만으로는 부족하다 — Firestore에서 설정을 비동기로
+      // 불러오는 도중엔 이 state가 아직 true로 안 바뀌었을 수도 있지만, 반대로 이미 true인데도
+      // kisService 내부의 실제 config는 아직 초기화 전일 수 있다("KIS Config not initialized"
+      // 에러의 정체). 실제 내부 준비 상태까지 함께 확인해서 이 간극에서 오는 무의미한 API
+      // 실패/에러 로그를 막는다.
+      if (!kisService.isConfigReady()) return;
       if (!isKoreanDataCollectionActive()) return; // 🕗 정규장(09:00~15:30)에 더해 08:30~09:00 프리마켓(시가단일가) 구간도 포함 — 09:00 정각에 RSI/VWAP이 바로 유의미하도록 미리 이력을 쌓는다
       try {
         // 🔄 웹소켓 기반 방식으로 원복 — 웹소켓이 연결되어 있으면, 종목별로 "마지막 갱신 후 얼마나
@@ -6802,6 +6808,7 @@ priceData.current
     const syncLiveOrderbook = async () => {
 
   if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음
+  if (!kisService.isConfigReady()) return; // 🛡️ React state와 내부 준비 상태 간극 방지
   if (!isKoreanMarketOpen()) return; // 🕘 정규장 외 시간에는 호가가 안 움직이므로 조회하지 않음
 
   // 🛡️ 예전엔 선택된 종목 하나만 조회했는데, 매수 점수제(매도호가소진/매수호가우세)가 이

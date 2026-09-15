@@ -48,6 +48,15 @@ class KISService {
   private pendingTokenPromise: Promise<string> | null = null;
   private onTokenUpdate: ((token: string, expiresAt: number, issuedAt: number) => void) | null = null;
 
+  // 🔍 React state(kisConfig.isConnected)와 이 클래스 내부의 실제 config가 서로 다른 타이밍에
+  // 준비될 수 있다 — 예를 들어 Firestore에서 저장된 설정을 비동기로 불러오는 동안, React
+  // 상태는 아직 "연결 안 됨"이라 다른 경로가 가격 조회를 시도하지 않지만, 반대로 여러 effect가
+  // "연결됨"으로 낙관적으로 판단하고 조회를 시도했는데 정작 이 내부 config는 아직 null일 수
+  // 있다. 이 메서드로 실제 준비 상태를 외부에서 확인할 수 있게 한다.
+  public isConfigReady(): boolean {
+    return this.config !== null;
+  }
+
   // 🩺 네트워크/API 상태 모니터링 — 스캘핑 중 API 실패/지연이 계속되면 매매를 멈추기 위한 최근 호출 기록
   private recentCallResults: { timestamp: number; success: boolean; latencyMs: number }[] = [];
   private readonly HEALTH_WINDOW_MS = 30000;
