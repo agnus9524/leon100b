@@ -476,27 +476,36 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   )}
                   title={`${tabName} (${tab.symbol}) 탭으로 전환`}
                 >
-                <div className="flex items-center justify-between gap-1.5 min-w-0 w-full">
-                  <div className="flex items-center gap-1.5 min-w-0 flex-1">
+                <div className="flex flex-col gap-0.5 w-full">
+                  {/* 1줄: 종목명(종목코드) — 이름이 잘리지 않도록 이 줄 전체를 이름에 할당 */}
+                  <div className="flex items-center gap-1.5 min-w-0 w-full">
                     <span className={cn(
                       "w-1.5 h-1.5 rounded-full shrink-0",
                       tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" : "bg-slate-500"
                     )} />
-                    <span className="font-bold text-base truncate text-white shrink min-w-0">{tabName}</span>
-                    <span className="hidden md:inline text-[11px] text-slate-400 shrink-0">
+                    <span className="font-bold text-base truncate text-white min-w-0">{tabName}</span>
+                    <span className="text-[10px] font-mono text-slate-500 shrink-0">({tab.symbol})</span>
+                  </div>
+
+                  {/* 2줄: 보유수량 / 주문가능수량 / 등락률 */}
+                  <div className="flex items-center gap-2 min-w-0 w-full pl-3">
+                    <span className="text-[11px] text-slate-400 shrink-0">
                       보유 <strong className="text-slate-200">{(tab.holdingQty || 0).toLocaleString()}</strong>
                     </span>
-                    <span className="hidden md:inline text-[11px] text-slate-400 shrink-0">
+                    <span className="text-[11px] text-slate-400 shrink-0">
                       주문가능 <strong className="text-sleek-blue">{(tab.orderableQty || 0).toLocaleString()}</strong>
                     </span>
                     <span className={cn(
-                      "hidden md:inline text-[11px] font-bold shrink-0",
+                      "text-[11px] font-bold shrink-0",
                       (tab.changePercent || 0) >= 0 ? "text-rose-400" : "text-sky-400"
                     )}>
                       {(tab.changePercent || 0) >= 0 ? '+' : ''}{(tab.changePercent || 0).toFixed(2)}%
                     </span>
                   </div>
 
+                  {/* 3줄: 현재체결가 / 봇상태 / 수량선택 / 닫기 */}
+                  <div className="flex items-center justify-between gap-1.5 min-w-0 w-full">
+                  <div className="flex-1 min-w-0" />
                   <div className="flex items-center gap-1.5 shrink-0">
                     {isPriceLoading ? (
                       <span className="hidden md:inline text-[10px] font-bold text-slate-500 animate-pulse">연결 중...</span>
@@ -548,6 +557,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                     >
                       <X className="w-3 h-3" />
                     </button>
+                  </div>
                   </div>
                 </div>
 
