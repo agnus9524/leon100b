@@ -1872,10 +1872,12 @@ export default function App() {
     );
 
     // COMPLETED는 종착점이 아니라 다음 매매 사이클을 위해 다시 WATCHING으로 순환한다 (이 전이도 로그에 남는다).
+    // 🎨 매도완료(빨강 테두리) 상태를 5초간 눈에 띄게 유지한 후 관망중(회색)으로 돌아간다 —
+    // 예전엔 0ms(사실상 즉시)라서 사용자가 매도완료 순간을 눈으로 확인할 틈이 없었다.
     if (next === 'COMPLETED') {
       setTimeout(() => {
         transitionLifecycleStatus(symbol, 'WATCHING', '다음 매매 사이클 대기');
-      }, 0);
+      }, 5000);
     }
   }, [updateTab]);
 
@@ -9249,6 +9251,12 @@ useEffect(() => {
             // 실제로 반영된다 — 전역 설정이 우연히 '01'(시장가)이면 애써 계산한 목표가가 무시되고
             // 엉뚱한 가격에 체결될 위험이 있었다. 이제 유효한 목표가가 있으면 무조건 지정가로 낸다.
             const effectiveOrdDvsn = (tradePrice && tradePrice > 0) ? '00' : (kisConfig.domesticOrderType || '00');
+            // 🎨 매우 중요한 추가: executeTrade는 매수/매도 모든 경로(자동매매 엔진, 수동매도,
+            // BullGPT 시그널 등)가 공통으로 거치는 지점이다. 지금까지 SELLING 상태로의 전이가
+            // 어디서도 호출된 적이 없어서, 매도 주문 중에도 카드가 계속 "매수시도중" 색으로 남거나
+            // 아예 전이가 안 되는 문제가 있었다. 여기서 실제 주문 전송 직전에 공통으로 전이해서,
+            // 어떤 경로로 주문이 나가든 카드 테두리 색이 정확히 반영되게 한다.
+            transitionLifecycleStatus(stock.symbol, action === 'BUY' ? 'BUYING' : 'SELLING', `${action === 'BUY' ? '매수' : '매도'} 주문 전송 (${formatCurrency(tradePrice || 0)} x ${finalAmount || 1})`);
             setBotStatus(`[KIS API] ${stock.symbol} ${action === 'BUY' ? '매수' : '매도'} 주문 전송 중...`);
             const res = await kisService.order(
                 stock.symbol, 

@@ -468,15 +468,26 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
               const tabPrice = (tab.price && tab.price > 0) ? tab.price : (tabStock?.price || 0);
               const isPriceLoading = tab.priceStatus === 'LOADING' && tabPrice <= 0;
 
+              // 🎨 매매 상태(lifecycleStatus)에 따른 카드 테두리 색 — 관망중(회색)/매수시도중(노랑)/
+              // 보유중(초록)/매도시도중(주황)/매도완료(빨강, 5초간 유지 후 관망중으로 복귀).
+              // 선택 여부(파란 링)와는 별개로 항상 표시해서 두 정보를 동시에 보여준다.
+              const lifecycleBorderCls =
+                tab.lifecycleStatus === 'HOLDING' ? "border-emerald-500"
+                : (tab.lifecycleStatus === 'BUY_READY' || tab.lifecycleStatus === 'BUYING') ? "border-amber-500"
+                : (tab.lifecycleStatus === 'SELL_READY' || tab.lifecycleStatus === 'SELLING') ? "border-orange-500"
+                : tab.lifecycleStatus === 'COMPLETED' ? "border-rose-500"
+                : "border-white/10"; // WATCHING 등 기본 — 회색 테두리
+
               return (
                 <div
                   key={tab.id}
                   onClick={() => handleSwitchTab(tab.id)}
                   className={cn(
                     "px-2 py-1.5 rounded-xl border flex flex-col gap-1 cursor-pointer transition-all w-full text-left min-w-0 font-mono select-none group",
+                    lifecycleBorderCls,
                     isSelected
-                      ? "bg-sleek-blue/25 border-sleek-blue text-white shadow-md font-black ring-1 ring-sleek-blue/60"
-                      : "bg-black/50 border-white/10 hover:bg-white/10 text-slate-300 hover:text-white"
+                      ? "bg-sleek-blue/25 text-white shadow-md font-black ring-1 ring-sleek-blue/60"
+                      : "bg-black/50 hover:bg-white/10 text-slate-300 hover:text-white"
                   )}
                   title={`${tabName} (${tab.symbol}) 탭으로 전환`}
                 >
