@@ -1759,7 +1759,7 @@ public async getWebsocketApprovalKey() {
 public async connectWebSocket(
   symbols: string[],
   onTick: (data: { symbol: string; price: number; change: number; changePercent: number; volume: string; executionStrength?: number; time: string }) => void,
-  onStatusChange?: (status: 'connecting' | 'open' | 'closed' | 'error') => void,
+  onStatusChange?: (status: 'connecting' | 'open' | 'closed' | 'error' | 'kis_disconnected') => void,
   onOrderbook?: (data: { symbol: string; totalBidVolume: number; totalAskVolume: number; bidPrice1: number; askPrice1: number }) => void
 ): Promise<WebSocket> {
   const wsUrl = "wss://service-100-221699414173.us-west1.run.app/ws/kis";
@@ -1853,6 +1853,18 @@ public async connectWebSocket(
 
     ws.onmessage = (event) => {
       const raw = String(event.data);
+      // 🛡️ 매우 중요한 추가: 서버가 보내는 "KIS 실제 연결 상태" 메시지를 먼저 확인한다 —
+      // 프록시 서버와의 연결(ws.onopen)과 프록시가 KIS와 실제로 연결됐는지는 완전히 별개다.
+      // 이 메시지가 없으면 프록시가 KIS와 끊긴 상태에서도 클라이언트는 "연결됨"으로 착각할 수 있다.
+      try {
+        if (raw.trim().startsWith('{')) {
+          const obj = JSON.parse(raw);
+          if (obj.type === 'kis_ws_status') {
+            onStatusChange?.(obj.status === 'connected' ? 'open' : 'kis_disconnected');
+            return;
+          }
+        }
+      } catch { /* JSON 파싱 실패 시 일반 tick/orderbook 파싱으로 넘어감 */ }
       const tick = parseTick(raw);
       if (tick) onTick(tick);
       const orderbook = parseOrderbook(raw);

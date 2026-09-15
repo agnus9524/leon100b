@@ -241,6 +241,14 @@ async function connectKis() {
           "[KIS CONNECTED]"
         );
 
+        // 🛡️ 매우 중요한 수정: 예전엔 클라이언트가 "프록시 서버와의 연결"만 보고 KIS 실제 연결
+        // 여부를 알 방법이 없었다 — 프록시가 KIS와 끊겨 있어도 클라이언트-프록시 연결 자체는
+        // 계속 "열려있음"으로 보일 수 있었다. 이제 KIS와 실제로 연결될 때마다 모든 클라이언트에게
+        // 명시적으로 알려준다.
+        broadcastToClients(
+          JSON.stringify({ type: 'kis_ws_status', status: 'connected' })
+        );
+
       }
     );
 
@@ -268,6 +276,11 @@ async function connectKis() {
           "[KIS RECONNECT]"
         );
 
+        // 🛡️ KIS와의 연결이 끊기면 즉시 클라이언트에게 알려서, REST 백업으로 확실히 전환하게 한다
+        broadcastToClients(
+          JSON.stringify({ type: 'kis_ws_status', status: 'disconnected' })
+        );
+
         setTimeout(
           connectKis,
           5000
@@ -285,6 +298,10 @@ async function connectKis() {
           err
         );
 
+        broadcastToClients(
+          JSON.stringify({ type: 'kis_ws_status', status: 'error' })
+        );
+
       }
     );
 
@@ -293,6 +310,16 @@ async function connectKis() {
     console.error(
       "[KIS CONNECT FAIL]",
       err
+    );
+
+    // 🛡️ 예전엔 승인키 발급 자체가 실패하면(catch 블록) 재시도 없이 그대로 끝났다 — 한 번 실패하면
+    // 영원히 복구가 안 되는 문제였다. close 핸들러와 동일하게 5초 후 재시도한다.
+    broadcastToClients(
+      JSON.stringify({ type: 'kis_ws_status', status: 'error' })
+    );
+    setTimeout(
+      connectKis,
+      5000
     );
 
   }

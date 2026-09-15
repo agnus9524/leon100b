@@ -1909,7 +1909,7 @@ export default function App() {
       sensors: item.sensors
     }));
   }, [scalperInventory]);
-  const [wsConnectionStatus, setWsConnectionStatus] = useState<'connecting' | 'open' | 'closed' | 'error' | 'idle'>('idle');
+  const [wsConnectionStatus, setWsConnectionStatus] = useState<'connecting' | 'open' | 'closed' | 'error' | 'idle' | 'kis_disconnected'>('idle');
   // 🔄 REST 폴링 effect(syncAllPrices/syncSelectedPrice)는 이 상태를 의존성 배열에 넣지 않고
   // ref로만 읽는다 — state를 의존성에 넣으면 웹소켓 상태가 바뀔 때마다(연결/재연결/끊김) 그
   // effect 전체가 재시작되면서 "즉시 전체조회"가 다시 실행되어 오히려 순간 폭주를 만들 수 있다.

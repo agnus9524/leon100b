@@ -93,7 +93,7 @@ export interface IntegratedTradingHeaderProps {
   setManualSellModalOpen: (open: boolean) => void;
   INITIAL_STOCKS_KR: Stock[];
   maxInventoryPerMarket: number;
-  wsConnectionStatus: 'connecting' | 'open' | 'closed' | 'error' | 'idle';
+  wsConnectionStatus: 'connecting' | 'open' | 'closed' | 'error' | 'idle' | 'kis_disconnected';
   handleClearAllInventory: () => void;
   updateTab: (symbol: string, updates: Partial<ScalperTab>) => void;
   INITIAL_STOCKS: Stock[];
@@ -405,12 +405,14 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   wsConnectionStatus === 'open' && "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
                   wsConnectionStatus === 'connecting' && "text-amber-400 bg-amber-500/10 border-amber-500/30",
                   (wsConnectionStatus === 'idle' || wsConnectionStatus === 'closed') && "text-slate-400 bg-white/5 border-white/10",
-                  wsConnectionStatus === 'error' && "text-rose-400 bg-rose-500/10 border-rose-500/30"
+                  wsConnectionStatus === 'error' && "text-rose-400 bg-rose-500/10 border-rose-500/30",
+                  wsConnectionStatus === 'kis_disconnected' && "text-orange-400 bg-orange-500/10 border-orange-500/30"
                 )}
                 title={
                   wsConnectionStatus === 'open' ? "웹소켓 실시간 연결 중 — 등록된 전 종목이 체결 즉시 갱신됩니다"
                   : wsConnectionStatus === 'connecting' ? "웹소켓 연결 시도 중..."
                   : wsConnectionStatus === 'error' ? "웹소켓 연결 오류 — REST 폴링(최대 25초 주기)으로 대체 동작 중"
+                  : wsConnectionStatus === 'kis_disconnected' ? "프록시 서버는 연결됐지만, 서버가 KIS 실제 서버와의 연결이 끊긴 상태 — REST 폴링(최대 25초 주기)으로 대체 동작 중"
                   : "웹소켓 미연결 — REST 폴링(최대 25초 주기)으로 동작 중"
                 }
               >
@@ -419,11 +421,13 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   wsConnectionStatus === 'open' && "bg-emerald-400 animate-pulse",
                   wsConnectionStatus === 'connecting' && "bg-amber-400 animate-pulse",
                   (wsConnectionStatus === 'idle' || wsConnectionStatus === 'closed') && "bg-slate-500",
-                  wsConnectionStatus === 'error' && "bg-rose-400"
+                  wsConnectionStatus === 'error' && "bg-rose-400",
+                  wsConnectionStatus === 'kis_disconnected' && "bg-orange-400 animate-pulse"
                 )} />
                 {wsConnectionStatus === 'open' ? '실시간(WS)'
                   : wsConnectionStatus === 'connecting' ? '연결 중...'
                   : wsConnectionStatus === 'error' ? 'WS 오류'
+                  : wsConnectionStatus === 'kis_disconnected' ? 'KIS 연결끊김'
                   : 'REST 폴백'}
               </span>
               <span className="text-[10px] font-mono font-bold text-sleek-blue bg-sleek-blue/10 px-1.5 py-0.5 rounded border border-sleek-blue/20">
