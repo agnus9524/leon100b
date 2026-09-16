@@ -520,7 +520,8 @@ return strat.activeCount >= 1;
   }
 
   try {
-    const res = await this.queueRequest<any>(() =>
+    // 🎯 주문 전용 큐 사용 — 시장데이터 조회가 밀려있어도 해시키 발급은 영향받지 않는다
+    const res = await this.orderQueueRequest<any>(() =>
       axios.post(
         `${this.baseUrl}/uapi/hashkey`,
         body,
@@ -1197,9 +1198,11 @@ await this.getDomesticPrice(symbol);
   });
 
   // ------------------------------------------------------------
-  // STEP 4. 실제 주문 API만 큐에 넣는다.
+  // STEP 4. 실제 주문 API — 주문 전용 큐 사용 (해시키 발급과 동일한 큐).
+  // 시장데이터 큐(가격/호가/랭킹/잔고 등)와 완전히 분리되어, 추천종목 검색이나 REST 백업
+  // 조회가 아무리 밀려있어도 이 단계는 영향받지 않는다.
   // ------------------------------------------------------------
-  const res = await this.queueRequest<any>(() =>
+  const res = await this.orderQueueRequest<any>(() =>
     axios.post(
       `${this.baseUrl}${endpoint}`,
       body,
@@ -1329,7 +1332,9 @@ await this.getDomesticPrice(symbol);
       'custtype': 'P',
     };
 
-    const res = await this.queueRequest<any>(() => axios.post(`${this.baseUrl}${endpoint}`, body, { headers }));
+    // 🎯 정정취소도 주문 전용 큐 사용 — 손절/익절 취소는 매수/매도만큼 시급하므로 시장데이터
+    // 큐에 밀려서 지연되면 안 된다.
+    const res = await this.orderQueueRequest<any>(() => axios.post(`${this.baseUrl}${endpoint}`, body, { headers }));
     if (res.data.rt_cd && res.data.rt_cd !== '0') {
       console.warn(`[KIS Service] Revise/Cancel Order Result (${res.data.rt_cd}): ${res.data.msg1} (${res.data.msg_cd})`);
     }
@@ -1515,6 +1520,15 @@ await this.getDomesticPrice(symbol);
   private lastRequestTime = 0;
   private minRequestInterval = 500; // Minimum 500ms interval between API calls to prevent Rate Limit (EGW00201 / 429)
   private globalRateLimitCooldownUntil = 0; // 🛡️ 429가 뜨면 이 시각까지 전체 가격 조회를 잠시 미룬다 (한 종목만 재시도해서는 부족함)
+
+  // 🎯 주문 전용 큐 — 시장데이터(가격/호가/랭킹/잔고 등) 조회는 기존 requestQueueChain을 그대로
+  // 쓰고, 해시키 발급과 실제 주문 전송만 이 별도 체인을 쓴다. 이렇게 분리하지 않으면, 추천종목
+  // 검색이나 REST 백업 조회가 한꺼번에 몰릴 때 그 뒤에 줄 선 실제 주문이 지연될 수 있다 —
+  // "인벤토리 실시간성과 추천종목 탐색은 같은 우선순위로 처리하면 안 된다"는 원칙을 주문에도
+  // 적용한 것. globalRateLimitCooldownUntil(KIS 서버 자체의 전역 429 제한)은 공유한다 — 이건
+  // 어느 큐에서 발생했든 KIS 서버가 전체 계정에 거는 제한이라 분리할 수 없는 값이기 때문이다.
+  private lastOrderRequestTime = 0;
+  private orderRequestQueueChain: Promise<any> = Promise.resolve();
   private _volumeRankingFieldsLogged = false; // 🔍 거래량순위 API 원본 필드 샘플을 최초 1회만 로그로 남기기 위한 플래그
 
   /** 지수 백오프 지연시간 계산: 1차 2초, 2차 4초, 3차 8초, 4차 15초, 5차 30초 (상한 고정) */
@@ -1541,6 +1555,29 @@ await this.getDomesticPrice(symbol);
     });
 
     this.requestQueueChain = nextInQueue.catch(() => {});
+    return nextInQueue;
+  }
+
+  // 🎯 주문 전용 큐 — 시장데이터 큐(requestQueueChain)와 완전히 독립된 체인을 쓴다. 추천종목
+  // 검색이나 REST 백업 조회가 아무리 밀려있어도, 이 큐는 그 대기열을 전혀 거치지 않으므로
+  // 해시키 발급과 실제 주문 전송이 즉시 처리된다. 다만 KIS 서버 자체가 거는 전역 429 쿨다운은
+  // 공유해야 한다 — 이건 계정 전체에 걸리는 제한이라 큐를 나눈다고 피할 수 있는 게 아니다.
+  public async orderQueueRequest<T>(fn: () => Promise<T>): Promise<T> {
+    const nextInQueue = this.orderRequestQueueChain.then(async () => {
+      const cooldownRemaining = this.globalRateLimitCooldownUntil - Date.now();
+      if (cooldownRemaining > 0) {
+        await new Promise(resolve => setTimeout(resolve, cooldownRemaining));
+      }
+      const now = Date.now();
+      const timeSinceLast = now - this.lastOrderRequestTime;
+      if (timeSinceLast < this.minRequestInterval) {
+        await new Promise(resolve => setTimeout(resolve, this.minRequestInterval - timeSinceLast));
+      }
+      this.lastOrderRequestTime = Date.now();
+      return await this.executeWithBackoff(fn);
+    });
+
+    this.orderRequestQueueChain = nextInQueue.catch(() => {});
     return nextInQueue;
   }
 

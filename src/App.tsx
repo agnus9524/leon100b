@@ -6830,7 +6830,14 @@ priceData.current
         // 지났는지"를 확인해서 15초 이상 갱신이 안 된 종목만 골라 REST로 보완한다. 활발히
         // 거래되는 종목은 웹소켓이 계속 최신 상태로 유지해주므로 이 조건에 걸리지 않아 REST
         // 호출 자체가 안 생긴다.
-        const STALE_THRESHOLD_MS = 15000;
+        // 🎯 인벤토리(등록) 종목과 추천풀(비등록) 종목의 REST 백업 우선순위를 분리 — 예전엔 둘 다
+        // 똑같이 15초 기준으로 취급해서, 추천종목 찾기 후보 30~40개가 인벤토리 종목과 REST 요청
+        // 슬롯을 동등하게 나눠쓰고 있었다. 실제로 실시간 감시가 필요한 건 인벤토리 종목뿐이고,
+        // 추천풀은 "다음에 추천종목 찾기를 누를 때 어느 정도 최신이면 충분"한 수준이라, 훨씬 뜸하게
+        // 갱신해도 무방하다. 등록 종목을 최우선으로 확실히 실시간에 가깝게 유지한다.
+        const STALE_THRESHOLD_MS = 15000;         // 인벤토리(등록) 종목 — 급함, 기존 그대로
+        const CANDIDATE_STALE_THRESHOLD_MS = 120000; // 추천풀(비등록) 종목 — 2분, 훨씬 뜸하게
+        const registeredSymbolsSet = new Set(scalperTabsRef.current.map(t => t.symbol));
         const now = Date.now();
         const currentStocks = stocksRef.current;
         if (currentStocks.length === 0) { console.log('[syncAllPrices 중단] currentStocks 비어있음'); return; }
@@ -6838,9 +6845,10 @@ priceData.current
         const targetStocks = wsConnectionStatusRef.current === 'open'
           ? currentStocks.filter(s => {
               const lastUpdate = lastWsTickAtRef.current[s.symbol] || 0;
-              return now - lastUpdate >= STALE_THRESHOLD_MS;
+              const threshold = registeredSymbolsSet.has(s.symbol) ? STALE_THRESHOLD_MS : CANDIDATE_STALE_THRESHOLD_MS;
+              return now - lastUpdate >= threshold;
             })
-          : currentStocks;
+          : currentStocks.filter(s => registeredSymbolsSet.has(s.symbol)); // 웹소켓 자체가 끊긴 비상 상황에선 인벤토리만이라도 확실히 챙긴다
         console.log('[syncAllPrices 진행]', { 전체종목: currentStocks.length, 대상종목: targetStocks.length, ws상태: wsConnectionStatusRef.current });
         if (targetStocks.length === 0) return;
 
