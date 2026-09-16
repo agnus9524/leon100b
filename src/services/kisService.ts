@@ -2076,6 +2076,7 @@ public async connectWebSocket(
     ws.onopen = () => {
       reconnectAttempts = 0;
       onStatusChange?.('open');
+      console.log('[WS 연결 성공]', { 구독요청종목수: symbols.length, 종목목록: symbols });
       ws.send(JSON.stringify({ type: 'approval', approval_key: approvalKey }));
       for (const symbol of symbols) {
         ws.send(JSON.stringify({ type: 'subscribe', symbol }));

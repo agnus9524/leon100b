@@ -2192,9 +2192,10 @@ export default function App() {
   // 바로 KIS 실제가를 조회해서 정확한 값으로 채운다.
   // ============================================================
   useEffect(() => {
-    if (!kisService.isConfigReady()) return; // 🛡️ kisService.init()이 아직 완료되기 전이면 시도하지 않음
+    if (!kisService.isConfigReady()) { console.log('[인벤토리 시딩 중단] config 준비 안 됨'); return; }
     const missing = scalperTabs.filter(t => !stocksRef.current.some(s => s.symbol === t.symbol));
     if (missing.length === 0) return;
+    console.log('[인벤토리 시딩 진행]', { 누락종목: missing.map(t => t.symbol) });
 
     setStocks(prev => {
       const existing = new Set(prev.map(s => s.symbol));
