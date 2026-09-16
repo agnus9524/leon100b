@@ -1070,77 +1070,175 @@ await this.getDomesticPrice(symbol);
     }
   }
 
-  public async orderDomestic(symbol: string, side: 'BUY' | 'SELL', price: string, qty: string, ordDvsn: string = '00') {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    return this.queueRequest(async () => {
-      const token = await this.getAccessToken();
-      const endpoint = '/uapi/domestic-stock/v1/trading/order-cash';
-      
-      // SLL_TYPE is required for domestic stock sell orders
-      // 01: General Cash Sell
-      // 🛡️ 매우 중요한 추가: EXCG_ID_DVSN_CD(거래소 ID 구분코드)가 그동안 빠져있었다. 정정취소
-      // 함수(reviseDomestic)에는 이미 있었는데 정작 실제 매수/매도 주문에는 없었다 — KIS 공식
-      // 문서가 이 필드를 필수로 요구하고 있고, 특히 이제 KRX/NXT 복수 거래소 체제가 되면서 이
-      // 필드 없이는 주문이 어느 거래소로 가는지 불명확해질 수 있다. KRX를 명시적으로 지정한다.
-      const body: any = {
-        CANO: this.config.accountNo,
-        ACNT_PRDT_CD: this.config.accountCode,
-        PDNO: symbol,
-        ORD_DVSN: ordDvsn, // 00 for Limit, 01 for Market
-        ORD_QTY: qty,
-        ORD_UNPR: ordDvsn === '01' ? '0' : price,
-        EXCG_ID_DVSN_CD: getExchangeIdForOrder(),
-        CNDT_PRIC: '', // 조건가격 — 일반 지정가/시장가 주문에서는 사용하지 않음
-      };
+  public async orderDomestic(
+  symbol: string,
+  side: 'BUY' | 'SELL',
+  price: string,
+  qty: string,
+  ordDvsn: string = '00'
+) {
+  if (!this.config) {
+    throw new Error("KIS Config not initialized");
+  }
 
-      if (side === 'SELL') {
-        body.SLL_TYPE = '01'; // Default to 01 (General Cash Sell)
-      }
+  const token = await this.getAccessToken();
+  const endpoint = '/uapi/domestic-stock/v1/trading/order-cash';
 
-      const hashkey = await this.getHashKey(body);
+  const body: any = {
+    CANO: this.config.accountNo,
+    ACNT_PRDT_CD: this.config.accountCode,
+    PDNO: symbol,
+    ORD_DVSN: ordDvsn,
+    ORD_QTY: qty,
+    ORD_UNPR: ordDvsn === '01' ? '0' : price,
+    EXCG_ID_DVSN_CD: getExchangeIdForOrder(),
+    CNDT_PRIC: '',
+  };
 
-      // 🔄 두 개의 독립적인 소스(공식 API 문서 api.xlsx, C# 참고 구현)가 모두 매수 TTTC0012U /
-      // 매도 TTTC0011U를 가리키고 있어서 다시 이 값으로 변경한다. 지난 테스트 때는 ODNO(진짜
-      // 주문번호) 검증 로직이 아직 없어서 실패 원인이 불명확했는데, 이제는 있으므로 이번엔
-      // 성공/실패가 로그에 명확하게 남는다.
-      const trId =
-  side === 'BUY'
-    ? 'TTTC0012U'
-    : 'TTTC0011U';
+  if (side === 'SELL') {
+    body.SLL_TYPE = '01';
+  }
 
-      const headers = {
-        'content-type': 'application/json',
-        'authorization': `Bearer ${token}`,
-        'appkey': this.config.appKey,
-        'appsecret': this.config.appSecret,
-        'tr-id': trId,
-        'hashkey': hashkey,
-        'custtype': 'P',
-      };
-
-console.log(
-  '[KIS BUY SEND]',
-  {
+  console.log('[KIS ORDER STEP 1 - 주문 준비]', {
     symbol,
+    side,
     qty,
     price,
     ordDvsn,
-    side
-  }
-);
+    exchange: body.EXCG_ID_DVSN_CD
+  });
 
+  // ------------------------------------------------------------
+  // STEP 2. Hashkey 발급
+  // 중요:
+  // orderDomestic 전체를 queueRequest로 감싸지 않는다.
+  // getHashKey 자체가 queueRequest를 사용하기 때문이다.
+  // ------------------------------------------------------------
+  const hashkey = await this.getHashKey(body);
 
-
-      const res = await axios.post(`${this.baseUrl}${endpoint}`, body, { headers });
-      if (res.data.rt_cd && res.data.rt_cd !== '0') {
-        if (res.data.msg_cd === 'EGW00201' || res.data.msg1?.includes('초당 거래건수')) {
-          throw new Error(`[429] ${res.data.msg1}`);
-        }
-        throw new Error(`국내 주문 실패: ${res.data.msg1} (${res.data.msg_cd})`);
-      }
-      return res.data;
+  if (!hashkey) {
+    console.error('[KIS ORDER STEP 2 FAILED - HASHKEY 없음]', {
+      symbol,
+      side,
+      body
     });
+
+    throw new Error('KIS Hashkey 발급 실패 — 주문을 전송하지 않았습니다.');
   }
+
+  console.log('[KIS ORDER STEP 2 - HASHKEY 발급 완료]', {
+    symbol,
+    side,
+    hashkeyReceived: true
+  });
+
+  // ------------------------------------------------------------
+  // STEP 3. 실전 주문 TR-ID
+  // ------------------------------------------------------------
+  const trId =
+    side === 'BUY'
+      ? 'TTTC0012U'
+      : 'TTTC0011U';
+
+  const headers = {
+    'content-type': 'application/json',
+    'authorization': `Bearer ${token}`,
+    'appkey': this.config.appKey,
+    'appsecret': this.config.appSecret,
+    'tr-id': trId,
+    'hashkey': hashkey,
+    'custtype': 'P',
+  };
+
+  console.log('[KIS ORDER STEP 3 - 실제 주문 API 전송]', {
+    symbol,
+    side,
+    trId,
+    qty,
+    price,
+    ordDvsn
+  });
+
+  // ------------------------------------------------------------
+  // STEP 4. 실제 주문 API만 큐에 넣는다.
+  // ------------------------------------------------------------
+  const res = await this.queueRequest<any>(() =>
+    axios.post(
+      `${this.baseUrl}${endpoint}`,
+      body,
+      { headers }
+    )
+  );
+
+  const data = res.data;
+
+  console.log('[KIS ORDER STEP 4 - RAW 응답]', {
+    symbol,
+    side,
+    trId,
+    httpStatus: res.status,
+    rt_cd: data?.rt_cd,
+    msg_cd: data?.msg_cd,
+    msg1: data?.msg1,
+    output: data?.output,
+    output1: data?.output1
+  });
+
+  // ------------------------------------------------------------
+  // STEP 5. KIS API 자체 실패
+  // ------------------------------------------------------------
+  if (data?.rt_cd !== '0') {
+    const msg = data?.msg1 || 'KIS 주문 실패';
+    const code = data?.msg_cd || '';
+
+    console.error('[KIS ORDER FAILED]', {
+      symbol,
+      side,
+      trId,
+      rt_cd: data?.rt_cd,
+      msg_cd: code,
+      msg1: msg
+    });
+
+    throw new Error(`국내 주문 실패: ${msg} (${code})`);
+  }
+
+  // ------------------------------------------------------------
+  // STEP 6. 반드시 주문번호 확인
+  // ------------------------------------------------------------
+  const rawOdno =
+    data?.output?.ODNO ??
+    data?.output?.odno ??
+    data?.output1?.ODNO ??
+    data?.output1?.odno;
+
+  const odno = rawOdno
+    ? String(rawOdno).trim()
+    : '';
+
+  if (!odno) {
+    console.error('[KIS ORDER ACCEPT UNKNOWN - ODNO 없음]', {
+      symbol,
+      side,
+      trId,
+      response: data
+    });
+
+    throw new Error(
+      `KIS API는 성공 응답을 반환했지만 주문번호(ODNO)가 없습니다. 실제 주문 접수 여부를 확인할 수 없습니다.`
+    );
+  }
+
+  console.log('[KIS ORDER ACCEPTED - 실제 주문접수 확인]', {
+    symbol,
+    side,
+    trId,
+    ODNO: odno,
+    ORD_TMD: data?.output?.ORD_TMD || data?.output?.ord_tmd
+  });
+
+  return data;
+}
 
   public async cancelDomesticOrder(orgNo: string, ordNo: string, qty: string, ordDvsn: string = '00') {
     return this.reviseDomestic(orgNo, ordNo, qty, "0", '02', ordDvsn);
