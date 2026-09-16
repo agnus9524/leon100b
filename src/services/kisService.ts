@@ -2090,6 +2090,13 @@ public async connectWebSocket(
 
     ws.onmessage = (event) => {
       const raw = String(event.data);
+      // 🔍 진단 1단계: 원시 메시지 자체가 도착하는지 확인 — 이게 하나도 안 찍히면 웹소켓 수신
+      // 자체가 멈춘 것이고, 이건 찍히는데 [WS TICK 정상]이 없으면 parseTick()이 거부하고 있다는
+      // 뜻이다. 스팸 방지로 200ms에 한 번만 찍는다(내용 확인이 목적이라 매번 찍을 필요는 없음).
+      if (!(KISService as any)._lastRawLogAt || Date.now() - (KISService as any)._lastRawLogAt >= 200) {
+        (KISService as any)._lastRawLogAt = Date.now();
+        console.log('[WS RAW]', raw.slice(0, 200));
+      }
       // 🛡️ 매우 중요한 추가: 서버가 보내는 "KIS 실제 연결 상태" 메시지를 먼저 확인한다 —
       // 프록시 서버와의 연결(ws.onopen)과 프록시가 KIS와 실제로 연결됐는지는 완전히 별개다.
       // 이 메시지가 없으면 프록시가 KIS와 끊긴 상태에서도 클라이언트는 "연결됨"으로 착각할 수 있다.

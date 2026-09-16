@@ -1796,6 +1796,12 @@ export default function App() {
   const [scalperInventory, setScalperInventory] = useState<ScalperInventoryItem[]>(
     () => migrateLegacyTabsToInventory(buildInitialScalperTabs())
   );
+  // 🎯 웹소켓 틱 핸들러가 참조할 최신 인벤토리 스냅샷 — stocks 배열 존재 여부와 무관하게, 인벤토리
+  // 자체의 데이터(이름/현재가 등)를 직접 기반으로 삼기 위함. state 대신 ref를 쓰는 이유는 틱마다
+  // 클로저 안에서 최신값을 즉시 읽어야 하는데(리렌더를 기다릴 수 없음) effect 의존성 배열 재구성
+  // 없이도 항상 최신을 보장하기 위함이다.
+  const scalperInventoryRef = React.useRef(scalperInventory);
+  useEffect(() => { scalperInventoryRef.current = scalperInventory; }, [scalperInventory]);
 
   // symbol 하나에 대해 (기존 flat ScalperTab 필드명 기준) 부분 업데이트를 수행하는 공용 헬퍼.
   // 필드 이름을 보고 자동으로 올바른 네임스페이스에만 쓴다. 기존 엔진 루프 호출부는 수정할 필요가 없다.
@@ -2072,20 +2078,36 @@ export default function App() {
             lastSensorCalcRef.current[tick.symbol] = nowForSensor;
 
             const nowLabelForHistory = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            const oldLiveHistory = liveHistoryRef.current[tick.symbol] || stocksRef.current.find(s => s.symbol === tick.symbol)?.history || [];
+            // 🛡️ 매우 중요한 수정: 예전엔 stocksRef.current에서 못 찾으면(=stocks 배열에 그 종목이
+            // 없으면) history 폴백도, 아래 baseStock도 전부 실패해서 그 종목은 센서 계산 자체가
+            // 통째로 스킵되고 있었다 — 실제로 인벤토리 12종목 중 일부가 stocks 배열에 없는 경우가
+            // 확인됐다(등록/초기화 타이밍에 따라 발생 가능). 이제 stocks 존재 여부를 필수조건으로
+            // 두지 않는다 — 인벤토리 아이템 자체(scalperInventoryRef)가 이미 이름/현재가 등 기본
+            // 정보를 갖고 있으므로, stocks는 있으면 보강(enrichment)에만 쓰고 없어도 문제없다.
+            const oldLiveHistory = liveHistoryRef.current[tick.symbol]
+              || stocksRef.current.find(s => s.symbol === tick.symbol)?.history
+              || [];
             const newLiveHistory = [...oldLiveHistory.slice(-599), { time: nowLabelForHistory, price: tick.price, timestamp: nowForSensor }];
             liveHistoryRef.current[tick.symbol] = newLiveHistory;
 
+            const inventoryItem = scalperInventoryRef.current.find(item => item.symbol === tick.symbol);
             const baseStock = stocksRef.current.find(s => s.symbol === tick.symbol);
-            if (baseStock) {
-              // 이 틱까지 반영한 최신 정보로 임시 Stock 객체를 만들어서 전략을 계산한다 —
-              // 100ms 배치를 기다리지 않고 "지금 이 틱 기준"으로 바로 판단한다.
+            // 인벤토리에 등록된 종목이 아니면(추천풀 등) 이 로직 자체가 불필요 — 인벤토리 우선이라는
+            // 원칙에 맞춰, 인벤토리에 없는 종목은 여기서 처리하지 않는다(REST 백업이 담당).
+            if (inventoryItem) {
+              const isUS = /^[A-Za-z]/.test(tick.symbol);
+              // 이 틱까지 반영한 최신 정보로 임시 Stock 객체를 만들어서 전략을 계산한다 — stocks에
+              // 있으면 그 정보(이름 등)로 보강하고, 없으면 인벤토리 자체 정보만으로 구성한다.
               const liveStockForStrategy: Stock = {
-                ...baseStock,
+                symbol: tick.symbol,
+                name: baseStock?.name || inventoryItem.name,
                 price: tick.price,
+                change: tick.change,
                 changePercent: tick.changePercent,
-                executionStrength: tick.executionStrength !== undefined ? tick.executionStrength : baseStock.executionStrength,
+                volume: tick.volume,
+                executionStrength: tick.executionStrength !== undefined ? tick.executionStrength : baseStock?.executionStrength,
                 history: newLiveHistory,
+                market: baseStock?.market || (isUS ? 'US' : 'KR'),
               };
               const strat = detectStockStrategiesRef.current(liveStockForStrategy);
               const roundedRsi = Math.round(strat.rsi);
