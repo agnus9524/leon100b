@@ -926,7 +926,7 @@ interface NewsItem {
 //   20(전체종목) + T/2000(선택종목) + T/5000(호가) 건
 // 이걸 600ms×건수로 처리하는 시간이 T보다 작아야 밀리지 않는다: (20 + 0.3T/1000 + 0.12T/1000)×600 ≤ T
 // → T ≥ 약 20.7초. 여유를 두어 25초로 설정했다 (아래 syncAllPrices 주기 참고).
-const MAX_INVENTORY_PER_MARKET = 6;
+const MAX_INVENTORY_PER_MARKET = 12; // 🔼 6→12로 확대 — 웹소켓 구독(종목당 2개)/센서계산(3초 주기 로컬연산) 모두 이 정도 증가는 무리 없는 수준으로 판단됨
 
 const INITIAL_STOCKS_KR: Stock[] = [
   {
@@ -5108,10 +5108,12 @@ setGapInventory(nextInv);
               ...r,
               dataSource: 'RANKING_API' as const,
               dataAgeSeconds: 0,
-              // 🎯 예전엔 목표가/손절가가 가격×1.02 / 가격×0.985라는 고정 공식이었는데, 이건 실제
-              // 사용자가 설정한 목표수익/손절 값과 무관했다. 이제 실제 설정값을 그대로 반영한다.
-              targetPrice: Math.round(r.price * (1 + scalpingTargetProfit / 100)),
-              stopLoss: Math.round(r.price * (1 + scalpingStopLoss / 100)),
+              // 🎯 예전엔 목표가/손절가가 가격×(1+비율)이라는 단순 계산이라 세금·수수료가 전혀
+              // 반영 안 됐다. 이제 실제 매매 엔진이 손절/익절 판단에 쓰는 것과 동일한 함수
+              // (calcTargetSellPriceByNetProfit)를 그대로 써서, 매수수수료+매도수수료+매도세금을
+              // 다 제하고도 목표 순수익률을 정확히 달성하는 가격을 보여준다.
+              targetPrice: calcTargetSellPriceByNetProfit(r.price, scalpingTargetProfit, 'KR'),
+              stopLoss: calcTargetSellPriceByNetProfit(r.price, scalpingStopLoss, 'KR'),
               expectedReturn: scalpingTargetProfit,
             }));
         }
@@ -5142,8 +5144,8 @@ setGapInventory(nextInv);
               ...r,
               dataSource: 'TRACKED_POOL' as const,
               dataAgeSeconds: ageSeconds,
-              targetPrice: Math.round(r.price * (1 + scalpingTargetProfit / 100)),
-              stopLoss: Math.round(r.price * (1 + scalpingStopLoss / 100)),
+              targetPrice: calcTargetSellPriceByNetProfit(r.price, scalpingTargetProfit, 'KR'),
+              stopLoss: calcTargetSellPriceByNetProfit(r.price, scalpingStopLoss, 'KR'),
               expectedReturn: scalpingTargetProfit,
             };
           });
