@@ -1922,7 +1922,75 @@ export default function App() {
   // 🕐 종목별 마지막 웹소켓 tick 수신 시각 — syncAllPrices가 "오래 갱신 안 된 종목"을 골라
   // REST로 보완할 때 이 값을 기준으로 판단한다.
   const lastWsTickAtRef = React.useRef<Record<string, number>>({});
+  // 🛡️ 틱 수신과 화면 렌더링을 분리하기 위한 임시 저장소 — 매 틱마다 여기 즉시 쓰고, 별도의
+  // 100ms 배치 effect가 이걸 한 번에 stocks/scalperInventory에 반영한다.
+  const liveTickRef = React.useRef<Record<string, {
+    price: number;
+    change: number;
+    changePercent: number;
+    volume: string;
+    executionStrength?: number;
+    buyVolume?: number;
+    sellVolume?: number;
+    timestamp: number;
+  }>>({});
+  const lastTickLogRef = React.useRef<number>(0); // [WS TICK] 진단 로그를 1초에 한 번만 찍기 위한 타임스탬프
   useEffect(() => { wsConnectionStatusRef.current = wsConnectionStatus; }, [wsConnectionStatus]);
+
+  // 🛡️ liveTickRef → stocks/scalperInventory 배치 반영 (100ms 주기) — 틱 수신 자체는 위에서
+  // ref에만 즉시 쓰고 렌더링을 유발하지 않으니, 실제 화면/매매판단용 상태 반영은 여기서 한 번에
+  // 처리한다. history는 여전히 최대 600개까지 유지한다 — 5분 전고점(돌파 판정)을 계산하려면
+  // 실제 timestamp 기준으로 5분치 샘플이 필요하기 때문에, 이 부분은 줄이지 않는다. 다만 이제
+  // 이 계산 자체가 틱마다(초당 수십 회)가 아니라 100ms에 한 번만 일어나므로 부담이 크게 준다.
+  useEffect(() => {
+    const batchInterval = setInterval(() => {
+      const pending = liveTickRef.current;
+      const symbols = Object.keys(pending);
+      if (symbols.length === 0) return;
+      liveTickRef.current = {}; // 이번 배치에서 처리할 것만 꺼내고 즉시 비움 — 다음 100ms엔 새로 쌓인 것만 처리
+
+      const nowLabel = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+      setStocks(prev => prev.map(s => {
+        const tick = pending[s.symbol];
+        if (!tick) return s;
+        const oldHistory = Array.isArray(s.history) ? s.history : [];
+        const newHistory = [...oldHistory.slice(-599), { time: nowLabel, price: tick.price, timestamp: tick.timestamp }];
+        const realCvd = (tick.buyVolume !== undefined && tick.sellVolume !== undefined)
+          ? tick.buyVolume - tick.sellVolume
+          : s.realCvd;
+        return {
+          ...s,
+          price: tick.price,
+          change: tick.change,
+          changePercent: tick.changePercent,
+          volume: tick.volume,
+          executionStrength: tick.executionStrength !== undefined ? tick.executionStrength : s.executionStrength,
+          realCvd,
+          isRealTime: true,
+          history: newHistory,
+          lastUpdated: nowLabel
+        };
+      }));
+
+      setScalperInventory(prev => prev.map(item => {
+        const tick = pending[item.symbol];
+        if (!tick || tick.price <= 0) return item;
+        return {
+          ...item,
+          market: {
+            ...item.market,
+            currentPrice: tick.price,
+            changePercent: tick.changePercent || 0,
+            priceStatus: 'LIVE',
+            lastUpdatedAt: Date.now()
+          }
+        };
+      }));
+    }, 100);
+
+    return () => clearInterval(batchInterval);
+  }, []);
   const registeredSymbolsKeyRaw = scalperTabs.map(t => t.symbol).sort().join(',');
   // 🛡️ 종목이 하나 등록/삭제될 때마다 이 키가 바뀌어서 웹소켓 전체가 끊겼다 재연결되고 있었다.
   // 특히 자동 슬롯 채움이 여러 종목을 연속으로 등록할 때, 종목마다 웹소켓이 재연결되면서
@@ -1953,66 +2021,35 @@ export default function App() {
       .connectWebSocket(
         symbols,
         tick => {
-          // 🔍 웹소켓 "연결됨" 표시와 별개로, 실제로 파싱된 체결 틱이 들어오는지 명확히 확인하는
-          // 진단 로그 — 만약 이 로그가 안 뜬다면 연결 자체는 됐지만 실제 데이터는 전혀 안 오고
-          // 있다는 뜻이니, syncAllPrices의 25초 REST 백업이 사실상 유일한 데이터 소스가 된다.
-          console.log('[WS TICK 수신]', tick.symbol, tick.price, new Date().toLocaleTimeString('ko-KR'));
+          // 🛡️ 매우 중요한 성능 개선: 예전엔 틱 하나가 들어올 때마다 setStocks/setScalperInventory를
+          // 즉시 호출해서, 초당 수십 틱이 오면 그만큼 전체 React 리렌더링이 반복됐다(각 렌더마다
+          // stocks 배열 전체를 map하고 history를 최대 600개까지 복사). 이제 틱은 liveTickRef에만
+          // 즉시 저장하고, 실제 화면 반영(및 그 안의 history 계산)은 아래 별도 useEffect가 100ms
+          // 주기로 한 번에 처리한다 — "틱 수신"과 "화면 갱신"을 분리해서 메인 스레드 부담을 크게
+          // 줄인다. 매매 판단에 쓰이는 stocks 값 자체는 최대 100ms 지연일 뿐이라 스캘핑 판단에
+          // 실질적인 영향은 없다.
+          liveTickRef.current[tick.symbol] = {
+            price: tick.price,
+            change: tick.change,
+            changePercent: tick.changePercent,
+            volume: tick.volume,
+            executionStrength: tick.executionStrength,
+            buyVolume: tick.buyVolume,
+            sellVolume: tick.sellVolume,
+            timestamp: Date.now()
+          };
+
+          // 🔍 진단 로그는 1초에 한 번만 — 틱마다 찍으면(초당 수십 회) 콘솔 출력 자체가 메인
+          // 스레드를 바쁘게 만들 수 있다. 틱 자체는 위에서 전부 처리되고 있으니 로그만 줄인다.
+          const nowForLog = Date.now();
+          if (nowForLog - lastTickLogRef.current >= 1000) {
+            console.log('[WS TICK 정상]', tick.symbol, tick.price, new Date().toLocaleTimeString('ko-KR'));
+            lastTickLogRef.current = nowForLog;
+          }
 
           // 🕐 이 종목이 방금 웹소켓으로 갱신됐다는 걸 기록 — syncAllPrices가 "오래 갱신 안 된
-          // 종목"만 REST로 보완할 때 이 시각을 기준으로 판단한다.
+          // 종목"만 REST로 보완할 때 이 시각을 기준으로 판단한다. 가벼운 연산이라 즉시 처리해도 무방.
           lastWsTickAtRef.current[tick.symbol] = Date.now();
-
-          // 🔄 웹소켓 실시간 체결 틱을 REST 폴링과 동일한 필드에 반영한다.
-          // REST 폴링(syncAllPrices/syncSelectedPrice)은 그대로 계속 동작하는 백업이고,
-          // 웹소켓이 연결되어 있을 때는 이 틱이 훨씬 더 빠르게(초 단위가 아니라 체결 즉시) 값을
-          // 갱신해준다 — 매매 판단(점수제, RSI 복합조건 등)이 참조하는 값이 바로 이 stocks이므로,
-          // 추가 배선 없이 기존 엔진 전체가 자동으로 더 실시간에 가까워진다.
-          // 🛡️ 매우 중요한 수정: 예전엔 여기서 price만 갱신하고 history는 전혀 안 늘리고 있었다.
-          // 웹소켓이 연결되어 있으면 REST 백업(syncAllPrices)이 스킵되므로, 이 틱 핸들러가
-          // history를 안 늘리면 선택 안 한 종목들의 history가 영원히 고정되어 RSI/이동평균/VWAP
-          // 등 전략센서가 실제 추세를 전혀 반영하지 못하는 원인이 되고 있었다. refreshInventoryItem과
-          // 동일한 방식으로 매 틱마다 실제 가격을 이력에 누적한다.
-          setStocks(prev => prev.map(s => {
-            if (s.symbol !== tick.symbol) return s;
-            const nowLabel = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-            const nowTs = Date.now();
-            const oldHistory = Array.isArray(s.history) ? s.history : [];
-            const newHistory = [...oldHistory.slice(-599), { time: nowLabel, price: tick.price, timestamp: nowTs }];
-            // 🎯 진짜 CVD(매수체결량 누적 - 매도체결량 누적) — KIS가 이미 누적치를 주므로 그대로 뺄셈.
-            // 둘 다 유효한 값일 때만 계산하고, 아니면 기존 값을 유지(필드 인덱스가 실제와 다르면
-            // undefined로 남아 조용히 무시됨 — 앞서 심어둔 진단 로그로 실제 인덱스 검증 가능).
-            const realCvd = (tick.buyVolume !== undefined && tick.sellVolume !== undefined)
-              ? tick.buyVolume - tick.sellVolume
-              : s.realCvd;
-            return {
-              ...s,
-              price: tick.price,
-              change: tick.change,
-              changePercent: tick.changePercent,
-              volume: tick.volume,
-              executionStrength: tick.executionStrength !== undefined ? tick.executionStrength : s.executionStrength,
-              realCvd,
-              isRealTime: true,
-              history: newHistory,
-              lastUpdated: nowLabel
-            };
-          }));
-
-          // 🛡️ syncAllPrices와 동일한 이유로, 웹소켓 틱도 scalperInventory의 market 네임스페이스를
-          // 함께 갱신한다 — 안 그러면 웹소켓이 연결된 동안(syncAllPrices가 스킵되는 상황)에는
-          // 선택 안 한 종목들의 scalperInventory 가격이 전혀 갱신되지 않는다.
-          if (tick.price > 0) {
-            setScalperInventory(prev => prev.map(item => item.symbol === tick.symbol ? {
-              ...item,
-              market: {
-                ...item.market,
-                currentPrice: tick.price,
-                changePercent: tick.changePercent || 0,
-                priceStatus: 'LIVE',
-                lastUpdatedAt: Date.now()
-              }
-            } : item));
-          }
         },
         status => {
           if (!cancelled) setWsConnectionStatus(status);
