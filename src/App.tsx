@@ -1935,6 +1935,14 @@ export default function App() {
     timestamp: number;
   }>>({});
   const lastTickLogRef = React.useRef<Record<string, number>>({}); // [WS TICK] 진단 로그를 종목별로 각각 1초에 한 번만 찍기 위한 타임스탬프 — 예전엔 전체가 하나의 타이머를 공유해서, 한 종목의 로그가 다른 종목들의 로그까지 억제하는 문제가 있었음
+  // 🎯 틱 기반 종목별 센서 즉시 계산에 쓰는 경량 이력 — React state(stocks[].history, 100ms 배치로만
+  // 갱신됨)와 별개로, 틱이 오는 즉시(ref라 렌더링 없음) 갱신해서 "이 틱까지 포함한" 최신 이력으로
+  // 센서를 계산할 수 있게 한다. 최대 600개 유지(5분 전고점 계산과 동일한 기준).
+  const liveHistoryRef = React.useRef<Record<string, { time: string; price: number; timestamp: number }[]>>({});
+  // 🎯 종목별 마지막 센서 계산 시각 — 매 틱마다 무조건 재계산하면 활발한 종목(초당 수십 틱)에서
+  // CPU 부담이 커질 수 있어, 종목당 최소 200ms 간격으로 스로틀한다. 그래도 기존 1초 전체 순회
+  // 방식보다는 훨씬 반응성이 좋고, 그 종목만 계산하니 다른 종목에 영향도 없다.
+  const lastSensorCalcRef = React.useRef<Record<string, number>>({});
   useEffect(() => { wsConnectionStatusRef.current = wsConnectionStatus; }, [wsConnectionStatus]);
 
   // 🛡️ liveTickRef → stocks/scalperInventory 배치 반영 (100ms 주기) — 틱 수신 자체는 위에서
@@ -2051,6 +2059,74 @@ export default function App() {
           // 🕐 이 종목이 방금 웹소켓으로 갱신됐다는 걸 기록 — syncAllPrices가 "오래 갱신 안 된
           // 종목"만 REST로 보완할 때 이 시각을 기준으로 판단한다. 가벼운 연산이라 즉시 처리해도 무방.
           lastWsTickAtRef.current[tick.symbol] = Date.now();
+
+          // 🎯 틱 기반 종목별 즉시 센서 계산 — 예전엔 "3초(→1초)마다 등록된 전체 종목을 순회"하는
+          // 방식이라, 가격은 틱 단위로 움직여도 센서(눌림목/VWAP/단기모멘텀/돌파/RSI)는 최대 1초
+          // 지연되어 "체결가는 사는데 센서는 멈춘 것처럼" 보일 수 있었다. 이제 틱이 트리거해서
+          // "이 틱을 받은 종목 하나만" 즉시 재계산한다 — 다른 종목들은 건드리지 않아 효율적이다.
+          // 다만 매 틱마다 무조건 계산하면 활발한 종목(초당 수십 틱)에서 부담이 커질 수 있어
+          // 종목당 최소 200ms 간격으로 스로틀한다. 기존 1초 전체 순회는 안전망으로 그대로 둔다
+          // (틱이 뜸한 저유동성 종목이나, 이 로직이 놓친 경우를 보완).
+          const nowForSensor = Date.now();
+          if (nowForSensor - (lastSensorCalcRef.current[tick.symbol] || 0) >= 200) {
+            lastSensorCalcRef.current[tick.symbol] = nowForSensor;
+
+            const nowLabelForHistory = new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            const oldLiveHistory = liveHistoryRef.current[tick.symbol] || stocksRef.current.find(s => s.symbol === tick.symbol)?.history || [];
+            const newLiveHistory = [...oldLiveHistory.slice(-599), { time: nowLabelForHistory, price: tick.price, timestamp: nowForSensor }];
+            liveHistoryRef.current[tick.symbol] = newLiveHistory;
+
+            const baseStock = stocksRef.current.find(s => s.symbol === tick.symbol);
+            if (baseStock) {
+              // 이 틱까지 반영한 최신 정보로 임시 Stock 객체를 만들어서 전략을 계산한다 —
+              // 100ms 배치를 기다리지 않고 "지금 이 틱 기준"으로 바로 판단한다.
+              const liveStockForStrategy: Stock = {
+                ...baseStock,
+                price: tick.price,
+                changePercent: tick.changePercent,
+                executionStrength: tick.executionStrength !== undefined ? tick.executionStrength : baseStock.executionStrength,
+                history: newLiveHistory,
+              };
+              const strat = detectStockStrategiesRef.current(liveStockForStrategy);
+              const roundedRsi = Math.round(strat.rsi);
+
+              setScalperInventory(prev => {
+                const idx = prev.findIndex(item => item.symbol === tick.symbol);
+                if (idx === -1) return prev; // 이 종목이 인벤토리에 없으면(추천풀 등) 건드리지 않음
+                const item = prev[idx];
+                const cur = item.sensors;
+                // 센서 값 자체가 안 바뀌었으면(그리고 RSI도 정수 단위로 안 바뀌었으면) 불필요한
+                // 리렌더링을 피한다 — 다만 lastUpdatedAt은 갱신해서 "살아있다"는 걸 반영한다.
+                const sensorsUnchanged =
+                  cur.pullback === strat.isPullback &&
+                  cur.breakout === strat.isBreakout &&
+                  cur.vwap === strat.isVwapSupport &&
+                  cur.cvd === strat.isVolumeProfile &&
+                  cur.shortTermMomentum === strat.momentumPositive &&
+                  cur.volumeMomentum === strat.hasVolumeMomentum &&
+                  cur.rsi === roundedRsi &&
+                  cur.activeCount === strat.activeCount;
+                if (sensorsUnchanged) return prev;
+
+                const next = [...prev];
+                next[idx] = {
+                  ...item,
+                  sensors: {
+                    pullback: strat.isPullback,
+                    breakout: strat.isBreakout,
+                    vwap: strat.isVwapSupport,
+                    cvd: strat.isVolumeProfile,
+                    shortTermMomentum: strat.momentumPositive,
+                    volumeMomentum: strat.hasVolumeMomentum,
+                    rsi: roundedRsi,
+                    activeCount: strat.activeCount,
+                    lastUpdatedAt: nowForSensor
+                  }
+                };
+                return next;
+              });
+            }
+          }
         },
         status => {
           if (!cancelled) setWsConnectionStatus(status);
@@ -2921,6 +2997,12 @@ setGapInventory(nextInv);
 
     return { isPullback, isBreakout, isVwapSupport, isVolumeProfile, activeCount, rsi, sma5, sma20, vwap, poc, cvd: priceDirection, isBullishAbsorption, isBearishAbsorption, bb, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice, hasVolumeMomentum, recentPeak, hasRecentPriceMovement };
   }, [marketType]);
+
+  // 🎯 웹소켓 연결 effect(이 함수보다 먼저 선언됨)가 항상 최신 detectStockStrategies를 안전하게
+  // 참조할 수 있도록 ref로 캐싱한다 — effect의 dependency 배열에 넣으면 이 함수가 바뀔 때마다
+  // 웹소켓이 재연결되어 버리므로, ref를 통한 간접 참조로 그 부작용 없이 최신 함수를 쓴다.
+  const detectStockStrategiesRef = React.useRef(detectStockStrategies);
+  useEffect(() => { detectStockStrategiesRef.current = detectStockStrategies; }, [detectStockStrategies]);
 
   // ============================================================
   // 🎯 매수 점수제 (Buy Scoring System)
