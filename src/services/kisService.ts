@@ -1626,84 +1626,77 @@ await this.getDomesticPrice(symbol);
     
     // Official KIS TR-ID for domestic price inquiry (FHKST01010100 is valid for both Real and Virtual accounts)
     const trId = 'FHKST01010100';
-    const maxRetries = 5;
-    let lastError = null;
 
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      // 🛡️ 전역 429 쿨다운 중이면 이 종목 재시도도 그 시각까지 같이 기다린다
-      const cooldownRemaining = this.globalRateLimitCooldownUntil - Date.now();
-      if (cooldownRemaining > 0) {
-        await new Promise(resolve => setTimeout(resolve, cooldownRemaining));
+    const headers = {
+      'content-type': 'application/json',
+      'authorization': `Bearer ${token}`,
+      'appkey': this.config.appKey,
+      'appsecret': this.config.appSecret,
+      'tr-id': trId,
+      'custtype': 'P',
+    };
+
+    const params = {
+      FID_COND_MRKT_DIV_CODE: marketCode,
+      FID_INPUT_ISCD: symbol
+    };
+
+    try {
+      // 🛡️ 매우 중요한 수정: 예전엔 여기서 자체적으로 "직전 요청 이후 충분히 지났는지"를
+      // this.lastRequestTime과 비교해서 체크했는데, 이건 진짜 직렬 큐가 아니라 그냥 타임스탬프
+      // 비교라서 경쟁조건이 있었다 — 여러 종목이 Promise.all로 동시에 이 함수를 호출하면
+      // (syncAllPrices가 정확히 이렇게 한다), 전부 거의 동시에 this.lastRequestTime을 읽어서
+      // "기다릴 필요 없다"고 착각하고 한꺼번에 요청을 쏠 수 있었다. 이제 실제 axios 호출을
+      // queueRequest(진짜 직렬 .then() 체인, 순서와 최소간격을 확실히 보장)로 감싸서, 동시에
+      // 몇 개를 호출하든 실제로는 하나씩 순서대로 처리되게 한다.
+      // 🛡️ 또한 예전엔 429/서버오류 시 최대 5번, 2s→4s→8s→15s→30s로 누적 최악 59초까지
+      // 재시도하며 물고 늘어졌다 — 그동안 이 직렬 큐 전체가 이 한 종목 때문에 막혀서 다른 모든
+      // 종목의 조회까지 함께 지연됐다. 이제 재시도하지 않고 실패 시 즉시 포기한다(아래 참고) —
+      // 이 종목은 다음 syncAllPrices 사이클에 자연스럽게 다시 시도된다.
+      const res = await this.queueRequest<any>(() => axios.get(`${this.baseUrl}${endpoint}`, { headers, params }));
+      
+      if (res.data.rt_cd === '0' && res.data.output) {
+        return res.data.output;
       }
 
-      // Throttle minimum interval between consecutive API requests
-      const now = Date.now();
-      const timeSinceLast = now - this.lastRequestTime;
-      if (timeSinceLast < this.minRequestInterval) {
-        await new Promise(resolve => setTimeout(resolve, this.minRequestInterval - timeSinceLast));
-      }
-      this.lastRequestTime = Date.now();
+      // If not zero code, check if it's a rate limit error or temporary 500 error
+      const lastError = res.data.msg1 || res.data.message || res.data.msg_cd || 'Unknown Error';
 
-      const headers = {
-        'content-type': 'application/json',
-        'authorization': `Bearer ${token}`,
-        'appkey': this.config.appKey,
-        'appsecret': this.config.appSecret,
-        'tr-id': trId,
-        'custtype': 'P',
-      };
+      const isRateLimitOrServerError =
+        typeof lastError === 'string' && (
+          lastError.includes('초당') ||
+          lastError.includes('초과') ||
+          lastError.includes('500') ||
+          lastError.includes('대기') ||
+          lastError.includes('오류') ||
+          res.data.msg_cd === 'EGW00201' ||
+          res.data.msg_cd === 'KIS_PROXY_NOTICE'
+        );
 
-      const params = {
-        FID_COND_MRKT_DIV_CODE: marketCode,
-        FID_INPUT_ISCD: symbol
-      };
-
-      try {
-        const res = await axios.get(`${this.baseUrl}${endpoint}`, { headers, params });
-        
-        if (res.data.rt_cd === '0' && res.data.output) {
-          return res.data.output;
-        }
-        
-        // If not zero code, check if it's a rate limit error or temporary 500 error
-        lastError = res.data.msg1 || res.data.message || res.data.msg_cd || 'Unknown Error';
-        
-        const isRateLimitOrServerError = 
-          typeof lastError === 'string' && (
-            lastError.includes('초당') || 
-            lastError.includes('초과') || 
-            lastError.includes('500') || 
-            lastError.includes('대기') ||
-            lastError.includes('오류') ||
-            res.data.msg_cd === 'EGW00201' || 
-            res.data.msg_cd === 'KIS_PROXY_NOTICE'
-          );
-
-        if (isRateLimitOrServerError && attempt < maxRetries) {
-          const backoff = this.getBackoffDelay(attempt);
-          this.globalRateLimitCooldownUntil = Date.now() + backoff; // 이 종목뿐 아니라 전체 가격 조회를 같이 늦춤
-          console.warn(`[KIS Retry] ${symbol} (시도 ${attempt}/${maxRetries}): ${lastError}. ${backoff}ms 대기 후 자동 재시도... (전체 쿨다운 적용)`);
-          await new Promise(resolve => setTimeout(resolve, backoff));
-          continue;
-        }
-
+      // 🛡️ 매우 중요한 수정: 예전엔 429/서버오류 시 이 함수 안에서 최대 5번, 2s→4s→8s→15s→30s로
+      // 누적 최악 59초까지 재시도하며 물고 늘어졌다. 이 대기 시간 동안 queueRequest(직렬 큐)
+      // 전체가 이 한 종목 때문에 막혀서, 뒤에 줄 선 다른 모든 종목의 조회까지 함께 지연됐다.
+      // 이제 재시도하지 않고 즉시 포기한다 — 짧은 전역 쿨다운(2초)만 설정해서 바로 다음 요청들이
+      // 무의미하게 또 429를 맞는 것만 방지하고, 이 종목 자체는 다음 syncAllPrices 사이클(수십 초
+      // 후)에 자연스럽게 다시 시도되도록 맡긴다.
+      if (isRateLimitOrServerError) {
+        this.globalRateLimitCooldownUntil = Date.now() + 2000;
+        console.warn(`[KIS Rate Limit] ${symbol}: ${lastError} — 재시도하지 않고 즉시 건너뜁니다 (다음 주기에 재시도)`);
+      } else {
         console.warn(`[KIS Service] Domestic Price fetch failed for ${symbol}: ${lastError}`);
-        return null;
-      } catch (error: any) {
-        lastError = error.response?.data?.msg1 || error.message;
-        const status = error.response?.status;
-        if ((status === 500 || status === 429 || (typeof lastError === 'string' && (lastError.includes('초당') || lastError.includes('초과') || lastError.includes('500') || lastError.includes('status code 500')))) && attempt < maxRetries) {
-          const backoff = this.getBackoffDelay(attempt);
-          this.globalRateLimitCooldownUntil = Date.now() + backoff; // 이 종목뿐 아니라 전체 가격 조회를 같이 늦춤
-          console.warn(`[KIS HTTP ${status || 'Error'} Retry] ${symbol} (시도 ${attempt}/${maxRetries}): ${lastError}. ${backoff}ms 대기 후 자동 재시도... (전체 쿨다운 적용)`);
-          await new Promise(resolve => setTimeout(resolve, backoff));
-          continue;
-        }
       }
+      return null;
+    } catch (error: any) {
+      const lastError = error.response?.data?.msg1 || error.message;
+      const status = error.response?.status;
+      if (status === 500 || status === 429 || (typeof lastError === 'string' && (lastError.includes('초당') || lastError.includes('초과') || lastError.includes('500') || lastError.includes('status code 500')))) {
+        this.globalRateLimitCooldownUntil = Date.now() + 2000;
+        console.warn(`[KIS HTTP ${status || 'Error'}] ${symbol}: ${lastError} — 재시도하지 않고 즉시 건너뜁니다 (다음 주기에 재시도)`);
+      } else {
+        console.warn(`[KIS Service] Domestic Price (${trId}) failed for ${symbol}:`, error);
+      }
+      return null;
     }
-    
-    console.warn(`[KIS Service] Domestic Price (${trId}) reached max retries for ${symbol}: ${lastError}`);
-    return null;
   }
 
   public async getDomesticMinuteChart(symbol: string, time: string = '') {

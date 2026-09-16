@@ -4406,66 +4406,14 @@ setGapInventory(nextInv);
     return result;
   }, [holdings]);
 
-  // Auto-fetch real-time price & metadata for any stock in effectiveHoldings continuously
-  useEffect(() => {
-    const heldSymbols = Object.keys(effectiveHoldings);
-    if (heldSymbols.length === 0) return;
+  // 🛡️ 매우 중요한 삭제: 여기 있던 "보유종목 4초 주기 가격조회" useEffect는 syncAllPrices(25초
+  // 주기, 인벤토리 종목 15초/추천풀 2분 우선순위)와 완전히 별개로, 독립적으로 4초마다 보유종목
+  // 전체를 순회하며 REST 조회를 하고 있었다 — 두 함수가 같은 종목에 대해 각각 요청을 날리니
+  // 실제 KIS 요청량이 예상보다 훨씬 많아지고, 이게 429(요청 과다) 발생 위험을 키우는 원인이었다.
+  // 게다가 이 함수는 새 종목을 stocks에 추가할 때 history를 실제 값이 아니라 가짜 랜덤값
+  // (price * (0.98~1.02배))으로 채우고 있었다. syncAllPrices가 이미 stocks 배열 전체(보유종목이
+  // stocks에 있는 한 포함)를 담당하므로 이 중복 루프를 완전히 제거한다.
 
-    let isSubscribed = true;
-
-    const fetchHoldingsPrices = async () => {
-      if (!kisConfig.isConnected) return;
-      for (const sym of heldSymbols) {
-        if (!isSubscribed) break;
-        const isStockUS = /^[A-Za-z]/.test(sym) && !/^\d+$/.test(sym);
-        const market = isStockUS ? 'US' : 'KR';
-        try {
-          const pData = await kisService.getPrice(sym);
-          if (pData && pData.current > 0 && isSubscribed) {
-            const liveName = pData.name || sym;
-            const newStock: Stock = {
-              symbol: sym,
-              name: liveName,
-              price: pData.current,
-              change: pData.change || 0,
-              changePercent: pData.changePercent || 0,
-              volume: String(pData.volume || '0'),
-              history: Array.from({ length: 40 }, (_, i) => ({ 
-                time: `${i}:00`, 
-                price: pData.current * (0.98 + Math.random() * 0.04) 
-              })),
-              market,
-              isAI: false
-            };
-            setStocks(prev => {
-              if (prev.some(s => s.symbol === sym)) {
-                return prev.map(s => s.symbol === sym ? { ...s, price: pData.current, change: pData.change || s.change, changePercent: pData.changePercent || s.changePercent, volume: String(pData.volume || s.volume), name: pData.name || s.name || sym } : s);
-              }
-              return [newStock, ...prev];
-            });
-            setStocksCache(prev => {
-              const list = prev[market] || [];
-              if (list.some(s => s.symbol === sym)) {
-                return { ...prev, [market]: list.map(s => s.symbol === sym ? { ...s, price: pData.current, change: pData.change || s.change, changePercent: pData.changePercent || s.changePercent, volume: String(pData.volume || s.volume), name: pData.name || s.name || sym } : s) };
-              }
-              return { ...prev, [market]: [newStock, ...list] };
-            });
-          }
-        } catch (err) {
-          console.warn(`[Holdings Price Fetch] Error for ${sym}:`, err);
-        }
-        await new Promise(r => setTimeout(r, 200));
-      }
-    };
-
-    fetchHoldingsPrices();
-    const interval = setInterval(fetchHoldingsPrices, 4000);
-
-    return () => {
-      isSubscribed = false;
-      clearInterval(interval);
-    };
-  }, [effectiveHoldings, kisConfig.isConnected]);
 
   const assetAnalysis = useMemo(() => {
     const isUSD = displayCurrency === 'USD';
@@ -6957,15 +6905,21 @@ priceData.current
         console.log('[syncAllPrices 진행]', { 전체종목: currentStocks.length, 대상종목: targetStocks.length, ws상태: wsConnectionStatusRef.current });
         if (targetStocks.length === 0) return;
 
-        const updatedTargets = await Promise.all(targetStocks.map(async (s) => {
+        // 🛡️ 매우 중요한 수정: 예전엔 Promise.all()로 대상 종목 전체에 대해 getPrice()를 동시에
+        // 호출했다. getDomesticPrice() 자체는 이제 queueRequest(진짜 직렬 큐)를 거치므로 실제 축
+        // 요청은 순서대로 처리되지만, 애초에 N개의 호출을 한꺼번에 만들지 않는 게 더 단순하고
+        // 안전하다 — 한 종목씩 순차 처리하면 실패(429 등)가 나도 그 즉시 인지하고 다음 시도로
+        // 넘어갈 수 있고, 굳이 수십 개의 pending promise를 한꺼번에 만들 필요가 없다.
+        const updatedTargets: Stock[] = [];
+        for (const s of targetStocks) {
           try {
             const priceData = await kisService.getPrice(s.symbol);
             console.log(`[getPrice 결과] ${s.symbol}`, priceData);
             if (priceData && priceData.current > 0) {
               const realPrice = priceData.current;
               const safeHist = Array.isArray(s.history) ? s.history : [];
-              
-              return {
+
+              updatedTargets.push({
                 ...s,
                 price: realPrice,
                 change: priceData.change,
@@ -6974,19 +6928,20 @@ priceData.current
                 executionStrength: priceData.executionStrength,
                 isRealTime: true,
                 lastUpdated: new Date().toLocaleTimeString(),
-                history: safeHist.length > 0 
-                  ? [...safeHist.slice(1), { 
-                      time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }), 
-                      price: realPrice 
+                history: safeHist.length > 0
+                  ? [...safeHist.slice(1), {
+                      time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
+                      price: realPrice
                     }]
                   : [{ time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }), price: realPrice }]
-              };
+              });
+              continue;
             }
           } catch (innerErr: any) {
             console.warn(`All-stock price fetch failed for ${s.symbol}:`, innerErr);
           }
-          return { ...s };
-        }));
+          updatedTargets.push({ ...s });
+        }
 
         // 🛡️ updatedTargets는 "이번에 REST로 새로 조회한 일부 종목"만 담고 있다. 나머지(웹소켓으로
         // 이미 최신 상태인) 종목은 그대로 두고, 이번에 갱신된 것만 병합한다.
@@ -9296,6 +9251,21 @@ useEffect(() => {
 
             transitionLifecycleStatus(stockItem.symbol, 'SELL_READY', sellReason);
             if (isSelected) setScalperMessage(`[매도 시그널] ${stockItem.name} ${formatCurrency(weightedAvgPrice)} -> ${formatCurrency(currentPrice)} (${sellReason})`);
+
+            // 🛡️ 매우 중요한 수정: 예전엔 여기서 기존 미체결 매도 주문이 있는지 전혀 확인하지 않고
+            // 무조건 새 매도 주문을 또 냈다. 만약 직전 사이클에서 이미 매도 주문이 나가서 아직
+            // 미체결로 남아있으면(지정가가 아직 안 맞아서 대기 중 등), 그 물량은 이미 그 주문에
+            // 묶여있는데 또 같은 수량을 팔려고 시도해서 "주문 가능한 수량을 초과했습니다"로 거부되고,
+            // 다음 사이클에도 매도 시그널이 그대로 유지되니 계속 반복되는 무한 루프가 있었다.
+            // 손절(위 1번 조건)은 "급하니 기존 주문을 취소하고 즉시 재주문"하는 게 맞지만, 일반
+            // 익절/시그널 매도는 이미 낸 주문이 체결되길 기다리는 게 안전하다 — 굳이 취소하고
+            // 다시 낼 필요가 없다.
+            const existingPendingSells = pendingSellOrdersRef.current.filter(o => o.symbol === stockItem.symbol);
+            if (existingPendingSells.length > 0) {
+              if (isSelected) setScalperMessage(`[매도 대기] ${stockItem.name} 이미 미체결 매도 주문이 있어 체결을 기다립니다`);
+              continue;
+            }
+
             await executeTrade('SELL', stockItem, totalHeldQty, `Profit Max (${stockItem.name}): ${sellReason}`, marketableSellPrice, weightedAvgPrice, undefined, exitReason);
 
             setHighWaterMark(prev => {
@@ -9316,8 +9286,20 @@ useEffect(() => {
     return () => clearInterval(gapInterval);
   }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, marketType, exchangeRate, kisConfig.isConnected, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, entryPriceMode, lowestBidOnlyMode, maxSlots, allowSamePriceEntry, enableCombinedAvgProfitExit, detectStockStrategies]);
 
+  const sellQtyMismatchCooldownRef = React.useRef<Record<string, number>>({}); // 종목별 "수량 불일치로 인한 매도 재시도 쿨다운" 만료 시각
+
   const executeTrade = async (action: 'BUY' | 'SELL' | 'HOLD', stock: Stock, amount: number, reason: string, customPrice?: number, buyPrice?: number, slotId?: string, exitReason?: ExitReason, entryReason?: string): Promise<number> => {
     if (action === 'HOLD' || amount <= 0) return 0;
+
+    // 🛡️ 수량 불일치 쿨다운 체크 — 방금 "주문 가능한 수량을 초과했습니다" 실패를 겪은 종목은,
+    // 계좌 재동기화가 반영될 시간(30초)을 주기 위해 이 기간 동안 매도 재시도를 건너뛴다.
+    // 안 그러면 로컬 holdings가 실제와 다른 채로 계속 같은 실패를 무한 반복하게 된다.
+    if (action === 'SELL') {
+      const cooldownUntil = sellQtyMismatchCooldownRef.current[stock.symbol];
+      if (cooldownUntil && Date.now() < cooldownUntil) {
+        return 0;
+      }
+    }
 
     const tradeLockKey = `${stock.symbol}_${action}`;
     if (pendingTradeKeysRef.current.has(tradeLockKey)) {
@@ -9629,6 +9611,19 @@ useEffect(() => {
                 setBotStatus("[요청 제한] 초당 거래건수 초과 (자동 조절 중)");
                 addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[주문실패] 요청 한도 초과(429) — 이 시도는 취소되었습니다`);
                 showNotification(`요청 한도 초과: 잠시 후 다시 시도합니다.`, "info");
+            } else if (errMsg.includes('APBK0400') || errMsg.includes('주문 가능한 수량') || errMsg.includes('초과했습니다')) {
+                // 🛡️ 매우 중요한 안전장치: "주문 가능한 수량을 초과했습니다"는 로컬에 기록된 보유수량
+                // (holdings)이 실제 KIS 계좌 상태와 어긋나 있다는 신호다 — 이미 다른 경로(수동매도,
+                // 부분체결 등)로 물량이 빠졌는데 로컬은 아직 모르는 상황일 수 있다. 예전엔 이걸 그냥
+                // "통신오류"로 뭉뚱그려서, 다음 엔진 루프에서 또 같은 (틀린) 수량으로 재시도하고,
+                // 또 실패하는 게 무한 반복됐다. 이제 ① 즉시 계좌를 재동기화해서 로컬 holdings를
+                // 실제 값으로 맞추고, ② 이 종목은 30초간 자동 매도 재시도를 쉬게 해서, 재동기화가
+                // 반영될 시간을 준다.
+                setBotStatus(`[수량 불일치] ${stock.symbol} 실제 계좌와 로컬 보유수량이 달라 계좌를 재동기화합니다`);
+                addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[주문실패] 실제 계좌 보유수량과 불일치 — 계좌 재동기화 후 30초간 재시도 대기`);
+                showNotification(`${stock.name}: 계좌 정보 불일치 감지 — 재동기화 중`, "error");
+                sellQtyMismatchCooldownRef.current[stock.symbol] = Date.now() + 30000;
+                if (kisConfig.isConnected) handleSyncKIS();
             } else {
                 setBotStatus("증권사 API 서버 통신 오류");
                 addLog(stock.symbol, action === 'BUY' ? '매수' : '매도', tradePrice, finalAmount, `[주문실패] 증권사 API 통신 오류: ${errMsg}`);
@@ -9637,6 +9632,7 @@ useEffect(() => {
             return 0;
         }
     }
+
 
     const priceInKrw = marketType === 'US' ? tradePrice * exchangeRate : tradePrice; 
     const cost = priceInKrw * finalAmount;
