@@ -1934,7 +1934,7 @@ export default function App() {
     sellVolume?: number;
     timestamp: number;
   }>>({});
-  const lastTickLogRef = React.useRef<number>(0); // [WS TICK] 진단 로그를 1초에 한 번만 찍기 위한 타임스탬프
+  const lastTickLogRef = React.useRef<Record<string, number>>({}); // [WS TICK] 진단 로그를 종목별로 각각 1초에 한 번만 찍기 위한 타임스탬프 — 예전엔 전체가 하나의 타이머를 공유해서, 한 종목의 로그가 다른 종목들의 로그까지 억제하는 문제가 있었음
   useEffect(() => { wsConnectionStatusRef.current = wsConnectionStatus; }, [wsConnectionStatus]);
 
   // 🛡️ liveTickRef → stocks/scalperInventory 배치 반영 (100ms 주기) — 틱 수신 자체는 위에서
@@ -2039,12 +2039,13 @@ export default function App() {
             timestamp: Date.now()
           };
 
-          // 🔍 진단 로그는 1초에 한 번만 — 틱마다 찍으면(초당 수십 회) 콘솔 출력 자체가 메인
-          // 스레드를 바쁘게 만들 수 있다. 틱 자체는 위에서 전부 처리되고 있으니 로그만 줄인다.
+          // 🔍 진단 로그는 종목별로 각각 1초에 한 번만 — 예전엔 전체가 하나의 타이머를 공유해서
+          // 한 종목의 로그가 다른 종목들의 로그를 억제했다. 실제 데이터 처리(liveTickRef 저장)는
+          // 로그와 무관하게 항상 정상적으로 일어난다 — 이건 순수하게 콘솔 출력 빈도만의 문제였다.
           const nowForLog = Date.now();
-          if (nowForLog - lastTickLogRef.current >= 1000) {
+          if (nowForLog - (lastTickLogRef.current[tick.symbol] || 0) >= 1000) {
             console.log('[WS TICK 정상]', tick.symbol, tick.price, new Date().toLocaleTimeString('ko-KR'));
-            lastTickLogRef.current = nowForLog;
+            lastTickLogRef.current[tick.symbol] = nowForLog;
           }
 
           // 🕐 이 종목이 방금 웹소켓으로 갱신됐다는 걸 기록 — syncAllPrices가 "오래 갱신 안 된
@@ -7064,7 +7065,7 @@ priceData.current
     };
 
     refreshAllInventorySensors();
-    const sensorInterval = setInterval(refreshAllInventorySensors, 3000);
+    const sensorInterval = setInterval(refreshAllInventorySensors, 1000); // 🔼 3초→1초 — 가격은 100ms 배치로 반영되는데 센서만 3초 지연되면 체감상 "센서가 늦게 움직인다"는 인상을 줄 수 있어 단축. 다만 100~300ms까지는 종목당 RSI/SMA/VWAP/POC 계산(history 최대 600개 순회)이 다소 무거운 연산이라 부담이 커질 수 있어 1초로 절충
     return () => clearInterval(sensorInterval);
   }, [isAppInitialized, detectStockStrategies]);
 
