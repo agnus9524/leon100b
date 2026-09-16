@@ -515,14 +515,51 @@ return strat.activeCount >= 1;
   }
 
   private async getHashKey(body: any) {
-    if (!this.config) throw new Error("KIS Config not initialized");
-    try {
-      const res = await this.queueRequest<any>(() => axios.post(`${this.baseUrl}/uapi/hashkey`, body, {
-        headers: { 'content-type': 'application/json', 'appkey': this.config!.appKey, 'appsecret': this.config!.appSecret }
-      }));
-      return res.data.HASH || '';
-    } catch { return ''; }
+  if (!this.config) {
+    throw new Error("KIS Config not initialized");
   }
+
+  try {
+    const res = await this.queueRequest<any>(() =>
+      axios.post(
+        `${this.baseUrl}/uapi/hashkey`,
+        body,
+        {
+          headers: {
+            'content-type': 'application/json',
+            'appkey': this.config!.appKey,
+            'appsecret': this.config!.appSecret
+          }
+        }
+      )
+    );
+
+    const hash = res.data?.HASH;
+
+    if (!hash) {
+      console.error('[KIS HASHKEY FAILED]', res.data);
+      throw new Error(
+        `KIS Hashkey 발급 실패: ${res.data?.msg1 || 'HASH 없음'}`
+      );
+    }
+
+    return hash;
+
+  } catch (error: any) {
+    console.error(
+      '[KIS HASHKEY ERROR]',
+      error?.response?.data || error?.message || error
+    );
+
+    throw new Error(
+      `KIS Hashkey 발급 오류: ${
+        error?.response?.data?.msg1 ||
+        error?.message ||
+        '알 수 없는 오류'
+      }`
+    );
+  }
+}
 
   // --- Unified / Router Methods (Main Interface) ---
   // Currently prioritized for Domestic Stocks as requested.
