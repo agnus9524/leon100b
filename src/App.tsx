@@ -2084,48 +2084,50 @@ return additions.length > 0
   : prev;
   });
 
-  // 초기화 이후 누락된 종목만 실제 현재가를 보정한다.
-  missing.forEach(async (t) => {
-    try {
-      if (!currentUser) return;
-      if (!isAppInitialized) return;
+useEffect(() => {
+  if (!currentUser) return;
+  if (!isAppInitialized) return;
+  if (!kisConfig.isConnected) return;
 
-      const priceData = await kisService.getPrice(t.symbol);
+  if (!kisService.isConfigReady()) {
+    console.log('[인벤토리 시딩 중단] KIS config 준비 안 됨');
+    return;
+  }
 
-      if (!currentUser) return;
-      if (!isAppInitialized) return;
+  const missing = scalperTabs.filter(
+    t => !stocksRef.current.some(s => s.symbol === t.symbol)
+  );
 
-      if (priceData && priceData.current > 0) {
-        setStocks(prev =>
-          prev.map(s =>
-            s.symbol === t.symbol
-              ? {
-                  ...s,
-                  price: priceData.current,
-                  change: priceData.change,
-                  changePercent: priceData.changePercent,
-                  volume: priceData.volume,
-                  executionStrength: priceData.executionStrength,
-                  isRealTime: true,
-                  lastUpdated: new Date().toLocaleTimeString(
-                    'ko-KR',
-                    {
-                      hour: '2-digit',
-                      minute: '2-digit',
-                      second: '2-digit'
-                    }
-                  )
-                }
-              : s
-          )
-        );
-      }
-    } catch (err) {
-      console.warn(
-        `[인벤토리 초기 가격 보정] ${t.symbol} 조회 실패`,
-        err
-      );
-    }
+  if (missing.length === 0) return;
+
+  console.log('[인벤토리 시딩 진행]', {
+    누락종목: missing.map(t => t.symbol)
+  });
+
+  setStocks(prev => {
+    const existing = new Set(prev.map(s => s.symbol));
+
+    const additions: Stock[] = missing
+      .filter(t => !existing.has(t.symbol))
+      .map(t => {
+        const isUS = /^[A-Za-z]/.test(t.symbol);
+
+        return {
+          symbol: t.symbol,
+          name: t.name,
+          price: 0,
+          change: 0,
+          changePercent: 0,
+          volume: '0',
+          history: [],
+          market: isUS ? 'US' : 'KR',
+          isAI: false
+        };
+      });
+
+    return additions.length > 0
+      ? [...prev, ...additions]
+      : prev;
   });
 }, [
   currentUser,
@@ -2133,6 +2135,8 @@ return additions.length > 0
   kisConfig.isConnected,
   scalperTabs
 ]);
+
+
 
   // 🛡️ 매우 중요한 복원: 이 useEffect는 예전에 파일 손상으로 시작부(선언, isConfigReady 체크,
   // missing 변수 선언)가 통째로 사라지고 몸통만 위의 다른 useEffect 뒤에 잘못 붙어있었다.
