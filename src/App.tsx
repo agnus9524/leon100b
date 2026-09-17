@@ -1034,6 +1034,13 @@ export default function App() {
   const holdingsViewTab = 'KR';
   const syncInProgressRef = React.useRef(false);
 
+// ============================================================
+// 🔒 실시간 데이터 세션 보호
+// 로그인 중에만 시세/센서/호가 조회가 실행되도록 한다.
+// 로그아웃하면 세션 번호를 증가시켜 진행 중인 비동기 작업도 이후 결과를 반영하지 못하도록 차단한다.
+// ============================================================
+const liveDataSessionRef = React.useRef(0);
+
   const [lastSelectedKR, setLastSelectedKR] = useState(() => {
     return localStorage.getItem('sleek_last_symbol_KR') || '073240';
   });
@@ -4664,13 +4671,41 @@ setGapInventory(nextInv);
   };
 
   const handleLogout = async () => {
+  try {
+    // ============================================================
+    // 🔴 로그아웃 즉시 실시간 데이터 세션 무효화
+    // ============================================================
+    liveDataSessionRef.current += 1;
+
+    // 진행 중인 동기화 플래그 초기화
+    syncInProgressRef.current = false;
+
+    // 앱 실시간 데이터 루프 중단
+    setIsAppInitialized(false);
+
+    // 봇/실시간 상태도 안전하게 대기 상태로 변경
+    setBotStatus("대기 중");
+
+    // ============================================================
+    // KIS 연결 상태 초기화
+    // ============================================================
     try {
-      await signOut(auth);
-      showNotification("로그아웃 되었습니다.", "info");
-    } catch (e: any) {
-      showNotification("로그아웃 중 오류가 발생했습니다.", "error");
+      kisService.clear();
+    } catch (kisError) {
+      console.warn("[로그아웃] KIS 세션 정리 실패:", kisError);
     }
-  };
+
+    // Firebase 로그아웃
+    await signOut(auth);
+
+    showNotification("로그아웃 되었습니다.", "info");
+
+    console.log("[로그아웃 완료] 실시간 시세/센서/동기화 세션 중단");
+  } catch (e: any) {
+    console.error("[로그아웃 오류]", e);
+    showNotification("로그아웃 중 오류가 발생했습니다.", "error");
+  }
+};
 
   const handleMarketSwitch = async (newMarket: 'KR' | 'US') => {
     if (newMarket === 'US') {
@@ -6658,16 +6693,29 @@ priceData.current
     if (!isAppInitialized) return;
 
     // 1. Sync for all watchlist stocks (every 10 seconds)
-    const syncAllPrices = async () => {
-      if (!kisConfig.isConnected) return; // KIS 미연동 상태에서는 시도하지 않음 (연동 전 에러 스팸 방지)
-      // 🛡️ React state(kisConfig.isConnected)만으로는 부족하다 — Firestore에서 설정을 비동기로
-      // 불러오는 도중엔 이 state가 아직 true로 안 바뀌었을 수도 있지만, 반대로 이미 true인데도
-      // kisService 내부의 실제 config는 아직 초기화 전일 수 있다("KIS Config not initialized"
-      // 에러의 정체). 실제 내부 준비 상태까지 함께 확인해서 이 간극에서 오는 무의미한 API
-      // 실패/에러 로그를 막는다.
-      if (!kisService.isConfigReady()) return;
-      if (!isKoreanDataCollectionActive()) { console.log('[syncAllPrices 중단] 데이터수집 시간 아님'); return; } // 🕗 정규장(09:00~15:30)에 더해 08:30~09:00 프리마켓(시가단일가) 구간도 포함 — 09:00 정각에 RSI/VWAP이 바로 유의미하도록 미리 이력을 쌓는다
-      try {
+  const syncAllPrices = async () => {
+  // ============================================================
+  // 🔒 로그인/앱 초기화 상태가 아니면 REST 시세조회 금지
+  // ============================================================
+  if (!currentUser) return;
+  if (!isAppInitialized) return;
+  if (!kisConfig.isConnected) return;
+
+  // 현재 실시간 데이터 세션 번호 저장
+  const sessionId = liveDataSessionRef.current;
+
+  // KIS 설정이 실제로 준비되지 않았으면 중단
+  if (!kisService.isConfigReady()) return;
+
+  // 로그아웃 등으로 세션이 변경되었으면 중단
+  if (sessionId !== liveDataSessionRef.current) return;
+
+  if (!isKoreanDataCollectionActive()) {
+    console.log('[syncAllPrices 중단] 데이터수집 시간 아님');
+    return;
+  }
+
+  try {
         // 🔄 웹소켓 기반 방식으로 원복 — 웹소켓이 연결되어 있으면, 종목별로 "마지막 갱신 후 얼마나
         // 지났는지"를 확인해서 15초 이상 갱신이 안 된 종목만 골라 REST로 보완한다. 활발히
         // 거래되는 종목은 웹소켓이 계속 최신 상태로 유지해주므로 이 조건에 걸리지 않아 REST
@@ -6699,10 +6747,23 @@ priceData.current
         // 요청은 순서대로 처리되지만, 애초에 N개의 호출을 한꺼번에 만들지 않는 게 더 단순하고
         // 안전하다 — 한 종목씩 순차 처리하면 실패(429 등)가 나도 그 즉시 인지하고 다음 시도로
         // 넘어갈 수 있고, 굳이 수십 개의 pending promise를 한꺼번에 만들 필요가 없다.
+        const sessionId = liveDataSessionRef.current;
         const updatedTargets: Stock[] = [];
         for (const s of targetStocks) {
+          // ============================================================
+  // 🔒 로그인 상태 및 실시간 세션 확인
+  // ============================================================
+  if (!currentUser) break;
+  if (!isAppInitialized) break;
+  if (sessionId !== liveDataSessionRef.current) break;
           try {
             const priceData = await kisService.getPrice(s.symbol);
+            // ============================================================
+    // 🔒 REST 응답 대기 중 로그아웃되었으면 결과 반영 금지
+    // ============================================================
+    if (!currentUser) break;
+    if (!isAppInitialized) break;
+    if (sessionId !== liveDataSessionRef.current) break;
             console.log(`[getPrice 결과] ${s.symbol}`, priceData);
             if (priceData && priceData.current > 0) {
               const realPrice = priceData.current;
@@ -6735,9 +6796,16 @@ priceData.current
         // 🛡️ updatedTargets는 "이번에 REST로 새로 조회한 일부 종목"만 담고 있다. 나머지(웹소켓으로
         // 이미 최신 상태인) 종목은 그대로 두고, 이번에 갱신된 것만 병합한다.
         const targetPriceMap = new Map<string, Stock>(updatedTargets.map(s => [s.symbol, s]));
-        const updatedStocks = currentStocks.map(s => targetPriceMap.get(s.symbol) || s);
+        const updatedStocks = currentStocks.map(
+  s => targetPriceMap.get(s.symbol) || s
+);
 
-        setStocks(updatedStocks);
+// 🔒 REST 응답 대기 중 로그아웃했다면 상태 반영 금지
+if (!currentUser) return;
+if (!isAppInitialized) return;
+if (sessionId !== liveDataSessionRef.current) return;
+
+setStocks(updatedStocks);
 
         // 🛡️ 매우 중요한 수정: 지금까지 이 함수는 stocks 배열만 갱신하고 scalperInventory는
         // 전혀 건드리지 않았다. scalperInventory(등록된 종목의 실제 데이터 소스)는 오직 "현재
@@ -6830,7 +6898,7 @@ priceData.current
     return () => {
       clearInterval(masterInterval);
     };
-  }, [kisConfig.isConnected, marketType, isGapBotActive]);
+  }, [currentUser, isAppInitialized, kisConfig.isConnected, marketType, isGapBotActive]);
 
   // ============================================================
   // 🛡️ 등록된 전체 종목의 전략센서(RSI 포함) 계산 전용 갱신 — API 호출 없음
@@ -6843,7 +6911,9 @@ priceData.current
   // 채워 넣는다.
   // ============================================================
   useEffect(() => {
-    if (!isAppInitialized) return;
+  if (!currentUser) return;
+  if (!isAppInitialized) return;
+  if (!kisConfig.isConnected) return;
 
     const refreshAllInventorySensors = () => {
       if (!isKoreanDataCollectionActive()) { console.log('[refreshAllInventorySensors 중단] 데이터수집 시간 아님'); return; } // 🕗 09:00 정각에 센서가 바로 유의미하도록 08:30부터 미리 계산 — 실제 매수/매도는 별도 엔진 루프가 isKoreanMarketOpen()으로 09:00부터만 실행하므로 안전하다
