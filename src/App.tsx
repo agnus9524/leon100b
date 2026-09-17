@@ -367,6 +367,7 @@ interface Stock {
   executionStrength?: number; // 실제 체결강도(KIS cttr) — 매수체결량/매도체결량 기반. 호가잔량 비율이 아님
   realCvd?: number; // 🎯 진짜 CVD — 매수체결량 누적 - 매도체결량 누적(H0STCNT0 필드 기반, 정확한 인덱스는 진단 로그로 검증 필요)
   tradingValue?: number; // 🎯 실제 거래대금(KIS acml_tr_pbmn) — 있으면 추천 카드에서 하드코딩 대신 이 값을 그대로 표시
+  isPlaceholderData?: boolean; // ⚠️ 하드코딩된 가짜/플레이스홀더 데이터 여부 — true면 가격/등락률/history가 전부 임의값이며 실제 KIS 시세가 아님. 실시간 조회(getPrice 등)로 실제 데이터를 받으면 반드시 false/undefined로 갱신되어야 함
 }
 
 // 🕘 한국 정규장(평일 09:00~15:30 KST) 여부 판단.
@@ -605,283 +606,13 @@ interface AIAnalysisResult {
   expectedAnnualReturn: number;
 }
 
-const INITIAL_STOCKS: Stock[] = [
-  {
-    symbol: 'SNDL',
-    name: 'SNDL Inc.',
-    price: 2.15,
-    change: 0.08,
-    changePercent: 3.86,
-    volume: '28.4M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1.70 + (i / 40) * 0.45 + Math.random() * 0.05 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'RIG',
-    name: '트랜스오션',
-    price: 5.89,
-    change: 0.12,
-    changePercent: 2.08,
-    volume: '19.2M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 5.30 + (i / 40) * 0.55 + Math.random() * 0.05 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'LCID',
-    name: 'Lucid Group',
-    price: 2.92,
-    change: 0.14,
-    changePercent: 5.04,
-    volume: '32.1M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2.20 + (i / 40) * 0.72 + Math.random() * 0.05 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'DNA',
-    name: 'Ginkgo Bioworks',
-    price: 1.45,
-    change: 0.04,
-    changePercent: 2.84,
-    volume: '15.8M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1.10 + (i / 40) * 0.35 + Math.random() * 0.03 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'SOUN',
-    name: 'SoundHound AI',
-    price: 5.78,
-    change: 0.32,
-    changePercent: 5.86,
-    volume: '24.5M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 4.50 + (i / 40) * 1.28 + Math.random() * 0.08 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'SOFI',
-    name: 'SoFi Technologies',
-    price: 7.25,
-    change: 0.35,
-    changePercent: 5.07,
-    volume: '38.2M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 5.80 + (i / 40) * 1.45 + Math.random() * 0.09 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'BBAI',
-    name: 'BigBear.ai',
-    price: 2.35,
-    change: 0.12,
-    changePercent: 5.38,
-    volume: '18.9M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1.80 + (i / 40) * 0.55 + Math.random() * 0.05 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'IONQ',
-    name: 'IonQ Inc.',
-    price: 8.90,
-    change: 0.48,
-    changePercent: 5.70,
-    volume: '21.4M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 6.90 + (i / 40) * 2.00 + Math.random() * 0.12 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'NVDA',
-    name: '엔비디아',
-    price: 128.50,
-    change: 4.20,
-    changePercent: 3.38,
-    volume: '45.2M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 120 + (i / 40) * 8.5 + Math.random() * 0.8 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'TSLA',
-    name: '테슬라',
-    price: 215.80,
-    change: 7.50,
-    changePercent: 3.60,
-    volume: '38.6M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 200 + (i / 40) * 15.8 + Math.random() * 1.2 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'AAPL',
-    name: '애플',
-    price: 224.30,
-    change: 3.10,
-    changePercent: 1.40,
-    volume: '28.9M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 218 + (i / 40) * 6.3 + Math.random() * 0.5 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'AMD',
-    name: 'AMD',
-    price: 142.10,
-    change: 5.20,
-    changePercent: 3.80,
-    volume: '22.5M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 132 + (i / 40) * 10.1 + Math.random() * 0.9 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'PLTR',
-    name: '팔란티어',
-    price: 28.40,
-    change: 1.25,
-    changePercent: 4.60,
-    volume: '35.1M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 25 + (i / 40) * 3.4 + Math.random() * 0.2 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'AMZN',
-    name: '아마존',
-    price: 182.50,
-    change: 3.80,
-    changePercent: 2.13,
-    volume: '26.4M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 175 + (i / 40) * 7.5 + Math.random() * 0.6 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'MSFT',
-    name: '마이크로소프트',
-    price: 418.20,
-    change: 6.40,
-    changePercent: 1.55,
-    volume: '18.3M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 405 + (i / 40) * 13.2 + Math.random() * 1.0 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'META',
-    name: '메타',
-    price: 485.60,
-    change: 12.30,
-    changePercent: 2.60,
-    volume: '16.7M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 465 + (i / 40) * 20.6 + Math.random() * 1.5 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'GOOGL',
-    name: '알파벳',
-    price: 168.40,
-    change: 2.90,
-    changePercent: 1.75,
-    volume: '20.1M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 162 + (i / 40) * 6.4 + Math.random() * 0.5 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'MARA',
-    name: '마라톤 디지털',
-    price: 18.20,
-    change: 1.15,
-    changePercent: 6.74,
-    volume: '42.8M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 15 + (i / 40) * 3.2 + Math.random() * 0.3 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'RIOT',
-    name: '라이엇 플랫폼스',
-    price: 11.40,
-    change: 0.68,
-    changePercent: 6.34,
-    volume: '29.3M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 9.5 + (i / 40) * 1.9 + Math.random() * 0.2 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'COIN',
-    name: '코인베이스',
-    price: 215.30,
-    change: 11.80,
-    changePercent: 5.80,
-    volume: '15.4M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 195 + (i / 40) * 20.3 + Math.random() * 1.8 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'SMCI',
-    name: '슈퍼마이크로',
-    price: 580.40,
-    change: 28.50,
-    changePercent: 5.16,
-    volume: '12.8M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 530 + (i / 40) * 50.4 + Math.random() * 4.0 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'INTC',
-    name: '인텔',
-    price: 21.60,
-    change: 0.85,
-    changePercent: 4.10,
-    volume: '54.2M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 19 + (i / 40) * 2.6 + Math.random() * 0.2 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'NIO',
-    name: '니오',
-    price: 4.85,
-    change: 0.22,
-    changePercent: 4.75,
-    volume: '38.9M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 4.1 + (i / 40) * 0.75 + Math.random() * 0.06 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'RIVN',
-    name: '리비안',
-    price: 13.70,
-    change: 0.75,
-    changePercent: 5.80,
-    volume: '27.4M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 11.8 + (i / 40) * 1.9 + Math.random() * 0.15 })),
-    market: 'US',
-    isAI: true
-  },
-  {
-    symbol: 'LABU',
-    name: '디렉시온 바이오 3X',
-    price: 125.40,
-    change: 8.60,
-    changePercent: 7.36,
-    volume: '19.8M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 110 + (i / 40) * 15.4 + Math.random() * 1.2 })),
-    market: 'US',
-    isAI: true
-  }
-];
+// ⚠️⚠️⚠️ 삭제됨 — 하드코딩된 미국 주식 가짜 데이터 ⚠️⚠️⚠️
+// 예전엔 여기에 SNDL/RIG/LCID/DNA/SOUN/SOFI/BBAI/IONQ/NVDA/TSLA/AAPL 등 미국 종목의 고정
+// 가격/등락률/거래량과, Math.random()으로 생성한 가짜 40분 차트 히스토리가 하드코딩되어
+// 있었다. 실제 KIS 데이터가 전혀 아니었고, 이 스캘퍼는 국내(KOSPI/KOSDAQ) 전용이므로 완전히
+// 삭제했다. 아래 참조 지점들(US 시장 관련 폴백/캐시 초기값)은 전부 빈 배열로도 안전하게
+// 동작하도록 확인했다 — find()는 undefined를, forEach()는 아무 일도 하지 않는다.
+const INITIAL_STOCKS: Stock[] = [];
 
 // 매도 사유를 구조화된 값으로 남겨서 GLOBAL TRADE LOGS에서 "왜 팔았는지"를 정확히 필터링/확인할 수 있게 한다.
 export type ExitReason =
@@ -928,6 +659,13 @@ interface NewsItem {
 // → T ≥ 약 20.7초. 여유를 두어 25초로 설정했다 (아래 syncAllPrices 주기 참고).
 const MAX_INVENTORY_PER_MARKET = 12; // 🔼 6→12로 확대 — 웹소켓 구독(종목당 2개)/센서계산(3초 주기 로컬연산) 모두 이 정도 증가는 무리 없는 수준으로 판단됨
 
+// ⚠️⚠️⚠️ 가짜/플레이스홀더 데이터 — 실제 KIS 시세가 아님 ⚠️⚠️⚠️
+// 아래 25개 종목의 price/change/changePercent/volume/history는 전부 하드코딩된 임의값이며,
+// history는 Math.random()으로 생성한 가짜 40분 차트 곡선이다. 이 데이터는 오직 "앱을 처음 켰을 때
+// 화면이 비어있지 않도록" 하는 초기 시드 값일 뿐이며, 실시간 KIS 데이터(WebSocket 틱 또는
+// syncAllPrices REST 백업)가 들어오는 즉시 실제 값으로 대체되어야 한다. 각 종목 객체에
+// isPlaceholderData: true 필드를 달아뒀으니, 화면에 이 값이 그대로 표시되고 있다면(즉 아직 실제
+// 데이터로 갱신되지 않았다면) UI에서 이 필드를 확인해 "대기 중" 등으로 구분 표시할 수 있다.
 const INITIAL_STOCKS_KR: Stock[] = [
   {
     symbol: '001520',
@@ -938,7 +676,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '11.2M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1050 + Math.round((i / 40) * 190) + Math.floor(Math.random() * 20) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '025560',
@@ -949,7 +688,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '18.4M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1800 + Math.round((i / 40) * 350) + Math.floor(Math.random() * 25) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '004060',
@@ -960,7 +700,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '12.1M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 750 + Math.round((i / 40) * 140) + Math.floor(Math.random() * 15) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '014160',
@@ -971,7 +712,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '15.6M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1400 + Math.round((i / 40) * 280) + Math.floor(Math.random() * 20) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '088350',
@@ -982,7 +724,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '22.4M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2600 + Math.round((i / 40) * 520) + Math.floor(Math.random() * 30) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '011930',
@@ -993,7 +736,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '16.5M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1820 + Math.round((i / 40) * 360) + Math.floor(Math.random() * 25) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '017040',
@@ -1004,7 +748,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '14.2M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2000 + Math.round((i / 40) * 450) + Math.floor(Math.random() * 25) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '003520',
@@ -1015,7 +760,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '12.8M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2900 + Math.round((i / 40) * 550) + Math.floor(Math.random() * 35) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '005360',
@@ -1026,7 +772,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '10.5M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2500 + Math.round((i / 40) * 450) + Math.floor(Math.random() * 30) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '005930',
@@ -1039,7 +786,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '0',
     history: [],
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '000660',
@@ -1050,7 +798,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '8.8M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 162000 + Math.round((i / 40) * 10000) + Math.floor(Math.random() * 500) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '035420',
@@ -1061,7 +810,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '2.9M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 178000 + Math.round((i / 40) * 7000) + Math.floor(Math.random() * 400) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '005380',
@@ -1072,7 +822,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '3.6M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 235000 + Math.round((i / 40) * 10000) + Math.floor(Math.random() * 500) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '000270',
@@ -1083,7 +834,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '4.2M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 103000 + Math.round((i / 40) * 5500) + Math.floor(Math.random() * 300) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '068270',
@@ -1094,7 +846,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '2.5M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 188000 + Math.round((i / 40) * 10500) + Math.floor(Math.random() * 400) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '006400',
@@ -1105,7 +858,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '1.8M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 345000 + Math.round((i / 40) * 17000) + Math.floor(Math.random() * 800) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '051910',
@@ -1116,7 +870,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '1.4M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 302000 + Math.round((i / 40) * 16000) + Math.floor(Math.random() * 700) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '035720',
@@ -1127,7 +882,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '5.8M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 38800 + Math.round((i / 40) * 2400) + Math.floor(Math.random() * 150) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '034020',
@@ -1138,7 +894,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '19.4M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 19800 + Math.round((i / 40) * 1600) + Math.floor(Math.random() * 100) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '012450',
@@ -1149,7 +906,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '3.1M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 265000 + Math.round((i / 40) * 20000) + Math.floor(Math.random() * 900) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '042700',
@@ -1160,7 +918,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '6.4M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 102000 + Math.round((i / 40) * 10000) + Math.floor(Math.random() * 400) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '086520',
@@ -1171,7 +930,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '4.8M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 172000 + Math.round((i / 40) * 12500) + Math.floor(Math.random() * 500) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '247540',
@@ -1182,7 +942,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '7.2M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 82000 + Math.round((i / 40) * 6500) + Math.floor(Math.random() * 300) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   },
   {
     symbol: '196170',
@@ -1193,7 +954,8 @@ const INITIAL_STOCKS_KR: Stock[] = [
     volume: '2.8M',
     history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 290000 + Math.round((i / 40) * 25000) + Math.floor(Math.random() * 1000) })),
     market: 'KR',
-    isAI: true
+    isAI: true,
+    isPlaceholderData: true
   }
 ];
 
@@ -3669,8 +3431,20 @@ setGapInventory(nextInv);
     setGapDownReportData(null);
 
     const pnlPct = Number((profitRatio * 100).toFixed(2));
-    const bidQty = Math.round(18000 + Math.random() * 12000);
-    const askQty = Math.round(12000 + Math.random() * 8000);
+    // 🛡️ 매우 중요한 수정: 예전엔 여기서 실제 호가/체결강도/RSI/이평상태를 전부 랜덤값으로
+    // 만들어서 "이게 실제 시장 상황"인 것처럼 AI(Gemini) 프롬프트에 그대로 넣고 있었다. AI가 이
+    // 가짜 데이터를 기반으로 "반등 가능성" 등을 진단하면, 사용자는 이걸 진짜 시장 분석으로
+    // 오인해서 실제 매매 판단에 참고할 위험이 있었다. 이제 실제 데이터를 쓴다 — 호가는 실시간
+    // 웹소켓(liveOrderbooksRef), 체결강도는 KIS가 준 실제 값(stock.executionStrength), RSI/
+    // 이평상태는 실제 계산 함수(detectStockStrategies)에서 가져온다. 실제 호가 데이터가 아직
+    // 없으면(막 등록된 종목 등) 가짜로 채우지 않고 0으로 정직하게 표시한다.
+    const liveOrderbook = liveOrderbooksRef.current[stock.symbol];
+    const bidQty = liveOrderbook?.totalBidVolume || 0;
+    const askQty = liveOrderbook?.totalAskVolume || 0;
+    const strat = detectStockStrategiesRef.current(stock);
+    const maStatusReal = strat.momentumPositive
+      ? (strat.sma5 > strat.sma20 ? '5일선 상회 — 단기 상승 모멘텀' : '이평 혼조')
+      : '5일선 하회 — 단기 조정 국면';
 
     try {
       const report = await generateGapDownReport({
@@ -3685,12 +3459,12 @@ setGapInventory(nextInv);
         orderbook: {
           totalBidQty: bidQty,
           totalAskQty: askQty,
-          bidAskRatio: Math.round((bidQty / askQty) * 100),
-          volumeIntensity: Math.round(108 + Math.random() * 15)
+          bidAskRatio: askQty > 0 ? Math.round((bidQty / askQty) * 100) : 0,
+          volumeIntensity: stock.executionStrength || 0
         },
         marketContext: {
-          rsi: Math.round(28 + Math.random() * 8),
-          maStatus: '5일선 하회 과매도 반등 모멘텀 형성'
+          rsi: Math.round(strat.rsi),
+          maStatus: maStatusReal
         }
       });
 
@@ -5795,12 +5569,18 @@ const newStock: Stock = {
         change: 0,
         changePercent: 0,
         volume: '0',
-        history: Array.from({ length: 40 }, (_, i) => ({ 
-          time: `${i}:00`, 
-          price: initialPrice * (0.98 + Math.random() * 0.04) 
+        // 🛡️ 매우 중요한 수정: 예전엔 여기서 initialPrice * (0.98~1.02배) 랜덤 노이즈로 40개의
+        // 가짜 파동 곡선을 만들었다 — 실제 KIS 데이터를 받기 전까지 화면에 "그럴듯해 보이는
+        // 가짜 차트"가 떠 있었던 것이다. 이제 랜덤 노이즈 없이 전부 동일한 값(현재가 그대로)으로
+        // 채워서, 최소한 "가짜인데 진짜처럼 보이는 변동"은 만들지 않는다. 그리고 아래에서
+        // seedRealHistory로 실제 KIS 분봉 데이터를 받아와 즉시 이 임시값을 대체한다.
+        history: Array.from({ length: 40 }, (_, i) => ({
+          time: `${i}:00`,
+          price: initialPrice
         })),
         market: marketType,
-        isAI: false
+        isAI: false,
+        isPlaceholderData: true // ⚠️ 실제 KIS 데이터로 보정되기 전까지의 임시값임을 명시
       };
       
       setStocks(prev => {
@@ -5815,6 +5595,14 @@ const newStock: Stock = {
       }));
       openOrSwitchScalperTab(symbolToUse, customName, newStock.price);
       setSelectedSymbol(symbolToUse);
+
+      // 🔄 인위적 반복 패턴(가짜 이력) 대신 실제 분봉 이력으로 보정 — 위(5538번 근처)의 KIS
+      // 실시간 조회 성공 경로와 동일한 방식을 이 폴백 경로에도 적용한다.
+      seedRealHistory(symbolToUse).then(realHistory => {
+        if (realHistory && realHistory.length > 0) {
+          setStocks(prev => prev.map(s => s.symbol === symbolToUse ? { ...s, history: realHistory, isPlaceholderData: false } : s));
+        }
+      }).catch(() => {});
       
       // 🔄 신규 종목의 실제 이름/가격은 AI에게 "추측"시키지 않고 KIS 실시세로 직접 보정한다.
       // (LLM은 실시간 시세에 접근할 수 없어 이 방식은 부정확했고, 불필요하게 느리고 비쌌다)
@@ -5831,7 +5619,8 @@ const newStock: Stock = {
                   change: priceData.change,
                   changePercent: priceData.changePercent,
                   volume: priceData.volume,
-                  executionStrength: priceData.executionStrength
+                  executionStrength: priceData.executionStrength,
+                  isPlaceholderData: false // 실제 KIS 시세로 보정됨
                 };
               }
               return s;
