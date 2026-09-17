@@ -652,18 +652,18 @@ interface NewsItem {
 // 의도적으로 별도 상수로 관리한다 — 두 값을 억지로 같은 숫자로 맞추지 않는다.
 // ------------------------------------------------------------------
 // 20종목 기준 계산: getPrice()는 앱 전체가 공유하는 큐를 쓰고 호출당 최소 600ms가 걸린다.
-// syncAllPrices(등록종목 전체, 주기 T) + syncSelectedPrice(2초마다 1건) + syncLiveOrderbook(5초마다 1건)이
+// refreshStalePrices(등록종목 전체, 주기 T) + syncSelectedPrice(2초마다 1건) + syncLiveOrderbook(5초마다 1건)이
 // 전부 같은 큐를 나눠 쓰므로, 한 주기(T) 안에 처리해야 할 호출 수는:
 //   20(전체종목) + T/2000(선택종목) + T/5000(호가) 건
 // 이걸 600ms×건수로 처리하는 시간이 T보다 작아야 밀리지 않는다: (20 + 0.3T/1000 + 0.12T/1000)×600 ≤ T
-// → T ≥ 약 20.7초. 여유를 두어 25초로 설정했다 (아래 syncAllPrices 주기 참고).
+// → T ≥ 약 20.7초. 여유를 두어 25초로 설정했다 (아래 refreshStalePrices 주기 참고).
 const MAX_INVENTORY_PER_MARKET = 12; // 🔼 6→12로 확대 — 웹소켓 구독(종목당 2개)/센서계산(3초 주기 로컬연산) 모두 이 정도 증가는 무리 없는 수준으로 판단됨
 
 // ⚠️⚠️⚠️ 가짜/플레이스홀더 데이터 — 실제 KIS 시세가 아님 ⚠️⚠️⚠️
 // 아래 25개 종목의 price/change/changePercent/volume/history는 전부 하드코딩된 임의값이며,
 // history는 Math.random()으로 생성한 가짜 40분 차트 곡선이다. 이 데이터는 오직 "앱을 처음 켰을 때
 // 화면이 비어있지 않도록" 하는 초기 시드 값일 뿐이며, 실시간 KIS 데이터(WebSocket 틱 또는
-// syncAllPrices REST 백업)가 들어오는 즉시 실제 값으로 대체되어야 한다. 각 종목 객체에
+// refreshStalePrices REST 백업)가 들어오는 즉시 실제 값으로 대체되어야 한다. 각 종목 객체에
 // isPlaceholderData: true 필드를 달아뒀으니, 화면에 이 값이 그대로 표시되고 있다면(즉 아직 실제
 // 데이터로 갱신되지 않았다면) UI에서 이 필드를 확인해 "대기 중" 등으로 구분 표시할 수 있다.
 const INITIAL_STOCKS_KR: Stock[] = [
@@ -1089,9 +1089,9 @@ const liveDataSessionRef = React.useRef(0);
     }
     return localStorage.getItem('sleek_last_symbol_KR') || '073240';
   });
-  // 🛡️ syncAllPrices/syncSelectedPrice/syncLiveOrderbook을 감싸는 effect가 종목을 클릭할 때마다
+  // 🛡️ refreshStalePrices/syncSelectedPrice/syncLiveOrderbook을 감싸는 effect가 종목을 클릭할 때마다
   // (selectedSymbol이 바뀔 때마다) 통째로 재시작되면, 등록된 전체 종목을 25초마다 갱신해야 할
-  // syncAllPrices의 타이머가 클릭할 때마다 리셋되어 버려서 한 번도 제대로 실행되지 못하는 문제가
+  // refreshStalePrices의 타이머가 클릭할 때마다 리셋되어 버려서 한 번도 제대로 실행되지 못하는 문제가
   // 있었다 — "선택 안 한 종목은 가격이 안 바뀐다"는 증상의 진짜 근본 원인이었을 가능성이 높다.
   // ref로 참조하면 effect의 dependency array에서 selectedSymbol을 뺄 수 있어 이 문제가 해결된다.
   const selectedSymbolRef = React.useRef(selectedSymbol);
@@ -1690,11 +1690,11 @@ const liveDataSessionRef = React.useRef(0);
     }));
   }, [scalperInventory]);
   const [wsConnectionStatus, setWsConnectionStatus] = useState<'connecting' | 'open' | 'closed' | 'error' | 'idle' | 'kis_disconnected'>('idle');
-  // 🔄 REST 폴링 effect(syncAllPrices/syncSelectedPrice)는 이 상태를 의존성 배열에 넣지 않고
+  // 🔄 REST 폴링 effect(refreshStalePrices/syncSelectedPrice)는 이 상태를 의존성 배열에 넣지 않고
   // ref로만 읽는다 — state를 의존성에 넣으면 웹소켓 상태가 바뀔 때마다(연결/재연결/끊김) 그
   // effect 전체가 재시작되면서 "즉시 전체조회"가 다시 실행되어 오히려 순간 폭주를 만들 수 있다.
   const wsConnectionStatusRef = React.useRef(wsConnectionStatus);
-  // 🕐 종목별 마지막 웹소켓 tick 수신 시각 — syncAllPrices가 "오래 갱신 안 된 종목"을 골라
+  // 🕐 종목별 마지막 웹소켓 tick 수신 시각 — refreshStalePrices가 "오래 갱신 안 된 종목"을 골라
   // REST로 보완할 때 이 값을 기준으로 판단한다.
   const lastWsTickAtRef = React.useRef<Record<string, number>>({});
   // 🛡️ 틱 수신과 화면 렌더링을 분리하기 위한 임시 저장소 — 매 틱마다 여기 즉시 쓰고, 별도의
@@ -1867,7 +1867,7 @@ const liveDataSessionRef = React.useRef(0);
             lastTickLogRef.current[tick.symbol] = nowForLog;
           }
 
-          // 🕐 이 종목이 방금 웹소켓으로 갱신됐다는 걸 기록 — syncAllPrices가 "오래 갱신 안 된
+          // 🕐 이 종목이 방금 웹소켓으로 갱신됐다는 걸 기록 — refreshStalePrices가 "오래 갱신 안 된
           // 종목"만 REST로 보완할 때 이 시각을 기준으로 판단한다. 가벼운 연산이라 즉시 처리해도 무방.
           lastWsTickAtRef.current[tick.symbol] = Date.now();
 
@@ -2015,7 +2015,7 @@ const liveDataSessionRef = React.useRef(0);
   // ============================================================
   // 🔄 인벤토리에 등록된 "모든" 종목이 stocks 배열에 존재하도록 보장한다.
   // ------------------------------------------------------------
-  // stocks에 없는 종목은 syncAllPrices()(10초 주기 전체 동기화)나 market/account 동기화
+  // stocks에 없는 종목은 refreshStalePrices()(10초 주기 전체 동기화)나 market/account 동기화
   // effect가 아예 그 존재를 인지하지 못해서 갱신 대상에서 빠진다. 그 결과 "선택된 1개 종목만
   // 실시간 가격이 반영되고, 나머지 등록 종목은 로딩 시점의(어쩌면 0원이거나 다른 값인) 스냅샷에
   // 계속 갇혀있는" 증상이 생긴다. 새로 나타난 종목은 fallback 값으로만 채우지 않고, 그 자리에서
@@ -2062,36 +2062,26 @@ useEffect(() => {
     const existing = new Set(prev.map(s => s.symbol));
 
     const additions: Stock[] = missing
-      .filter(t => !existing.has(t.symbol))
-      .map(t => {
-        const isUS = /^[A-Za-z]/.test(t.symbol);
+  .filter(t => !existing.has(t.symbol))
+  .map(t => {
+    const isUS = /^[A-Za-z]/.test(t.symbol);
 
-        const seedPrice =
-          (t.price && t.price > 0)
-            ? t.price
-            : (isUS ? 10 : 1000);
+    return {
+      symbol: t.symbol,
+      name: t.name,
+      price: 0,
+      change: 0,
+      changePercent: 0,
+      volume: '0',
+      history: [],
+      market: isUS ? 'US' : 'KR',
+      isAI: false
+    };
+  });
 
-        return {
-          symbol: t.symbol,
-          name: t.name,
-          price: seedPrice,
-          change: 0,
-          changePercent: 0,
-          volume: '0',
-          history: [
-            {
-              time: '09:00',
-              price: seedPrice
-            }
-          ],
-          market: isUS ? 'US' : 'KR',
-          isAI: false
-        };
-      });
-
-    return additions.length > 0
-      ? [...prev, ...additions]
-      : prev;
+return additions.length > 0
+  ? [...prev, ...additions]
+  : prev;
   });
 
   // 초기화 이후 누락된 종목만 실제 현재가를 보정한다.
@@ -2160,15 +2150,15 @@ useEffect(() => {
         .filter(t => !existing.has(t.symbol))
         .map(t => {
           const isUS = /^[A-Za-z]/.test(t.symbol);
-          const seedPrice = (t.price && t.price > 0) ? t.price : (isUS ? 10 : 1000);
+         
           return {
             symbol: t.symbol,
             name: t.name,
-            price: seedPrice,
+            price: 0,
             change: 0,
             changePercent: 0,
             volume: '0',
-            history: [{ time: '09:00', price: seedPrice }],
+            history: [],
             market: isUS ? 'US' : 'KR',
             isAI: false
           };
@@ -2176,26 +2166,6 @@ useEffect(() => {
       return additions.length > 0 ? [...prev, ...additions] : prev;
     });
 
-    // 10초 주기 전체 동기화를 기다리지 않고, 새로 나타난 종목들은 지금 즉시 실제가를 조회해서 correction한다.
-    missing.forEach(async (t) => {
-      try {
-        const priceData = await kisService.getPrice(t.symbol);
-        if (priceData && priceData.current > 0) {
-          setStocks(prev => prev.map(s => s.symbol === t.symbol ? {
-            ...s,
-            price: priceData.current,
-            change: priceData.change,
-            changePercent: priceData.changePercent,
-            volume: priceData.volume,
-            executionStrength: priceData.executionStrength,
-            isRealTime: true,
-            lastUpdated: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-          } : s));
-        }
-      } catch (err) {
-        console.warn(`[인벤토리 초기가격 보정] ${t.symbol} 조회 실패`, err);
-      }
-    });
   }, [scalperTabs]);
 
   // 🔄 인벤토리의 market/account 네임스페이스를 실시간 시세/보유정보로 동기화.
@@ -4353,12 +4323,12 @@ setGapInventory(nextInv);
     return result;
   }, [holdings]);
 
-  // 🛡️ 매우 중요한 삭제: 여기 있던 "보유종목 4초 주기 가격조회" useEffect는 syncAllPrices(25초
+  // 🛡️ 매우 중요한 삭제: 여기 있던 "보유종목 4초 주기 가격조회" useEffect는 refreshStalePrices(25초
   // 주기, 인벤토리 종목 15초/추천풀 2분 우선순위)와 완전히 별개로, 독립적으로 4초마다 보유종목
   // 전체를 순회하며 REST 조회를 하고 있었다 — 두 함수가 같은 종목에 대해 각각 요청을 날리니
   // 실제 KIS 요청량이 예상보다 훨씬 많아지고, 이게 429(요청 과다) 발생 위험을 키우는 원인이었다.
   // 게다가 이 함수는 새 종목을 stocks에 추가할 때 history를 실제 값이 아니라 가짜 랜덤값
-  // (price * (0.98~1.02배))으로 채우고 있었다. syncAllPrices가 이미 stocks 배열 전체(보유종목이
+  // (price * (0.98~1.02배))으로 채우고 있었다. refreshStalePrices가 이미 stocks 배열 전체(보유종목이
   // stocks에 있는 한 포함)를 담당하므로 이 중복 루프를 완전히 제거한다.
 
 
@@ -6180,7 +6150,7 @@ priceData.current
 
   const refreshInventoryItem = React.useCallback(async (symbol: string) => {
     if (!symbol) return;
-    // 🛡️ 전체 종목 담당 함수들(syncAllPrices, refreshAllInventorySensors)은 장 마감 시간에
+    // 🛡️ 전체 종목 담당 함수들(refreshStalePrices, refreshAllInventorySensors)은 장 마감 시간에
     // 실행을 안 하는데, 선택된 종목 전용인 이 함수만 게이트가 빠져있어서 장 마감 중에도 선택된
     // 종목만 계속 갱신되고 있었다 — "선택한 종목만 가격/로그가 계속 바뀐다"는 증상의 실제
     // 원인이었다. 형평성을 맞춰서 이 함수도 정규장/애프터마켓 시간에만 동작하도록 한다.
@@ -6884,7 +6854,7 @@ priceData.current
     if (!isAppInitialized) return;
 
     // 1. Sync for all watchlist stocks (every 10 seconds)
-  const syncAllPrices = async () => {
+ const refreshStalePrices = async () => {
   // ============================================================
   // 🔒 로그인/앱 초기화 상태가 아니면 REST 시세조회 금지
   // ============================================================
@@ -6902,36 +6872,69 @@ priceData.current
   if (sessionId !== liveDataSessionRef.current) return;
 
   if (!isKoreanDataCollectionActive()) {
-    console.log('[syncAllPrices 중단] 데이터수집 시간 아님');
+    console.log('[refreshStalePrices 중단] 데이터수집 시간 아님');
     return;
   }
 
   try {
-        // 🔄 웹소켓 기반 방식으로 원복 — 웹소켓이 연결되어 있으면, 종목별로 "마지막 갱신 후 얼마나
-        // 지났는지"를 확인해서 15초 이상 갱신이 안 된 종목만 골라 REST로 보완한다. 활발히
-        // 거래되는 종목은 웹소켓이 계속 최신 상태로 유지해주므로 이 조건에 걸리지 않아 REST
-        // 호출 자체가 안 생긴다.
-        // 🎯 인벤토리(등록) 종목과 추천풀(비등록) 종목의 REST 백업 우선순위를 분리 — 예전엔 둘 다
-        // 똑같이 15초 기준으로 취급해서, 추천종목 찾기 후보 30~40개가 인벤토리 종목과 REST 요청
-        // 슬롯을 동등하게 나눠쓰고 있었다. 실제로 실시간 감시가 필요한 건 인벤토리 종목뿐이고,
-        // 추천풀은 "다음에 추천종목 찾기를 누를 때 어느 정도 최신이면 충분"한 수준이라, 훨씬 뜸하게
-        // 갱신해도 무방하다. 등록 종목을 최우선으로 확실히 실시간에 가깝게 유지한다.
-        const STALE_THRESHOLD_MS = 15000;         // 인벤토리(등록) 종목 — 급함, 기존 그대로
-        const CANDIDATE_STALE_THRESHOLD_MS = 120000; // 추천풀(비등록) 종목 — 2분, 훨씬 뜸하게
-        const registeredSymbolsSet = new Set(scalperTabsRef.current.map(t => t.symbol));
-        const now = Date.now();
-        const currentStocks = stocksRef.current;
-        if (currentStocks.length === 0) { console.log('[syncAllPrices 중단] currentStocks 비어있음'); return; }
+        // ============================================================
+// 🎯 REST 백업 대상은 "실제 스캘퍼 등록종목"만
+//
+// stocks 배열에는 추천 후보/검색 결과/기타 표시용 종목이 들어갈 수 있다.
+// 하지만 REST 가격 백업이 필요한 것은 실제 매매 감시 대상인
+// scalperTabs뿐이다.
+//
+// 정상 상태:
+//   H0STCNT0 WebSocket → 실시간 가격
+//
+// 비정상/지연 상태:
+//   refreshStalePrices() → 오래된 등록종목만 REST 보완
+//
+// ❌ stocks 전체 순회 금지
+// ❌ 추천 후보 전체 REST 조회 금지
+// ============================================================
 
-        const targetStocks = wsConnectionStatusRef.current === 'open'
-          ? currentStocks.filter(s => {
-              const lastUpdate = lastWsTickAtRef.current[s.symbol] || 0;
-              const threshold = registeredSymbolsSet.has(s.symbol) ? STALE_THRESHOLD_MS : CANDIDATE_STALE_THRESHOLD_MS;
-              return now - lastUpdate >= threshold;
-            })
-          : currentStocks.filter(s => registeredSymbolsSet.has(s.symbol)); // 웹소켓 자체가 끊긴 비상 상황에선 인벤토리만이라도 확실히 챙긴다
-        console.log('[syncAllPrices 진행]', { 전체종목: currentStocks.length, 대상종목: targetStocks.length, ws상태: wsConnectionStatusRef.current });
-        if (targetStocks.length === 0) return;
+const STALE_THRESHOLD_MS = 10000; // 등록종목이 10초 동안 틱이 없으면 REST 백업
+
+const inventorySymbols = Array.from(
+  new Set(
+    scalperTabsRef.current
+      .map(t => t.symbol)
+      .filter(symbol => /^\d{6}$/.test(symbol))
+  )
+);
+
+if (inventorySymbols.length === 0) {
+  console.log('[refreshStalePrices 중단] 등록된 국내 스캘퍼 종목 없음');
+  return;
+}
+
+const now = Date.now();
+const currentStocks = stocksRef.current;
+
+// stocks에 존재하는 등록종목만 REST 백업 대상으로 만든다.
+// WebSocket이 정상적으로 틱을 보내고 있으면 대상에서 제외된다.
+const targetStocks = inventorySymbols
+  .map(symbol => currentStocks.find(s => s.symbol === symbol))
+  .filter((s): s is Stock => !!s)
+  .filter(s => {
+    const lastUpdate = lastWsTickAtRef.current[s.symbol] || 0;
+
+    // 마지막 WebSocket 틱을 받은 지 10초 이상이면 stale
+    return now - lastUpdate >= STALE_THRESHOLD_MS;
+  });
+
+console.log('[refreshStalePrices]', {
+  전체Stocks: currentStocks.length,
+  등록종목: inventorySymbols.length,
+  REST백업대상: targetStocks.map(s => s.symbol),
+  대상수: targetStocks.length,
+  ws상태: wsConnectionStatusRef.current
+});
+
+if (targetStocks.length === 0) {
+  return;
+}
 
         // 🛡️ 매우 중요한 수정: 예전엔 Promise.all()로 대상 종목 전체에 대해 getPrice()를 동시에
         // 호출했다. getDomesticPrice() 자체는 이제 queueRequest(진짜 직렬 큐)를 거치므로 실제 축
@@ -7039,7 +7042,7 @@ setStocks(updatedStocks);
 
     // 2. Fast sync for the currently selected stock (every 1.5 seconds)
     // 🛡️ syncSelectedPrice(선택 종목 전용 2초 REST)를 완전히 제거했다 — 웹소켓 틱 핸들러가
-    // 이제 history까지 정확히 갱신하고, syncAllPrices가 15초 이상 갱신 안 된 종목을 자동으로
+    // 이제 history까지 정확히 갱신하고, refreshStalePrices가 15초 이상 갱신 안 된 종목을 자동으로
     // REST로 보완하므로, 선택된 종목만 별도로 더 자주 조회할 이유가 없다. 이 함수가 "선택한
     // 종목만 유독 빠르게 갱신되는" 착시의 또 다른 원인이었다.
 
@@ -7075,17 +7078,26 @@ setStocks(updatedStocks);
 };
 
     // Immediate initial sync
-    syncAllPrices();
+    refreshStalePrices();
     syncLiveOrderbook();
 
-    let masterTickCount = 0;
-    const masterInterval = setInterval(() => {
-      masterTickCount += 1;
-      if (masterTickCount % 5 === 0) syncLiveOrderbook();          // 5초마다 — 인벤토리 종목 라운드로빈으로 호가 순환 조회
-      if (masterTickCount % 20 === 0 && kisConfig.isConnected) handleSyncKIS(); // 20초마다
-      if (masterTickCount % 25 === 0) syncAllPrices();             // 25초마다 — 웹소켓 미연결/stale 종목 REST 백업
-    }, 1000);
+   let masterTickCount = 0;
 
+const masterInterval = setInterval(() => {
+  masterTickCount += 1;
+
+  if (masterTickCount % 5 === 0) {
+    syncLiveOrderbook();
+  }
+
+  if (masterTickCount % 20 === 0 && kisConfig.isConnected) {
+    handleSyncKIS();
+  }
+
+  if (masterTickCount % 25 === 0) {
+    refreshStalePrices();
+  }
+}, 1000);
     return () => {
       clearInterval(masterInterval);
     };
@@ -7522,7 +7534,7 @@ setStocks(updatedStocks);
   // 것처럼 보인다"는 증상의 실제 원인이 바로 이 코드였다: 그 움직임 자체가 진짜 체결이 아니라
   // 화면 효과용 가짜 데이터였다. 실전 매매 프로그램에서 진짜 가격을 가짜 값으로 덮어쓰는 코드는
   // 매매 판단 자체를 오염시킬 수 있어 완전히 제거한다. 이제 모든 종목의 가격은 오직 웹소켓
-  // (H0STCNT0)과 REST 백업(syncAllPrices)을 통해서만 갱신된다.
+  // (H0STCNT0)과 REST 백업(refreshStalePrices)을 통해서만 갱신된다.
 
 
   const cancelPendingBuyOrder = async (orderId: string) => {
