@@ -61,6 +61,9 @@ export interface IntegratedTradingHeaderProps {
   priceRangeOptions: { label: string; minPrice: number; maxPrice?: number }[];
   priceRangeIndex: number;
   setPriceRangeIndex: (idx: number) => void;
+  buyAmountOptions: readonly { value: number; label: string }[];
+  targetInvestmentPerStock: number;
+  setTargetInvestmentPerStock: (amount: number) => void;
   isRefreshingTop3: boolean;
   scalperTabs: ScalperTab[];
   activeTabId: string;
@@ -146,6 +149,9 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
   priceRangeOptions,
   priceRangeIndex,
   setPriceRangeIndex,
+  buyAmountOptions,
+  targetInvestmentPerStock,
+  setTargetInvestmentPerStock,
   isRefreshingTop3,
   scalperTabs,
   activeTabId,
@@ -447,6 +453,41 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
               >
                 전체초기화
               </button>
+            </div>
+          </div>
+
+          {/* 💰 종목당 진입금액 — 실제 매수 시그널이 발생하는 순간 "이 금액 ÷ 그때의 주문가격"으로
+              수량이 계산된다. 인벤토리 전체에 적용되는 전역 설정이라 카드마다 반복하지 않고
+              목록 바로 위에 한 번만 배치한다. */}
+          <div className="mb-2 px-2.5 py-2 rounded-xl bg-black/20 border border-white/5 space-y-2">
+            <div className="flex items-center justify-between">
+              <div>
+                <div className="text-xs font-black text-white">종목당 진입금액</div>
+                <div className="mt-0.5 text-[10px] text-slate-400">매수 시그널 발생 시 현재가 기준 최대수량으로 진입</div>
+              </div>
+              <div className="rounded-lg px-2.5 py-1 text-[11px] font-black bg-blue-500/10 border border-blue-500/30 text-blue-400 shrink-0">
+                {targetInvestmentPerStock.toLocaleString()}원
+              </div>
+            </div>
+            <div className="grid grid-cols-4 gap-1.5">
+              {buyAmountOptions.map(option => {
+                const selected = targetInvestmentPerStock === option.value;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => setTargetInvestmentPerStock(option.value)}
+                    className={cn(
+                      "h-9 rounded-lg border text-[11px] font-bold transition-all active:scale-95",
+                      selected
+                        ? "bg-blue-500 text-white border-blue-500 shadow-lg shadow-blue-500/20"
+                        : "bg-white/5 text-slate-300 border-white/10 hover:bg-white/10"
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 

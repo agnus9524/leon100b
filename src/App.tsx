@@ -1447,7 +1447,7 @@ const liveDataSessionRef = React.useRef(0);
   const [holdingsTabFilter, setHoldingsTabFilter] = useState<'AUTO' | 'ALL' | 'KR' | 'US'>('AUTO');
   const [gapBuyPrice, setGapBuyPrice] = useState<number>(0);
   const [gapSellPrice, setGapSellPrice] = useState<number>(0);
-  const [tradeQuantity, setTradeQuantity] = useState<number>(1);
+  const [tradeQuantity, setTradeQuantity] = useState<number>(0);
   const [scalperMode, setScalperMode] = useState<'NORMAL' | 'TURBO'>('NORMAL');
   const [isGapBotActive, setIsGapBotActive] = useState<boolean>(false);
   const [kisBuyableQty, setKisBuyableQty] = useState<number | null>(null);
@@ -2414,10 +2414,11 @@ setGapInventory(nextInv);
       strategy: {
         gapBuyPrice: limits.lowerLimit,
         gapSellPrice: limits.upperLimit,
-        // 💰 생성 시점에 바로 목표 투자금액 기준 수량을 계산해서 넣는다 — 생성 후 별도로
-        // updateTab을 불러서 수정하는 방식은 렌더 타이밍에 따라 반영이 씹힐 수 있어서
-        // (다른 effect가 뒤이어 기본값으로 되돌리는 경우 등), 아예 생성 시점에 확정한다.
-        tradeQuantity: calcQuantityForTargetAmount(newStockObj.price || 0)
+        // 🛡️ 매우 중요한 원칙: 수량은 등록 시점이 아니라 오직 실제 매수 시그널이 발생하는 그
+        // 순간에만 계산되어야 한다 — 등록 시점의 가격은 이미 오래된 값일 수 있고, 실제 매수는
+        // 그 이후 시그널이 뜬 시점의 최신 가격을 기준으로 이뤄지기 때문이다. 등록 시점에 미리
+        // 계산해두면 그 값이 실제 매수 판단과 무관하게 굳어버릴 위험이 있어 항상 0으로 시작한다.
+        tradeQuantity: 0
       }
     });
 
@@ -2614,17 +2615,71 @@ setGapInventory(nextInv);
   const [scalpingWins, setScalpingWins] = useState<number>(0);
   const [scalpingLosses, setScalpingLosses] = useState<number>(0);
   const [maxSlots, setMaxSlots] = useState<number>(10);
-  // 💰 종목당 목표 투자금액 — 추천종목이 인벤토리에 등록될 때(자동 채움/수동 클릭 모두), 이 금액에
-  // 맞춰 "가격 대비 수량"을 자동으로 계산한다. 예: 10,000원 설정 시 990원 종목은 10주, 4,900원
-  // 종목은 2주, 13,000원 종목은 1주로 각각 계산되어 투자금액이 비슷하게 맞춰진다.
-  // 🛡️ UI 입력창은 삭제하고 가격구간 드롭다운으로 대체했지만, 종목당 투자금액 기반 수량 계산
-  // 로직 자체는 그대로 유지한다 — 기본값(10,000원)을 내부적으로 고정해서 사용한다.
-  const [targetInvestmentPerStock] = useState<number>(10000);
-  // 가격에 맞춰 수량 계산 — 최소 1주는 보장
-  const calcQuantityForTargetAmount = React.useCallback((price: number): number => {
-    if (!price || price <= 0 || targetInvestmentPerStock <= 0) return 1;
-    return Math.max(1, Math.floor(targetInvestmentPerStock / price));
+
+  // ============================================================
+  // 💰 종목당 진입금액
+  // ============================================================
+
+  const BUY_AMOUNT_OPTIONS = [
+    { value: 10000, label: '1만원' },
+    { value: 20000, label: '2만원' },
+    { value: 30000, label: '3만원' },
+    { value: 40000, label: '4만원' },
+    { value: 50000, label: '5만원' },
+    { value: 100000, label: '10만원' },
+    { value: 500000, label: '50만원' },
+    { value: 1000000, label: '100만원' }
+  ] as const;
+
+  const DEFAULT_BUY_AMOUNT = BUY_AMOUNT_OPTIONS[0].value;
+
+  const [targetInvestmentPerStock, setTargetInvestmentPerStock] =
+    useState<number>(() => {
+      const saved = localStorage.getItem(
+        'scalper_target_investment'
+      );
+
+      const parsed = saved ? Number(saved) : DEFAULT_BUY_AMOUNT;
+
+      return BUY_AMOUNT_OPTIONS.some(
+        option => option.value === parsed
+      )
+        ? parsed
+        : DEFAULT_BUY_AMOUNT;
+    });
+
+  useEffect(() => {
+    localStorage.setItem(
+      'scalper_target_investment',
+      String(targetInvestmentPerStock)
+    );
   }, [targetInvestmentPerStock]);
+
+  const targetInvestmentPerStockRef =
+    React.useRef(targetInvestmentPerStock);
+
+  useEffect(() => {
+    targetInvestmentPerStockRef.current =
+      targetInvestmentPerStock;
+  }, [targetInvestmentPerStock]);
+
+  // 가격에 맞춰 수량 계산 — 최소 1주는 보장
+  const calcQuantityForTargetAmount = React.useCallback(
+    (price: number): number => {
+      const budget = targetInvestmentPerStockRef.current;
+
+      if (!Number.isFinite(price) || price <= 0) {
+        return 0;
+      }
+
+      if (!Number.isFinite(budget) || budget <= 0) {
+        return 0;
+      }
+
+      return Math.floor(budget / price);
+    },
+    []
+  );
 
   // 💰 추천종목 검색/자동채움에 적용할 가격구간 — "종목당 10000원" 입력창 자리를 대체하는 드롭다운.
   // 선택한 구간의 종목만 KIS 랭킹 API 단계에서부터 후보로 걸러진다(추가 API 호출 없이 파라미터만
@@ -5316,10 +5371,9 @@ useEffect(() => {
       });
 
       openOrSwitchScalperTab(rec.symbol, resolvedName, resolvedPrice, rec);
-      // 💰 목표 투자금액에 맞춰 수량 자동 계산 (수동 클릭 등록에도 자동 채움과 동일하게 적용)
-      const autoQty = calcQuantityForTargetAmount(resolvedPrice);
-      updateTab(rec.symbol, { tradeQuantity: autoQty });
-      showNotification(`[스캘퍼 타겟 등록] ${resolvedName}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (현재 체결가 ${resolvedPrice.toLocaleString()}원, 추천가 ${rec.recommendedPrice.toLocaleString()}원, 스캘핑 점수 ${rec.scalpingScore}점, 자동 수량 ${autoQty}주)`, "success");
+      // 🛡️ 수량은 등록 시점에 계산하지 않는다 — 실제 매수 시그널이 발생하는 순간의 최신 가격
+      // 기준으로 계산되어야 하므로, 등록만으로는 tradeQuantity를 정하지 않는다(기본값 0 유지).
+      showNotification(`[스캘퍼 타겟 등록] ${resolvedName}(${rec.symbol}) 종목이 스캘퍼 탭으로 등록 및 선택되었습니다. (현재 체결가 ${resolvedPrice.toLocaleString()}원, 추천가 ${rec.recommendedPrice.toLocaleString()}원, 스캘핑 점수 ${rec.scalpingScore}점)`, "success");
       // 🛡️ 등록해도 모달을 닫지 않는다 — 여러 종목을 연속으로 등록할 수 있게, 닫는 건 사용자가
       // 직접 닫기 버튼을 눌렀을 때만 하도록 한다.
 
@@ -7300,9 +7354,9 @@ const masterInterval = setInterval(() => {
         for (const rec of candidates) {
           if ((scalperTabsRef.current.filter(t => !/^[A-Za-z]/.test(t.symbol) && !toRemove.includes(t.symbol)).length) >= MAX_INVENTORY_PER_MARKET) break;
           handleSelectRecommendationStock(rec);
-          // 등록 직후 봇도 바로 시작 상태로 (자동 관리 모드이므로), 수량은 목표 투자금액에 맞춰 자동 계산
-          const autoQty = calcQuantityForTargetAmount(rec.price);
-          updateTab(rec.symbol, { isBotActive: true, tradeQuantity: autoQty });
+          // 🛡️ 등록 직후 봇도 바로 시작 상태로 (자동 관리 모드이므로) — 수량은 등록 시점에 계산하지
+          // 않는다. 실제 매수 시그널이 발생하는 순간의 최신 가격 기준으로 계산되어야 하기 때문이다.
+          updateTab(rec.symbol, { isBotActive: true, tradeQuantity: 0 });
           await new Promise(r => setTimeout(r, 800)); // 연속 등록 시 상태 업데이트가 겹치지 않도록 간격 확대
         }
         if (candidates.length > 0) {
@@ -8816,7 +8870,9 @@ useEffect(() => {
           maxPrice = limits.upperLimit;
         }
 
-        const itemTradeQty = tabItem.tradeQuantity || (isSelected ? tradeQuantity : 1);
+        // 🛡️ 예전엔 여기서 itemTradeQty(등록 시점/전역 설정 기반 수량)를 미리 정해뒀지만, 이제
+        // 수량은 매수 조건이 실제로 충족된 순간(아래 calcQuantityForTargetAmount 호출부)에만
+        // 계산하므로 더 이상 필요 없다.
         const itemMaxSlots = tabItem.maxSlots || (isSelected ? maxSlots : 10);
         const itemEntryMode = tabItem.entryPriceMode || (isSelected ? entryPriceMode : 'BID1');
 
@@ -9016,7 +9072,34 @@ useEffect(() => {
 
                 const currentStep = currentTotalOccupied + 1;
                 const isAiMaxYieldActive = scalperStrategyMode === 'AI_MAX_YIELD';
-                let scaledQuantity = itemTradeQty;
+
+                // 🛡️ 매우 중요한 변경: 예전엔 등록 시점(또는 전역 설정)에 미리 정해둔 itemTradeQty를
+                // 그대로 썼다 — 등록 당시의 가격은 이미 오래된 값일 수 있어서, 실제 매수 시점의
+                // 가격과 어긋난 수량으로 주문이 나갈 위험이 있었다. 이제 매수 조건이 실제로 충족된
+                // "바로 이 순간"의 targetBuyPrice로 즉시 수량을 계산한다.
+                const orderPrice = targetBuyPrice;
+                const calculatedBuyQty = calcQuantityForTargetAmount(orderPrice);
+
+                console.log('[매수수량 계산]', {
+                  symbol: stockItem.symbol,
+                  진입금액: targetInvestmentPerStockRef.current,
+                  주문가격: orderPrice,
+                  계산수량: calculatedBuyQty,
+                  예상주문금액: calculatedBuyQty > 0 ? orderPrice * calculatedBuyQty : 0
+                });
+
+                if (calculatedBuyQty <= 0 && !isAiMaxYieldActive) {
+                  addLog(
+                    stockItem.symbol,
+                    '매수',
+                    orderPrice,
+                    0,
+                    `[매수 스킵] 설정 진입금액 ${targetInvestmentPerStockRef.current.toLocaleString()}원으로 1주 매수 불가`
+                  );
+                  continue;
+                }
+
+                let scaledQuantity = calculatedBuyQty;
                 if (isAiMaxYieldActive && maxYieldBudgetRef.current > 0) {
                   const currentPriceUnit = priceInKrw > 0 ? priceInKrw : 1;
                   const totalAffordableQty = Math.max(1, Math.floor(maxYieldBudgetRef.current / currentPriceUnit));
@@ -9315,6 +9398,40 @@ useEffect(() => {
     // KIS API가 연결되어 있고 실제 주문 전송이 활성화된 경우 실제 주문을 라이브 인터페이스를 통해 시도
     if (kisConfig.isConnected) {
         if (action === 'BUY') {
+            // 🛡️ 최종 안전장치: 앞으로 새로운 매수 경로가 추가되더라도, 여기서 마지막으로 한번 더
+            // 막는다. 어떤 값의 amount가 넘어왔든 상관없이, 실제 주문 직전에 "설정 진입금액 ÷
+            // 실제 주문가격"으로 다시 계산해서 finalAmount를 확정한다. 이 아래 이어지는 KIS 실제
+            // 매수가능수량 조회는 그대로 유지되며, 그 로직이 이 finalAmount를 기준으로 실제 가능
+            // 여부를 다시 검증한다 — 즉 (설정금액 기준 수량)과 (KIS 실제 매수가능수량) 중 작은
+            // 쪽으로 최종 확정되는 흐름이 자연스럽게 완성된다.
+            const budget = targetInvestmentPerStockRef.current;
+
+            if (!Number.isFinite(tradePrice) || tradePrice <= 0) {
+              addLog(
+                stock.symbol,
+                '매수',
+                0,
+                0,
+                '[매수 차단] 유효하지 않은 주문가격'
+              );
+              return 0;
+            }
+
+            const budgetQty = Math.floor(budget / tradePrice);
+
+            if (budgetQty <= 0) {
+              addLog(
+                stock.symbol,
+                '매수',
+                tradePrice,
+                0,
+                `[매수 차단] ${budget.toLocaleString()}원으로 1주 매수 불가`
+              );
+              return 0;
+            }
+
+            finalAmount = budgetQty;
+
             try {
                 const isKR = /^\d{6}$/.test(stock.symbol);
                 if (isKR) {
@@ -10406,6 +10523,9 @@ useEffect(() => {
                 priceRangeOptions={PRICE_RANGE_OPTIONS}
                 priceRangeIndex={priceRangeIndex}
                 setPriceRangeIndex={setPriceRangeIndex}
+                buyAmountOptions={BUY_AMOUNT_OPTIONS}
+                targetInvestmentPerStock={targetInvestmentPerStock}
+                setTargetInvestmentPerStock={setTargetInvestmentPerStock}
                 isRefreshingTop3={isRefreshingTop3}
                 scalperTabs={scalperTabs}
                 activeTabId={activeTabId}
