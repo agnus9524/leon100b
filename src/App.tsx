@@ -1835,13 +1835,6 @@ const liveDataSessionRef = React.useRef(0);
 
   let socket: WebSocket | null = null;
   let cancelled = false;
-    if (symbols.length === 0) {
-      setWsConnectionStatus('idle');
-      return;
-    }
-
-    let socket: WebSocket | null = null;
-    let cancelled = false;
 
     kisService
       .connectWebSocket(
@@ -2150,6 +2143,14 @@ useEffect(() => {
   kisConfig.isConnected,
   scalperTabs
 ]);
+
+  // 🛡️ 매우 중요한 복원: 이 useEffect는 예전에 파일 손상으로 시작부(선언, isConfigReady 체크,
+  // missing 변수 선언)가 통째로 사라지고 몸통만 위의 다른 useEffect 뒤에 잘못 붙어있었다.
+  // 등록된 인벤토리 종목 중 아직 stocks 배열에 없는 종목을 찾아서 초기 시드값을 채우고, 실제
+  // 가격을 곧바로 조회해서 보정하는 역할이다.
+  useEffect(() => {
+    if (!kisService.isConfigReady()) { console.log('[인벤토리 시딩 중단] config 준비 안 됨'); return; }
+    const missing = scalperTabs.filter(t => !stocksRef.current.some(s => s.symbol === t.symbol));
     if (missing.length === 0) return;
     console.log('[인벤토리 시딩 진행]', { 누락종목: missing.map(t => t.symbol) });
 
@@ -9373,6 +9374,22 @@ useEffect(() => {
       return 0;
     }
     pendingTradeKeysRef.current.add(tradeLockKey);
+
+    // 🛡️ 매우 중요한 안전조치: 예전엔 KIS가 연동 안 된 상태에서 매매를 시도하면, 실제 주문 API
+    // 호출 자체를 건너뛰고 곧바로 로컬 holdings/balance를 낙관적으로 갱신하는 "가상 매매
+    // 시뮬레이션"이 있었다 — 화면엔 "매수/매도 완료"로 보이지만 실제로는 KIS에 아무 주문도
+    // 나가지 않았다. 이건 KIS API 키가 아예 없을 때뿐 아니라, 봇이 돌아가는 도중 KIS 연동이
+    // 순간적으로 끊겼을 때(세션 만료, 네트워크 튐 등)도 똑같이 발동해서, 사용자가 실제 체결로
+    // 착각하거나 로컬 상태와 실제 KIS 잔고가 어긋나는 위험이 있었다. 이제 KIS 미연동 시 매매
+    // 자체를 여기서 완전히 차단한다 — 실제 주문 로직도, 그 아래의 로컬 상태 갱신도 전부 실행되지
+    // 않는다.
+    if (!kisConfig.isConnected) {
+      pendingTradeKeysRef.current.delete(tradeLockKey);
+      setBotStatus(`[매매 차단] KIS 미연동 상태 — 실제 계좌 연동 없이는 매매가 실행되지 않습니다`);
+      addLog(stock.symbol, action === 'SELL' ? '매도' : '매수', stock.price, amount, `[매매 차단] KIS 미연동 — 실제 계좌 연동 후 다시 시도해주세요`);
+      showNotification(`매매 차단: KIS 실제 계좌가 연동되어 있지 않습니다. [설정 > KIS 연동]에서 연동 상태를 확인해주세요.`, "error");
+      return 0;
+    }
 
     try {
       let tradePrice = customPrice !== undefined ? customPrice : stock.price;
