@@ -1786,12 +1786,55 @@ const liveDataSessionRef = React.useRef(0);
   }, [registeredSymbolsKeyRaw]);
 
   useEffect(() => {
-    if (!kisConfig.isConnected) {
-      setWsConnectionStatus('idle');
-      return;
-    }
+  // ============================================================
+  // 🔒 실시간 데이터 시작 순서 보호
+  //
+  // 순서:
+  // 1. Firebase 로그인
+  // 2. KIS 초기화
+  // 3. 계좌/인벤토리 초기 동기화
+  // 4. isAppInitialized = true
+  // 5. 그 다음 WebSocket 연결
+  //
+  // 초기화 전에 WebSocket을 열면 인벤토리가 확정되기 전에
+  // 구독이 시작되어 재연결/재구독이 반복될 수 있다.
+  // ============================================================
+  if (!currentUser) {
+    setWsConnectionStatus('idle');
+    return;
+  }
 
-    const symbols = scalperTabsRef.current.map(t => t.symbol).filter(Boolean);
+  if (!isAppInitialized) {
+    setWsConnectionStatus('idle');
+    return;
+  }
+
+  if (!kisConfig.isConnected) {
+    setWsConnectionStatus('idle');
+    return;
+  }
+
+  if (!kisService.isConfigReady()) {
+    setWsConnectionStatus('idle');
+    return;
+  }
+
+  const symbols = scalperTabsRef.current
+    .map(t => t.symbol)
+    .filter(Boolean);
+
+  if (symbols.length === 0) {
+    setWsConnectionStatus('idle');
+    return;
+  }
+
+  console.log('[WS 시작] 초기화 완료 후 최종 인벤토리 구독', {
+    종목수: symbols.length,
+    종목목록: symbols
+  });
+
+  let socket: WebSocket | null = null;
+  let cancelled = false;
     if (symbols.length === 0) {
       setWsConnectionStatus('idle');
       return;
@@ -1971,7 +2014,10 @@ const liveDataSessionRef = React.useRef(0);
         }
       }
     };
-  }, [kisConfig.isConnected, registeredSymbolsKey]);
+  }, [currentUser,
+  isAppInitialized,
+  kisConfig.isConnected,
+  registeredSymbolsKey]);
 
   // ============================================================
   // 🔄 인벤토리에 등록된 "모든" 종목이 stocks 배열에 존재하도록 보장한다.
@@ -1982,9 +2028,128 @@ const liveDataSessionRef = React.useRef(0);
   // 계속 갇혀있는" 증상이 생긴다. 새로 나타난 종목은 fallback 값으로만 채우지 않고, 그 자리에서
   // 바로 KIS 실제가를 조회해서 정확한 값으로 채운다.
   // ============================================================
-  useEffect(() => {
-    if (!kisService.isConfigReady()) { console.log('[인벤토리 시딩 중단] config 준비 안 됨'); return; }
-    const missing = scalperTabs.filter(t => !stocksRef.current.some(s => s.symbol === t.symbol));
+  // ============================================================
+// 🔄 인벤토리에 등록된 모든 종목을 stocks 배열에 보장
+//
+// 중요:
+// 초기 KIS 동기화가 끝나기 전에 실행하면
+// stocks / scalperTabs / WebSocket의 초기화 순서가 서로 꼬인다.
+//
+// 따라서:
+// KIS 초기화 → 계좌 동기화 → 인벤토리 확정 → App 초기화 완료
+// 이후에만 여기서 누락 종목을 보정한다.
+// ============================================================
+useEffect(() => {
+  if (!currentUser) return;
+
+  if (!isAppInitialized) {
+    return;
+  }
+
+  if (!kisConfig.isConnected) {
+    return;
+  }
+
+  if (!kisService.isConfigReady()) {
+    console.log('[인벤토리 시딩 중단] KIS config 준비 안 됨');
+    return;
+  }
+
+  const missing = scalperTabs.filter(
+    t => !stocksRef.current.some(s => s.symbol === t.symbol)
+  );
+
+  if (missing.length === 0) return;
+
+  console.log('[인벤토리 시딩 진행]', {
+    누락종목: missing.map(t => t.symbol)
+  });
+
+  setStocks(prev => {
+    const existing = new Set(prev.map(s => s.symbol));
+
+    const additions: Stock[] = missing
+      .filter(t => !existing.has(t.symbol))
+      .map(t => {
+        const isUS = /^[A-Za-z]/.test(t.symbol);
+
+        const seedPrice =
+          (t.price && t.price > 0)
+            ? t.price
+            : (isUS ? 10 : 1000);
+
+        return {
+          symbol: t.symbol,
+          name: t.name,
+          price: seedPrice,
+          change: 0,
+          changePercent: 0,
+          volume: '0',
+          history: [
+            {
+              time: '09:00',
+              price: seedPrice
+            }
+          ],
+          market: isUS ? 'US' : 'KR',
+          isAI: false
+        };
+      });
+
+    return additions.length > 0
+      ? [...prev, ...additions]
+      : prev;
+  });
+
+  // 초기화 이후 누락된 종목만 실제 현재가를 보정한다.
+  missing.forEach(async (t) => {
+    try {
+      if (!currentUser) return;
+      if (!isAppInitialized) return;
+
+      const priceData = await kisService.getPrice(t.symbol);
+
+      if (!currentUser) return;
+      if (!isAppInitialized) return;
+
+      if (priceData && priceData.current > 0) {
+        setStocks(prev =>
+          prev.map(s =>
+            s.symbol === t.symbol
+              ? {
+                  ...s,
+                  price: priceData.current,
+                  change: priceData.change,
+                  changePercent: priceData.changePercent,
+                  volume: priceData.volume,
+                  executionStrength: priceData.executionStrength,
+                  isRealTime: true,
+                  lastUpdated: new Date().toLocaleTimeString(
+                    'ko-KR',
+                    {
+                      hour: '2-digit',
+                      minute: '2-digit',
+                      second: '2-digit'
+                    }
+                  )
+                }
+              : s
+          )
+        );
+      }
+    } catch (err) {
+      console.warn(
+        `[인벤토리 초기 가격 보정] ${t.symbol} 조회 실패`,
+        err
+      );
+    }
+  });
+}, [
+  currentUser,
+  isAppInitialized,
+  kisConfig.isConnected,
+  scalperTabs
+]);
     if (missing.length === 0) return;
     console.log('[인벤토리 시딩 진행]', { 누락종목: missing.map(t => t.symbol) });
 
@@ -6915,6 +7080,11 @@ setStocks(updatedStocks);
   if (!isAppInitialized) return;
   if (!kisConfig.isConnected) return;
 
+   if (!kisService.isConfigReady()) {
+    console.log('[refreshAllInventorySensors 중단] KIS config 준비 안 됨');
+    return;
+  }
+
     const refreshAllInventorySensors = () => {
       if (!isKoreanDataCollectionActive()) { console.log('[refreshAllInventorySensors 중단] 데이터수집 시간 아님'); return; } // 🕗 09:00 정각에 센서가 바로 유의미하도록 08:30부터 미리 계산 — 실제 매수/매도는 별도 엔진 루프가 isKoreanMarketOpen()으로 09:00부터만 실행하므로 안전하다
       const currentStocks = stocksRef.current;
@@ -6994,7 +7164,10 @@ setStocks(updatedStocks);
     refreshAllInventorySensors();
     const sensorInterval = setInterval(refreshAllInventorySensors, 1000); // 🔼 3초→1초 — 가격은 100ms 배치로 반영되는데 센서만 3초 지연되면 체감상 "센서가 늦게 움직인다"는 인상을 줄 수 있어 단축. 다만 100~300ms까지는 종목당 RSI/SMA/VWAP/POC 계산(history 최대 600개 순회)이 다소 무거운 연산이라 부담이 커질 수 있어 1초로 절충
     return () => clearInterval(sensorInterval);
-  }, [isAppInitialized, detectStockStrategies]);
+  }, [currentUser,
+  isAppInitialized,
+  kisConfig.isConnected,
+  detectStockStrategies]);
 
   // ============================================================
   // 🤖 강한 매수 신호 자동 감지 → 팝업 자동 표시
