@@ -4802,16 +4802,41 @@ setGapInventory(nextInv);
   }, []);
 
   // Auto-Sync KIS Account Status once initial stocks, charts, and prices load
-  const hasAutoSyncedRef = React.useRef(false);
-  useEffect(() => {
-    if (kisConfig.isConnected && !hasAutoSyncedRef.current && stocks.length > 0 && true) {
-      hasAutoSyncedRef.current = true;
-      const timer = setTimeout(() => {
-        handleSyncKIS();
-      }, 800);
-      return () => clearTimeout(timer);
-    }
-  }, [kisConfig.isConnected, stocks.length, true]);
+ // ============================================================
+// 🔄 KIS 초기 계좌 자동 동기화
+//
+// executeFullKisInitialSync()가 초기화 중에는 이미
+// handleSyncKIS()를 호출하므로 중복 호출하지 않는다.
+//
+// 초기화가 완료된 뒤에도 실제 계좌 상태가 필요한 경우에만
+// 1회 실행한다.
+// ============================================================
+const hasAutoSyncedRef = React.useRef(false);
+
+useEffect(() => {
+  if (!currentUser) return;
+  if (!isAppInitialized) return;
+  if (!kisConfig.isConnected) return;
+  if (hasAutoSyncedRef.current) return;
+  if (stocks.length === 0) return;
+
+  hasAutoSyncedRef.current = true;
+
+  const timer = setTimeout(() => {
+    if (!currentUser) return;
+    if (!isAppInitialized) return;
+    if (!kisConfig.isConnected) return;
+
+    handleSyncKIS();
+  }, 800);
+
+  return () => clearTimeout(timer);
+}, [
+  currentUser,
+  isAppInitialized,
+  kisConfig.isConnected,
+  stocks.length
+]);
 
   const isLoggingInRef = React.useRef(false);
   const handleLogin = async () => {
