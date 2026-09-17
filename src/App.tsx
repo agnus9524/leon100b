@@ -6857,22 +6857,24 @@ priceData.current
   useEffect(() => {
     if (!isAppInitialized) return;
 
-    // 1. Sync for all watchlist stocks (every 10 seconds)
- const refreshStalePrices = async () => {
-  // ============================================================
-  // 🔒 로그인/앱 초기화 상태가 아니면 REST 시세조회 금지
-  // ============================================================
+    // ============================================================
+    // 🔄 REST 가격 백업 — WebSocket이 오래 끊긴 등록 스캘퍼 종목만 조회
+    // ------------------------------------------------------------ 
+    // 원칙: // 1. scalperTabs에 등록된 국내 종목만 대상 '
+    // 2. WebSocket(H0STCNT0)이 정상적으로 들어오는 종목은 REST 조회 안 함 
+    // 3. 마지막 WebSocket 틱이 10초 이상 없는 종목만 REST 보완 
+    // 4. stocks 전체(추천풀 포함)를 REST 조회하지 않음 
+    // 5. 여러 종목을 동시에 요청하지 않고 한 종목씩 순차 처리 
+    // ============================================================
+
+const refreshStalePrices = async () => {
   if (!currentUser) return;
   if (!isAppInitialized) return;
   if (!kisConfig.isConnected) return;
-
-  // 현재 실시간 데이터 세션 번호 저장
-  const sessionId = liveDataSessionRef.current;
-
-  // KIS 설정이 실제로 준비되지 않았으면 중단
   if (!kisService.isConfigReady()) return;
 
-  // 로그아웃 등으로 세션이 변경되었으면 중단
+  const sessionId = liveDataSessionRef.current;
+
   if (sessionId !== liveDataSessionRef.current) return;
 
   if (!isKoreanDataCollectionActive()) {
@@ -6881,168 +6883,213 @@ priceData.current
   }
 
   try {
-        // ============================================================
-// 🎯 REST 백업 대상은 "실제 스캘퍼 등록종목"만
-//
-// stocks 배열에는 추천 후보/검색 결과/기타 표시용 종목이 들어갈 수 있다.
-// 하지만 REST 가격 백업이 필요한 것은 실제 매매 감시 대상인
-// scalperTabs뿐이다.
-//
-// 정상 상태:
-//   H0STCNT0 WebSocket → 실시간 가격
-//
-// 비정상/지연 상태:
-//   refreshStalePrices() → 오래된 등록종목만 REST 보완
-//
-// ❌ stocks 전체 순회 금지
-// ❌ 추천 후보 전체 REST 조회 금지
-// ============================================================
+    // ========================================================
+    // 실제 스캘퍼 등록 종목만 추출
+    // ========================================================
+    const inventorySymbols = Array.from(
+      new Set(
+        scalperTabsRef.current
+          .map(t => t.symbol)
+          .filter(symbol => /^\d{6}$/.test(symbol))
+      )
+    );
 
-const STALE_THRESHOLD_MS = 10000; // 등록종목이 10초 동안 틱이 없으면 REST 백업
+    if (inventorySymbols.length === 0) {
+      console.log('[refreshStalePrices 중단] 등록된 국내 스캘퍼 종목 없음');
+      return;
+    }
 
-const inventorySymbols = Array.from(
-  new Set(
-    scalperTabsRef.current
-      .map(t => t.symbol)
-      .filter(symbol => /^\d{6}$/.test(symbol))
-  )
-);
+    const now = Date.now();
+    const currentStocks = stocksRef.current;
 
-if (inventorySymbols.length === 0) {
-  console.log('[refreshStalePrices 중단] 등록된 국내 스캘퍼 종목 없음');
-  return;
-}
+    // ========================================================
+    // WebSocket 틱이 10초 이상 없는 등록 종목만 REST 백업
+    // ========================================================
+    const STALE_THRESHOLD_MS = 10000;
 
-const now = Date.now();
-const currentStocks = stocksRef.current;
+    const targetStocks = inventorySymbols
+      .map(symbol =>
+        currentStocks.find(s => s.symbol === symbol)
+      )
+      .filter((s): s is Stock => !!s)
+      .filter(s => {
+        const lastUpdate =
+          lastWsTickAtRef.current[s.symbol] || 0;
 
-// stocks에 존재하는 등록종목만 REST 백업 대상으로 만든다.
-// WebSocket이 정상적으로 틱을 보내고 있으면 대상에서 제외된다.
-const targetStocks = inventorySymbols
-  .map(symbol => currentStocks.find(s => s.symbol === symbol))
-  .filter((s): s is Stock => !!s)
-  .filter(s => {
-    const lastUpdate = lastWsTickAtRef.current[s.symbol] || 0;
+        return now - lastUpdate >= STALE_THRESHOLD_MS;
+      });
 
-    // 마지막 WebSocket 틱을 받은 지 10초 이상이면 stale
-    return now - lastUpdate >= STALE_THRESHOLD_MS;
-  });
+    console.log('[refreshStalePrices]', {
+      전체Stocks: currentStocks.length,
+      등록종목: inventorySymbols.length,
+      REST백업대상: targetStocks.map(s => s.symbol),
+      대상수: targetStocks.length,
+      ws상태: wsConnectionStatusRef.current
+    });
 
-console.log('[refreshStalePrices]', {
-  전체Stocks: currentStocks.length,
-  등록종목: inventorySymbols.length,
-  REST백업대상: targetStocks.map(s => s.symbol),
-  대상수: targetStocks.length,
-  ws상태: wsConnectionStatusRef.current
-});
+    if (targetStocks.length === 0) {
+      return;
+    }
 
-if (targetStocks.length === 0) {
-  return;
-}
+    // ========================================================
+    // REST는 반드시 한 종목씩 순차 조회
+    // ========================================================
+    const updatedTargets: Stock[] = [];
 
-        // 🛡️ 매우 중요한 수정: 예전엔 Promise.all()로 대상 종목 전체에 대해 getPrice()를 동시에
-        // 호출했다. getDomesticPrice() 자체는 이제 queueRequest(진짜 직렬 큐)를 거치므로 실제 축
-        // 요청은 순서대로 처리되지만, 애초에 N개의 호출을 한꺼번에 만들지 않는 게 더 단순하고
-        // 안전하다 — 한 종목씩 순차 처리하면 실패(429 등)가 나도 그 즉시 인지하고 다음 시도로
-        // 넘어갈 수 있고, 굳이 수십 개의 pending promise를 한꺼번에 만들 필요가 없다.
-        const sessionId = liveDataSessionRef.current;
-        const updatedTargets: Stock[] = [];
-        for (const s of targetStocks) {
-          // ============================================================
-  // 🔒 로그인 상태 및 실시간 세션 확인
-  // ============================================================
-  if (!currentUser) break;
-  if (!isAppInitialized) break;
-  if (sessionId !== liveDataSessionRef.current) break;
-          try {
-            const priceData = await kisService.getPrice(s.symbol);
-            // ============================================================
-    // 🔒 REST 응답 대기 중 로그아웃되었으면 결과 반영 금지
-    // ============================================================
-    if (!currentUser) break;
-    if (!isAppInitialized) break;
-    if (sessionId !== liveDataSessionRef.current) break;
-            console.log(`[getPrice 결과] ${s.symbol}`, priceData);
-            if (priceData && priceData.current > 0) {
-              const realPrice = priceData.current;
-              const safeHist = Array.isArray(s.history) ? s.history : [];
+    for (const s of targetStocks) {
+      // ------------------------------------------------------
+      // 세션 / 로그인 상태 재확인
+      // ------------------------------------------------------
+      if (!currentUser) break;
+      if (!isAppInitialized) break;
+      if (sessionId !== liveDataSessionRef.current) break;
 
-              updatedTargets.push({
-                ...s,
-                price: realPrice,
-                change: priceData.change,
-                changePercent: priceData.changePercent,
-                volume: priceData.volume,
-                executionStrength: priceData.executionStrength,
-                isRealTime: true,
-                lastUpdated: new Date().toLocaleTimeString(),
-                history: safeHist.length > 0
-                  ? [...safeHist.slice(1), {
-                      time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }),
+      try {
+        const priceData = await kisService.getPrice(s.symbol);
+
+        // ----------------------------------------------------
+        // REST 응답을 기다리는 동안 세션이 바뀌었으면 반영 금지
+        // ----------------------------------------------------
+        if (!currentUser) break;
+        if (!isAppInitialized) break;
+        if (sessionId !== liveDataSessionRef.current) break;
+
+        console.log(`[REST 백업 결과] ${s.symbol}`, priceData);
+
+        if (priceData && priceData.current > 0) {
+          const realPrice = priceData.current;
+          const safeHist = Array.isArray(s.history)
+            ? s.history
+            : [];
+
+          updatedTargets.push({
+            ...s,
+            price: realPrice,
+            change: priceData.change,
+            changePercent: priceData.changePercent,
+            volume: priceData.volume,
+            executionStrength:
+              priceData.executionStrength,
+            isRealTime: true,
+            lastUpdated: new Date().toLocaleTimeString(),
+            history:
+              safeHist.length > 0
+                ? [
+                    ...safeHist.slice(1),
+                    {
+                      time: new Date().toLocaleTimeString(
+                        'ko-KR',
+                        {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        }
+                      ),
                       price: realPrice
-                    }]
-                  : [{ time: new Date().toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' }), price: realPrice }]
-              });
-              continue;
-            }
-          } catch (innerErr: any) {
-            console.warn(`All-stock price fetch failed for ${s.symbol}:`, innerErr);
-          }
-          updatedTargets.push({ ...s });
+                    }
+                  ]
+                : [
+                    {
+                      time: new Date().toLocaleTimeString(
+                        'ko-KR',
+                        {
+                          hour: '2-digit',
+                          minute: '2-digit'
+                        }
+                      ),
+                      price: realPrice
+                    }
+                  ]
+          });
+
+          // REST로 보완했으므로 마지막 갱신 시각도 기록
+          lastWsTickAtRef.current[s.symbol] =
+            Date.now();
+
+          continue;
+        }
+      } catch (innerErr: any) {
+        console.warn(
+          `[REST 가격 백업 실패] ${s.symbol}`,
+          innerErr
+        );
+      }
+
+      // 조회 실패 시 기존 데이터 유지
+      updatedTargets.push({
+        ...s
+      });
+    }
+
+    // ========================================================
+    // 이번 REST 백업 대상만 기존 stocks에 병합
+    // ========================================================
+    if (!currentUser) return;
+    if (!isAppInitialized) return;
+    if (sessionId !== liveDataSessionRef.current) return;
+
+    const targetPriceMap = new Map<string, Stock>(
+      updatedTargets.map(s => [s.symbol, s])
+    );
+
+    const updatedStocks = currentStocks.map(
+      s => targetPriceMap.get(s.symbol) || s
+    );
+
+    setStocks(updatedStocks);
+
+    // ========================================================
+    // 등록된 scalperInventory의 현재가도 함께 갱신
+    // ========================================================
+    const priceMap = new Map<string, Stock>(
+      updatedStocks.map(s => [s.symbol, s])
+    );
+
+    setScalperInventory(prev => {
+      return prev.map(item => {
+        const updated = priceMap.get(item.symbol);
+
+        if (
+          !updated ||
+          !updated.price ||
+          updated.price <= 0
+        ) {
+          return item;
         }
 
-        // 🛡️ updatedTargets는 "이번에 REST로 새로 조회한 일부 종목"만 담고 있다. 나머지(웹소켓으로
-        // 이미 최신 상태인) 종목은 그대로 두고, 이번에 갱신된 것만 병합한다.
-        const targetPriceMap = new Map<string, Stock>(updatedTargets.map(s => [s.symbol, s]));
-        const updatedStocks = currentStocks.map(
-  s => targetPriceMap.get(s.symbol) || s
-);
+        const priceChanged =
+          item.market.currentPrice !== updated.price ||
+          item.market.changePercent !==
+            (updated.changePercent || 0);
 
-// 🔒 REST 응답 대기 중 로그아웃했다면 상태 반영 금지
-if (!currentUser) return;
-if (!isAppInitialized) return;
-if (sessionId !== liveDataSessionRef.current) return;
+        if (!priceChanged) {
+          return item;
+        }
 
-setStocks(updatedStocks);
+        return {
+          ...item,
+          market: {
+            ...item.market,
+            currentPrice: updated.price,
+            changePercent:
+              updated.changePercent || 0,
+            volume:
+              updated.volume ||
+              item.market.volume,
+            priceStatus: 'LIVE' as const,
+            lastUpdatedAt: Date.now()
+          }
+        };
+      });
+    });
 
-        // 🛡️ 매우 중요한 수정: 지금까지 이 함수는 stocks 배열만 갱신하고 scalperInventory는
-        // 전혀 건드리지 않았다. scalperInventory(등록된 종목의 실제 데이터 소스)는 오직 "현재
-        // 선택된 종목"만 refreshInventoryItem을 통해 갱신되고 있었고, 나머지 등록 종목들은
-        // 등록 당시 가격에 영원히 고정되어 있었다. 그 결과 메인 엔진 루프와 센서 갱신 로직이
-        // 선택 안 한 종목에 대해서는 오래된(또는 존재하지 않는) 가격으로 판단하거나 아예
-        // 건너뛰게 되어, "종목을 클릭해야만 실시간으로 감시/매매되는 것처럼" 보이는 근본
-        // 원인이었다. 이제 등록된 전체 종목의 market 네임스페이스를 여기서 함께 갱신한다.
-        const priceMap = new Map<string, Stock>(updatedStocks.map(s => [s.symbol, s]));
-        setScalperInventory(prev => {
-          const result = prev.map(item => {
-            const updated = priceMap.get(item.symbol);
-            const matched = !!updated;
-            const hasValidPrice = !!(updated && updated.price && updated.price > 0);
-            const priceChanged = hasValidPrice && !(item.market.currentPrice === updated!.price && item.market.changePercent === (updated!.changePercent || 0));
-            // 🔍 인벤토리 종목이 이번 사이클에서 stocks 배열에 매칭됐는지, 유효한 가격을 받았는지,
-            // 실제로 값이 바뀌었는지를 명확히 남긴다 — "인벤토리 6종목이 이 갱신에 포함되는지"를
-            // 애매함 없이 확인하기 위함
-            console.log(`[인벤토리 갱신 체크] ${item.symbol}(${item.name})`, { stocks배열에_존재: matched, 유효가격: hasValidPrice, 값바뀜: priceChanged, 기존가격: item.market.currentPrice, 새가격: updated?.price });
-            if (!hasValidPrice) return item;
-            if (!priceChanged) return item;
-            return {
-              ...item,
-              market: {
-                ...item.market,
-                currentPrice: updated!.price,
-                changePercent: updated!.changePercent || 0,
-                volume: updated!.volume || item.market.volume,
-                priceStatus: 'LIVE' as const,
-                lastUpdatedAt: Date.now()
-              }
-            };
-          });
-          return result;
-        });
-      } catch (err: any) {
-        console.error("Real-time price sync failed:", err);
-      }
-    };
+  } catch (err: any) {
+    console.error(
+      '[refreshStalePrices 오류]',
+      err
+    );
+  }
+};
+
 
     // 2. Fast sync for the currently selected stock (every 1.5 seconds)
     // 🛡️ syncSelectedPrice(선택 종목 전용 2초 REST)를 완전히 제거했다 — 웹소켓 틱 핸들러가
