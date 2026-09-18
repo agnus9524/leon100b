@@ -5111,11 +5111,18 @@ useEffect(() => {
           조회시각: new Date().toLocaleTimeString('ko-KR')
         });
 
-        // symbol 기준으로 병합 (중복 제거) — 두 순위에 모두 등장하는 종목이 특히 유의미한 후보
-        const mergedMap = new Map<string, { symbol: string; name: string; price: number; changePercent: number; volume: string }>();
-        [...volumeLeaders, ...fluctuationLeaders].forEach(v => {
+        // symbol 기준으로 병합 (중복 제거) — 두 순위에 모두 등장하는 종목이 특히 유의미한 후보.
+        // 🔍 어느 순위에서 온 종목인지(source) 태깅해서, 특정 종목이 후보군 단계에서 실제로
+        // 잡혔는지 진단 로그로 바로 확인할 수 있게 한다.
+        const mergedMap = new Map<string, { symbol: string; name: string; price: number; changePercent: number; volume: string; source?: string }>();
+        volumeLeaders.forEach(v => {
+          if (!v?.symbol) return;
+          mergedMap.set(v.symbol, { ...v, source: 'VOLUME' });
+        });
+        fluctuationLeaders.forEach(v => {
+          if (!v?.symbol) return;
           const existing = mergedMap.get(v.symbol);
-          if (!existing || v.price > 0) mergedMap.set(v.symbol, v);
+          mergedMap.set(v.symbol, { ...(existing || {}), ...v, source: existing ? 'VOLUME+MOMENTUM' : 'MOMENTUM' });
         });
         // 추천에서 KODEX/TIGER 등 ETF 상품, 인버스/레버리지/선물 파생상품은 제외.
         // 종목명 자체를 알 수 없는(빈 이름) 종목도 제외한다 — 대부분 로컬 마스터 데이터에 없는
@@ -5127,6 +5134,16 @@ useEffect(() => {
             || (name || '').includes('인버스') || (name || '').includes('레버리지') || (name || '').includes('선물') || (name || '').includes('스팩');
         };
         const merged = Array.from(mergedMap.values()).filter(v => v.name && v.name.trim().length > 0 && !isEtfName(v.name));
+
+        // 🔍 후보군 통합 진단 — 거래량 순위와 등락률 순위가 실제로 몇 개씩 후보군에 기여했는지,
+        // 그리고 특정 종목(예: 거래량은 폭발했지만 등락률 순위에선 밀린 종목)이 이 단계에서
+        // 실제로 살아남았는지 바로 확인할 수 있다. 여기서 false로 나오면 scoring 문제가 아니라
+        // KIS 랭킹 후보군 단계에서 이미 탈락한 것이다.
+        console.log('[추천 후보군 통합]', {
+          거래량후보: volumeLeaders.length,
+          등락률후보: fluctuationLeaders.length,
+          중복제거후보: merged.length
+        });
 
         if (merged.length > 0) {
           const candidateStocks: Stock[] = merged.map(v => {
@@ -7397,7 +7414,7 @@ const masterInterval = setInterval(() => {
           // 🛡️ 등록 직후 봇도 바로 시작 상태로 (자동 관리 모드이므로) — 수량은 등록 시점에 계산하지
           // 않는다. 실제 매수 시그널이 발생하는 순간의 최신 가격 기준으로 계산되어야 하기 때문이다.
           updateTab(rec.symbol, { isBotActive: true, tradeQuantity: 0 });
-          await new Promise(r => setTimeout(r, 800)); // 연속 등록 시 상태 업데이트가 겹치지 않도록 간격 확대
+          await new Promise(r => setTimeout(r, 1000)); // 연속 등록 시 상태 업데이트가 겹치지 않도록 간격 확대 (800ms→1000ms)
         }
         if (candidates.length > 0) {
           showNotification(`[자동 채움] 빈 슬롯 ${candidates.length}개를 실시간 데이터 기반 추천종목으로 자동 등록했습니다.`, 'success');
