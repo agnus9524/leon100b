@@ -1122,6 +1122,22 @@ await this.getDomesticPrice(symbol);
   const token = await this.getAccessToken();
   const endpoint = '/uapi/domestic-stock/v1/trading/order-cash';
 
+  // 🛡️ 실제 주문 API 직전 이중 안전장치 — App.tsx의 executeTrade에서 이미 검증하지만, 앞으로
+  // 새로운 호출 경로가 생기더라도 여기서 마지막으로 한번 더 막는다. 특히 매도는 가격이 0이면
+  // KIS가 "ORD_UNPR: 0"인 지정가 주문을 그대로 받아들여 이상 동작할 위험이 있다.
+  const numericPrice = Number(price);
+  const numericQty = Number(qty);
+
+  if (!Number.isFinite(numericQty) || numericQty <= 0) {
+    throw new Error(`KIS ${side} 주문 실패: 잘못된 수량 (${qty})`);
+  }
+
+  if (side === 'SELL') {
+    if (!Number.isFinite(numericPrice) || numericPrice <= 0) {
+      throw new Error(`KIS SELL 주문 실패: 잘못된 매도가 (${price})`);
+    }
+  }
+
   const body: any = {
     CANO: this.config.accountNo,
     ACNT_PRDT_CD: this.config.accountCode,
@@ -1133,9 +1149,10 @@ await this.getDomesticPrice(symbol);
     CNDT_PRIC: '',
   };
 
-  if (side === 'SELL') {
-    body.SLL_TYPE = '01';
-  }
+  // 🛡️ SLL_TYPE('01') 필드 제거 — 일반 현금 매도 주문에서 이 필드를 임의로 추가하는 게 오히려
+  // 매도 실패의 원인일 가능성이 있어, KIS 표준 현금주문 예제 형태(이 필드를 안 보내는 형태)로
+  // 되돌려서 테스트한다. 정확히 어떤 상황에 이 값이 필요한지 KIS 공식 문서로 확정 못 했으므로,
+  // 지금은 안전하게 생략한다.
 
   console.log('[KIS ORDER STEP 1 - 주문 준비]', {
     symbol,

@@ -8734,7 +8734,14 @@ useEffect(() => {
         if (!stockObj) continue;
 
         const avgP = avgPrices[symbol] || stockObj.price;
-        if (avgP <= 0) continue;
+        // 🛡️ 기존엔 avgP <= 0만 체크했는데, avgP가 NaN이면 "NaN <= 0"이 false라서 오히려 이
+        // 체크를 통과해버리는 허점이 있었다 — stocks 안에 가격이 0이거나 비정상인 종목이 섞여
+        // 있을 때 이 경로로 잘못된 목표매도가가 계산될 위험이 있었다. Number.isFinite로 NaN/
+        // Infinity까지 확실히 걸러낸다.
+        if (!Number.isFinite(avgP) || avgP <= 0) {
+          console.warn('[Auto-Sell 차단 - 평단가 오류]', { symbol, avgP, stockPrice: stockObj.price, avgPrice: avgPrices[symbol] });
+          continue;
+        }
 
         const targetSellPrice = calculateTargetSellPrice(avgP, scalpingTargetProfit);
 
@@ -9874,6 +9881,26 @@ useEffect(() => {
       }
       return finalAmount;
     } else if (action === 'SELL') {
+      // ============================================================
+      // 🔴 SELL 주문 안전검증 — 매도는 실제 보유수량과 유효한 주문가격이 반드시 있어야 한다.
+      // 예전엔 이 검증이 없어서, tradePrice가 0인 채로 지정가(00) 매도가 KIS까지 전달될 수 있었다
+      // (ORD_UNPR: "0"인 지정가 주문은 매도 실패의 강력한 후보다).
+      // ============================================================
+      {
+        const sellPrice = Number(tradePrice);
+        if (!Number.isFinite(sellPrice) || sellPrice <= 0) {
+          console.error('[SELL 주문 차단 - 잘못된 매도가]', { symbol: stock.symbol, name: stock.name, tradePrice, finalAmount, reason });
+          addLog(stock.symbol, '매도', sellPrice || 0, finalAmount || 0, '[매도 주문 차단] 유효한 매도 가격이 없습니다.');
+          setBotStatus(`[매도 차단] ${stock.name} 매도 가격 오류: ${sellPrice}`);
+          return 0;
+        }
+        if (!Number.isFinite(finalAmount) || finalAmount <= 0) {
+          console.error('[SELL 주문 차단 - 잘못된 매도수량]', { symbol: stock.symbol, name: stock.name, finalAmount, holdings: holdings[stock.symbol] });
+          addLog(stock.symbol, '매도', sellPrice, finalAmount || 0, '[매도 주문 차단] 매도 수량이 없습니다.');
+          setBotStatus(`[매도 차단] ${stock.name} 매도 수량 오류`);
+          return 0;
+        }
+      }
       try {
         const isKR = /^\d{6}$/.test(stock.symbol);
         if (isKR) {
