@@ -5039,7 +5039,18 @@ useEffect(() => {
   // 지금 이 순간 실제로 거래량이 많은 종목들을 먼저 가져오고, 그 위에서 전략센서 분석을 돌린다.
   // ============================================================
   const fallbackSymbolsRef = React.useRef<Set<string>>(new Set());
+  // 🛡️ 추천 검색 중복 실행 방지 — 사용자가 버튼을 누른 것과 자동 슬롯 채우기가 거의 동시에
+  // loadScalperRecommendations를 호출하면, 예전엔 각자 독립적으로 KIS 랭킹 API를 또 호출해서
+  // 요청 큐가 불필요하게 붐볐다. 이미 진행 중인 검색이 있으면 새로 요청을 만들지 않고 그 결과를
+  // 그대로 기다리게 한다.
+  const recommendationSearchPromiseRef = React.useRef<Promise<ScalperRecommendation[]> | null>(null);
   const loadScalperRecommendations = useCallback(async (): Promise<ScalperRecommendation[]> => {
+    if (recommendationSearchPromiseRef.current) {
+      console.log('[추천 검색 중복 요청 차단] 기존 검색 결과 대기');
+      return recommendationSearchPromiseRef.current;
+    }
+
+    const searchPromise = (async (): Promise<ScalperRecommendation[]> => {
     let list: ScalperRecommendation[] = [];
 
     // 1순위: 실제 코스피 거래량순위 + 등락률순위를 함께 조회해서 병합한다.
@@ -5049,16 +5060,35 @@ useEffect(() => {
       // 🛡️ 등록 종목이 많을수록 요청 큐가 붐벼서 429 백오프가 겹치기 쉽다. "추천종목 조회는
       // 최우선"이라는 원칙에 맞춰, 1차 시도(20초)가 실패해도 곧바로 포기하지 않고 5초 대기 후
       // 한 번 더 시도한다 — 일시적인 혼잡으로 인한 실패 가능성을 낮추기 위함이다.
-      const fetchRanking = () => {
+      // 🛡️ 예전엔 거래량순위/등락률순위 두 API를 Promise.all로 동시에 호출했다 — 이게 다른 KIS
+      // 요청(가격조회 등)과 겹쳐서 큐가 붐빌 위험을 키웠다. 이제 순차 호출하고 그 사이에 아주
+      // 짧은 간격(150ms)을 둬서, 추천 검색 하나가 다른 요청과 충돌할 가능성을 줄인다.
+      const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+      const fetchRanking = async (): Promise<[any[], any[]]> => {
         // 💰 "종목당 10000원" 입력창 대신 만든 가격구간 드롭다운 — 선택한 구간의 종목만
         // KIS 랭킹 API 단계에서부터 걸러진다(추가 API 호출 없이 파라미터만 바뀜).
         const selectedRange = PRICE_RANGE_OPTIONS[priceRangeIndexRef.current] || PRICE_RANGE_OPTIONS[0];
         const priceFilter = { minPrice: selectedRange.minPrice, maxPrice: selectedRange.maxPrice, minVolume: 100000 };
+
+        console.log('[추천 검색 시작]', { 가격구간: selectedRange, 시각: new Date().toLocaleTimeString('ko-KR') });
+
+        const rankingPromise = (async (): Promise<[any[], any[]]> => {
+          const volumeLeaders = await kisService.getVolumeRanking('J', 80, priceFilter);
+          console.log('[추천 검색 1/2 완료]', { 거래량순위: volumeLeaders?.length || 0 });
+
+          await sleep(150);
+
+          const fluctuationLeaders = await kisService.getFluctuationRanking('J', 'UP', 70, priceFilter);
+          console.log('[추천 검색 2/2 완료]', { 등락률순위: fluctuationLeaders?.length || 0 });
+
+          return [
+            Array.isArray(volumeLeaders) ? volumeLeaders : [],
+            Array.isArray(fluctuationLeaders) ? fluctuationLeaders : []
+          ];
+        })();
+
         return Promise.race([
-          Promise.all([
-            kisService.getVolumeRanking('J', 80, priceFilter),
-            kisService.getFluctuationRanking('J', 'UP', 70, priceFilter)
-          ]),
+          rankingPromise,
           new Promise<[any[], any[]]>((_, reject) => setTimeout(() => reject(new Error('ranking_timeout')), 20000))
         ]);
       };
@@ -5201,6 +5231,15 @@ useEffect(() => {
     return scoredCandidates
       .slice(0, MAX_SCALPER_RECOMMENDATIONS)
       .map((item, idx) => ({ ...item, rank: idx + 1 }));
+    })();
+
+    recommendationSearchPromiseRef.current = searchPromise;
+
+    try {
+      return await searchPromise;
+    } finally {
+      recommendationSearchPromiseRef.current = null;
+    }
   }, [detectStockStrategies, kisConfig.isConnected, calculateBuyScore]);
 
   const handleGetRecommendations = useCallback(async () => {
@@ -7328,15 +7367,13 @@ const masterInterval = setInterval(() => {
       const emptySlots = MAX_INVENTORY_PER_MARKET - krSlotsUsed;
       if (emptySlots <= 0) return;
 
-      // 🛡️ 20종목이 이미 실시간 폴링 중인 상태에서 너무 자주 부르면 요청 큐가 밀려서
-      // 타임아웃(ranking_timeout)이 나기 쉽다. 1분으로 단축했으니, 만약 타임아웃/부하 문제가
-      // 다시 나타나면 이 값을 다시 늘려야 한다.
-      // 🛡️ 1분 주기가 15종목으로 줄인 후에도 여전히 ranking_timeout을 자주 유발해서, 부하를
-      // 줄이기 위해 5분으로 다시 늘린다. 빈 슬롯이 몇 분 늦게 채워지는 것보다, 큐가 계속
-      // 막혀서 다른 API 호출(매수/매도 포함)까지 영향받는 게 더 문제이기 때문이다.
-      const AUTO_FILL_CHECK_INTERVAL_MS = 5 * 60 * 1000;
+      // 🛡️ 예전엔 5분 고정 잠금이라, 추천 검색이 한 번 실패하면 빈 슬롯이 있어도 5분 동안
+      // 재시도를 안 했다. 이제 loadScalperRecommendations 자체에 중복실행 방지(promise 캐시)가
+      // 생겼으니, 여러 경로가 동시에 호출해도 실제 KIS 요청은 한 번만 나간다 — 굳이 5분씩
+      // 기다릴 필요 없이, 실패하면 30초 후 다시 시도해도 안전하다.
+      const AUTO_FILL_RETRY_MS = 30 * 1000;
       const now = Date.now();
-      if (now - lastAutoFillAttemptRef.current < AUTO_FILL_CHECK_INTERVAL_MS) return;
+      if (lastAutoFillAttemptRef.current > 0 && now - lastAutoFillAttemptRef.current < AUTO_FILL_RETRY_MS) return;
       lastAutoFillAttemptRef.current = now;
 
       isAutoFillingRef.current = true;
@@ -7346,7 +7383,10 @@ const masterInterval = setInterval(() => {
         // 🛡️ fallback(3순위, 실시간 랭킹 조회 실패 시 쓰는 오래된 하드코딩 데이터)로만 채워진
         // 종목은 자동 매매 편입 대상에서 제외한다 — "신호 몇 개 잡혔다고 넣지 않고, 실시간
         // 계산 결과만 믿고 넣는다"는 원칙을 지키기 위함이다.
-        const MAX_FILL_PER_CYCLE = 5; // 한 사이클에 너무 많이 한꺼번에 등록하지 않고, 나머지는 다음 사이클에서
+        // 🛡️ 5개→2개로 축소 — 한 사이클에 너무 많이 한꺼번에 등록하면 웹소켓 구독/실시간 폴링에
+        // 부담이 갑자기 커진다. 빈 슬롯이 많아도 사이클마다 2개씩만 채우고 나머지는 다음
+        // 사이클(30초 후)에서 계속 채워나간다.
+        const MAX_FILL_PER_CYCLE = 2;
         const candidates = recommendations
           .filter(r => !alreadyRegistered.has(r.symbol) && !fallbackSymbolsRef.current.has(r.symbol))
           .slice(0, Math.min(emptySlots, MAX_FILL_PER_CYCLE));
