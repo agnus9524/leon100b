@@ -623,10 +623,6 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                     { key: 'pullback', label: '눌림목', detail: '', onCls: 'bg-teal-500/20 text-teal-300 border-teal-500/40', dotCls: 'bg-teal-400' },
                     { key: 'breakout', label: '돌파', detail: '', onCls: 'bg-amber-500/20 text-amber-300 border-amber-500/40', dotCls: 'bg-amber-400' },
                     { key: 'vwap', label: 'VWAP', detail: '', onCls: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/40', dotCls: 'bg-indigo-400' },
-                    // 🚧 예전엔 여기가 'CVD'였는데, 실제 계산은 진짜 CVD(매수체결량-매도체결량 누적)가
-                    // 아니라 POC지지/매수흡수 기반이라 이름이 부정확했다. 진짜 CVD는 별도 과제로
-                    // 남겨두고, 이 자리는 정확히 계산되는 "단기 모멘텀"(SMA5>SMA20)으로 대체한다.
-                    { key: 'shortTermMomentum', label: '단기 모멘텀', detail: 'SMA5 > SMA20', onCls: 'bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40', dotCls: 'bg-fuchsia-400' },
                   ] as const).map(({ key, label, detail, onCls, dotCls }) => {
                     const isOn = tab.sensors?.[key] === true;
                     return (
@@ -643,6 +639,40 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                       </span>
                     );
                   })}
+                  {/* 🎯 실제 CVD(매수체결량 누적 - 매도체결량 누적) — 값이 아직 없으면(웹소켓 필드
+                      검증 전이거나 틱이 안 들어온 상태) 표시하지 않고, 값이 있으면 양수(매수우위)/
+                      음수(매도우위)를 화살표와 색으로 구분해 보여준다. "단기 모멘텀" 배지 바로
+                      왼쪽에 배치. */}
+                  {typeof tabStock?.realCvd === 'number' && (
+                    <span
+                      className={cn(
+                        "text-[10px] font-bold px-1.5 py-0.5 rounded-full border flex items-center gap-0.5",
+                        tabStock.realCvd > 0
+                          ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                          : tabStock.realCvd < 0
+                          ? "bg-sky-500/20 text-sky-300 border-sky-500/40"
+                          : "bg-white/5 text-slate-500 border-white/10"
+                      )}
+                      title={`${tabName} — 실제 CVD(매수체결량 누적 - 매도체결량 누적): ${tabStock.realCvd.toLocaleString()}`}
+                    >
+                      실제 CVD {tabStock.realCvd > 0 ? '▲' : tabStock.realCvd < 0 ? '▼' : '-'}
+                    </span>
+                  )}
+                  {(() => {
+                    const isOn = tab.sensors?.shortTermMomentum === true;
+                    return (
+                      <span
+                        className={cn(
+                          "text-[10px] font-bold px-1.5 py-0.5 rounded-full border flex items-center gap-0.5 transition-all",
+                          isOn ? "bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40" : "bg-white/5 text-slate-500 border-white/10"
+                        )}
+                        title={`${tabName} — 단기 모멘텀 센서 ${isOn ? '감지됨' : '대기 중'} (SMA5 > SMA20)`}
+                      >
+                        <span className={cn("w-1 h-1 rounded-full", isOn ? "bg-fuchsia-400" : "bg-slate-600")} />
+                        단기 모멘텀
+                      </span>
+                    );
+                  })()}
                   {tab.sensors && (
                     <span className="text-[11px] font-bold text-slate-500 ml-auto">
                       RSI {Math.round(tab.sensors.rsi)} · {tab.sensors.activeCount}/4
