@@ -458,18 +458,10 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
 
           {/* 💰 종목당 진입금액 — 실제 매수 시그널이 발생하는 순간 "이 금액 ÷ 그때의 주문가격"으로
               수량이 계산된다. 인벤토리 전체에 적용되는 전역 설정이라 카드마다 반복하지 않고
-              목록 바로 위에 한 번만 배치한다. */}
-          <div className="mb-2 px-2.5 py-2 rounded-xl bg-black/20 border border-white/5 space-y-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs font-black text-white">종목당 진입금액</div>
-                <div className="mt-0.5 text-[10px] text-slate-400">매수 시그널 발생 시 현재가 기준 최대수량으로 진입</div>
-              </div>
-              <div className="rounded-lg px-2.5 py-1 text-[11px] font-black bg-blue-500/10 border border-blue-500/30 text-blue-400 shrink-0">
-                {targetInvestmentPerStock.toLocaleString()}원
-              </div>
-            </div>
-            <div className="grid grid-cols-4 gap-1.5">
+              목록 바로 위에 한 번만, 세로 공간을 아끼기 위해 한 줄로 배치한다. */}
+          <div className="mb-2 px-2.5 py-1.5 rounded-xl bg-black/20 border border-white/5 flex items-center gap-2 overflow-x-auto custom-scrollbar">
+            <span className="text-[11px] font-black text-white shrink-0" title="매수 시그널 발생 시 현재가 기준 최대수량으로 진입">종목당 진입금액</span>
+            <div className="flex items-center gap-1 shrink-0">
               {buyAmountOptions.map(option => {
                 const selected = targetInvestmentPerStock === option.value;
                 return (
@@ -478,9 +470,9 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                     type="button"
                     onClick={() => setTargetInvestmentPerStock(option.value)}
                     className={cn(
-                      "h-9 rounded-lg border text-[11px] font-bold transition-all active:scale-95",
+                      "h-6 px-2 rounded-md border text-[10px] font-bold transition-all active:scale-95 whitespace-nowrap",
                       selected
-                        ? "bg-blue-500 text-white border-blue-500 shadow-lg shadow-blue-500/20"
+                        ? "bg-blue-500 text-white border-blue-500 shadow-md shadow-blue-500/20"
                         : "bg-white/5 text-slate-300 border-white/10 hover:bg-white/10"
                     )}
                   >
@@ -489,9 +481,12 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                 );
               })}
             </div>
+            <div className="rounded-md px-2 py-0.5 text-[10px] font-black bg-blue-500/10 border border-blue-500/30 text-blue-400 shrink-0 ml-auto">
+              {targetInvestmentPerStock.toLocaleString()}원
+            </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-1 max-h-[280px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-1 max-h-[720px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
             {scalperTabs.filter(tab => {
               const isUS = /^[A-Z]/.test(tab.symbol);
               return marketType === 'US' ? isUS : !isUS;
@@ -698,10 +693,11 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   );
                 })()}
 
-                {/* 📜 종목별 개별 로그창 — GLOBAL TRADE LOGS 중 이 종목만 걸러서 최근 메시지를 보여준다 */}
-                <div className="pl-3 pr-1 py-1.5 bg-black/30 rounded-lg border border-white/5 max-h-[84px] overflow-y-auto custom-scrollbar space-y-1">
+                {/* 📜 종목별 개별 로그창 — GLOBAL TRADE LOGS 중 이 종목만 걸러서 가장 최근 1건만 보여준다.
+                    12종목을 한 화면에 다 담기 위해 카드 높이를 압축하는 차원에서 4줄 → 1줄로 축소. */}
+                <div className="pl-3 pr-1 py-1 bg-black/30 rounded-lg border border-white/5 overflow-hidden">
                   {(() => {
-                    const myLogs = tradeLogs.filter(l => l.symbol === tab.symbol).slice(0, 4);
+                    const myLogs = tradeLogs.filter(l => l.symbol === tab.symbol).slice(0, 1);
                     if (myLogs.length === 0) {
                       return <div className="text-[10px] text-slate-600 py-0.5">아직 이벤트가 없습니다</div>;
                     }
