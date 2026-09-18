@@ -5202,6 +5202,15 @@ useEffect(() => {
         // 실패하면 바로 아래 2순위(추적 종목 풀)로 넘어간다.
         const [volumeLeaders, fluctuationLeaders] = await fetchRanking();
 
+        // 🔎 대한광통신(010170) 1단계: KIS 랭킹 원천 데이터 확인 — volume/fluctuation 중 어느
+        // 쪽이 undefined인지가 핵심이다. priceFilter는 fetchRanking 내부 지역변수라 여기선
+        // 접근이 안 되니, 동일한 방식(PRICE_RANGE_OPTIONS)으로 재구성해서 로그에 남긴다.
+        console.log('[🔎 010170 1단계 - KIS 랭킹]', {
+          volume: volumeLeaders.find((v: any) => v.symbol === '010170'),
+          fluctuation: fluctuationLeaders.find((v: any) => v.symbol === '010170'),
+          priceFilter: PRICE_RANGE_OPTIONS[priceRangeIndexRef.current] || PRICE_RANGE_OPTIONS[0],
+        });
+
         // 🔍 실제 KIS 응답을 그대로 콘솔에 남긴다 — 장 시작 전(정규장 09:00 이전)에는 KIS가
         // 이 랭킹 API에 빈 배열을 줄 수도, 데이터를 줄 수도 있는데, 이 로그를 보면 실제로
         // 어느 쪽인지 바로 확인할 수 있다. 개수가 0이면 "지금 KIS가 데이터를 안 주고 있다"는
@@ -5283,6 +5292,12 @@ useEffect(() => {
               stopLoss: calcTargetSellPriceByNetProfit(r.price, scalpingStopLoss, 'KR'),
               expectedReturn: scalpingTargetProfit,
             }));
+
+          // 🔎 대한광통신(010170) 2단계(1순위 경로): 전략 센서 필터 통과 여부
+          console.log('[🔎 010170 2단계 - 전략 필터(1순위/RANKING_API)]', {
+            result: list.find(r => r.symbol === '010170'),
+            candidate: candidateStocks.find(s => s.symbol === '010170'),
+          });
         }
       } catch (err) {
         console.warn('[거래량/등락률 순위 기반 추천 실패]', err);
@@ -5302,7 +5317,17 @@ useEffect(() => {
       if (candidatePool.length > 0) {
         const existingSymbols = new Set(list.map(r => r.symbol));
         const nowForAge = Date.now();
-        const supplement = kisService.generateRealtimeRecommendations(candidatePool, detectStockStrategies)
+        const rawGenerated = kisService.generateRealtimeRecommendations(candidatePool, detectStockStrategies);
+
+        // 🔎 대한광통신(010170) 2단계(2순위 경로): 전략 센서 필터 통과 여부.
+        // candidate 있음 + result undefined면 generateRealtimeRecommendations에서 탈락한 것이고,
+        // candidate 자체가 undefined면 그 이전(candidatePool 구성) 단계에서 이미 탈락한 것이다.
+        console.log('[🔎 010170 2단계 - 전략 필터(2순위/TRACKED_POOL)]', {
+          result: rawGenerated.find(r => r.symbol === '010170'),
+          candidate: candidatePool.find(s => s.symbol === '010170'),
+        });
+
+        const supplement = rawGenerated
           .filter(r => !existingSymbols.has(r.symbol))
           .map(r => {
             const lastTick = lastWsTickAtRef.current[r.symbol];
@@ -5333,6 +5358,16 @@ useEffect(() => {
       const strat = detectStockStrategies(stockItem);
       const { score } = calculateBuyScore(stockItem, strat);
       return { ...rec, scalpingScore: score };
+    });
+
+    // 🔎 대한광통신(010170) 3단계: 실제 매수점수 재평가 결과
+    const daehanRescored = rescored.find(r => r.symbol === '010170');
+    console.log('[🔎 010170 3단계 - 최종 점수]', {
+      result: daehanRescored,
+      stockData: stocksRef.current.find(s => s.symbol === '010170'),
+      rankBeforeFinalSort: daehanRescored
+        ? rescored.slice().sort((a, b) => (b.scalpingScore || 0) - (a.scalpingScore || 0)).findIndex(r => r.symbol === '010170') + 1
+        : '탈락',
     });
 
     // 🛡️ 예전엔 여기서 1/2순위가 부족하면 하드코딩된 예전 데이터(3순위)로 채워 넣었는데,
