@@ -1699,6 +1699,23 @@ const liveDataSessionRef = React.useRef(0);
   // 🕐 종목별 마지막 웹소켓 tick 수신 시각 — refreshStalePrices가 "오래 갱신 안 된 종목"을 골라
   // REST로 보완할 때 이 값을 기준으로 판단한다.
   const lastWsTickAtRef = React.useRef<Record<string, number>>({});
+
+  // ============================================================
+  // 🛡️ 매매 워밍업/안정화 게이트
+  // ------------------------------------------------------------
+  // 앱 로딩 직후 잘못된 가격/history/센서로 매수하는 것을 방지한다.
+  //
+  // 흐름: 앱 로딩 → KIS 연결 → WebSocket 실제 tick 수신 → 종목별 최소 tick 확보
+  //      → 최근 tick 정상 여부 확인 → 매매 허용
+  // ============================================================
+  const [isTradingArmed, setIsTradingArmed] = useState(false); // 앱 전체가 매매 가능한 상태인지
+  const wsTickCountRef = React.useRef<Record<string, number>>({}); // 종목별 실제 WebSocket tick 수신 횟수
+  const tradingWarmupStartedAtRef = React.useRef<number>(0); // 앱 시작 후 워밍업 시작 시각
+  const tradingWarmupCompletedRef = React.useRef(false); // 워밍업 완료 여부
+  const pendingMarketOpenRef = React.useRef(false); // 장 시작을 감지했지만 아직 워밍업이 안 끝나 자동시작을 미룬 상태
+  const MIN_WARMUP_TICKS = 10; // 종목당 최소 이만큼의 실제 WS tick을 받아야 안정화된 것으로 본다
+  const MAX_WS_TICK_AGE_MS = 1500; // 최근 실제 WebSocket tick이 이 시간보다 오래되면 매매하지 않는다
+  const MIN_TRADING_WARMUP_MS = 5000; // 앱 초기화 후 최소 이 시간 동안은 매매하지 않는다
   // 🛡️ 틱 수신과 화면 렌더링을 분리하기 위한 임시 저장소 — 매 틱마다 여기 즉시 쓰고, 별도의
   // 100ms 배치 effect가 이걸 한 번에 stocks/scalperInventory에 반영한다.
   const liveTickRef = React.useRef<Record<string, {
@@ -1721,6 +1738,88 @@ const liveDataSessionRef = React.useRef(0);
   // 방식보다는 훨씬 반응성이 좋고, 그 종목만 계산하니 다른 종목에 영향도 없다.
   const lastSensorCalcRef = React.useRef<Record<string, number>>({});
   useEffect(() => { wsConnectionStatusRef.current = wsConnectionStatus; }, [wsConnectionStatus]);
+
+  // ============================================================
+  // 🛡️ 앱 초기화 후 매매 워밍업
+  // ------------------------------------------------------------
+  // 로딩 → KIS 연결 → WebSocket 실제 시세 확인 → 종목별 워밍업 → 센서 활성화 → 매매 허가 → 매수
+  // 순서를 강제한다. 봇이 켜진 종목만 워밍업 대상으로 삼는다 — 거래가 거의 없는 종목 하나
+  // 때문에 전체 매매가 영원히 시작 안 되는 걸 막기 위함이다.
+  // ============================================================
+  useEffect(() => {
+    if (!isAppInitialized) {
+      setIsTradingArmed(false);
+      tradingWarmupCompletedRef.current = false;
+      tradingWarmupStartedAtRef.current = 0;
+      return;
+    }
+
+    if (tradingWarmupCompletedRef.current) return;
+
+    tradingWarmupStartedAtRef.current = Date.now();
+
+    console.log('[TRADING WARMUP 시작]', {
+      startedAt: new Date().toISOString(),
+      inventory: scalperTabsRef.current.map(t => ({ symbol: t.symbol, name: t.name, isBotActive: t.isBotActive }))
+    });
+
+    setIsTradingArmed(false);
+
+    const warmupInterval = setInterval(() => {
+      const now = Date.now();
+
+      const elapsed = now - tradingWarmupStartedAtRef.current;
+      if (elapsed < MIN_TRADING_WARMUP_MS) return;
+
+      if (!kisConfig.isConnected) {
+        console.log('[TRADING WARMUP 대기] KIS 미연결');
+        return;
+      }
+
+      const inventorySymbols = [...new Set(
+        scalperTabsRef.current
+          .filter(t => t.isBotActive)
+          .map(t => t.symbol)
+          .filter(symbol => typeof symbol === 'string' && /^[0-9]{6}$/.test(symbol))
+      )];
+
+      if (inventorySymbols.length === 0) {
+        console.log('[TRADING WARMUP 대기] 봇 활성화된 인벤토리 종목 없음');
+        return;
+      }
+
+      const status = inventorySymbols.map(symbol => {
+        const tickCount = wsTickCountRef.current[symbol] || 0;
+        const lastTick = lastWsTickAtRef.current[symbol] || 0;
+        const tickAge = lastTick > 0 ? now - lastTick : Infinity;
+        const hasEnoughTicks = tickCount >= MIN_WARMUP_TICKS;
+        const hasFreshTick = tickAge <= MAX_WS_TICK_AGE_MS;
+        return { symbol, tickCount, tickAge, hasEnoughTicks, hasFreshTick };
+      });
+
+      console.log('[TRADING WARMUP 상태]', status);
+
+      const allStable = status.every(item => item.hasEnoughTicks && item.hasFreshTick);
+      if (!allStable) return;
+
+      tradingWarmupCompletedRef.current = true;
+      setIsTradingArmed(true);
+      clearInterval(warmupInterval);
+
+      console.log('[TRADING ARMED] 모든 인벤토리 종목 데이터 안정화 완료', { elapsedMs: elapsed, symbols: status });
+      setScalperMessage('실시간 데이터 안정화 완료 — 자동매매 감시 시작');
+
+      if (pendingMarketOpenRef.current && isKoreanMarketOpen()) {
+        setScalperInventory(prev => prev.map(item => ({ ...item, strategy: { ...item.strategy, isBotActive: true } })));
+        setIsGapBotActive(true);
+        pendingMarketOpenRef.current = false;
+        showNotification('[자동 시작] 실시간 데이터 안정화 완료 — 스캘핑 시작', 'success');
+        console.log('[TRADING ARMED → AUTO START] 장 시작 대기 후 자동매매 시작');
+      }
+    }, 500);
+
+    return () => clearInterval(warmupInterval);
+  }, [isAppInitialized, kisConfig.isConnected]);
 
   // 🛡️ liveTickRef → stocks/scalperInventory 배치 반영 (100ms 주기) — 틱 수신 자체는 위에서
   // ref에만 즉시 쓰고 렌더링을 유발하지 않으니, 실제 화면/매매판단용 상태 반영은 여기서 한 번에
@@ -1872,6 +1971,10 @@ const liveDataSessionRef = React.useRef(0);
           // 🕐 이 종목이 방금 웹소켓으로 갱신됐다는 걸 기록 — refreshStalePrices가 "오래 갱신 안 된
           // 종목"만 REST로 보완할 때 이 시각을 기준으로 판단한다. 가벼운 연산이라 즉시 처리해도 무방.
           lastWsTickAtRef.current[tick.symbol] = Date.now();
+          // 🛡️ 실제 WebSocket tick만 워밍업 카운트에 포함한다. REST 가격 조회(refreshStalePrices)는
+          // 여기 안 들어오므로 이 카운터는 순수하게 "이 종목의 실제 KIS 체결 데이터가 몇 번
+          // 들어왔는가"만 나타낸다.
+          wsTickCountRef.current[tick.symbol] = (wsTickCountRef.current[tick.symbol] || 0) + 1;
 
           // 🎯 틱 기반 종목별 즉시 센서 계산 — 예전엔 "3초(→1초)마다 등록된 전체 종목을 순회"하는
           // 방식이라, 가격은 틱 단위로 움직여도 센서(눌림목/VWAP/단기모멘텀/돌파/RSI)는 최대 1초
@@ -7288,7 +7391,7 @@ const masterInterval = setInterval(() => {
   const DEAD_SIGNAL_DURATION_MS = 5 * 60 * 1000;
   const lowScoreSinceRef = React.useRef<Record<string, number>>({});
   const scoreHistoryForEvictionRef = React.useRef<Record<string, number[]>>({}); // 퇴출 판정용 최근 점수 이력 — 순간 노이즈가 아니라 평균 추세로 판단하기 위함
-  const wasMarketOpenRef = React.useRef<boolean>(false);
+  const wasMarketOpenRef = React.useRef<boolean | null>(null);
   const isAutoFillingRef = React.useRef<boolean>(false);
   const lastAutoFillAttemptRef = React.useRef<number>(0);
 
@@ -7298,15 +7401,31 @@ const masterInterval = setInterval(() => {
     const autoManageInventory = async () => {
       const marketOpen = isKoreanMarketOpen();
 
+      // 🛡️ 매우 중요한 안전장치: 앱이 장중에 새로 로딩된 경우를 "장 시작 순간"으로 오인하지
+      // 않는다. 최초 실행에서는 현재 시장 상태만 기억하고, 자동매매 ON/OFF 전환은 하지 않는다 —
+      // 안 그러면 장중에 프로그램을 재시작할 때마다 워밍업 없이 즉시 전 종목 매매가 켜져버린다.
+      if (wasMarketOpenRef.current === null) {
+        wasMarketOpenRef.current = marketOpen;
+        console.log('[자동관리 초기화]', { marketOpen, message: '앱 최초 로딩이므로 장 시작 이벤트로 처리하지 않습니다.' });
+        return;
+      }
+
       // ① 거래 가능 시간 시작/종료 순간(엣지)을 감지해서 전 종목 봇을 한 번만 켜고/끈다.
       // isKoreanMarketOpen()은 정규장(09:00~15:30)과, 2026-09-14부터 신설되는 KRX 애프터마켓
       // (16:00~20:00) 둘 다를 포함하므로, 정규장 마감(15:30) 시 자동 정지되고 — 이때 KRX 쪽
       // 미체결 주문도 어차피 자동 취소되므로 자연스럽게 맞아떨어진다 — 애프터마켓 시작(16:00,
       // 9/14부터) 시 자동으로 다시 시작된다.
+      // 🛡️ 실제로 "닫힘 → 열림"으로 바뀐 순간에도, 워밍업(isTradingArmed)이 아직 안 끝났으면
+      // 바로 켜지 않고 대기시킨다 — 워밍업이 끝나는 즉시(위 워밍업 effect에서) 자동 시작된다.
       if (marketOpen && !wasMarketOpenRef.current) {
-        setScalperInventory(prev => prev.map(item => ({ ...item, strategy: { ...item.strategy, isBotActive: true } })));
-        setIsGapBotActive(true);
-        showNotification('[자동 시작] 거래 가능 시간이 시작되어 등록된 전 종목의 스캘핑을 자동으로 시작합니다.', 'success');
+        pendingMarketOpenRef.current = true;
+        console.log('[장 시작 감지] 데이터 안정화 완료 후 자동매매를 시작합니다.');
+        if (isTradingArmed) {
+          setScalperInventory(prev => prev.map(item => ({ ...item, strategy: { ...item.strategy, isBotActive: true } })));
+          setIsGapBotActive(true);
+          pendingMarketOpenRef.current = false;
+          showNotification('[자동 시작] 거래 가능 시간이 시작되어 등록된 전 종목의 스캘핑을 자동으로 시작합니다.', 'success');
+        }
       } else if (!marketOpen && wasMarketOpenRef.current) {
         setScalperInventory(prev => prev.map(item => ({ ...item, strategy: { ...item.strategy, isBotActive: false } })));
         setIsGapBotActive(false);
@@ -7429,7 +7548,7 @@ const masterInterval = setInterval(() => {
     autoManageInventory();
     const autoManageInterval = setInterval(autoManageInventory, 30000); // 30초마다 점검
     return () => clearInterval(autoManageInterval);
-  }, [isAppInitialized, detectStockStrategies, calculateBuyScore, holdings, loadScalperRecommendations, handleSelectRecommendationStock, showNotification, calcQuantityForTargetAmount]);
+  }, [isAppInitialized, detectStockStrategies, calculateBuyScore, holdings, loadScalperRecommendations, handleSelectRecommendationStock, showNotification, calcQuantityForTargetAmount, isTradingArmed]);
 
   // ============================================================
   // 🐕 봇 정지 자동 재개(watchdog)
@@ -8810,6 +8929,14 @@ useEffect(() => {
   // 2. High-speed automatic trading decisions (Multi-Stock Automatic Engine - Only Started Stocks)
   useEffect(() => {
     const hasAnyActiveBot = isGapBotActive || scalperTabsRef.current.some(t => t.isBotActive);
+
+    // 🛡️ 앱 초기화가 끝났더라도 실시간 데이터 워밍업이 끝나기 전에는 절대 매매 엔진을
+    // 실행하지 않는다 — 로딩 직후 잘못된 가격/history/센서로 매수 판단이 이뤄지는 걸 막는다.
+    if (!isTradingArmed) {
+      setScalperMessage('실시간 데이터 안정화 중... 자동매매 대기');
+      return;
+    }
+
     if (!hasAnyActiveBot) {
       setScalperMessage("대기 중...");
       return;
@@ -8867,6 +8994,20 @@ useEffect(() => {
         const isSelected = selectedStock && stockItem.symbol === selectedStock.symbol;
         const currentPrice = stockItem.price;
         if (!currentPrice || currentPrice <= 0) continue;
+
+        // ==========================================================
+        // 🛡️ 종목별 실시간 데이터 안전장치 — 최종 방어선
+        // ----------------------------------------------------------
+        // 가격이 존재한다는 것만으로는 매매하지 않는다. 반드시 실제 WebSocket tick이 최근에
+        // 들어왔고, 최소 워밍업 tick 수를 확보한 종목만 매매 판단한다. 설령 어떤 이유로 센서가
+        // 전부 켜지더라도, 이 종목의 실제 WebSocket tick이 부족하면 매수 판단 자체를 하지 않는다.
+        // ==========================================================
+        {
+          const _tickCount = wsTickCountRef.current[stockItem.symbol] || 0;
+          const _lastWsTick = lastWsTickAtRef.current[stockItem.symbol] || 0;
+          const _tickAge = _lastWsTick > 0 ? Date.now() - _lastWsTick : Infinity;
+          if (_tickCount < MIN_WARMUP_TICKS || _tickAge > MAX_WS_TICK_AGE_MS) continue;
+        }
 
         const strat = detectStockStrategies(stockItem);
         const { rsi, bb, sma5, momentumPositive, isNearLowerBand, isNearUpperBand, lastPrice } = strat;
@@ -9402,7 +9543,7 @@ useEffect(() => {
     }, Math.max(1000, scalpingSpeed));
 
     return () => clearInterval(gapInterval);
-  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, marketType, exchangeRate, kisConfig.isConnected, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, entryPriceMode, lowestBidOnlyMode, maxSlots, allowSamePriceEntry, enableCombinedAvgProfitExit, detectStockStrategies]);
+  }, [isGapBotActive, gapBuyPrice, gapSellPrice, tradeQuantity, marketType, exchangeRate, kisConfig.isConnected, scalpingSpeed, scalpingTargetProfit, scalpingStopLoss, scalpingSoundEnabled, immediateEntry, entryPriceMode, lowestBidOnlyMode, maxSlots, allowSamePriceEntry, enableCombinedAvgProfitExit, detectStockStrategies, isTradingArmed]);
 
   const sellQtyMismatchCooldownRef = React.useRef<Record<string, number>>({}); // 종목별 "수량 불일치로 인한 매도 재시도 쿨다운" 만료 시각
 
