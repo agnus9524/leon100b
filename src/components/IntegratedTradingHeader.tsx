@@ -486,7 +486,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
             </div>
           </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-3 gap-1 max-h-[720px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-1 max-h-[720px] overflow-y-auto custom-scrollbar pr-0.5 py-0.5">
             {scalperTabs.filter(tab => {
               const isUS = /^[A-Z]/.test(tab.symbol);
               return marketType === 'US' ? isUS : !isUS;
@@ -519,7 +519,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   key={tab.id}
                   onClick={() => handleSwitchTab(tab.id)}
                   className={cn(
-                    "px-2 py-1.5 rounded-xl border flex flex-col gap-1 cursor-pointer transition-all w-full text-left min-w-0 font-mono select-none group",
+                    "relative px-2 py-1.5 rounded-xl border flex flex-col gap-1 cursor-pointer transition-all w-full text-left min-w-0 font-mono select-none group",
                     lifecycleBorderCls,
                     isSelected
                       ? "bg-sleek-blue/25 text-white shadow-md font-black ring-1 ring-sleek-blue/60"
@@ -527,15 +527,32 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   )}
                   title={`${tabName} (${tab.symbol}) 탭으로 전환`}
                 >
+                {/* ✕ 닫기 버튼 — 카드 우측 상단 고정 */}
+                <button
+                  type="button"
+                  onClick={(e) => closeScalperTab(tab.id, e)}
+                  className="absolute top-2 right-2 z-10 p-1 rounded-md text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 transition-all opacity-70 group-hover:opacity-100 cursor-pointer"
+                  title={`${tabName} 탭 닫기`}
+                >
+                  <X className="w-3 h-3" />
+                </button>
+
                 <div className="flex flex-col gap-0.5 w-full">
-                  {/* 1줄: 종목명(종목코드) — 이름이 잘리지 않도록 이 줄 전체를 이름에 할당 */}
-                  <div className="flex items-center gap-1.5 min-w-0 w-full">
+                  {/* 1줄: 종목명(종목코드) → 현재 체결가 — 요청에 따라 이름 옆에 실시간 체결가를 바로 붙임 */}
+                  <div className="flex items-center gap-1.5 min-w-0 w-full pr-5">
                     <span className={cn(
                       "w-1.5 h-1.5 rounded-full shrink-0",
                       tab.isBotActive ? "bg-emerald-400 animate-pulse shadow-[0_0_6px_#34d399]" : "bg-slate-500"
                     )} />
                     <span className="font-bold text-base truncate text-white min-w-0">{tabName}</span>
                     <span className="text-[10px] font-mono text-slate-500 shrink-0">({tab.symbol})</span>
+                    {isPriceLoading ? (
+                      <span className="text-[10px] font-bold text-slate-500 animate-pulse shrink-0">연결 중...</span>
+                    ) : (
+                      <span className="font-black font-mono text-rose-500 tabular-nums text-sm shrink-0 ml-auto">
+                        {formatCurrency(tabPrice)}
+                      </span>
+                    )}
                   </div>
 
                   {/* 2줄: 보유수량 / 주문가능수량 / 등락률 */}
@@ -554,19 +571,10 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                     </span>
                   </div>
 
-                  {/* 3줄: 현재체결가 / 봇상태 / 수량선택 / 닫기 */}
-                  <div className="flex items-center justify-between gap-1.5 min-w-0 w-full">
+                  {/* 3줄: 봇상태 / 수량선택 — 체결가와 닫기 버튼은 각각 1줄과 카드 우측상단으로 이동함 */}
+                  <div className="flex items-center justify-end gap-1.5 min-w-0 w-full">
                   <div className="flex-1 min-w-0" />
                   <div className="flex items-center gap-1.5 shrink-0">
-                    {isPriceLoading ? (
-                      <span className="hidden md:inline text-[10px] font-bold text-slate-500 animate-pulse">연결 중...</span>
-                    ) : (
-                      <span className="hidden md:flex items-center gap-1 text-sm font-black font-mono text-rose-500 tabular-nums">
-                        <span className="text-[10.5px] font-bold text-slate-400">현재 체결가</span>
-                        {formatCurrency(tabPrice)}
-                      </span>
-                    )}
-
                     {tab.isBotActive && (
                       <span className="text-[10.5px] font-black bg-emerald-500/20 text-emerald-400 px-1 py-0.2 rounded border border-emerald-500/30 shrink-0">
                         ON
@@ -599,15 +607,6 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                         <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
                       ))}
                     </select>
-
-                    <button
-                      type="button"
-                      onClick={(e) => closeScalperTab(tab.id, e)}
-                      className="p-1 rounded-md text-slate-400 hover:text-rose-400 hover:bg-rose-500/20 transition-all opacity-70 group-hover:opacity-100 cursor-pointer"
-                      title={`${tabName} 탭 닫기`}
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
                   </div>
                   </div>
                 </div>
@@ -653,6 +652,11 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                       실제 CVD {tabStock.realCvd > 0 ? '▲' : tabStock.realCvd < 0 ? '▼' : '-'}
                     </span>
                   )}
+                </div>
+
+                {/* 🎯 단기모멘텀과 RSI를 확실히 같은 줄에 — 4열로 카드 폭이 좁아진 뒤로는
+                    flex-wrap 하나에만 의존하면 줄바꿈 위치가 불안정해서 별도 줄로 분리했다. */}
+                <div className="flex items-center justify-between pl-3">
                   {(() => {
                     const isOn = tab.sensors?.shortTermMomentum === true;
                     return (
@@ -669,7 +673,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                     );
                   })()}
                   {tab.sensors && (
-                    <span className="text-[11px] font-bold text-slate-500 ml-auto">
+                    <span className="text-[11px] font-bold text-slate-500">
                       RSI {Math.round(tab.sensors.rsi)} · {tab.sensors.activeCount}/4
                     </span>
                   )}
