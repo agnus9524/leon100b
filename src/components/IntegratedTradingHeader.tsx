@@ -633,30 +633,33 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                       </span>
                     );
                   })}
-                  {/* 🎯 실제 CVD(매수체결량 누적 - 매도체결량 누적) — 값이 아직 없으면(웹소켓 필드
-                      검증 전이거나 틱이 안 들어온 상태) 표시하지 않고, 값이 있으면 양수(매수우위)/
-                      음수(매도우위)를 화살표와 색으로 구분해 보여준다. "단기 모멘텀" 배지 바로
-                      왼쪽에 배치. */}
-                  {typeof tabStock?.realCvd === 'number' && (
-                    <span
-                      className={cn(
-                        "text-[10px] font-bold px-1.5 py-0.5 rounded-full border flex items-center gap-0.5",
-                        tabStock.realCvd > 0
-                          ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
-                          : tabStock.realCvd < 0
-                          ? "bg-sky-500/20 text-sky-300 border-sky-500/40"
-                          : "bg-white/5 text-slate-500 border-white/10"
-                      )}
-                      title={`${tabName} — 실제 CVD(매수체결량 누적 - 매도체결량 누적): ${tabStock.realCvd.toLocaleString()}`}
-                    >
-                      실제 CVD {tabStock.realCvd > 0 ? '▲' : tabStock.realCvd < 0 ? '▼' : '-'}
-                    </span>
-                  )}
-                </div>
-
-                {/* 🎯 단기모멘텀과 RSI를 확실히 같은 줄에 — 4열로 카드 폭이 좁아진 뒤로는
-                    flex-wrap 하나에만 의존하면 줄바꿈 위치가 불안정해서 별도 줄로 분리했다. */}
-                <div className="flex items-center justify-between pl-3">
+                  {/* 🎯 실제 CVD(매수체결량 누적 - 매도체결량 누적) — 다른 센서들처럼 항상
+                      표시한다. 값이 아직 없으면(웹소켓 필드 검증 전이거나 틱이 안 들어온 상태)
+                      다른 센서의 OFF 상태와 동일하게 회색으로 표시하고, 값이 있으면 양수(매수우위)/
+                      음수(매도우위)를 화살표와 색으로 구분한다. VWAP 바로 오른쪽에 배치. */}
+                  {(() => {
+                    const cvdVal = tabStock?.realCvd;
+                    const hasData = typeof cvdVal === 'number';
+                    const isPositive = hasData && cvdVal! > 0;
+                    const isNegative = hasData && cvdVal! < 0;
+                    return (
+                      <span
+                        className={cn(
+                          "text-[10px] font-bold px-1.5 py-0.5 rounded-full border flex items-center gap-0.5 transition-all",
+                          isPositive
+                            ? "bg-rose-500/20 text-rose-300 border-rose-500/40"
+                            : isNegative
+                            ? "bg-sky-500/20 text-sky-300 border-sky-500/40"
+                            : "bg-white/5 text-slate-500 border-white/10"
+                        )}
+                        title={`${tabName} — 실제 CVD(매수체결량 누적 - 매도체결량 누적) ${hasData ? cvdVal!.toLocaleString() : '데이터 대기 중'}`}
+                      >
+                        <span className={cn("w-1 h-1 rounded-full", isPositive ? "bg-rose-400" : isNegative ? "bg-sky-400" : "bg-slate-600")} />
+                        실제 CVD{hasData ? (isPositive ? ' ▲' : isNegative ? ' ▼' : '') : ''}
+                      </span>
+                    );
+                  })()}
+                  {/* 🎯 단기모멘텀 — CVD 배지 바로 오른쪽, 같은 줄에 배치 (라벨은 띄어쓰기 없이 '단기모멘텀') */}
                   {(() => {
                     const isOn = tab.sensors?.shortTermMomentum === true;
                     return (
@@ -665,16 +668,17 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                           "text-[10px] font-bold px-1.5 py-0.5 rounded-full border flex items-center gap-0.5 transition-all",
                           isOn ? "bg-fuchsia-500/20 text-fuchsia-300 border-fuchsia-500/40" : "bg-white/5 text-slate-500 border-white/10"
                         )}
-                        title={`${tabName} — 단기 모멘텀 센서 ${isOn ? '감지됨' : '대기 중'} (SMA5 > SMA20)`}
+                        title={`${tabName} — 단기모멘텀 센서 ${isOn ? '감지됨' : '대기 중'} (SMA5 > SMA20)`}
                       >
                         <span className={cn("w-1 h-1 rounded-full", isOn ? "bg-fuchsia-400" : "bg-slate-600")} />
-                        단기 모멘텀
+                        단기모멘텀
                       </span>
                     );
                   })()}
+                  {/* 🎯 RSI — 단기모멘텀 바로 오른쪽, 같은 줄. 활성화 센서 개수(0/4) 표시는 삭제 */}
                   {tab.sensors && (
                     <span className="text-[11px] font-bold text-slate-500">
-                      RSI {Math.round(tab.sensors.rsi)} · {tab.sensors.activeCount}/4
+                      RSI {Math.round(tab.sensors.rsi)}
                     </span>
                   )}
                 </div>
