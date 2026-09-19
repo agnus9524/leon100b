@@ -655,7 +655,7 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                         title={`${tabName} — 실제 CVD(매수체결량 누적 - 매도체결량 누적) ${hasData ? cvdVal!.toLocaleString() : '데이터 대기 중'}`}
                       >
                         <span className={cn("w-1 h-1 rounded-full", isPositive ? "bg-rose-400" : isNegative ? "bg-sky-400" : "bg-slate-600")} />
-                        실제 CVD{hasData ? (isPositive ? ' ▲' : isNegative ? ' ▼' : '') : ''}
+                        CVD{hasData ? (isPositive ? ' ▲' : isNegative ? ' ▼' : '') : ''}
                       </span>
                     );
                   })()}
