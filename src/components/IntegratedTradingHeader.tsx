@@ -571,7 +571,10 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                     </span>
                   </div>
 
-                  {/* 3줄: 봇상태 / 수량선택 — 체결가와 닫기 버튼은 각각 1줄과 카드 우측상단으로 이동함 */}
+                  {/* 3줄: 봇상태 — 체결가와 닫기 버튼은 각각 1줄과 카드 우측상단으로 이동함.
+                      🛡️ 수량 선택 드롭다운은 삭제했다 — 실제 매수/매도 어느 경로도 이 값을
+                      참조하지 않는다(자동매수는 진입금액 기준 계산, 매도는 보유수량 기준)라서
+                      "여기서 바꾸면 수량이 바뀐다"는 오해만 주는 죽은 UI였다. */}
                   <div className="flex items-center justify-end gap-1.5 min-w-0 w-full">
                   <div className="flex-1 min-w-0" />
                   <div className="flex items-center gap-1.5 shrink-0">
@@ -580,33 +583,6 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                         ON
                       </span>
                     )}
-
-                    <select
-                      value={tab.tradeQuantity}
-                      disabled={tab.isBotActive}
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => {
-                        e.stopPropagation();
-                        const newQty = Number(e.target.value);
-                        updateTab(tab.symbol, { tradeQuantity: newQty });
-                        // 🛡️ 매우 중요한 수정: 이 종목이 현재 선택된 탭이라면 전역 tradeQuantity도
-                        // 함께 갱신해야 한다. 안 그러면 START/STOP을 누를 때 도는 동기화 effect가
-                        // (아직 안 바뀐) 오래된 전역값으로 이 종목의 tradeQuantity를 다시 덮어써서,
-                        // 방금 바꾼 수량이 START 누르는 순간 원래대로 되돌아가는 버그가 있었다.
-                        if (tab.id === activeTabId) {
-                          setTradeQuantity(newQty);
-                        }
-                      }}
-                      className={cn(
-                        "shrink-0 bg-black/60 border border-white/10 rounded-md text-[10px] font-bold text-slate-300 outline-none px-1 py-0.5",
-                        tab.isBotActive ? "opacity-40 cursor-not-allowed" : "cursor-pointer appearance-none hover:border-sleek-blue/50"
-                      )}
-                      title={tab.isBotActive ? `${tabName} 봇 실행 중에는 수량을 바꿀 수 없습니다 — 먼저 정지한 뒤 수량을 정하고 다시 시작하세요.` : `${tabName} 1회 거래수량 (종목별 개별 설정)`}
-                    >
-                      {[1, 2, 3, 5, 10, 15, 20, 30, 50, 100].map(val => (
-                        <option key={val} value={val} className="bg-sleek-bg text-white">{val}주</option>
-                      ))}
-                    </select>
                   </div>
                   </div>
                 </div>
