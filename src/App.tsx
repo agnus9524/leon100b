@@ -662,7 +662,7 @@ interface NewsItem {
 const MAX_INVENTORY_PER_MARKET = 12; // 🔼 6→12로 확대 — 웹소켓 구독(종목당 2개)/센서계산(3초 주기 로컬연산) 모두 이 정도 증가는 무리 없는 수준으로 판단됨
 
 // ⚠️⚠️⚠️ 가짜/플레이스홀더 데이터 — 실제 KIS 시세가 아님 ⚠️⚠️⚠️
-// 아래 25개 종목의 price/change/changePercent/volume/history는 전부 하드코딩된 임의값이며,
+// 아래 1개 종목(동양)의 price/change/changePercent/volume/history는 전부 하드코딩된 임의값이며,
 // history는 Math.random()으로 생성한 가짜 40분 차트 곡선이다. 이 데이터는 오직 "앱을 처음 켰을 때
 // 화면이 비어있지 않도록" 하는 초기 시드 값일 뿐이며, 실시간 KIS 데이터(WebSocket 틱 또는
 // refreshStalePrices REST 백업)가 들어오는 즉시 실제 값으로 대체되어야 한다. 각 종목 객체에
@@ -681,284 +681,6 @@ const INITIAL_STOCKS_KR: Stock[] = [
     isAI: true,
     isPlaceholderData: true
   },
-  {
-    symbol: '025560',
-    name: '미래산업',
-    price: 2150,
-    change: 95,
-    changePercent: 4.62,
-    volume: '18.4M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1800 + Math.round((i / 40) * 350) + Math.floor(Math.random() * 25) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '004060',
-    name: 'SG세계물산',
-    price: 890,
-    change: 25,
-    changePercent: 2.89,
-    volume: '12.1M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 750 + Math.round((i / 40) * 140) + Math.floor(Math.random() * 15) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '014160',
-    name: '대영포장',
-    price: 1680,
-    change: 60,
-    changePercent: 3.70,
-    volume: '15.6M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1400 + Math.round((i / 40) * 280) + Math.floor(Math.random() * 20) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '088350',
-    name: '한화생명',
-    price: 3120,
-    change: 120,
-    changePercent: 4.00,
-    volume: '22.4M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2600 + Math.round((i / 40) * 520) + Math.floor(Math.random() * 30) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '011930',
-    name: '신성이엔지',
-    price: 2180,
-    change: 85,
-    changePercent: 4.06,
-    volume: '16.5M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 1820 + Math.round((i / 40) * 360) + Math.floor(Math.random() * 25) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '017040',
-    name: '광명전기',
-    price: 2450,
-    change: 105,
-    changePercent: 4.48,
-    volume: '14.2M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2000 + Math.round((i / 40) * 450) + Math.floor(Math.random() * 25) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '003520',
-    name: '영진약품',
-    price: 3450,
-    change: 140,
-    changePercent: 4.23,
-    volume: '12.8M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2900 + Math.round((i / 40) * 550) + Math.floor(Math.random() * 35) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '005360',
-    name: '모나미',
-    price: 2950,
-    change: 110,
-    changePercent: 3.87,
-    volume: '10.5M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 2500 + Math.round((i / 40) * 450) + Math.floor(Math.random() * 30) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '005930',
-    name: '삼성전자',
-    price: 0, // 🛡️ 실제 가격을 하드코딩하면 시간이 지나며 반드시 틀어진다. 0은 이 코드베이스 전반에서
-              // "아직 실시간 데이터가 로딩되지 않음"을 뜻하는 관례값이라, 실제 시세가 동기화되기 전까지는
-              // 추천종목 모달 등에서 이 값이 "진짜 현재가"인 것처럼 잘못 병합되어 표시되는 일이 없다.
-    change: 0,
-    changePercent: 0,
-    volume: '0',
-    history: [],
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '000660',
-    name: 'SK하이닉스',
-    price: 172000,
-    change: 6500,
-    changePercent: 3.93,
-    volume: '8.8M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 162000 + Math.round((i / 40) * 10000) + Math.floor(Math.random() * 500) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '035420',
-    name: '네이버',
-    price: 185000,
-    change: 4500,
-    changePercent: 2.49,
-    volume: '2.9M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 178000 + Math.round((i / 40) * 7000) + Math.floor(Math.random() * 400) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '005380',
-    name: '현대차',
-    price: 245000,
-    change: 7000,
-    changePercent: 2.94,
-    volume: '3.6M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 235000 + Math.round((i / 40) * 10000) + Math.floor(Math.random() * 500) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '000270',
-    name: '기아',
-    price: 108500,
-    change: 3200,
-    changePercent: 3.04,
-    volume: '4.2M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 103000 + Math.round((i / 40) * 5500) + Math.floor(Math.random() * 300) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '068270',
-    name: '셀트리온',
-    price: 198500,
-    change: 6200,
-    changePercent: 3.22,
-    volume: '2.5M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 188000 + Math.round((i / 40) * 10500) + Math.floor(Math.random() * 400) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '006400',
-    name: '삼성SDI',
-    price: 362000,
-    change: 11500,
-    changePercent: 3.28,
-    volume: '1.8M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 345000 + Math.round((i / 40) * 17000) + Math.floor(Math.random() * 800) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '051910',
-    name: 'LG화학',
-    price: 318000,
-    change: 9500,
-    changePercent: 3.08,
-    volume: '1.4M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 302000 + Math.round((i / 40) * 16000) + Math.floor(Math.random() * 700) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '035720',
-    name: '카카오',
-    price: 41200,
-    change: 1450,
-    changePercent: 3.65,
-    volume: '5.8M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 38800 + Math.round((i / 40) * 2400) + Math.floor(Math.random() * 150) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '034020',
-    name: '두산에너빌리티',
-    price: 21400,
-    change: 950,
-    changePercent: 4.65,
-    volume: '19.4M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 19800 + Math.round((i / 40) * 1600) + Math.floor(Math.random() * 100) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '012450',
-    name: '한화에어로스페이스',
-    price: 285000,
-    change: 12500,
-    changePercent: 4.59,
-    volume: '3.1M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 265000 + Math.round((i / 40) * 20000) + Math.floor(Math.random() * 900) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '042700',
-    name: '한미반도체',
-    price: 112000,
-    change: 5400,
-    changePercent: 5.07,
-    volume: '6.4M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 102000 + Math.round((i / 40) * 10000) + Math.floor(Math.random() * 400) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '086520',
-    name: '에코프로비엠',
-    price: 184500,
-    change: 7200,
-    changePercent: 4.06,
-    volume: '4.8M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 172000 + Math.round((i / 40) * 12500) + Math.floor(Math.random() * 500) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '247540',
-    name: '에코프로',
-    price: 88500,
-    change: 3800,
-    changePercent: 4.49,
-    volume: '7.2M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 82000 + Math.round((i / 40) * 6500) + Math.floor(Math.random() * 300) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  },
-  {
-    symbol: '196170',
-    name: '알테오젠',
-    price: 315000,
-    change: 15500,
-    changePercent: 5.18,
-    volume: '2.8M',
-    history: Array.from({ length: 40 }, (_, i) => ({ time: `${i}:00`, price: 290000 + Math.round((i / 40) * 25000) + Math.floor(Math.random() * 1000) })),
-    market: 'KR',
-    isAI: true,
-    isPlaceholderData: true
-  }
 ];
 
 // Flag Components
@@ -4218,28 +3940,13 @@ setGapInventory(nextInv);
           }));
         }
 
-        if (stockList.length === 0) {
-          stockList = [
-            { pdno: '005930', prdt_name: '삼성전자', sll_qty: 15, pchs_amt: 1050000, sll_amt: 1062500, rlzt_pnl: 12500, erng_rt: 1.19 },
-            { pdno: '000660', prdt_name: 'SK하이닉스', sll_qty: 8, pchs_amt: 1280000, sll_amt: 1284800, rlzt_pnl: 4800, erng_rt: 0.38 },
-            { pdno: '035420', prdt_name: 'NAVER', sll_qty: 6, pchs_amt: 1020000, sll_amt: 1018500, rlzt_pnl: -1500, erng_rt: -0.15 },
-          ];
-        }
-
-        if (dailyList.length === 0) {
-          // Exact daily data reference from KIS TR TTTC8715R (8/14 4,066원 1.19%, total 15,800원 +0.36%)
-          dailyList = [
-            { stck_bsop_date: '2026.08.14', trad_cnt: 2, pchs_amt: 341680, sll_amt: 345746, rlzt_pnl: 4066, erng_rt: 1.19 },
-            { stck_bsop_date: '2026.08.13', trad_cnt: 3, pchs_amt: 2082000, sll_amt: 2084082, rlzt_pnl: 2082, erng_rt: 0.10 },
-            { stck_bsop_date: '2026.08.12', trad_cnt: 1, pchs_amt: 760714, sll_amt: 759649, rlzt_pnl: -1065, erng_rt: -0.14 },
-            { stck_bsop_date: '2026.08.11', trad_cnt: 1, pchs_amt: 246666, sll_amt: 247036, rlzt_pnl: 370, erng_rt: 0.15 },
-            { stck_bsop_date: '2026.08.07', trad_cnt: 1, pchs_amt: 742857, sll_amt: 742337, rlzt_pnl: -520, erng_rt: -0.07 },
-            { stck_bsop_date: '2026.08.06', trad_cnt: 1, pchs_amt: 750000, sll_amt: 749550, rlzt_pnl: -450, erng_rt: -0.06 },
-            { stck_bsop_date: '2026.08.05', trad_cnt: 2, pchs_amt: 530555, sll_amt: 534375, rlzt_pnl: 3820, erng_rt: 0.72 },
-            { stck_bsop_date: '2026.08.04', trad_cnt: 2, pchs_amt: 488285, sll_amt: 493412, rlzt_pnl: 5127, erng_rt: 1.05 },
-            { stck_bsop_date: '2026.08.01', trad_cnt: 1, pchs_amt: 488888, sll_amt: 491088, rlzt_pnl: 2200, erng_rt: 0.45 },
-          ];
-        }
+        // 🛡️ 매우 중요한 삭제: 여기 있던 "삼성전자 15주 매도 +12,500원" 같은 가짜 3종목 내역과,
+        // 실제 KIS 응답(TTTC8715R)을 한 번 보고 그 숫자를 그대로 영구 하드코딩해뒀던 가짜 일별
+        // 실현손익(2026년 8월 여러 날짜)을 완전히 삭제했다. 이건 실현손익(내 계좌의 실제 수익/손실)
+        // 이라는, 사용자가 실제 돈과 직결해서 신뢰해야 하는 화면에 지어낸 매매 기록을 보여주는
+        // 것이었다 — KIS 미연동이기만 해도 이 가짜 수익 내역이 그대로 노출됐다. 이제 채울 실제
+        // 데이터(KIS 응답 또는 세션 내 실제 매도 로그)가 없으면 정직하게 빈 배열로 남겨서
+        // "거래 내역 없음"이 표시되도록 한다.
       }
 
       // Generate Monthly List dynamically from dailyList if available
@@ -4262,12 +3969,9 @@ setGapInventory(nextInv);
           monthlyGroup[monthLabel].rlzt_pnl += (item.rlzt_pnl || 0);
         });
 
-        // Add additional prior months if only current month exists
-        if (Object.keys(monthlyGroup).length === 1 && !kisConfig.isConnected) {
-          monthlyGroup['26년 7월'] = { trad_cnt: 18, pchs_amt: 4550000, sll_amt: 4634200, rlzt_pnl: 84200 };
-          monthlyGroup['26년 6월'] = { trad_cnt: 14, pchs_amt: 4420000, sll_amt: 4407600, rlzt_pnl: -12400 };
-          monthlyGroup['26년 5월'] = { trad_cnt: 22, pchs_amt: 4430000, sll_amt: 4558500, rlzt_pnl: 128500 };
-        }
+        // 🛡️ 여기 있던 "26년 7월/6월/5월"이라는 지어낸 이전 달 수익 데이터를 삭제했다 — 실제
+        // dailyList(진짜 데이터)만으로 월간 집계하고, 데이터가 그 달만큼만 있으면 정직하게
+        // 그만큼만 보여준다.
 
         monthlyList = Object.entries(monthlyGroup).map(([moLabel, vals]) => ({
           stck_bsop_month: moLabel,
@@ -4294,9 +3998,8 @@ setGapInventory(nextInv);
           yearlyGroup[label].rlzt_pnl += (item.rlzt_pnl || 0);
         });
 
-        if (Object.keys(yearlyGroup).length === 1 && !kisConfig.isConnected) {
-          yearlyGroup['2025년'] = { trad_cnt: 110, pchs_amt: 24650000, sll_amt: 25500400, rlzt_pnl: 850400 };
-        }
+        // 🛡️ 여기 있던 "2025년"이라는 지어낸 이전 해 수익 데이터를 삭제했다 — 실제 데이터만큼만
+        // 정직하게 보여준다.
 
         yearlyList = Object.entries(yearlyGroup).map(([yrLabel, vals]) => ({
           stck_bsop_year: yrLabel,
