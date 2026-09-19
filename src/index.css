@@ -58,3 +58,18 @@
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.4);
 }
+
+/* 🎯 인벤토리 카드 — 센서가 활성화된 순간 테두리가 청록색으로 잠깐 반짝였다 사라지는 효과.
+   틱 데이터가 들어올 때마다 살짝 깜빡이는 느낌을 주기 위함. 관망(회색)/매수시도(노랑)/
+   보유(초록)/매도시도(주황)/매도완료(빨강)와 겹치지 않도록 청록색을 사용한다. */
+@keyframes sensorFlash {
+  0% {
+    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0.95), 0 0 12px 2px rgba(34, 211, 238, 0.6);
+  }
+  100% {
+    box-shadow: 0 0 0 2px rgba(34, 211, 238, 0);
+  }
+}
+.sensor-flash-ring {
+  animation: sensorFlash 700ms ease-out;
+}

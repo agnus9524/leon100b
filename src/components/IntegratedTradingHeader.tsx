@@ -193,6 +193,30 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
   const [highlightedIndex, setHighlightedIndex] = React.useState(-1);
   const suggestionItemRefs = React.useRef<(HTMLButtonElement | null)[]>([]);
 
+  // 🎯 종목 카드 테두리 "센서 반짝임" 효과 — 이 종목의 센서(눌림목/돌파/VWAP 등) 활성화 개수가
+  // 늘어난 순간, 카드 테두리에 청록색 링이 잠깐 반짝였다 사라지도록 한다. 기존 5가지 상태색
+  // (관망=회색/매수시도=노랑/보유=초록/매도시도=주황/매도완료=빨강)과 안 겹치는 색을 골랐다.
+  // React state/타이머 없이, activeCount가 늘어날 때마다 flashKey를 1씩 올려서 그 key로
+  // 오버레이 엘리먼트를 remount시키면 CSS 애니메이션이 매번 처음부터 재생된다(useState로
+  // "몇 ms 동안 켜둘지"를 관리할 필요가 없어 훨씬 단순하다).
+  const prevActiveCountRef = React.useRef<Record<string, number>>({});
+  const [flashKeys, setFlashKeys] = React.useState<Record<string, number>>({});
+  React.useEffect(() => {
+    let changed = false;
+    const next = { ...flashKeys };
+    for (const tab of scalperTabs) {
+      const count = tab.sensors?.activeCount ?? 0;
+      const prev = prevActiveCountRef.current[tab.symbol] ?? 0;
+      if (count > prev) {
+        next[tab.symbol] = (next[tab.symbol] || 0) + 1;
+        changed = true;
+      }
+      prevActiveCountRef.current[tab.symbol] = count;
+    }
+    if (changed) setFlashKeys(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scalperTabs]);
+
   React.useEffect(() => {
     setHighlightedIndex(-1);
   }, [searchSuggestions, showSuggestions]);
@@ -527,6 +551,15 @@ export const IntegratedTradingHeader: React.FC<IntegratedTradingHeaderProps> = (
                   )}
                   title={`${tabName} (${tab.symbol}) 탭으로 전환`}
                 >
+                {/* 🎯 센서 반짝임 — key가 바뀔 때마다(활성 센서 개수가 늘어날 때마다) 이 엘리먼트가
+                    remount되어 sensorFlash 애니메이션이 처음부터 재생된다. pointer-events-none이라
+                    카드 클릭/버튼 동작을 방해하지 않는다. */}
+                {(flashKeys[tab.symbol] || 0) > 0 && (
+                  <div
+                    key={`flash-${tab.symbol}-${flashKeys[tab.symbol]}`}
+                    className="absolute inset-0 rounded-xl pointer-events-none sensor-flash-ring"
+                  />
+                )}
                 {/* ✕ 닫기 버튼 — 카드 우측 상단 고정 */}
                 <button
                   type="button"
